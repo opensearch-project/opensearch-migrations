@@ -86,7 +86,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         });
         const groupId = props.customKafkaGroupId ?? `logging-group-${deployId}`
 
-        let command = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint}`
+        let command = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer --target-uri ${osClusterEndpoint}`
         const extraArgsDict = parseArgsToDict(props.extraArgs)
         if (props.skipClusterCertCheck != false) { // when true or unspecified, add the flag
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecure")

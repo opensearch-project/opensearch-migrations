@@ -16,6 +16,7 @@ import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
 import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
@@ -94,10 +95,53 @@ public class TrafficReplayer {
 
     public static class Parameters {
         @Parameter(
-            required = true,
+            required = false,
+            names = { "--target-uri", "--targetUri" },
             arity = 1,
-            description = "URI of the target cluster/domain")
+            description = "URI of the target cluster/domain (required for replay mode)")
         String targetUriString;
+        @Parameter(
+            required = false,
+            names = { "--mode" },
+            arity = 1,
+            description = "Operating mode: 'replay' (default), 'dump-raw', or 'dump-http'")
+        String mode = "replay";
+        @Parameter(
+            required = false,
+            names = { "--start-offset" },
+            arity = 1,
+            description = "For dump modes: start reading at this offset on every partition")
+        Long startOffset;
+        @Parameter(
+            required = false,
+            names = { "--end-offset" },
+            arity = 1,
+            description = "For dump modes: stop after passing this offset on every partition")
+        Long endOffset;
+        @Parameter(
+            required = false,
+            names = { "--start-time" },
+            arity = 1,
+            description = "For dump modes: start at the earliest record at or after this epoch-seconds timestamp")
+        Long startTime;
+        @Parameter(
+            required = false,
+            names = { "--end-time" },
+            arity = 1,
+            description = "For dump modes: stop after the first record whose timestamp exceeds this epoch-seconds value")
+        Long endTime;
+        @Parameter(
+            required = false,
+            names = { "--preview-bytes-read" },
+            arity = 1,
+            description = "For dump-raw: max bytes to preview for read observations (default 64)")
+        int previewBytesRead = 24;
+        @Parameter(
+            required = false,
+            names = { "--preview-bytes-write" },
+            arity = 1,
+            description = "For dump-raw: max bytes to preview for write observations (default 64)")
+        int previewBytesWrite = 24;
         @Parameter(
             required = false,
             names = {"--insecure" },
@@ -338,13 +382,218 @@ public class TrafficReplayer {
         return p;
     }
 
+    static boolean isDumpMode(Parameters params) {
+        return "dump-raw".equals(params.mode) || "dump-http".equals(params.mode);
+    }
+
+    private static void validateDumpModeParams(Parameters params) {
+        if (params.kafkaTrafficGroupId != null) {
+            throw new ParameterException(
+                "--kafka-traffic-group-id must not be specified in dump modes (they use no consumer group)");
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
         final var workerId = ProcessHelpers.getNodeInstanceName();
         log.info("Starting Traffic Replayer with id=" + workerId);
 
-        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
         var params = parseArgs(args);
+
+        if (isDumpMode(params)) {
+            validateDumpModeParams(params);
+            runDumpMode(params);
+            return;
+        }
+
+        // replay mode — targetUriString is required
+        if (params.targetUriString == null) {
+            System.err.println("Target URI is required for replay mode");
+            System.exit(2);
+            return;
+        }
+        runReplayMode(params);
+    }
+
+    private static void runDumpMode(Parameters params) throws Exception {
+        var topContext = new RootReplayerContext(
+            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(null, "dump", ProcessHelpers.getNodeInstanceName()),
+            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
+        );
+
+        if (params.inputFilename != null) {
+            // File input — use InputStreamOfTraffic
+            try (var source = TrafficCaptureSourceFactory.createUnbufferedTrafficCaptureSource(topContext, params)) {
+                runDumpFromSource(params, source, topContext);
+            }
+        } else if (params.kafkaTrafficBrokers != null && params.kafkaTrafficTopic != null) {
+            runDumpFromKafka(params, topContext);
+        } else {
+            System.err.println("Dump modes require either -i (file input) or --kafka-traffic-brokers and --kafka-traffic-topic");
+            System.exit(2);
+        }
+    }
+
+    private static void runDumpFromKafka(Parameters params, RootReplayerContext topContext) throws Exception {
+        var kafkaProps = KafkaTrafficCaptureSource.buildKafkaProperties(
+            params.kafkaTrafficBrokers, "unused-dump-group",
+            params.kafkaTrafficEnableMSKAuth, params.kafkaTrafficPropertyFile);
+        // Remove group.id — dump modes use assign(), not subscribe()
+        kafkaProps.remove(org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG);
+
+        try (var consumer = new org.apache.kafka.clients.consumer.KafkaConsumer<String, byte[]>(kafkaProps)) {
+            var partitions = consumer.partitionsFor(params.kafkaTrafficTopic).stream()
+                .map(pi -> new org.apache.kafka.common.TopicPartition(pi.topic(), pi.partition()))
+                .collect(java.util.stream.Collectors.toList());
+            consumer.assign(partitions);
+
+            // Seek to start position
+            if (params.startOffset != null) {
+                partitions.forEach(tp -> consumer.seek(tp, params.startOffset));
+            } else if (params.startTime != null) {
+                var timestampsToSearch = partitions.stream()
+                    .collect(java.util.stream.Collectors.toMap(tp -> tp, tp -> params.startTime * 1000));
+                var offsets = consumer.offsetsForTimes(timestampsToSearch);
+                offsets.forEach((tp, offsetAndTimestamp) -> {
+                    if (offsetAndTimestamp != null) {
+                        consumer.seek(tp, offsetAndTimestamp.offset());
+                    } else {
+                        consumer.seekToEnd(java.util.Collections.singleton(tp));
+                    }
+                });
+            } else {
+                consumer.seekToBeginning(partitions);
+            }
+
+            var endOffsets = consumer.endOffsets(partitions);
+
+            if ("dump-raw".equals(params.mode)) {
+                runDumpRawFromKafka(params, consumer, endOffsets);
+            } else {
+                runDumpHttpFromKafka(params, consumer, endOffsets, topContext);
+            }
+        }
+    }
+
+    private static void runDumpRawFromKafka(
+        Parameters params,
+        org.apache.kafka.clients.consumer.KafkaConsumer<String, byte[]> consumer,
+        java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets
+    ) {
+        while (true) {
+            var records = consumer.poll(java.time.Duration.ofSeconds(2));
+            if (records.isEmpty()) break;
+            boolean done = false;
+            for (var record : records) {
+                if (pastEnd(record, params, endOffsets)) { done = true; break; }
+                try {
+                    var ts = org.opensearch.migrations.trafficcapture.protos.TrafficStream.parseFrom(record.value());
+                    System.out.println(org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
+                        ts, record.partition(), record.offset(), params.previewBytesRead, params.previewBytesWrite));
+                } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+                    log.warn("Skipping unparseable record at p:{} o:{}", record.partition(), record.offset());
+                }
+            }
+            if (done) break;
+        }
+    }
+
+    private static void runDumpHttpFromKafka(
+        Parameters params,
+        org.apache.kafka.clients.consumer.KafkaConsumer<String, byte[]> consumer,
+        java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets,
+        RootReplayerContext topContext
+    ) {
+        var channelContextManager = new org.opensearch.migrations.replay.tracing.ChannelContextManager(topContext);
+        var dumper = new org.opensearch.migrations.replay.kafka.HttpTransactionDumper(System.out);
+        var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
+            Duration.ofSeconds(params.observedPacketConnectionTimeout),
+            "(see command line option " + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
+            dumper
+        );
+        try {
+            while (true) {
+                var records = consumer.poll(java.time.Duration.ofSeconds(2));
+                if (records.isEmpty()) break;
+                boolean done = false;
+                for (var record : records) {
+                    if (pastEnd(record, params, endOffsets)) { done = true; break; }
+                    try {
+                        var ts = org.opensearch.migrations.trafficcapture.protos.TrafficStream.parseFrom(record.value());
+                        var key = new org.opensearch.migrations.replay.kafka.TrafficStreamKeyWithKafkaRecordId(
+                            tsk -> {
+                                var channelCtx = channelContextManager.retainOrCreateContext(tsk);
+                                return topContext.createTrafficStreamContextForKafkaSource(channelCtx, record.key(), 0);
+                            },
+                            ts,
+                            new org.opensearch.migrations.replay.kafka.PojoKafkaCommitOffsetData(0, record.partition(), record.offset())
+                        );
+                        accumulator.accept(new org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey(ts, key));
+                    } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+                        log.warn("Skipping unparseable record at p:{} o:{}", record.partition(), record.offset());
+                    }
+                }
+                if (done) break;
+            }
+        } finally {
+            accumulator.close();
+        }
+    }
+
+    private static boolean pastEnd(
+        org.apache.kafka.clients.consumer.ConsumerRecord<String, byte[]> record,
+        Parameters params,
+        java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets
+    ) {
+        if (params.endOffset != null && record.offset() > params.endOffset) return true;
+        if (params.endTime != null && record.timestamp() > params.endTime * 1000) return true;
+        var tp = new org.apache.kafka.common.TopicPartition(record.topic(), record.partition());
+        return record.offset() >= endOffsets.getOrDefault(tp, Long.MAX_VALUE);
+    }
+
+    private static void runDumpFromSource(
+        Parameters params,
+        org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource source,
+        RootReplayerContext topContext
+    ) throws Exception {
+        if ("dump-raw".equals(params.mode)) {
+            while (true) {
+                try {
+                    var chunks = source.readNextTrafficStreamChunk(topContext::createReadChunkContext).get();
+                    for (var tswk : chunks) {
+                        System.out.println(org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
+                            tswk.getStream(), -1, -1, params.previewBytesRead, params.previewBytesWrite));
+                    }
+                } catch (java.util.concurrent.ExecutionException e) {
+                    if (e.getCause() instanceof java.io.EOFException) break;
+                    throw e;
+                }
+            }
+        } else {
+            var dumper = new org.opensearch.migrations.replay.kafka.HttpTransactionDumper(System.out);
+            var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
+                Duration.ofSeconds(params.observedPacketConnectionTimeout),
+                "(see command line option " + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
+                dumper
+            );
+            try {
+                while (true) {
+                    try {
+                        var chunks = source.readNextTrafficStreamChunk(topContext::createReadChunkContext).get();
+                        chunks.forEach(accumulator::accept);
+                    } catch (java.util.concurrent.ExecutionException e) {
+                        if (e.getCause() instanceof java.io.EOFException) break;
+                        throw e;
+                    }
+                }
+            } finally {
+                accumulator.close();
+            }
+        }
+    }
+
+    private static void runReplayMode(Parameters params) throws Exception {
+        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
         URI uri;
         try {
             uri = new URI(params.targetUriString);
