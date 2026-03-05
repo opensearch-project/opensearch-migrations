@@ -25,7 +25,7 @@ def call(Map config = [:]) {
         }
 
         options {
-            lock(label: params.STAGE, quantity: 1, variable: 'maStageName')
+            lock(label: params.STAGE ?: defaultStageId, quantity: 1, variable: 'maStageName')
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
