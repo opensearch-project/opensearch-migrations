@@ -83,45 +83,32 @@ spec:
             
             SOURCE_CONFIGS='{{inputs.parameters.source-configs}}'
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
-            # Function to transform cluster config to match workflow schema
-            # - version: ES_7.10 -> ES 7.10 (replace underscore with space)
+            # Transform Python cluster config to workflow schema:
+            # - version: ES_7.10 -> ES 7.10
             # - allow_insecure -> allowInsecure
-            # - sigv4 at top level -> authConfig.sigv4
-            transform_cluster_config() {
-              echo "$1" | jq '
-                # Transform version format: ES_7.10 -> ES 7.10
-                .version = (.version | gsub("_"; " "))
-                # Rename allow_insecure to allowInsecure
-                | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
-                # Move sigv4 under authConfig
-                | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
-              '
-            }
+            # - sigv4 -> authConfig.sigv4
+            # - basic_auth -> authConfig.basic
+            # - no_auth stripped (workflow schema uses absence of authConfig)
             
             # Build sourceClusters map from source-configs array with schema transformation
             SOURCE_CLUSTERS=$(echo "$SOURCE_CONFIGS" | jq '
               reduce to_entries[] as $e ({}; 
                 .["source\($e.key + 1)"] = (
                   $e.value.source
-                  # Transform version format: ES_7.10 -> ES 7.10
                   | .version = (.version | gsub("_"; " "))
-                  # Rename allow_insecure to allowInsecure
                   | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
-                  # Move sigv4 under authConfig
                   | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+                  | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
+                  | del(.no_auth)
                 )
               )')
             
             # Transform target config to match schema
             TARGET_TRANSFORMED=$(echo "$TARGET_CONFIG" | jq '
-              # Remove version (not in target cluster schema)
-              del(.version)
-              # Rename allow_insecure to allowInsecure
-              | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
-              # Move sigv4 under authConfig
+              if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
               | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
-              # Move basic_auth under authConfig.basic with secretName
               | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
+              | del(.no_auth)
             ')
             
             # Build snapshotExtractAndLoadConfigs from snapshot-and-migration-configs
