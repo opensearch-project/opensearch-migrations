@@ -9,4 +9,4 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
          remote: "${gitUrl}"])
 
 def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
-eksAOSSIntegPipeline(collectionType: 'SEARCH', defaultStageId: 'aossSearch', jobName: jobNameOverride ?: null)
+eksAOSSIntegPipeline(collectionType: 'SEARCH', defaultStageId: 'aosssrch', jobName: jobNameOverride ?: null)
