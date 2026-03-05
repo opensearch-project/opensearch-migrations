@@ -95,7 +95,7 @@ def call(Map config = [:]) {
                                         returnStdout: true
                                     ).trim()
                                     env.AOSS_COLLECTION_ENDPOINT = sh(
-                                        script: "jq -r '.[] | select(.OutputKey==\"CollectionEndpointExport-${maStageName}-aoss-target\") | .OutputValue' /tmp/stack-outputs.json",
+                                        script: "jq -r '.[] | select(.OutputKey==\"CollectionEndpointExport-${maStageName}-target\") | .OutputValue' /tmp/stack-outputs.json",
                                         returnStdout: true
                                     ).trim()
                                     echo "Discovered source: ${env.SOURCE_ENDPOINT}"
@@ -139,7 +139,7 @@ def call(Map config = [:]) {
                                                 domainRemovalPolicy: "DESTROY"
                                             ],
                                             [
-                                                clusterId: "aoss-target",
+                                                clusterId: "target",
                                                 clusterType: "OPENSEARCH_SERVERLESS",
                                                 collectionType: collectionType,
                                                 standbyReplicas: "DISABLED",
@@ -160,7 +160,7 @@ def call(Map config = [:]) {
                                     env.SOURCE_ENDPOINT = clusterDetails.source.endpoint
                                     env.SOURCE_VPC_ID = clusterDetails.source.vpcId
                                     env.SOURCE_SUBNET_IDS = clusterDetails.source.subnetIds
-                                    env.AOSS_COLLECTION_ENDPOINT = clusterDetails['aoss-target'].endpoint
+                                    env.AOSS_COLLECTION_ENDPOINT = clusterDetails['target'].endpoint
                                     echo "Source: ${env.SOURCE_ENDPOINT}"
                                     echo "AOSS: ${env.AOSS_COLLECTION_ENDPOINT}"
                                 }
