@@ -439,7 +439,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "useTargetClusterForWorkCoordination": {
                             "type": "boolean",
                             "default": false,
-                            "description": "When true, uses the target OpenSearch cluster for work coordination. When false, a dedicated single-node OpenSearch coordinator cluster is deployed and managed for the lifetime of the migration, then torn down on completion."
+                            "description": "When true, uses the target OpenSearch cluster for RFS work coordination. When false, a dedicated single-node OpenSearch coordinator cluster is deployed and managed for the lifetime of the migration, then torn down on completion."
                           },
                           "resources": {
                             "type": "object",
@@ -1203,7 +1203,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "useTargetClusterForWorkCoordination": {
                             "type": "boolean",
                             "default": false,
-                            "description": "When true, uses the target OpenSearch cluster for work coordination. When false, a dedicated single-node OpenSearch coordinator cluster is deployed and managed for the lifetime of the migration, then torn down on completion."
+                            "description": "When true, uses the target OpenSearch cluster for RFS work coordination. When false, a dedicated single-node OpenSearch coordinator cluster is deployed and managed for the lifetime of the migration, then torn down on completion."
                           },
                           "resources": {
                             "type": "object",
