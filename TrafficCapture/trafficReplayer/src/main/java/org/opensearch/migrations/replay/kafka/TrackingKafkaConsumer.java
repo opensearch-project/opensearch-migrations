@@ -398,7 +398,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             try (var pollContext = context.createPollContext()) {
                 records = kafkaConsumer.poll(keepAliveInterval.dividedBy(POLL_TIMEOUT_KEEP_ALIVE_DIVISOR));
             }
-            log.atLevel(records.isEmpty() ? Level.TRACE : Level.INFO)
+            log.atLevel(records.isEmpty() ? Level.TRACE : Level.DEBUG)
                 .setMessage("Kafka consumer poll has fetched {} records.  Records in flight={}")
                 .addArgument(records::count)
                 .addArgument(kafkaRecordsLeftToCommitEventually::get)
