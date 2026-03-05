@@ -258,24 +258,7 @@ def call(Map config = [:]) {
                                             --namespace ma --dry-run=client -o yaml | kubectl --context=${env.eksKubeContext} apply -f -
                                     """
 
-                                    // Modify target security group to allow EKS cluster security group
-                                    sh """
-                                        exists=\$(aws ec2 describe-security-groups \
-                                            --group-ids $targetCluster.securityGroupId \
-                                            --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
-                                            --output text)
 
-                                        if [ -z "\$exists" ]; then
-                                            echo "Adding security group ingress rule"
-                                            aws ec2 authorize-security-group-ingress \
-                                                --group-id $targetCluster.securityGroupId \
-                                                --protocol -1 \
-                                                --port -1 \
-                                                --source-group $env.clusterSecurityGroup
-                                        else
-                                            echo "Security group ingress rule already exists"
-                                        fi
-                                    """
                                 }
                             }
                         }
@@ -349,27 +332,6 @@ ENVEOF
 
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: region, duration: 4500, roleSessionName: 'jenkins-session') {
-                                // Revoke SG ingress rule added during setup
-                                if (env.clusterDetailsJson && env.clusterSecurityGroup) {
-                                    def clusterDetails = readJSON text: env.clusterDetailsJson
-                                    def targetCluster = clusterDetails.target
-                                    sh """
-                                        if aws ec2 describe-security-groups --group-ids ${targetCluster.securityGroupId} >/dev/null 2>&1; then
-                                            exists=\$(aws ec2 describe-security-groups \
-                                                --group-ids ${targetCluster.securityGroupId} \
-                                                --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='${env.clusterSecurityGroup}']]" \
-                                                --output json)
-                                            if [ "\$exists" != "[]" ]; then
-                                                echo "CLEANUP: Revoking EKS SG ingress rule"
-                                                aws ec2 revoke-security-group-ingress \
-                                                    --group-id ${targetCluster.securityGroupId} \
-                                                    --protocol -1 --port -1 \
-                                                    --source-group ${env.clusterSecurityGroup} || true
-                                            fi
-                                        fi
-                                    """
-                                }
-
                                 // Destroy domain stacks via CDK (uses same context file from deploy)
                                 dir('test') {
                                     echo "CLEANUP: Destroying domain stacks via CDK"
@@ -413,7 +375,8 @@ def deployTargetClusterOnly(Map config) {
             ebsEnabled: true,
             ebsVolumeSize: config.sizeConfig.ebsVolumeSize,
             ebsThroughput: config.sizeConfig.ebsThroughput,
-            nodeToNodeEncryption: true
+            nodeToNodeEncryption: true,
+            allowAllVpcTraffic: true
         ]]
     ]
 
