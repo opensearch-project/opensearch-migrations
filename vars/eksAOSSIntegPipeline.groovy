@@ -91,11 +91,11 @@ def call(Map config = [:]) {
                                     writeFile file: '/tmp/stack-outputs.json', text: stackOutputs
 
                                     env.SOURCE_ENDPOINT = "https://" + sh(
-                                        script: "jq -r '.[] | select(.OutputKey==\"ClusterEndpointExport-${maStageName}-source\") | .OutputValue' /tmp/stack-outputs.json",
+                                        script: "jq -r '.[] | select(.OutputKey==\"ClusterEndpointExport${maStageName}source\") | .OutputValue' /tmp/stack-outputs.json",
                                         returnStdout: true
                                     ).trim()
                                     env.AOSS_COLLECTION_ENDPOINT = sh(
-                                        script: "jq -r '.[] | select(.OutputKey==\"CollectionEndpointExport-${maStageName}-target\") | .OutputValue' /tmp/stack-outputs.json",
+                                        script: "jq -r '.[] | select(.OutputKey==\"CollectionEndpointExport${maStageName}target\") | .OutputValue' /tmp/stack-outputs.json",
                                         returnStdout: true
                                     ).trim()
                                     echo "Discovered source: ${env.SOURCE_ENDPOINT}"

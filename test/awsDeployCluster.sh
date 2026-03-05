@@ -32,23 +32,26 @@ write_cluster_outputs() {
     --output json)
 
   # VPC ID (inline in same stack, may not exist for serverless-only)
-  vpc_id=$(echo "$outputs" | jq -r --arg stage "$stage" \
-    '.[] | select(.OutputKey == "VpcIdExport-" + $stage) | .OutputValue // empty')
+  vpc_id=$(echo "$outputs" | jq -r --arg key "VpcIdExport${stage}" \
+    '.[] | select(.OutputKey == $key) | .OutputValue // empty')
 
   tmpfile=$(mktemp)
   echo "{}" > "$tmpfile"
 
   # Process ClusterEndpoint outputs (managed domains)
-  echo "$outputs" | jq -c --arg stage "$stage" \
-    '.[] | select(.OutputKey | startswith("ClusterEndpointExport-" + $stage + "-"))' | while read -r output; do
-    cluster_id=$(echo "$output" | jq -r --arg stage "$stage" '.OutputKey | ltrimstr("ClusterEndpointExport-" + $stage + "-")')
+  # CFN OutputKey strips hyphens from CDK logical IDs, so we match with regex
+  echo "$outputs" | jq -c '.[] | select(.OutputKey | test("^ClusterEndpointExport"))' | while read -r output; do
+    output_key=$(echo "$output" | jq -r '.OutputKey')
+    # Extract cluster_id: strip "ClusterEndpointExport" prefix and stage name
+    cluster_id=$(echo "$output_key" | sed "s/^ClusterEndpointExport${stage}//")
     endpoint=$(echo "$output" | jq -r '.OutputValue')
     [[ ! "$endpoint" =~ ^https?:// ]] && endpoint="https://$endpoint"
 
-    sg=$(echo "$outputs" | jq -r --arg key "ClusterAccessSecurityGroupIdExport-${stage}-${cluster_id}" \
-      '.[] | select(.OutputKey == $key) | .OutputValue // empty')
-    subnets=$(echo "$outputs" | jq -r --arg key "ClusterSubnets-${stage}-${cluster_id}" \
-      '.[] | select(.OutputKey == $key) | .OutputValue // empty')
+    # Look up SG and subnets using same no-hyphen pattern
+    sg=$(echo "$outputs" | jq -r --arg id "ClusterAccessSecurityGroupIdExport${stage}${cluster_id}" \
+      '.[] | select(.OutputKey == $id) | .OutputValue // empty')
+    subnets=$(echo "$outputs" | jq -r --arg id "ClusterSubnets${stage}${cluster_id}" \
+      '.[] | select(.OutputKey == $id) | .OutputValue // empty')
 
     jq --arg id "$cluster_id" --arg vpc "${vpc_id:-}" --arg endpoint "$endpoint" \
        --arg sg "${sg:-}" --arg subnets "${subnets:-}" \
@@ -58,9 +61,9 @@ write_cluster_outputs() {
   done
 
   # Process CollectionEndpoint outputs (serverless)
-  echo "$outputs" | jq -c --arg stage "$stage" \
-    '.[] | select(.OutputKey | startswith("CollectionEndpointExport-" + $stage + "-"))' | while read -r output; do
-    cluster_id=$(echo "$output" | jq -r --arg stage "$stage" '.OutputKey | ltrimstr("CollectionEndpointExport-" + $stage + "-")')
+  echo "$outputs" | jq -c '.[] | select(.OutputKey | test("^CollectionEndpointExport"))' | while read -r output; do
+    output_key=$(echo "$output" | jq -r '.OutputKey')
+    cluster_id=$(echo "$output_key" | sed "s/^CollectionEndpointExport${stage}//")
     endpoint=$(echo "$output" | jq -r '.OutputValue')
     [[ ! "$endpoint" =~ ^https?:// ]] && endpoint="https://$endpoint"
 
