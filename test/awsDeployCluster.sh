@@ -5,8 +5,6 @@
 
 set -euo pipefail
 
-CLUSTER_STACK_TYPE_REGEX="(OpenSearchDomain|OpenSearchServerless|SelfManagedEC2)"
-
 write_cluster_outputs() {
   local stage="$1"
   local outfile="$2"
@@ -20,45 +18,55 @@ write_cluster_outputs() {
     return 1
   fi
 
-  network_stack_name=$(echo "$stacks" | grep "NetworkInfra-${stage}" | head -n 1)
-  vpc_id=$(aws cloudformation describe-stacks \
-    --stack-name "$network_stack_name" \
-    --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue | [0]" \
-    --output text)
-
-  cluster_stack_names=$(echo "$stacks" | grep -E "^$CLUSTER_STACK_TYPE_REGEX-.*-${stage}-")
-  if [[ -z "$cluster_stack_names" ]]; then
-    echo "No cluster stacks found for stage: $stage"
+  # v0.3.x: single stack named OpenSearch-{stage}-{region}
+  stack_name=$(echo "$stacks" | grep "^OpenSearch-${stage}-" | head -n 1)
+  if [[ -z "$stack_name" ]]; then
+    echo "No OpenSearch stack found for stage: $stage"
     return 1
   fi
+  echo "Found stack: $stack_name"
+
+  outputs=$(aws cloudformation describe-stacks \
+    --stack-name "$stack_name" \
+    --query "Stacks[0].Outputs" \
+    --output json)
+
+  # VPC ID (inline in same stack, may not exist for serverless-only)
+  vpc_id=$(echo "$outputs" | jq -r --arg stage "$stage" \
+    '.[] | select(.OutputKey == "VpcIdExport-" + $stage) | .OutputValue // empty')
 
   tmpfile=$(mktemp)
   echo "{}" > "$tmpfile"
 
-  for stack in $cluster_stack_names; do
-    echo "Found cluster stack: $stack"
+  # Process ClusterEndpoint outputs (managed domains)
+  echo "$outputs" | jq -c --arg stage "$stage" \
+    '.[] | select(.OutputKey | startswith("ClusterEndpointExport-" + $stage + "-"))' | while read -r output; do
+    cluster_id=$(echo "$output" | jq -r --arg stage "$stage" '.OutputKey | ltrimstr("ClusterEndpointExport-" + $stage + "-")')
+    endpoint=$(echo "$output" | jq -r '.OutputValue')
+    [[ ! "$endpoint" =~ ^https?:// ]] && endpoint="https://$endpoint"
 
-    outputs=$(aws cloudformation describe-stacks \
-      --stack-name "$stack" \
-      --query "Stacks[0].Outputs" \
-      --output json)
+    sg=$(echo "$outputs" | jq -r --arg key "ClusterAccessSecurityGroupIdExport-${stage}-${cluster_id}" \
+      '.[] | select(.OutputKey == $key) | .OutputValue // empty')
+    subnets=$(echo "$outputs" | jq -r --arg key "ClusterSubnets-${stage}-${cluster_id}" \
+      '.[] | select(.OutputKey == $key) | .OutputValue // empty')
 
-    cluster_id=$(echo "$stack" \
-      | sed -E "s/^($CLUSTER_STACK_TYPE_REGEX)-//" \
-      | sed -E "s/-${stage}-.*$//")
-    cluster_endpoint=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterEndpoint")) | .OutputValue')
-    cluster_endpoint="https://$cluster_endpoint"
-    cluster_sg=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterAccessSecurityGroupId")) | .OutputValue')
-    cluster_subnets=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterSubnets")) | .OutputValue')
-
-    jq --arg id "$cluster_id" \
-       --arg vpc "$vpc_id" \
-       --arg endpoint "$cluster_endpoint" \
-       --arg security_group "$cluster_sg" \
-       --arg subnets "$cluster_subnets" \
-       '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $security_group, subnetIds: $subnets}}' \
+    jq --arg id "$cluster_id" --arg vpc "${vpc_id:-}" --arg endpoint "$endpoint" \
+       --arg sg "${sg:-}" --arg subnets "${subnets:-}" \
+       '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $sg, subnetIds: $subnets}}' \
        "$tmpfile" > "$tmpfile.new"
+    mv "$tmpfile.new" "$tmpfile"
+  done
 
+  # Process CollectionEndpoint outputs (serverless)
+  echo "$outputs" | jq -c --arg stage "$stage" \
+    '.[] | select(.OutputKey | startswith("CollectionEndpointExport-" + $stage + "-"))' | while read -r output; do
+    cluster_id=$(echo "$output" | jq -r --arg stage "$stage" '.OutputKey | ltrimstr("CollectionEndpointExport-" + $stage + "-")')
+    endpoint=$(echo "$output" | jq -r '.OutputValue')
+    [[ ! "$endpoint" =~ ^https?:// ]] && endpoint="https://$endpoint"
+
+    jq --arg id "$cluster_id" --arg endpoint "$endpoint" \
+       '. + {($id): {vpcId: "", endpoint: $endpoint, securityGroupId: "", subnetIds: ""}}' \
+       "$tmpfile" > "$tmpfile.new"
     mv "$tmpfile.new" "$tmpfile"
   done
 
@@ -109,11 +117,7 @@ if [[ -z "$PROVIDED_CONTEXT_FILE_PATH" ]]; then
 fi
 
 SAMPLE_CDK_REPO="https://github.com/aws-samples/amazon-opensearch-service-sample-cdk.git"
-SAMPLE_CDK_VERSION=$(git ls-remote --tags --sort=-v:refname "$SAMPLE_CDK_REPO" "v0.1.*" | head -n1 | sed 's/.*refs\/tags\///')
-if [[ -z "$SAMPLE_CDK_VERSION" ]]; then
-  echo "Error: Could not discover latest v0.1.x tag from $SAMPLE_CDK_REPO"
-  exit 1
-fi
+SAMPLE_CDK_VERSION="v0.3.7"
 echo "Using sample CDK version: $SAMPLE_CDK_VERSION"
 if [ ! -d "amazon-opensearch-service-sample-cdk" ]; then
   git clone "$SAMPLE_CDK_REPO"
