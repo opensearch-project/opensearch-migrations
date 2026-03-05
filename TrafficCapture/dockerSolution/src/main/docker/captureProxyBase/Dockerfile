@@ -1,7 +1,10 @@
+# Global ARGs (must be before first FROM to be usable in FROM lines)
+ARG CERT_BUILDER_IMAGE=docker.io/library/amazonlinux:2023
+ARG RUNTIME_IMAGE=docker.io/library/amazoncorretto:11-al2023-headless
+
 # =======================
 # Stage 1: Certificate Generation
 # =======================
-ARG CERT_BUILDER_IMAGE=docker.io/library/amazonlinux:2023
 FROM ${CERT_BUILDER_IMAGE} AS cert-builder
 
 # Install OpenSSL
@@ -22,7 +25,6 @@ RUN mkdir -p /certs && \
 # =======================
 # Stage 2: Final Image
 # =======================
-ARG RUNTIME_IMAGE=docker.io/library/amazoncorretto:11-al2023-headless
 FROM ${RUNTIME_IMAGE}
 
 # Set environment variables
