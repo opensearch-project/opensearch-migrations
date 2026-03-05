@@ -341,7 +341,23 @@ if [[ "$destroy" == "true" ]]; then
     exit 1
   fi
   echo "Deleting CloudFormation stack: $cfn_stack_name"
-  aws cloudformation delete-stack --stack-name "$cfn_stack_name" --region "$region"
+  # Check if stack exists and handle DELETE_FAILED state
+  stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" --region "$region" \
+    --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+  if [[ "$stack_status" == "DOES_NOT_EXIST" ]]; then
+    echo "Stack $cfn_stack_name does not exist."
+    exit 0
+  fi
+  retain_args=()
+  if [[ "$stack_status" == "DELETE_FAILED" ]]; then
+    failed_resources=$(aws cloudformation list-stack-resources --stack-name "$cfn_stack_name" --region "$region" \
+      --query "StackResourceSummaries[?ResourceStatus=='DELETE_FAILED'].LogicalResourceId" --output text 2>/dev/null || true)
+    if [[ -n "$failed_resources" ]]; then
+      echo "Retaining stuck resources: $failed_resources"
+      retain_args=(--retain-resources $failed_resources)
+    fi
+  fi
+  aws cloudformation delete-stack --stack-name "$cfn_stack_name" --region "$region" "${retain_args[@]}"
   echo "Waiting for stack deletion to complete..."
   aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" --region "$region"
   echo "Stack $cfn_stack_name deleted."

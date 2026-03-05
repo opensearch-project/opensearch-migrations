@@ -5,10 +5,7 @@
 
 set -euo pipefail
 
-# CDK stack naming convention: {Type}-{clusterId}-{stage}-{region}
-# Types: OpenSearchDomain, OpenSearchServerless, SelfManagedEC2
-CLUSTER_STACK_TYPE_REGEX="(OpenSearchDomain|OpenSearchServerless|SelfManagedEC2)"
-
+# CDK stack naming convention: OpenSearch-{stage}-{region}
 write_cluster_outputs() {
   local stage="$1"
   local outfile="$2"
@@ -35,8 +32,8 @@ write_cluster_outputs() {
       --output text)
   fi
 
-  # Match CDK naming: {Type}-{clusterId}-{stage}-{region}
-  cluster_stack_names=$(echo "$stacks" | grep -E "^${CLUSTER_STACK_TYPE_REGEX}-[^-]+-${stage}-" || true)
+  # Match CDK naming: OpenSearch-{stage}-{region}
+  cluster_stack_names=$(echo "$stacks" | grep -E "^OpenSearch-${stage}-" || true)
   if [[ -z "$cluster_stack_names" ]]; then
     echo "No cluster stacks found for stage: $stage"
     return 1
@@ -53,38 +50,48 @@ write_cluster_outputs() {
       --query "Stacks[0].Outputs" \
       --output json)
 
-    cluster_id=$(echo "$stack" \
-      | sed -E "s/^($CLUSTER_STACK_TYPE_REGEX)-//" \
-      | sed -E "s/-${stage}-.*$//")
-    cluster_endpoint=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterEndpoint")) | .OutputValue')
-    cluster_endpoint="https://$cluster_endpoint"
-    cluster_sg=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterAccessSecurityGroupId")) | .OutputValue')
-    # Fallback: look up security group from the OpenSearch domain's VPC config
-    if [[ -z "$cluster_sg" ]]; then
-      domain_name=$(aws cloudformation list-stack-resources --stack-name "$stack" \
-        --query "StackResourceSummaries[?ResourceType=='AWS::OpenSearchService::Domain'].PhysicalResourceId | [0]" \
-        --output text 2>/dev/null || true)
-      if [[ -n "$domain_name" && "$domain_name" != "None" ]]; then
-        cluster_sg=$(aws opensearch describe-domain --domain-name "$domain_name" \
-          --query 'DomainStatus.VPCOptions.SecurityGroupIds[0]' --output text 2>/dev/null || true)
-        if [[ -n "$cluster_sg" && "$cluster_sg" != "None" ]]; then
-          echo "Looked up security group from domain $domain_name: $cluster_sg"
-        else
-          cluster_sg=""
+    # Extract cluster IDs from output keys.
+    # CDK construct ID "ClusterEndpointExport-{stage}-{clusterId}" becomes
+    # CFN OutputKey "ClusterEndpointExport{stageNoDashes}{clusterId}" (dashes stripped)
+    local stage_nodash="${stage//-/}"
+    cluster_ids=$(echo "$outputs" | jq -r '.[].OutputKey' | grep -oP "^ClusterEndpointExport${stage_nodash}\K.+" || true)
+
+    for cluster_id in $cluster_ids; do
+      cluster_endpoint=$(echo "$outputs" | jq -r --arg key "ClusterEndpointExport${stage_nodash}${cluster_id}" \
+        '.[] | select(.OutputKey == $key) | .OutputValue')
+      cluster_endpoint="https://$cluster_endpoint"
+      cluster_sg=$(echo "$outputs" | jq -r --arg key "ClusterAccessSecurityGroupIdExport${stage_nodash}${cluster_id}" \
+        '.[] | select(.OutputKey == $key) | .OutputValue')
+      # Fallback: look up security group from the OpenSearch domain's VPC config
+      if [[ -z "$cluster_sg" || "$cluster_sg" == "null" ]]; then
+        domain_name=$(aws cloudformation list-stack-resources --stack-name "$stack" \
+          --query "StackResourceSummaries[?ResourceType=='AWS::OpenSearchService::Domain'].PhysicalResourceId | [0]" \
+          --output text 2>/dev/null || true)
+        if [[ -n "$domain_name" && "$domain_name" != "None" ]]; then
+          cluster_sg=$(aws opensearch describe-domain --domain-name "$domain_name" \
+            --query 'DomainStatus.VPCOptions.SecurityGroupIds[0]' --output text 2>/dev/null || true)
+          if [[ -n "$cluster_sg" && "$cluster_sg" != "None" ]]; then
+            echo "Looked up security group from domain $domain_name: $cluster_sg"
+          else
+            cluster_sg=""
+          fi
         fi
       fi
-    fi
-    cluster_subnets=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterSubnets")) | .OutputValue')
+      cluster_subnets=$(echo "$outputs" | jq -r --arg key "ClusterSubnets${stage_nodash}${cluster_id}" \
+        '.[] | select(.OutputKey == $key) | .OutputValue')
 
-    jq --arg id "$cluster_id" \
-       --arg vpc "$vpc_id" \
-       --arg endpoint "$cluster_endpoint" \
-       --arg security_group "$cluster_sg" \
-       --arg subnets "$cluster_subnets" \
-       '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $security_group, subnetIds: $subnets}}' \
-       "$tmpfile" > "$tmpfile.new"
+      echo "  cluster_id=$cluster_id endpoint=$cluster_endpoint sg=$cluster_sg"
 
-    mv "$tmpfile.new" "$tmpfile"
+      jq --arg id "$cluster_id" \
+         --arg vpc "$vpc_id" \
+         --arg endpoint "$cluster_endpoint" \
+         --arg security_group "$cluster_sg" \
+         --arg subnets "$cluster_subnets" \
+         '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $security_group, subnetIds: $subnets}}' \
+         "$tmpfile" > "$tmpfile.new"
+
+      mv "$tmpfile.new" "$tmpfile"
+    done
   done
 
   mv "$tmpfile" "$outfile"
@@ -145,12 +152,16 @@ if [[ -z "$PROVIDED_CONTEXT_FILE_PATH" ]]; then
   exit 1
 fi
 
+# Pin to v0.3.1 — v0.3.2+ has a bug: cfnDomain.getAtt('DomainEndpoints.vpc') causes
+# ROLLBACK with "Requested attribute DomainEndpoints.vpc must be a readonly property"
+CDK_REPO_TAG="v0.3.1"
+
 if [ ! -d "amazon-opensearch-service-sample-cdk" ]; then
   git clone https://github.com/aws-samples/amazon-opensearch-service-sample-cdk.git
 else
   echo "Repo already exists, skipping clone."
 fi
-cd amazon-opensearch-service-sample-cdk && git pull
+cd amazon-opensearch-service-sample-cdk && git fetch --tags && git checkout "$CDK_REPO_TAG"
 npm install
 
 cd ..
