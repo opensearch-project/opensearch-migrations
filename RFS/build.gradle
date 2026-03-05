@@ -3,84 +3,20 @@ plugins {
     id 'io.freefair.lombok'
     id 'java-test-fixtures'
     id 'me.champeau.jmh'
-    id 'com.gradleup.shadow'
 }
+
+evaluationDependsOn ':SearchSnapshotExtractor'
 
 ext {
     awsSdkVersion = '2.25.16'
     dataset = findProperty('dataset') ?: 'skip_dataset'
 }
 
-sourceSets {
-    lucene9 {
-        java {
-            srcDir 'src/lucene9/java'
-        }
-        resources {
-            srcDir 'src/lucene9/resources'
-        }
-    }
-}
-
-configurations {
-    lucene5
-    lucene6
-    lucene7
-    lucene9
-    lucene9Implementation.extendsFrom(lucene9)
-}
-
-tasks.named('processLucene9Resources').configure {
-    duplicatesStrategy = DuplicatesStrategy.INCLUDE
-}
-
-tasks.register('shadowLucene5', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    mergeServiceFiles()
-    configurations = [project.configurations.lucene5]
-    archiveClassifier.set('lucene5-shadow')
-    relocate 'org.apache.lucene', 'shadow.lucene5.org.apache.lucene'
-}
-
-tasks.register('shadowLucene6', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    mergeServiceFiles()
-    configurations = [project.configurations.lucene6]
-    archiveClassifier.set('lucene6-shadow')
-    relocate 'org.apache.lucene', 'shadow.lucene6.org.apache.lucene'
-}
-
-tasks.register('shadowLucene7', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    mergeServiceFiles()
-    configurations = [project.configurations.lucene7]
-    archiveClassifier.set('lucene7-shadow')
-    relocate 'org.apache.lucene', 'shadow.lucene7.org.apache.lucene'
-}
-
-tasks.register('shadowLucene9', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
-    dependsOn compileLucene9Java, processLucene9Resources
-    mergeServiceFiles()
-    archiveClassifier.set('lucene9-shadow')
-    configurations = [project.configurations.lucene9]
-    from sourceSets.lucene9.output
-    relocate 'org.apache.lucene', 'shadow.lucene9.org.apache.lucene'
-    manifest {
-        attributes 'Multi-Release': 'true'
-    }
-}
-
-tasks.register('prepareShadowJars') {
-    dependsOn shadowLucene5, shadowLucene6, shadowLucene7, shadowLucene9
-}
-
-tasks.named('build') {
-    dependsOn prepareShadowJars
-}
-
-tasks.named('test') {
-    dependsOn prepareShadowJars
-}
-
-
 dependencies {
+    api project(':rfs-common')
+    api project(':rfs-http')
+    api project(':rfs-pipeline')
+    api project(':SearchSnapshotExtractor')
     implementation project(':awsUtilities')
     implementation project(':coreUtilities')
     implementation project(':transformation')
@@ -104,39 +40,6 @@ dependencies {
 
     implementation libs.slf4j.api
 
-    lucene5 libs.lucene.v5.core
-    lucene5 libs.lucene.v5.backward.codecs
-    lucene5 libs.lucene.v5.suggest
-
-    lucene6 libs.lucene.v6.core
-    lucene6 libs.lucene.v6.backward.codecs
-    lucene6 libs.lucene.v6.suggest
-
-    lucene7 libs.lucene.v7.core
-    lucene7 libs.lucene.v7.backward.codecs
-    lucene7 libs.lucene.v7.suggest
-
-    lucene9 libs.lucene.v9.core
-    lucene9 libs.lucene.v9.analysis.common
-    lucene9 libs.lucene.v9.backward.codecs
-    lucene9 libs.lucene.v9.suggest
-    lucene9 libs.zstd.jni
-
-    implementation shadowLucene5.outputs.files
-    implementation shadowLucene6.outputs.files
-    implementation shadowLucene7.outputs.files
-    implementation shadowLucene9.outputs.files
-
-    testImplementation shadowLucene5.outputs.files
-    testImplementation shadowLucene6.outputs.files
-    testImplementation shadowLucene7.outputs.files
-    testImplementation shadowLucene9.outputs.files
-
-    testFixturesImplementation shadowLucene5.outputs.files
-    testFixturesImplementation shadowLucene6.outputs.files
-    testFixturesImplementation shadowLucene7.outputs.files
-    testFixturesImplementation shadowLucene9.outputs.files
-
     implementation libs.aws.crt
     implementation libs.aws.s3
 
@@ -145,6 +48,12 @@ dependencies {
 
     testImplementation libs.docker.java.core
     testImplementation libs.docker.java.transport.httpclient5
+
+    // Shadow lucene jars from SearchSnapshotExtractor (needed by test code)
+    testImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene5').map { it.outputs.files }
+    testImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene6').map { it.outputs.files }
+    testImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene7').map { it.outputs.files }
+    testImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene9').map { it.outputs.files }
 
     testImplementation testFixtures(project(path: ':RFS'))
     testImplementation libs.lucene.v9.backward.codecs
@@ -170,14 +79,13 @@ dependencies {
     testImplementation libs.hamcrest
     testImplementation libs.junit.jupiter.api
     testRuntimeOnly libs.junit.jupiter.engine
-    // why are these under implementation with the above comment for integ tests?
-    implementation libs.httpclient5
-    implementation libs.jackson.databind
-    implementation libs.jackson.core
-    implementation libs.jackson.annotations
 
     testFixturesImplementation project(':transformation')
     testFixturesImplementation testFixtures(project(":coreUtilities"))
+    testFixturesImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene5').map { it.outputs.files }
+    testFixturesImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene6').map { it.outputs.files }
+    testFixturesImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene7').map { it.outputs.files }
+    testFixturesImplementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene9').map { it.outputs.files }
     testFixturesImplementation libs.docker.java
     testFixturesImplementation libs.docker.java.core
     testFixturesImplementation libs.docker.java.transport.httpclient5

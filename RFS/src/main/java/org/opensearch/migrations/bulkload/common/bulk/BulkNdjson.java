@@ -6,10 +6,15 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
+import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
+import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
+import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -47,6 +52,53 @@ public final class BulkNdjson {
     }
 
     /**
+     * Write an action line + raw source bytes to an output stream in NDJSON format.
+     * Skips Jackson deserialization/reserialization of the document body.
+     */
+    @SneakyThrows
+    public static void writeRawOperation(String operationType, BaseOperationMeta meta,
+                                         byte[] rawSource, OutputStream out, ObjectMapper mapper) {
+        Map<String, Object> metaMap = mapper.convertValue(meta, new TypeReference<>() {});
+        Map<String, Object> actionLine = Map.of(operationType, metaMap);
+        out.write(mapper.writeValueAsBytes(actionLine));
+
+        if (rawSource != null && rawSource.length > 0) {
+            out.write(NEWLINE_BYTES);
+            out.write(rawSource);
+        }
+    }
+
+    /**
+     * Write a list of {@link DocumentChange} records as raw NDJSON bytes, skipping the
+     * byte[]→Map→byte[] round-trip for document bodies.
+     *
+     * @param docs       the documents to write
+     * @param indexName  the target index name
+     * @param stripIds   whether to strip document IDs (for server-generated IDs)
+     * @param mapper     the ObjectMapper to use for action-line serialization
+     * @return the raw NDJSON bytes
+     */
+    public static byte[] toRawNdjsonBytes(
+        List<? extends DocumentChange> docs,
+        String indexName, boolean stripIds, ObjectMapper mapper
+    ) {
+        try (var baos = new ByteArrayOutputStream()) {
+            for (var doc : docs) {
+                String opType = doc.operation() == DocumentChange.ChangeType.DELETE ? "delete" : "index";
+                String docId = stripIds ? null : doc.id();
+                var meta = doc.operation() == DocumentChange.ChangeType.DELETE
+                    ? DeleteOperationMeta.builder().id(docId).index(indexName).routing(doc.routing()).build()
+                    : IndexOperationMeta.builder().id(docId).index(indexName).routing(doc.routing()).build();
+                writeRawOperation(opType, meta, doc.source(), baos, mapper);
+                baos.write(NEWLINE_BYTES);
+            }
+            return baos.toByteArray();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
      * Write a single operation to an output stream in NDJSON format.
      * @param ops The operation to write
      * @param out The output stream to write to
@@ -61,18 +113,26 @@ public final class BulkNdjson {
     }
 
     /**
+     * Convert a list of bulk operations to NDJSON bytes, using raw source bytes when available.
+     * Avoids the byte[]→Map→byte[] round-trip for document bodies.
+     */
+    public static byte[] toBulkNdjsonBytes(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
+        try (var baos = new ByteArrayOutputStream()) {
+            writeAll(ops, baos, mapper);
+            return baos.toByteArray();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
      * Convert a list of bulk operations to NDJSON string.
      * @param ops The list of operations to convert
      * @param mapper The ObjectMapper to use for serialization
      * @return The NDJSON string representation
      */
     public static String toBulkNdjson(Collection<? extends BulkOperationSpec> ops, ObjectMapper mapper) {
-        try (var baos = new ByteArrayOutputStream()) {
-            writeAll(ops, baos, mapper);
-            return baos.toString(StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        return new String(toBulkNdjsonBytes(ops, mapper), StandardCharsets.UTF_8);
     }
 
     /**

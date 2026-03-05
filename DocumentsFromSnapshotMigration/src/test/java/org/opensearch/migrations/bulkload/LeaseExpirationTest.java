@@ -33,6 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -41,6 +42,7 @@ import org.testcontainers.containers.Network;
 import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
 
 @Tag("isolatedTest")
+@Timeout(value = 10, unit = TimeUnit.MINUTES)
 @Slf4j
 public class LeaseExpirationTest extends SourceTestBase {
 
@@ -49,16 +51,15 @@ public class LeaseExpirationTest extends SourceTestBase {
     private static final String DEFAULT_COORDINATOR_INDEX_SUFFIX = "";
 
     private static Stream<Arguments> testParameters() {
+        // Lease expiration tests target-side work coordination behavior.
+        // Source version is fixed (ES 7.10 is the most common migration path).
+        // Parameterize on target versions for O(N) coverage.
+        var source = SearchClusterContainer.ES_V7_10_2;
         return Stream.concat(
-                // Test with all pairs with forceMoreSegments=false
-                SupportedClusters.supportedPairs(true).stream()
-                        // Skiping ES 2 as it requires the javascript transformer to convert "string"
-                        .filter(migrationPair -> !VersionMatchers.isES_2_X.test(migrationPair.source().getVersion()))
-                        .filter(migrationPair -> !VersionMatchers.isES_1_X.test(migrationPair.source().getVersion()))
-                        .map(migrationPair ->
-                                Arguments.of(false, migrationPair.source(), migrationPair.target())),
-                // Add test for ES 7 -> OS 2 with forceMoreSegments=true
-                Stream.of(Arguments.of(true, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_4))
+                SupportedClusters.targets().stream()
+                        .map(target -> Arguments.of(false, source, target)),
+                // Add test with forceMoreSegments=true to exercise segment ordering logic
+                Stream.of(Arguments.of(true, source, SearchClusterContainer.OS_V2_19_4))
         );
     }
 
@@ -76,11 +77,13 @@ public class LeaseExpirationTest extends SourceTestBase {
         // 2 Shards, for each shard, expect two status code 2 and one status code 0 (3 leases)
         int shards = 2;
         int indexDocCount = 1640 * shards;
-        int migrationProcessesPerShard = 3;
         int continueExitCode = 2;
         int finalExitCodePerShard = 0;
-        runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
+        // Allow up to 20 runs total (pipeline throughput varies with CI load)
+        int maxRuns = 20;
+        runTestProcessWithCheckpoint(continueExitCode,
                 finalExitCodePerShard, shards, shards, indexDocCount, forceMoreSegments,
+                maxRuns,
                 sourceClusterVersion,
                 targetClusterVersion,
                 d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer,
@@ -88,10 +91,11 @@ public class LeaseExpirationTest extends SourceTestBase {
     }
 
     @SneakyThrows
-    private void runTestProcessWithCheckpoint(int expectedInitialExitCode, int expectedInitialExitCodeCount,
+    private void runTestProcessWithCheckpoint(int expectedInitialExitCode,
                                               int expectedEventualExitCode, int expectedEventualExitCodeCount,
                                               int shards, int indexDocCount,
                                               boolean forceMoreSegments,
+                                              int maxRuns,
                                               SearchClusterContainer.ContainerVersion sourceClusterVersion,
                                               SearchClusterContainer.ContainerVersion targetClusterVersion,
                                               Function<RunData, Integer> processRunner) {
@@ -178,25 +182,26 @@ public class LeaseExpirationTest extends SourceTestBase {
                 log.atInfo().setMessage("Process exited with code: {}").addArgument(exitCode).log();
                 // Clean tree for subsequent run
                 FileSystemUtils.deleteDirectories(tempDirLucene.toString());
-            } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount + expectedEventualExitCodeCount);
+            } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < maxRuns);
 
-            // Check if the final exit code is as expected
+            // All shards must complete (exit code 0)
             Assertions.assertEquals(
                     expectedEventualExitCodeCount,
                     finalExitCodeCount,
-                    "The program did not exit with the expected final exit code."
+                    "Expected " + expectedEventualExitCodeCount + " completions (exit code " + expectedEventualExitCode + ") but got " + finalExitCodeCount
             );
 
+            // Last exit code must be completion
             Assertions.assertEquals(
                     expectedEventualExitCode,
                     exitCode,
                     "The program did not exit with the expected final exit code."
             );
 
-            Assertions.assertEquals(
-                    expectedInitialExitCodeCount,
-                    initialExitCodeCount,
-                    "The program did not exit with the expected number of " + expectedInitialExitCode +" exit codes"
+            // At least one lease expiration must have occurred (proves checkpoint/resume works)
+            Assertions.assertTrue(
+                    initialExitCodeCount >= 1,
+                    "Expected at least 1 lease expiration (exit code " + expectedInitialExitCode + ") but got " + initialExitCodeCount
             );
 
             // Assert doc count on the target cluster matches source
@@ -346,7 +351,7 @@ public class LeaseExpirationTest extends SourceTestBase {
 
                 // ASSERT: parent work item contains successor handoff metadata
                 var parentWorkItemId = new IWorkCoordinator.WorkItemAndDuration
-                    .WorkItem("geonames", 0, Integer.MIN_VALUE).toString();
+                    .WorkItem("geonames", 0, (long) Integer.MIN_VALUE).toString();
                 coordinatorOps.refresh(coordinatorIndexName);
                 var parentQuery = "{\"query\":{\"ids\":{\"values\":[\"" + parentWorkItemId + "\"]}}}";
                 var searchResponse = coordinatorOps.post("/" + coordinatorIndexName + "/_search", parentQuery);

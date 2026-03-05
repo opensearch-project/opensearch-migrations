@@ -5,64 +5,62 @@
 
 set -euo pipefail
 
-CLUSTER_STACK_TYPE_REGEX="(OpenSearchDomain|OpenSearchServerless|SelfManagedEC2)"
-
+# Parse CDK --outputs-file into cluster-details JSON.
+# CDK outputs use export names: ClusterEndpoint-{stage}-{clusterId}, ClusterSubnets-{stage}-{clusterId},
+# ClusterAccessSecurityGroupId-{stage}-{clusterId}. The outputs file keys have dashes stripped by CFN.
 write_cluster_outputs() {
   local stage="$1"
-  local outfile="$2"
+  local cdk_outputs_file="$2"
+  local outfile="$3"
+  local provided_vpc_id="${4:-}"
 
-  stacks=$(aws cloudformation list-stacks \
-    --query "StackSummaries[?StackStatus!='DELETE_COMPLETE' && StackStatus!='DELETE_IN_PROGRESS'].StackName" \
-    --output text | tr '\t' '\n')
+  # Flatten all stack outputs into a single object {key: value, ...}
+  local flat_outputs
+  flat_outputs=$(jq '[to_entries[].value | to_entries[]] | from_entries' "$cdk_outputs_file")
 
-  if [[ -z "$stacks" ]]; then
-    echo "No stacks found when listing stacks."
+  # Build dash-stripped stage prefix for key matching (CDK strips dashes from construct IDs)
+  local stage_stripped="${stage//-/}"
+
+  # Extract cluster IDs from endpoint output keys: ClusterEndpointExport{stage}{clusterId} → {clusterId}
+  local cluster_ids
+  cluster_ids=$(echo "$flat_outputs" | jq -r "keys[] | select(startswith(\"ClusterEndpointExport${stage_stripped}\")) | ltrimstr(\"ClusterEndpointExport${stage_stripped}\")")
+
+  if [[ -z "$cluster_ids" ]]; then
+    echo "No cluster outputs found in CDK outputs file for stage: $stage"
     return 1
   fi
 
-  network_stack_name=$(echo "$stacks" | grep "NetworkInfra-${stage}" | head -n 1)
-  vpc_id=$(aws cloudformation describe-stacks \
-    --stack-name "$network_stack_name" \
-    --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" \
-    --output text)
+  local vpc_id="${provided_vpc_id:-}"
+  local result="{}"
 
-  cluster_stack_names=$(echo "$stacks" | grep -E "^$CLUSTER_STACK_TYPE_REGEX-.*-${stage}-")
-  if [[ -z "$cluster_stack_names" ]]; then
-    echo "No cluster stacks found for stage: $stage"
-    return 1
-  fi
+  for cluster_id_stripped in $cluster_ids; do
+    local endpoint sg subnets
+    endpoint=$(echo "$flat_outputs" | jq -r ".\"ClusterEndpointExport${stage_stripped}${cluster_id_stripped}\" // empty")
+    sg=$(echo "$flat_outputs" | jq -r ".\"ClusterAccessSecurityGroupIdExport${stage_stripped}${cluster_id_stripped}\" // empty")
+    subnets=$(echo "$flat_outputs" | jq -r ".\"ClusterSubnets${stage_stripped}${cluster_id_stripped}\" // empty")
 
-  tmpfile=$(mktemp)
-  echo "{}" > "$tmpfile"
+    # Recover original clusterId from context file (match by stripped version)
+    local cluster_id="$cluster_id_stripped"
+    local context_ids
+    context_ids=$(jq -r '.clusters[].clusterId // empty' "$CLUSTER_CDK_CONTEXT_FILE_PATH" 2>/dev/null || true)
+    for cid in $context_ids; do
+      if [[ "${cid//-/}" == "$cluster_id_stripped" ]]; then
+        cluster_id="$cid"
+        break
+      fi
+    done
 
-  for stack in $cluster_stack_names; do
-    echo "Found cluster stack: $stack"
-
-    outputs=$(aws cloudformation describe-stacks \
-      --stack-name "$stack" \
-      --query "Stacks[0].Outputs" \
-      --output json)
-
-    cluster_id=$(echo "$stack" \
-      | sed -E "s/^($CLUSTER_STACK_TYPE_REGEX)-//" \
-      | sed -E "s/-${stage}-.*$//")
-    cluster_endpoint=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterEndpoint")) | .OutputValue')
-    cluster_endpoint="https://$cluster_endpoint"
-    cluster_sg=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterAccessSecurityGroupId")) | .OutputValue')
-    cluster_subnets=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterSubnets")) | .OutputValue')
-
-    jq --arg id "$cluster_id" \
-       --arg vpc "$vpc_id" \
-       --arg endpoint "$cluster_endpoint" \
-       --arg security_group "$cluster_sg" \
-       --arg subnets "$cluster_subnets" \
-       '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $security_group, subnetIds: $subnets}}' \
-       "$tmpfile" > "$tmpfile.new"
-
-    mv "$tmpfile.new" "$tmpfile"
+    echo "Found cluster: $cluster_id (endpoint=$endpoint)"
+    result=$(echo "$result" | jq \
+      --arg id "$cluster_id" \
+      --arg vpc "$vpc_id" \
+      --arg endpoint "https://$endpoint" \
+      --arg sg "$sg" \
+      --arg subnets "$subnets" \
+      '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $sg, subnetIds: $subnets}}')
   done
 
-  mv "$tmpfile" "$outfile"
+  echo "$result" > "$outfile"
   echo "Wrote outputs to $outfile"
 }
 
@@ -75,6 +73,8 @@ CLUSTER_CDK_CONTEXT_FILE_PATH="$CLUSTER_CDK_PATH/cdk.context.json"
 # Defaults
 STAGE="aws-integ"
 PROVIDED_CONTEXT_FILE_PATH=""
+VPC_ID=""
+DESTROY=false
 
 # Argument parser
 while [[ $# -gt 0 ]]; do
@@ -87,11 +87,21 @@ while [[ $# -gt 0 ]]; do
       PROVIDED_CONTEXT_FILE_PATH="$2"
       shift 2
       ;;
+    --vpc-id)
+      VPC_ID="$2"
+      shift 2
+      ;;
+    --destroy)
+      DESTROY=true
+      shift
+      ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo "Options:"
       echo "  -s, --stage <val>              Stage name (default: $STAGE)"
       echo "  -c, --context-file <path>      Path to context file (REQUIRED)"
+      echo "  --vpc-id <id>                  VPC ID to use in cluster outputs (skips NetworkInfra stack lookup)"
+      echo "  --destroy                      Destroy all stacks instead of deploying"
       exit 0
       ;;
     *)
@@ -120,7 +130,16 @@ cd ..
 cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 
 cd amazon-opensearch-service-sample-cdk
-cdk deploy "*" --require-approval never --concurrency 3
 
-CLUSTER_DETAILS_OUTPUT_FILE_PATH="$ROOT_REPO_PATH/test/tmp/cluster-details-${STAGE}.json"
-write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH"
+if [[ "$DESTROY" == true ]]; then
+  cdk destroy "*" --force
+else
+  CDK_OUTPUTS_FILE=$(mktemp)
+  cdk deploy "*" --require-approval never --concurrency 3 --outputs-file "$CDK_OUTPUTS_FILE"
+
+  CLUSTER_DETAILS_OUTPUT_FILE_PATH="$ROOT_REPO_PATH/test/tmp/cluster-details-${STAGE}.json"
+  mkdir -p "$(dirname "$CLUSTER_DETAILS_OUTPUT_FILE_PATH")"
+  cd ..
+  write_cluster_outputs "$STAGE" "$CDK_OUTPUTS_FILE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH" "$VPC_ID"
+  rm -f "$CDK_OUTPUTS_FILE"
+fi

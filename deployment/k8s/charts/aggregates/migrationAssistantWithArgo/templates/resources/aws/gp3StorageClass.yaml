@@ -10,6 +10,7 @@ volumeBindingMode: WaitForFirstConsumer
 parameters:
   type: gp3
   encrypted: "true"
+  throughput: "250"
 reclaimPolicy: Delete
 allowVolumeExpansion: false
 {{- end }}

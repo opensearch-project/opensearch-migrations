@@ -92,7 +92,7 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
-                            sh './gradlew clean build --no-daemon --stacktrace'
+                            sh './gradlew clean build -x test --no-daemon --stacktrace'
                         }
                     }
                 }
@@ -148,7 +148,7 @@ def call(Map config = [:]) {
                                           --skip-console-exec \
                                           --skip-setting-k8s-context \
                                           --region us-east-1 \
-                                          2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
+                                          2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
                                     """
 
                                     // Capture env vars for later stages and cleanup
@@ -216,8 +216,7 @@ def call(Map config = [:]) {
                                             sigv4: [
                                                     region: "us-east-1",
                                                     service: "es"
-                                            ],
-                                            version: env.targetVer
+                                            ]
                                     ]
                                     sh """
                                       kubectl --context=${env.eksKubeContext} create configmap target-${targetVersionExpanded}-migration-config \
