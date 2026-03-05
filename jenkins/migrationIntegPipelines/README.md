@@ -15,7 +15,7 @@ The `JOB_NAME_OVERRIDE` parameter enables multiple Jenkins jobs to share the sam
 1. **Cover files** accept a `JOB_NAME_OVERRIDE` parameter and pass it to the vars function
 2. **Vars files** use `config.jobName ?: 'default-name'` to accept the override or use the default
 3. **GenericTrigger** in the pipeline uses the jobName in `regexpFilterExpression` to filter webhooks
-4. **GitHub Actions** sends webhooks with `pr-*` prefixed job names for PR-triggered tests
+4. **GitHub Actions** sends webhooks with `pr-*` or `main-*` prefixed job names depending on the trigger event
 
 ### Example Flow
 
@@ -27,11 +27,18 @@ GitHub PR → GHA sends job_name: "pr-eks-integ-test"
 → GenericTrigger matches and runs
 ```
 
-**Periodic job:**
+**Main-triggered job (push to main):**
 ```
-Cron trigger → Jenkins job "main-eks-integ-test" with JOB_NAME_OVERRIDE="main-eks-integ-test"
+Push to main → GHA sends job_name: "main-eks-integ-test"
+→ Jenkins job "main-eks-integ-test" with JOB_NAME_OVERRIDE="main-eks-integ-test"
 → eksIntegTestCover.groovy passes to eksIntegPipeline(jobName: "main-eks-integ-test")
-→ No webhook match, runs on schedule
+→ GenericTrigger matches and runs
+```
+
+**Main-triggered job (periodic cadence):**
+```
+Cron schedule fires → Jenkins runs "main-eks-integ-test" directly
+→ No webhook involved, job runs on its configured schedule
 ```
 
 ### Creating New Jobs
@@ -65,7 +72,7 @@ functionName(jobName: jobNameOverride ?: null)
 - Use `CHILD_JOB_NAME_OVERRIDE` parameter
 - Pass as `childJobName` to the vars function
 - Default child job path follows parent job name:
-  - `main-*` parent defaults to `Periodic runs from MAIN/main-k8s-local-integ-test`
+  - `main-*` parent defaults to `main/main-k8s-local-integ-test`
   - `pr-*` parent defaults to `pr-checks/pr-k8s-local-integ-test`
 - Periodic schedule is enabled by default for non-`pr-*` job names and disabled for `pr-*` job names
 
@@ -88,10 +95,20 @@ functionName(jobName: jobNameOverride ?: null)
 
 ### GitHub Actions Integration
 
-The `.github/workflows/jenkins_tests.yml` workflow sends PR-triggered webhooks with `pr-*` prefixed job names:
+The `.github/workflows/jenkins_tests.yml` workflow handles both PR and post-merge triggers using a single file. It uses `github.event_name == 'push'` to select `main-*` prefixed job names for pushes to `main`, and `pr-*` prefixed job names for pull requests. Note that `main-*` jobs may also run on a periodic cadence configured directly in Jenkins, independent of GHA webhooks.
 
-- `pr-full-es68source-e2e-test`
-- `pr-elasticsearch-5x-k8s-local-test`
-- `pr-eks-integ-test`
+Jobs triggered:
 
-This ensures PR-triggered jobs don't conflict with periodic or manually-triggered jobs using the same pipeline code.
+- `full-es68source-e2e-test` (PR and main)
+- `elasticsearch-5x-k8s-local-test` (PR and main)
+- `eks-integ-test` (PR with `run-eks-tests` label, and main)
+
+This ensures PR-triggered jobs don't conflict with post-merge jobs using the same pipeline code.
+
+### Jenkins Folder Structure
+
+Jenkins jobs are organized into two folders:
+
+- `main/` - pipelines that run on a periodic cadence, via GenericTrigger on push to `main`, or both (e.g., `main/main-k8s-local-integ-test`)
+- `pr-checks/` - pipelines that run only via GenericTrigger from PRs. No periodic cadence, no action on PR push (e.g., `pr-checks/pr-k8s-local-integ-test`)
+
