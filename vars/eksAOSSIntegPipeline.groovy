@@ -6,8 +6,7 @@ def call(Map config = [:]) {
     def endpointEnvVar = envVarMap[collectionType]
     def benchmarkTypeMap = ['SEARCH': 'search', 'TIMESERIES': 'timeseries', 'VECTORSEARCH': 'vector']
     def benchmarkType = benchmarkTypeMap[collectionType]
-    def stageIdMap = ['SEARCH': 'aoss-search', 'TIMESERIES': 'aoss-ts', 'VECTORSEARCH': 'aoss-vector']
-    def defaultStageId = config.defaultStageId ?: stageIdMap[collectionType]
+    def defaultStageId = config.defaultStageId ?: "aoss-search"
     def jobName = config.jobName ?: "eks-aoss-${collectionType.toLowerCase()}-integ-test"
     def clusterContextFilePath = "tmp/cluster-context-aoss-${currentBuild.number}.json"
 
