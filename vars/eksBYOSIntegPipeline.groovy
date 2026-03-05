@@ -250,8 +250,7 @@ def call(Map config = [:]) {
                                             sigv4: [
                                                 region: params.REGION,
                                                 service: "es"
-                                            ],
-                                            version: params.TARGET_VERSION
+                                            ]
                                     ]
                                     sh """
                                         kubectl --context=${env.eksKubeContext} create configmap target-${targetVersionExpanded}-migration-config \
