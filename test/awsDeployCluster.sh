@@ -5,6 +5,8 @@
 
 set -euo pipefail
 
+# CDK stack naming convention: {Type}-{clusterId}-{stage}-{region}
+# Types: OpenSearchDomain, OpenSearchServerless, SelfManagedEC2
 CLUSTER_STACK_TYPE_REGEX="(OpenSearchDomain|OpenSearchServerless|SelfManagedEC2)"
 
 write_cluster_outputs() {
@@ -33,7 +35,8 @@ write_cluster_outputs() {
       --output text)
   fi
 
-  cluster_stack_names=$(echo "$stacks" | grep -E "^$CLUSTER_STACK_TYPE_REGEX-.*-${stage}-")
+  # Match CDK naming: {Type}-{clusterId}-{stage}-{region}
+  cluster_stack_names=$(echo "$stacks" | grep -E "^${CLUSTER_STACK_TYPE_REGEX}-[^-]+-${stage}-" || true)
   if [[ -z "$cluster_stack_names" ]]; then
     echo "No cluster stacks found for stage: $stage"
     return 1
