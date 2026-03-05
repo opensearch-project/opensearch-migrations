@@ -62,6 +62,7 @@ push_images_to_ecr=false
 ma_images_source=""
 skip_setting_k8s_context=false
 skip_test_images=false
+destroy=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -99,6 +100,7 @@ while [[ $# -gt 0 ]]; do
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
     --skip-test-images) skip_test_images=true; shift 1 ;;
+    --destroy) destroy=true; shift 1 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
@@ -156,6 +158,8 @@ while [[ $# -gt 0 ]]; do
       echo "                                            deployments. You will need to pass --context=<context-name>"
       echo "                                            to every kubectl/helm command, or set the context yourself."
       echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
+      echo "  --destroy                                 Delete the CloudFormation stack specified by --stack-name"
+      echo "                                            and exit. Requires --stack-name and --region."
       echo ""
       echo "Build options:"
       echo "  --base-dir <path>                         opensearch-migrations directory"
@@ -325,6 +329,25 @@ validate_args() {
     exit 1
   fi
 }
+
+# --- destroy mode: delete the CFN stack and exit ---
+if [[ "$destroy" == "true" ]]; then
+  if [[ -z "$cfn_stack_name" ]]; then
+    echo "Error: --stack-name is required with --destroy." >&2
+    exit 1
+  fi
+  if [[ -z "$region" ]]; then
+    echo "Error: --region is required with --destroy." >&2
+    exit 1
+  fi
+  echo "Deleting CloudFormation stack: $cfn_stack_name"
+  aws cloudformation delete-stack --stack-name "$cfn_stack_name" --region "$region"
+  echo "Waiting for stack deletion to complete..."
+  aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" --region "$region"
+  echo "Stack $cfn_stack_name deleted."
+  exit 0
+fi
+
 validate_args
 
 # --- early subnet isolation check (before any slow operations) ---

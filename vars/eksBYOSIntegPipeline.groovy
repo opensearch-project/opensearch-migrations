@@ -377,8 +377,13 @@ ENVEOF
                                 }
 
                                 echo "CLEANUP: Deleting MA stack ${maStackName}"
-                                sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
-                                sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
+                                sh """
+                                    ./deployment/k8s/aws/aws-bootstrap.sh \
+                                      --stack-name "${maStackName}" \
+                                      --region ${region} \
+                                      --destroy \
+                                      || true
+                                """
                             }
                         }
                     }
