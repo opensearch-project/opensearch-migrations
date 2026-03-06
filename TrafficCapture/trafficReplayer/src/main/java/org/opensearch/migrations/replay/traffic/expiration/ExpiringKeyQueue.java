@@ -35,30 +35,22 @@ class ExpiringKeyQueue extends ConcurrentSkipListMap<EpochMillis, ConcurrentHash
         return accumulatorMap;
     }
 
-    ConcurrentHashMap<ScopedConnectionIdKey, Boolean> getHashSetForTimestamp(EpochMillis timestamp, Runnable onNewBucketCreated) {
-        return getHashSetForTimestamp(timestamp, onNewBucketCreated, true);
-    }
-
-    ConcurrentHashMap<ScopedConnectionIdKey, Boolean> getHashSetForTimestampWithDeferredExpiry(EpochMillis timestamp) {
-        return getHashSetForTimestamp(timestamp, null, false);
-    }
-
-    private ConcurrentHashMap<ScopedConnectionIdKey, Boolean> getHashSetForTimestamp(
-        EpochMillis timestamp, Runnable onNewBucketCreated, boolean runCallback
-    ) {
+    /**
+     * Returns null if the requested timestamp is in the expired range of timestamps,
+     * otherwise this returns the appropriate bucket.  It either finds it within the map
+     * or creates a new one and inserts it into the map (atomically).
+     *
+     * @param timestamp
+     * @return
+     */
+    private ConcurrentHashMap<ScopedConnectionIdKey, Boolean> getHashSetForTimestamp(EpochMillis timestamp) {
         return Optional.ofNullable(this.floorEntry(timestamp)).map(kvp -> {
             var shiftedKey = kvp.getKey().toInstant().plus(granularity);
             if (timestamp.test(shiftedKey, (newTimestamp, computedFloor) -> newTimestamp >= computedFloor)) {
-                try {
-                    return createNewSlot(timestamp, kvp.getKey());
-                } finally {
-                    if (runCallback && onNewBucketCreated != null) {
-                        onNewBucketCreated.run();
-                    }
-                }
+                return createNewSlot(timestamp, kvp.getKey());
             }
             return kvp.getValue();
-        }).orElse(null);
+        }).orElse(null); // floorEntry could be null if the entry was too old
     }
 
     /**

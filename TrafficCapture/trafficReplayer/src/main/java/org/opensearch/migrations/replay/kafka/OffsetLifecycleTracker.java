@@ -81,6 +81,7 @@ class OffsetLifecycleTracker {
             offsetMetadataMap.remove(offsetToRemove);
 
             if (offsetToRemove == topCursor) {
+                // most recent cursor was previously popped
                 topCursor = Optional.ofNullable(pQueue.peek()).orElse(cursorHighWatermark + 1);
                 log.atDebug().setMessage("Commit called for {}, and new topCursor={}")
                     .addArgument(offsetToRemove)

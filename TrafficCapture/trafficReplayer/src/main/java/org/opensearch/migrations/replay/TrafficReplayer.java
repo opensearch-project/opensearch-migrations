@@ -473,10 +473,8 @@ public class TrafficReplayer {
 
             if (MODE_DUMP_RAW.equals(params.mode)) {
                 runDumpRawFromKafka(params, consumer, endOffsets);
-            } else if (MODE_DUMP_HTTP.equals(params.mode)) {
-                runDumpHttpFromKafka(params, consumer, endOffsets, topContext, false);
             } else {
-                runDumpHttpFromKafka(params, consumer, endOffsets, topContext, true);
+                runDumpHttpFromKafka(params, consumer, endOffsets, topContext, MODE_DUMP_BOTH.equals(params.mode));
             }
         }
     }
@@ -495,13 +493,14 @@ public class TrafficReplayer {
         org.apache.kafka.clients.consumer.KafkaConsumer<String, byte[]> consumer,
         java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets
     ) {
-        while (true) {
-            var polled = consumer.poll(java.time.Duration.ofSeconds(2));
-            if (polled.isEmpty()) return;
+        for (var polled = consumer.poll(java.time.Duration.ofSeconds(2));
+             !polled.isEmpty();
+             polled = consumer.poll(java.time.Duration.ofSeconds(2))) {
             if (processRawRecords(polled, params, endOffsets)) return;
         }
     }
 
+    @SuppressWarnings("java:S1854") // trafficStream assignment is used; SonarQube false positive in try-catch
     private static boolean processRawRecords(
         org.apache.kafka.clients.consumer.ConsumerRecords<String, byte[]> records,
         Parameters params,
@@ -536,9 +535,9 @@ public class TrafficReplayer {
             dumper
         );
         try {
-            while (true) {
-                var polled = consumer.poll(java.time.Duration.ofSeconds(2));
-                if (polled.isEmpty()) return;
+            for (var polled = consumer.poll(java.time.Duration.ofSeconds(2));
+                 !polled.isEmpty();
+                 polled = consumer.poll(java.time.Duration.ofSeconds(2))) {
                 if (processRecordsForDump(polled, params, endOffsets, emitRaw, accumulator, dumper, channelContextManager, topContext)) {
                     return;
                 }
@@ -548,6 +547,7 @@ public class TrafficReplayer {
         }
     }
 
+    @SuppressWarnings("java:S1854") // trafficStream assignment is used; SonarQube false positive in try-catch
     private static boolean processRecordsForDump(
         org.apache.kafka.clients.consumer.ConsumerRecords<String, byte[]> records,
         Parameters params,
@@ -586,6 +586,7 @@ public class TrafficReplayer {
         return false;
     }
 
+    @SuppressWarnings("java:S1854") // topicPartition is used on the return line
     private static boolean pastEnd(
         org.apache.kafka.clients.consumer.ConsumerRecord<String, byte[]> consumerRecord,
         Parameters params,
@@ -597,6 +598,7 @@ public class TrafficReplayer {
         return consumerRecord.offset() >= endOffsets.getOrDefault(topicPartition, Long.MAX_VALUE);
     }
 
+    @SuppressWarnings("java:S3776") // Complexity is from straightforward mode branching, not worth splitting further
     private static void runDumpFromSource(
         Parameters params,
         org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource source,
