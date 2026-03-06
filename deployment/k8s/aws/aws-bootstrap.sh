@@ -962,6 +962,7 @@ if [[ "$build_images" == "true" ]]; then
     || { echo "ECR login failed"; exit 1; }
 
   BUILDKIT_NS="${BUILDKIT_NAMESPACE:-buildkit}"
+  kubectl create namespace "$BUILDKIT_NS" --dry-run=client -o yaml | kubectl apply -f -
   echo "Creating ECR credentials secret in namespace $BUILDKIT_NS..."
   kubectl create secret generic ecr-creds -n "$BUILDKIT_NS" \
     --from-file=config.json="$HOME/.docker/config.json" \
