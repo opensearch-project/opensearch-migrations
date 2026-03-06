@@ -50,7 +50,6 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
                     script {
-                        // Set env vars used across stages
                         env.STACK_NAME = "MA-Serverless-${maStageName}-${params.REGION}"
                         env.eksClusterName = "migration-eks-cluster-${maStageName}-${params.REGION}"
                         env.eksKubeContext = env.eksClusterName
@@ -100,7 +99,6 @@ def call(Map config = [:]) {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    // All clusters in single stack
                                     def stackOutputs = sh(
                                         script: """aws cloudformation describe-stacks --stack-name "${env.CLUSTER_STACK}" \
                                           --query 'Stacks[0].Outputs' --output json""",
@@ -134,6 +132,55 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Deploy & Bootstrap MA') {
+                when { expression { !params.REUSE_EXISTING } }
+                steps {
+                    timeout(time: 90, unit: 'MINUTES') {
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 7200, roleSessionName: 'jenkins-session') {
+                                    sh """
+                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                          --deploy-create-vpc-cfn \
+                                          --build-cfn \
+                                          --build-images \
+                                          --build-chart-and-dashboards \
+                                          --stack-name "${env.STACK_NAME}" \
+                                          --stage "${maStageName}" \
+                                          --region "${params.REGION}" \
+                                          --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
+                                          --base-dir "\$(pwd)" \
+                                          --skip-console-exec \
+                                          --skip-setting-k8s-context \
+                                          2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
+                                    """
+
+                                    // Capture MA VPC info for source domain deployment
+                                    def exportsJson = sh(
+                                        script: """aws cloudformation describe-stacks --stack-name "${env.STACK_NAME}" \
+                                          --query 'Stacks[0].Outputs' --output json""",
+                                        returnStdout: true
+                                    ).trim()
+                                    writeFile file: '/tmp/ma-outputs.json', text: exportsJson
+
+                                    env.MA_VPC_ID = sh(
+                                        script: "jq -r '.[] | select(.OutputKey | test(\"VpcId\")) | .OutputValue' /tmp/ma-outputs.json",
+                                        returnStdout: true
+                                    ).trim()
+                                    env.MA_SUBNET_IDS = sh(
+                                        script: "jq -r '[.[] | select(.OutputKey | test(\"PrivateSubnet\")) | .OutputValue] | join(\",\")' /tmp/ma-outputs.json",
+                                        returnStdout: true
+                                    ).trim()
+
+                                    echo "MA VPC: ${env.MA_VPC_ID}"
+                                    echo "MA Subnets: ${env.MA_SUBNET_IDS}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Deploy Source + AOSS Target') {
                 when { expression { !params.REUSE_EXISTING } }
                 steps {
@@ -144,10 +191,9 @@ def call(Map config = [:]) {
                                     def jenkinsRoleArn = "arn:aws:iam::${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole"
                                     def podRoleArn = "arn:aws:iam::${MIGRATIONS_TEST_ACCOUNT_ID}:role/${env.eksClusterName}-migrations-role"
 
-                                    // Single CDK deploy with both source domain + AOSS collection
                                     def context = [
                                         stage: "${maStageName}",
-                                        vpcAZCount: 2,
+                                        vpcId: "${env.MA_VPC_ID}",
                                         clusters: [
                                             [
                                                 clusterId: "source",
@@ -176,41 +222,9 @@ def call(Map config = [:]) {
 
                                     def clusterDetails = readJSON text: readFile("tmp/cluster-details-${maStageName}.json")
                                     env.SOURCE_ENDPOINT = clusterDetails.source.endpoint
-                                    env.SOURCE_VPC_ID = clusterDetails.source.vpcId
-                                    env.SOURCE_SUBNET_IDS = clusterDetails.source.subnetIds
                                     env.AOSS_COLLECTION_ENDPOINT = clusterDetails['target'].endpoint
                                     echo "Source: ${env.SOURCE_ENDPOINT}"
                                     echo "AOSS: ${env.AOSS_COLLECTION_ENDPOINT}"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Deploy & Bootstrap MA') {
-                when { expression { !params.REUSE_EXISTING } }
-                steps {
-                    timeout(time: 90, unit: 'MINUTES') {
-                        script {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 7200, roleSessionName: 'jenkins-session') {
-                                    sh """
-                                        ./deployment/k8s/aws/aws-bootstrap.sh \
-                                          --deploy-import-vpc-cfn \
-                                          --vpc-id "${env.SOURCE_VPC_ID}" \
-                                          --subnet-ids "${env.SOURCE_SUBNET_IDS}" \
-                                          --build-cfn \
-                                          --build-images \
-                                          --build-chart-and-dashboards \
-                                          --stack-name "${env.STACK_NAME}" \
-                                          --stage "${maStageName}" \
-                                          --region "${params.REGION}" \
-                                          --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          --skip-console-exec \
-                                          --skip-setting-k8s-context \
-                                          2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
-                                    """
                                 }
                             }
                         }
@@ -272,7 +286,6 @@ run_aoss_test_benchmarks(cluster, "${benchmarkType}")
                                     ).trim()
                                     env.S3_REPO_URI = "s3://${s3Bucket}/aoss-snapshot-${maStageName}/"
 
-                                    // Write snapshot repo config and creation script
                                     def repoConfig = """{"type":"s3","settings":{"bucket":"${s3Bucket}","base_path":"aoss-snapshot-${maStageName}","region":"${params.REGION}","role_arn":"${snapshotRole}"}}"""
                                     writeFile file: '/tmp/snapshot-repo-config.json', text: repoConfig
 
@@ -367,12 +380,12 @@ ENVEOF
 
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                // 1. Delete MA CFN stack
-                                echo "CLEANUP: Deleting MA stack ${env.STACK_NAME}"
+                                // 1. Delete cluster stack first (source domain + AOSS — depends on MA VPC)
+                                echo "CLEANUP: Deleting cluster stack ${env.CLUSTER_STACK}"
                                 sh """
-                                    aws cloudformation delete-stack --stack-name "${env.STACK_NAME}" --region "${params.REGION}" || true
-                                    aws cloudformation wait stack-delete-complete --stack-name "${env.STACK_NAME}" --region "${params.REGION}" || true
-                                    echo "MA stack deleted."
+                                    aws cloudformation delete-stack --stack-name "${env.CLUSTER_STACK}" --region "${params.REGION}" || true
+                                    aws cloudformation wait stack-delete-complete --stack-name "${env.CLUSTER_STACK}" --region "${params.REGION}" || true
+                                    echo "Cluster stack deleted."
                                 """
 
                                 // 2. Cleanup orphaned EKS security groups
@@ -398,12 +411,12 @@ ENVEOF
                                     fi
                                 """
 
-                                // 3. Delete cluster stack (source domain + AOSS collection + VPC in single stack)
-                                echo "CLEANUP: Deleting cluster stack ${env.CLUSTER_STACK}"
+                                // 3. Delete MA stack last (owns the VPC)
+                                echo "CLEANUP: Deleting MA stack ${env.STACK_NAME}"
                                 sh """
-                                    aws cloudformation delete-stack --stack-name "${env.CLUSTER_STACK}" --region "${params.REGION}" || true
-                                    aws cloudformation wait stack-delete-complete --stack-name "${env.CLUSTER_STACK}" --region "${params.REGION}" || true
-                                    echo "Cluster stack deleted."
+                                    aws cloudformation delete-stack --stack-name "${env.STACK_NAME}" --region "${params.REGION}" || true
+                                    aws cloudformation wait stack-delete-complete --stack-name "${env.STACK_NAME}" --region "${params.REGION}" || true
+                                    echo "MA stack deleted."
                                 """
                             }
                         }
