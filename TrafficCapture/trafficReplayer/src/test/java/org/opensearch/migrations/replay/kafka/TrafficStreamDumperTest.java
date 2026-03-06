@@ -111,7 +111,7 @@ class TrafficStreamDumperTest {
         log.info("dump-raw output: {}", result);
 
         Assertions.assertTrue(result.startsWith("[100-104]"));
-        Assertions.assertTrue(result.contains("p:0 o:1234"));
+        Assertions.assertTrue(result.contains("p:0 o:  1234"));
         Assertions.assertTrue(result.contains("ncs:node1.conn123.5:"));
         Assertions.assertTrue(result.contains("OPEN"));
         Assertions.assertTrue(result.contains("R["));

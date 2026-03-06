@@ -32,9 +32,15 @@ import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 public class HttpTransactionDumper implements AccumulationCallbacks {
 
     private final PrintStream out;
+    private final String linePrefix;
 
     public HttpTransactionDumper(PrintStream out) {
+        this(out, "");
+    }
+
+    public HttpTransactionDumper(PrintStream out, String linePrefix) {
         this.out = out;
+        this.linePrefix = linePrefix;
     }
 
     @Override
@@ -45,12 +51,12 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
     ) {
         var channelKey = ctx.getReplayerRequestKey().getTrafficStreamKey();
         var prefix = buildPrefix(channelKey, request.getFirstPacketTimestamp(), request.getLastPacketTimestamp());
-        out.println(prefix + " REQ[" + messageSize(request) + "] " + extractFirstLine(request));
+        out.println(linePrefix + prefix + " REQ[" + messageSize(request) + "] " + extractFirstLine(request));
 
         return rrPair -> {
             if (rrPair.getResponseData() != null) {
                 var rsp = rrPair.getResponseData();
-                out.println(buildPrefix(channelKey, rsp.getFirstPacketTimestamp(), rsp.getLastPacketTimestamp())
+                out.println(linePrefix + buildPrefix(channelKey, rsp.getFirstPacketTimestamp(), rsp.getLastPacketTimestamp())
                     + " RSP[" + messageSize(rsp) + "] " + extractFirstLine(rsp));
             }
         };
@@ -62,7 +68,7 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
         @NonNull IReplayContexts.IChannelKeyContext ctx,
         @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
     ) {
-        out.println(buildPrefixFromKeysAndCtx(trafficStreamKeysBeingHeld, ctx)
+        out.println(linePrefix + buildPrefixFromKeysAndCtx(trafficStreamKeysBeingHeld, ctx)
             + " EXPIRED (" + status + ")");
     }
 
@@ -75,7 +81,7 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
         @NonNull Instant timestamp,
         @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
     ) {
-        out.println(buildPrefixFromKeysAndCtx(trafficStreamKeysBeingHeld, ctx, timestamp)
+        out.println(linePrefix + buildPrefixFromKeysAndCtx(trafficStreamKeysBeingHeld, ctx, timestamp)
             + " CLOSED (" + channelInteractionNum + " requests completed)");
     }
 
@@ -89,6 +95,19 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
     private int pWidth = 1;
     private int oWidth = 6;
     private int sWidth = 3;
+    private long baseEpochSeconds = -1;
+
+    public void setBaseEpochSeconds(long baseEpochSeconds) {
+        if (this.baseEpochSeconds < 0) this.baseEpochSeconds = baseEpochSeconds;
+    }
+
+    private String relativeTime(long startEpoch, long endEpoch) {
+        if (startEpoch == 0) return String.format("%6s    %3s   ", "", "");
+        if (baseEpochSeconds < 0) baseEpochSeconds = startEpoch;
+        var offset = startEpoch - baseEpochSeconds;
+        var duration = endEpoch - startEpoch;
+        return String.format("%6d.0s %3d.0s", offset, duration);
+    }
 
     /**
      * All lines share the same column layout: [ts-ts] p:N o:N s:N nc:node.conn:
@@ -101,6 +120,7 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
         var endStr = String.valueOf(endEpoch);
         tsWidth = Math.max(tsWidth, Math.max(startStr.length(), endStr.length()));
         sb.append('[').append(pad(startStr, tsWidth)).append('-').append(pad(endStr, tsWidth)).append(']');
+        sb.append(' ').append(relativeTime(startEpoch, endEpoch));
 
         if (channelKey instanceof KafkaCommitOffsetData) {
             var k = (KafkaCommitOffsetData) channelKey;
@@ -157,6 +177,7 @@ public class HttpTransactionDumper implements AccumulationCallbacks {
         var epochStr = String.valueOf(epoch);
         tsWidth = Math.max(tsWidth, epochStr.length());
         sb.append('[').append(pad(epochStr, tsWidth)).append('-').append(pad(epochStr, tsWidth)).append(']');
+        sb.append(' ').append(relativeTime(epoch, epoch));
         sb.append(" p:").append(dashPad(pWidth));
         sb.append(" o:").append(dashPad(oWidth));
         sb.append(" s:").append(dashPad(sWidth));

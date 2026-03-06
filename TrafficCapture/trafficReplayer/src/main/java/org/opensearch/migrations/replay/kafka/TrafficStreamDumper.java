@@ -36,6 +36,11 @@ public class TrafficStreamDumper {
      */
     public static String format(TrafficStream ts, int partition, long offset,
                                 int previewRead, int previewWrite) {
+        return format(ts, partition, offset, previewRead, previewWrite, -1);
+    }
+
+    public static String format(TrafficStream ts, int partition, long offset,
+                                int previewRead, int previewWrite, long baseEpochSeconds) {
         var sb = new StringBuilder();
 
         long minEpoch = Long.MAX_VALUE;
@@ -49,16 +54,18 @@ public class TrafficStreamDumper {
             sb.append("[?-?]");
         } else {
             sb.append('[').append(minEpoch).append('-').append(maxEpoch).append(']');
+            if (baseEpochSeconds >= 0) {
+                sb.append(String.format(" %6d.0s %3d.0s", minEpoch - baseEpochSeconds, maxEpoch - minEpoch));
+            }
         }
 
         sb.append(' ');
         if (partition >= 0) {
-            sb.append("p:").append(partition).append(" o:").append(offset).append(' ');
+            sb.append(String.format("p:%d o:%6d ", partition, offset));
         }
 
-        var ncs = TrafficChannelKeyFormatter.format(
-            ts.getNodeId(), ts.getConnectionId(), TrafficStreamUtils.getTrafficStreamIndex(ts));
-        sb.append("ncs:").append(ncs).append(':');
+        sb.append("ncs:").append(TrafficChannelKeyFormatter.format(
+            ts.getNodeId(), ts.getConnectionId(), TrafficStreamUtils.getTrafficStreamIndex(ts))).append(':');
 
         var observations = ts.getSubStreamList();
         int i = 0;

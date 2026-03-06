@@ -158,6 +158,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             var workDequeuedByLimiterFuture = new TextTrackedFuture<TrafficStreamLimiter.WorkItem>(
                 () -> "waiting for " + ctx + " to be queued and run through TrafficStreamLimiter"
             );
+            log.atDebug().setMessage("[{}] Queuing request to TrafficStreamLimiter, permits={}")
+                .addArgument(ctx::getConnectionId)
+                .addArgument(liveTrafficStreamLimiter.liveTrafficStreamCostGate::availablePermits)
+                .log();
             var wi = liveTrafficStreamLimiter.queueWork(1, ctx, workDequeuedByLimiterFuture.future::complete);
             var httpSentRequestFuture = workDequeuedByLimiterFuture.thenCompose(
                     ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, quiescentDurationForRequest),

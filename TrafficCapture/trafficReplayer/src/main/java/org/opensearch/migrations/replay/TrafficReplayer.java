@@ -104,7 +104,7 @@ public class TrafficReplayer {
             required = false,
             names = { "--mode" },
             arity = 1,
-            description = "Operating mode: 'replay' (default), 'dump-raw', or 'dump-http'")
+            description = "Operating mode: 'replay' (default), 'dump-raw', 'dump-http', or 'dump-both'")
         String mode = "replay";
         @Parameter(
             required = false,
@@ -383,7 +383,7 @@ public class TrafficReplayer {
     }
 
     static boolean isDumpMode(Parameters params) {
-        return "dump-raw".equals(params.mode) || "dump-http".equals(params.mode);
+        return "dump-raw".equals(params.mode) || "dump-http".equals(params.mode) || "dump-both".equals(params.mode);
     }
 
     private static void validateDumpModeParams(Parameters params) {
@@ -469,10 +469,21 @@ public class TrafficReplayer {
 
             if ("dump-raw".equals(params.mode)) {
                 runDumpRawFromKafka(params, consumer, endOffsets);
+            } else if ("dump-http".equals(params.mode)) {
+                runDumpHttpFromKafka(params, consumer, endOffsets, topContext, false);
             } else {
-                runDumpHttpFromKafka(params, consumer, endOffsets, topContext);
+                runDumpHttpFromKafka(params, consumer, endOffsets, topContext, true);
             }
         }
+    }
+
+    private static long baseEpoch = -1;
+
+    private static long getBaseEpoch(org.opensearch.migrations.trafficcapture.protos.TrafficStream ts) {
+        if (baseEpoch < 0 && !ts.getSubStreamList().isEmpty()) {
+            baseEpoch = ts.getSubStreamList().get(0).getTs().getSeconds();
+        }
+        return baseEpoch;
     }
 
     private static void runDumpRawFromKafka(
@@ -489,7 +500,7 @@ public class TrafficReplayer {
                 try {
                     var ts = org.opensearch.migrations.trafficcapture.protos.TrafficStream.parseFrom(record.value());
                     System.out.println(org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
-                        ts, record.partition(), record.offset(), params.previewBytesRead, params.previewBytesWrite));
+                        ts, record.partition(), record.offset(), params.previewBytesRead, params.previewBytesWrite, getBaseEpoch(ts)));
                 } catch (com.google.protobuf.InvalidProtocolBufferException e) {
                     log.warn("Skipping unparseable record at p:{} o:{}", record.partition(), record.offset());
                 }
@@ -502,10 +513,11 @@ public class TrafficReplayer {
         Parameters params,
         org.apache.kafka.clients.consumer.KafkaConsumer<String, byte[]> consumer,
         java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets,
-        RootReplayerContext topContext
+        RootReplayerContext topContext,
+        boolean emitRaw
     ) {
         var channelContextManager = new org.opensearch.migrations.replay.tracing.ChannelContextManager(topContext);
-        var dumper = new org.opensearch.migrations.replay.kafka.HttpTransactionDumper(System.out);
+        var dumper = new org.opensearch.migrations.replay.kafka.HttpTransactionDumper(System.out, "msg ");
         var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
             Duration.ofSeconds(params.observedPacketConnectionTimeout),
             "(see command line option " + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
@@ -520,6 +532,12 @@ public class TrafficReplayer {
                     if (pastEnd(record, params, endOffsets)) { done = true; break; }
                     try {
                         var ts = org.opensearch.migrations.trafficcapture.protos.TrafficStream.parseFrom(record.value());
+                        getBaseEpoch(ts);
+                        dumper.setBaseEpochSeconds(baseEpoch);
+                        if (emitRaw) {
+                            System.out.println("RAW " + org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
+                                ts, record.partition(), record.offset(), params.previewBytesRead, params.previewBytesWrite, baseEpoch));
+                        }
                         var key = new org.opensearch.migrations.replay.kafka.TrafficStreamKeyWithKafkaRecordId(
                             tsk -> {
                                 var channelCtx = channelContextManager.retainOrCreateContext(tsk);
@@ -562,7 +580,7 @@ public class TrafficReplayer {
                     var chunks = source.readNextTrafficStreamChunk(topContext::createReadChunkContext).get();
                     for (var tswk : chunks) {
                         System.out.println(org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
-                            tswk.getStream(), -1, -1, params.previewBytesRead, params.previewBytesWrite));
+                            tswk.getStream(), -1, -1, params.previewBytesRead, params.previewBytesWrite, getBaseEpoch(tswk.getStream())));
                     }
                 } catch (java.util.concurrent.ExecutionException e) {
                     if (e.getCause() instanceof java.io.EOFException) break;
@@ -570,7 +588,9 @@ public class TrafficReplayer {
                 }
             }
         } else {
-            var dumper = new org.opensearch.migrations.replay.kafka.HttpTransactionDumper(System.out);
+            boolean emitRaw = "dump-both".equals(params.mode);
+            var prefix = emitRaw ? "msg " : "";
+            var dumper = new org.opensearch.migrations.replay.kafka.HttpTransactionDumper(System.out, prefix);
             var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
                 Duration.ofSeconds(params.observedPacketConnectionTimeout),
                 "(see command line option " + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
@@ -580,7 +600,13 @@ public class TrafficReplayer {
                 while (true) {
                     try {
                         var chunks = source.readNextTrafficStreamChunk(topContext::createReadChunkContext).get();
-                        chunks.forEach(accumulator::accept);
+                        for (var tswk : chunks) {
+                            if (emitRaw) {
+                                System.out.println("RAW " + org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
+                                    tswk.getStream(), -1, -1, params.previewBytesRead, params.previewBytesWrite, getBaseEpoch(tswk.getStream())));
+                            }
+                            accumulator.accept(tswk);
+                        }
                     } catch (java.util.concurrent.ExecutionException e) {
                         if (e.getCause() instanceof java.io.EOFException) break;
                         throw e;
