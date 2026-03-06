@@ -15,6 +15,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
+import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -94,10 +95,53 @@ public class TrafficReplayer {
 
     public static class Parameters {
         @Parameter(
-            required = true,
+            required = false,
+            names = { "--target-uri", "--targetUri" },
             arity = 1,
-            description = "URI of the target cluster/domain")
+            description = "URI of the target cluster/domain (required for replay mode)")
         String targetUriString;
+        @Parameter(
+            required = false,
+            names = { "--mode" },
+            arity = 1,
+            description = "Operating mode: 'replay' (default), 'dump-raw', 'dump-http', or 'dump-both'")
+        String mode = "replay";
+        @Parameter(
+            required = false,
+            names = { "--start-offset" },
+            arity = 1,
+            description = "For dump modes: start reading at this offset on every partition")
+        Long startOffset;
+        @Parameter(
+            required = false,
+            names = { "--end-offset" },
+            arity = 1,
+            description = "For dump modes: stop after passing this offset on every partition")
+        Long endOffset;
+        @Parameter(
+            required = false,
+            names = { "--start-time" },
+            arity = 1,
+            description = "For dump modes: start at the earliest record at or after this epoch-seconds timestamp")
+        Long startTime;
+        @Parameter(
+            required = false,
+            names = { "--end-time" },
+            arity = 1,
+            description = "For dump modes: stop after the first record whose timestamp exceeds this epoch-seconds value")
+        Long endTime;
+        @Parameter(
+            required = false,
+            names = { "--preview-bytes-read" },
+            arity = 1,
+            description = "For dump-raw: max bytes to preview for read observations (default 64)")
+        int previewBytesRead = 24;
+        @Parameter(
+            required = false,
+            names = { "--preview-bytes-write" },
+            arity = 1,
+            description = "For dump-raw: max bytes to preview for write observations (default 64)")
+        int previewBytesWrite = 24;
         @Parameter(
             required = false,
             names = {"--insecure" },
@@ -338,13 +382,73 @@ public class TrafficReplayer {
         return p;
     }
 
+    private static final String MODE_DUMP_RAW = "dump-raw";
+    private static final String MODE_DUMP_HTTP = "dump-http";
+    private static final String MODE_DUMP_BOTH = "dump-both";
+
+    static boolean isDumpMode(Parameters params) {
+        return MODE_DUMP_RAW.equals(params.mode) || MODE_DUMP_HTTP.equals(params.mode) || MODE_DUMP_BOTH.equals(params.mode);
+    }
+
+    private static void validateDumpModeParams(Parameters params) {
+        if (params.kafkaTrafficGroupId != null) {
+            throw new ParameterException(
+                "--kafka-traffic-group-id must not be specified in dump modes (they use no consumer group)");
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
         final var workerId = ProcessHelpers.getNodeInstanceName();
         log.info("Starting Traffic Replayer with id=" + workerId);
 
-        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
         var params = parseArgs(args);
+
+        if (isDumpMode(params)) {
+            validateDumpModeParams(params);
+            runDumpMode(params);
+            return;
+        }
+
+        // replay mode — targetUriString is required
+        if (params.targetUriString == null) {
+            System.err.println("Target URI is required for replay mode");
+            System.exit(2);
+            return;
+        }
+        runReplayMode(params);
+    }
+
+    private static void runDumpMode(Parameters params) throws Exception {
+        var topContext = new RootReplayerContext(
+            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(null, "dump", ProcessHelpers.getNodeInstanceName()),
+            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
+        );
+
+        var runner = new KafkaTopicDumper();
+
+        if (params.inputFilename != null) {
+            try (var source = TrafficCaptureSourceFactory.createUnbufferedTrafficCaptureSource(topContext, params)) {
+                runner.runDumpFromSource(params.mode, source,
+                    params.previewBytesRead, params.previewBytesWrite,
+                    params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
+                    topContext);
+            }
+        } else if (params.kafkaTrafficBrokers != null && params.kafkaTrafficTopic != null) {
+            runner.runDumpFromKafka(params.mode, params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
+                params.kafkaTrafficEnableMSKAuth, params.kafkaTrafficPropertyFile,
+                params.startOffset, params.startTime, params.endOffset, params.endTime,
+                params.previewBytesRead, params.previewBytesWrite,
+                params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
+                topContext);
+        } else {
+            System.err.println("Dump modes require either -i (file input) or --kafka-traffic-brokers and --kafka-traffic-topic");
+            System.exit(2);
+        }
+    }
+
+    private static void runReplayMode(Parameters params) throws Exception {
+        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
         URI uri;
         try {
             uri = new URI(params.targetUriString);
@@ -426,6 +530,17 @@ public class TrafficReplayer {
                 trafficStreamLimiter,
                 orderedRequestTracker
             );
+            log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
+                    " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
+                    " targetUri={} numClientThreads={}")
+                .addArgument(params.lookaheadTimeSeconds)
+                .addArgument(params.speedupFactor)
+                .addArgument(params.maxConcurrentRequests)
+                .addArgument(params.targetServerResponseTimeoutSeconds)
+                .addArgument(params.observedPacketConnectionTimeout)
+                .addArgument(uri)
+                .addArgument(params.numClientThreads)
+                .log();
             activeContextMonitor = new ActiveContextMonitor(
                 globalContextTracker,
                 perContextTracker,
@@ -435,12 +550,23 @@ public class TrafficReplayer {
                 activeContextLogger
             );
             ActiveContextMonitor finalActiveContextMonitor = activeContextMonitor;
+            var finalBlockingTrafficSource = blockingTrafficSource;
             scheduledExecutorService.scheduleAtFixedRate(() -> {
                 activeContextLogger.atInfo().setMessage("Total requests outstanding at {}: {}")
                     .addArgument(Instant::now)
                     .addArgument(tr.requestWorkTracker::size)
                     .log();
                 finalActiveContextMonitor.run();
+                finalActiveContextMonitor.logCompactSummary();
+                finalBlockingTrafficSource.logHeartbeat();
+                var accum = tr.getCurrentAccumulator();
+                if (accum != null) {
+                    accum.logHeartbeat();
+                }
+                var engine = tr.getCurrentReplayEngine();
+                if (engine != null) {
+                    engine.logHeartbeat();
+                }
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);

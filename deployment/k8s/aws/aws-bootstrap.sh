@@ -955,7 +955,8 @@ if [[ "$build_images" == "true" ]]; then
   # When mirroring, buildkit still pulls from public registries — building on
   # isolated clusters is not supported. Use --ma-images-source instead.
 
-  if docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
+  BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
+  if docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
     echo "Buildkit already configured and healthy, skipping setup"
   else
     echo "Setting up buildkit for local builds..."
@@ -969,10 +970,10 @@ if [[ "$build_images" == "true" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
+  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -x test || exit
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
-  docker buildx rm local-remote-builder 2>/dev/null || true
+  docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
   echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
 fi
 
