@@ -179,9 +179,7 @@ def call(Map config = [:]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 7200, roleSessionName: 'jenkins-session') {
                                     sh """
                                         ./deployment/k8s/aws/aws-bootstrap.sh \
-                                          --deploy-import-vpc-cfn \
-                                          --vpc-id "${env.SOURCE_VPC_ID}" \
-                                          --subnet-ids "${env.SOURCE_SUBNET_IDS}" \
+                                          --deploy-create-vpc-cfn \
                                           --build-cfn \
                                           --build-images \
                                           --build-chart-and-dashboards \
