@@ -17,7 +17,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'jenkins-target-aoss-collection', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
-            string(name: 'REGION', defaultValue: 'us-east-2', description: 'AWS region for deployment')
+            string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
             choice(name: 'SOURCE_VERSION', choices: ['ES_7.10'], description: 'Version of the source cluster')
             string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill')
             booleanParam(name: 'SKIP_DELETE', defaultValue: false, description: 'Skip deletion of all resources after test (for debugging)')
@@ -179,7 +179,9 @@ def call(Map config = [:]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 7200, roleSessionName: 'jenkins-session') {
                                     sh """
                                         ./deployment/k8s/aws/aws-bootstrap.sh \
-                                          --deploy-create-vpc-cfn \
+                                          --deploy-import-vpc-cfn \
+                                          --vpc-id "${env.SOURCE_VPC_ID}" \
+                                          --subnet-ids "${env.SOURCE_SUBNET_IDS}" \
                                           --build-cfn \
                                           --build-images \
                                           --build-chart-and-dashboards \
