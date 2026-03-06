@@ -35,7 +35,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.testcontainers.utility.MountableFile;
 
 /**
  * Reproduction test for the routing shard colocation bug.
@@ -165,10 +164,10 @@ public class RoutingShardColocationTest extends SourceTestBase {
         originalOps.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, REPO_NAME);
         originalOps.takeSnapshot(REPO_NAME, SNAPSHOT_NAME, INDEX_NAME);
 
-        // Copy snapshot data to temp dir, then into ES7 container
+        // Copy snapshot data to temp dir, then into ES7 container with correct permissions
         var tempSnapshotDir = java.nio.file.Files.createTempDirectory("es6_snapshot");
         originalCluster.copySnapshotData(tempSnapshotDir.toString());
-        copySnapshotToContainer(sourceCluster, tempSnapshotDir.toFile());
+        sourceCluster.putSnapshotData(tempSnapshotDir.toString());
 
         var sourceOps = new ClusterOperations(sourceCluster);
         sourceOps.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, REPO_NAME);
@@ -177,17 +176,6 @@ public class RoutingShardColocationTest extends SourceTestBase {
         sourceOps.refresh(INDEX_NAME);
 
         FileSystemUtils.deleteDirectories(tempSnapshotDir.toString());
-    }
-
-    @SneakyThrows
-    private void copySnapshotToContainer(SearchClusterContainer container, File snapshotDir) {
-        java.nio.file.Files.walk(snapshotDir.toPath())
-            .filter(java.nio.file.Files::isRegularFile)
-            .forEach(file -> {
-                var relativePath = snapshotDir.toPath().relativize(file).toString();
-                var containerPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR + "/" + relativePath;
-                container.copyFileToContainer(MountableFile.forHostPath(file), containerPath);
-            });
     }
 
     /**
