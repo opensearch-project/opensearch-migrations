@@ -12,7 +12,7 @@ import com.beust.jcommander.ParametersDelegate;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class KafkaUtils {
+public class KafkaLoaderFromFile {
     public static final String DEFAULT_TOPIC_NAME = "logging-traffic-topic";
     public static final int DEFAULT_BATCH_SIZE = 500;
 
