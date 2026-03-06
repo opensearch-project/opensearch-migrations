@@ -2,7 +2,7 @@
 module.exports = {
     preset: "ts-jest",
     testEnvironment: "node",
-    roots: ["<rootDir>/tests"],
+    roots: ["<rootDir>/tests/unit"],
     moduleFileExtensions: ["ts", "js", "json", "yaml", "yml", "sh"],
 
     transform: {

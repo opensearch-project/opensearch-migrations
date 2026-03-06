@@ -10,6 +10,7 @@ export * from "./models/scopeConstraints";
 export * from "./models/sharedTypes";
 export * from "./models/stepsBuilder";
 export * from "./models/suspendTemplateBuilder";
+export * from "./models/waitForResourceBuilder";
 export * from "./models/synchronization";
 export * from "./models/taskBuilder";
 export * from "./models/templateBodyBuilder";

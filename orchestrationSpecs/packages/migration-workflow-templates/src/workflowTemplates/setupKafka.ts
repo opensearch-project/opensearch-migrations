@@ -11,12 +11,12 @@ import {
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 
 
-function makeDeployKafkaClusterZookeeperManifest(kafkaName: BaseExpression<string>) {
+function makeDeployKafkaClusterZookeeperManifest(clusterName: BaseExpression<string>) {
     return {
         apiVersion: "kafka.strimzi.io/v1beta2",
         kind: "Kafka",
         metadata: {
-            name: kafkaName
+            name: clusterName
         },
         spec: {
             kafka: {
@@ -56,12 +56,12 @@ function makeDeployKafkaClusterZookeeperManifest(kafkaName: BaseExpression<strin
     };
 }
 
-function makeDeployKafkaClusterKraftManifest(kafkaName: BaseExpression<string>) {
+function makeDeployKafkaClusterKraftManifest(clusterName: BaseExpression<string>) {
     return {
         apiVersion: "kafka.strimzi.io/v1beta2",
         kind: "Kafka",
         metadata: {
-            name: kafkaName,
+            name: clusterName,
             annotations: {
                 "strimzi.io/node-pools": "enabled",
                 "strimzi.io/kraft": "enabled"
@@ -114,14 +114,14 @@ function makeDeployKafkaClusterKraftManifest(kafkaName: BaseExpression<string>) 
     };
 }
 
-function makeDeployKafkaNodePool(kafkaName: BaseExpression<string>) {
+function makeDeployKafkaNodePool(clusterName: BaseExpression<string>) {
     return {
         apiVersion: "kafka.strimzi.io/v1beta2",
         kind: "KafkaNodePool",
         metadata: {
             name: "dual-role",
             labels: {
-                "strimzi.io/cluster": kafkaName
+                "strimzi.io/cluster": clusterName
             }
         },
         spec: {
@@ -147,7 +147,7 @@ function makeDeployKafkaNodePool(kafkaName: BaseExpression<string>) {
 }
 
 function makeKafkaTopicManifest(args: {
-    kafkaName: BaseExpression<string>,
+    clusterName: BaseExpression<string>,
     topicName: BaseExpression<string>,
     topicPartitions: BaseExpression<Serialized<number>>,
     topicReplicas: BaseExpression<Serialized<number>>
@@ -158,7 +158,7 @@ function makeKafkaTopicManifest(args: {
         metadata: {
             name: args.topicName,
             labels: {
-                "strimzi.io/cluster": args.kafkaName,
+                "strimzi.io/cluster": args.clusterName,
             }
         },
         spec: {
@@ -183,13 +183,13 @@ export const SetupKafka = WorkflowBuilder.create({
 
 
     .addTemplate("deployKafkaClusterZookeeper", t => t
-        .addRequiredInput("kafkaName", typeToken<string>())
+        .addRequiredInput("clusterName", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "create",
                 setOwnerReference: true,
                 successCondition: "status.listeners",
-                manifest: makeDeployKafkaClusterZookeeperManifest(b.inputs.kafkaName)
+                manifest: makeDeployKafkaClusterZookeeperManifest(b.inputs.clusterName)
             }))
         .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
             typeToken<string>())
@@ -197,36 +197,36 @@ export const SetupKafka = WorkflowBuilder.create({
 
 
     .addTemplate("deployKafkaNodePool", t => t
-        .addRequiredInput("kafkaName", typeToken<string>())
+        .addRequiredInput("clusterName", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
                 setOwnerReference: true,
-                manifest: makeDeployKafkaNodePool(b.inputs.kafkaName)
+                manifest: makeDeployKafkaNodePool(b.inputs.clusterName)
             }))
     )
 
 
     .addTemplate("deployKafkaClusterKraft", t => t
-        .addRequiredInput("kafkaName", typeToken<string>())
+        .addRequiredInput("clusterName", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
                 setOwnerReference: true,
                 successCondition: "status.listeners",
-                manifest: makeDeployKafkaClusterKraftManifest(b.inputs.kafkaName)
+                manifest: makeDeployKafkaClusterKraftManifest(b.inputs.clusterName)
             }))
         .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
             typeToken<string>())
     )
 
 
-    .addTemplate("clusterDeploy", t => t
-        .addRequiredInput("kafkaName", typeToken<string>())
-        .addOptionalInput("useKraft", s => true)
+    .addTemplate("deployKafkaCluster", t => t
+        .addRequiredInput("clusterName", typeToken<string>())
+        .addOptionalInput("useKraft", s => true as boolean)
         .addDag(b => b
             .addTask("deployPool", INTERNAL, "deployKafkaNodePool", c =>
-                    c.register({kafkaName: b.inputs.kafkaName}),
+                    c.register({clusterName: b.inputs.clusterName}),
                 {when: expr.cast(b.inputs.useKraft).to<boolean>()})
             .addTask("deployKafkaClusterKraft", INTERNAL, "deployKafkaClusterKraft", c =>
                     c.register(selectInputsForRegister(b, c)),
@@ -235,15 +235,16 @@ export const SetupKafka = WorkflowBuilder.create({
                     c.register(selectInputsForRegister(b, c)),
                 {when: expr.not(expr.cast(b.inputs.useKraft).to<boolean>())})
         )
-        .addExpressionOutput("kafkaName", c => c.inputs.kafkaName)
+        .addExpressionOutput("clusterName", c => c.inputs.clusterName)
         .addExpressionOutput("bootstrapServers", c =>
             expr.ternary(expr.equals(expr.literal("Skipped"), c.tasks.deployKafkaClusterKraft.status),
                 c.tasks.deployKafkaClusterZookeeper.outputs.brokers,
                 c.tasks.deployKafkaClusterKraft.outputs.brokers))
     )
 
+
     .addTemplate("createKafkaTopic", t => t
-        .addRequiredInput("kafkaName", typeToken<string>())
+        .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("topicName", typeToken<string>())
         .addRequiredInput("topicPartitions", typeToken<number>())
         .addRequiredInput("topicReplicas", typeToken<number>())

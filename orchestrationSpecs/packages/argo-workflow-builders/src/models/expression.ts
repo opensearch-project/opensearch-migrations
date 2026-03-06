@@ -784,6 +784,21 @@ class ExprBuilder {
         return new RecordFieldSelectExpression(source, path) as any;
     }
 
+    /**
+     * Like jsonPathStrict, but returns a Serialized result. Use this when extracting
+     * nested object fields from a serialized record, where the field value is itself
+     * a serialized string at runtime.
+     */
+    jsonPathStrictSerialized<
+        T extends Record<string, any>,
+        K extends Extract<keyof NonMissing<T>, string>
+    >(
+        source: BaseExpression<Serialized<T>, any>,
+        key: K
+    ): BaseExpression<Serialized<SegmentsValueStrict<T, readonly [K]>>, "complicatedExpression"> {
+        return this.jsonPathStrict(source, key) as any;
+    }
+
     omit<
         E extends BaseExpression<PlainRecord, any>,
         T extends PlainRecord = ResultOfExpr<E>,
