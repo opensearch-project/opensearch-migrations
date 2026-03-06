@@ -75,6 +75,24 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Test Caller Identity') {
+                steps {
+                    script {
+                        sh 'aws sts get-caller-identity'
+                    }
+                }
+            }
+
+            stage('Build') {
+                steps {
+                    timeout(time: 1, unit: 'HOURS') {
+                        script {
+                            sh './gradlew clean build --no-daemon --stacktrace'
+                        }
+                    }
+                }
+            }
+
             stage('Discover Existing Resources') {
                 when { expression { params.REUSE_EXISTING } }
                 steps {
