@@ -326,11 +326,17 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         if (outstandingTrafficSourceReaderInterruptedCloseSessions.get() > 0) {
             log.atDebug().setMessage("Returning empty batch: {} synthetic close sessions still outstanding")
                 .addArgument(outstandingTrafficSourceReaderInterruptedCloseSessions::get).log();
-            // The spin here is intentional.
             // We should be draining very fast and if we block, we risk falling out of the Kafka group,
             // which could then have knock-on effects throughout the fleet since we're recovering from
             // the last recovery/partition reassignment.
-            Thread.yield();
+            try {
+                Thread.sleep(1); // 1 ms
+            } catch (InterruptedException e) {
+                log.atTrace()
+                    .setMessage("Ignoring an interrupt for the sleep that yields the Kafka producer thread" +
+                        " so that other threads can drain the work from the revoked partition generations").log();
+                Thread.currentThread().interrupt();
+            }
             return Collections.emptyList();
         }
         try {
