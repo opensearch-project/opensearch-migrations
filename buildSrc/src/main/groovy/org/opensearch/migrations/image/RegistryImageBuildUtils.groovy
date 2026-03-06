@@ -195,6 +195,7 @@ class RegistryImageBuildUtils {
         def registryEndpoint = targetReg.containerUrl
 
         def builder = project.findProperty("builder") ?: ""
+        def builderWasExplicit = true
         if (!builder) {
             try {
                 def context = "kubectl config current-context".execute().text.trim()
@@ -205,9 +206,14 @@ class RegistryImageBuildUtils {
                 }
             } catch (Exception ignored) {}
             if (!builder) {
-                throw new GradleException("No -Pbuilder specified and no kube context set. Use -Pbuilder=<name> or set a kube context.")
+                // Use a placeholder so Gradle configuration succeeds (task registration needs a value).
+                // The actual validation happens at task execution time via doFirst below.
+                builder = "UNSET"
+                builderWasExplicit = false
             }
         }
+        def resolvedBuilder = builder
+        def builderIsValid = builderWasExplicit
         def imageName = cfg.get("imageName").toString()
         def imageTag = cfg.get("imageTag", "latest").toString()
         def contextPath = project.file(cfg.get("contextDir", ".")).path
@@ -254,6 +260,12 @@ class RegistryImageBuildUtils {
                     group = "docker"
                     description = "Build and push ${platform} ${primaryDest}"
 
+                    doFirst {
+                        if (!builderIsValid) {
+                            throw new GradleException("No -Pbuilder specified and no kube context set. Use -Pbuilder=<name> or set a kube context.")
+                        }
+                    }
+
                     commonInputs(it, suffix)
                     inputs.property("platform", platform)
 
@@ -285,6 +297,11 @@ class RegistryImageBuildUtils {
         def multiArchTaskName = "buildKit_${cfg.serviceName}"
         if (!project.tasks.findByName(multiArchTaskName)) {
             project.tasks.register(multiArchTaskName, Exec) {
+                doFirst {
+                    if (!builderIsValid) {
+                        throw new GradleException("No -Pbuilder specified and no kube context set. Use -Pbuilder=<name> or set a kube context.")
+                    }
+                }
                 commonInputs(it, "")
                 def fullArgs = [
                         "docker buildx build",
