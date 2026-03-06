@@ -1,6 +1,6 @@
 # Using same base image as other Java containers in this repo
 ARG BASE_IMAGE=docker.io/library/amazoncorretto:17-al2023-headless
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} # NOSONAR - version tag is in the ARG default above
 
 # Install procps to use pgrep in entrypoint.sh
 RUN dnf install -y procps && \

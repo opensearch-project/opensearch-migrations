@@ -1,5 +1,5 @@
 ARG BASE_IMAGE=docker.io/library/amazonlinux:2023
-FROM ${BASE_IMAGE}
+FROM ${BASE_IMAGE} # NOSONAR - version tag is in the ARG default above
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ENV LANG=C.UTF-8

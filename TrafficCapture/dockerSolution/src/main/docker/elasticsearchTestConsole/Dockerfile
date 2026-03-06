@@ -3,7 +3,7 @@ ARG BUILDER_IMAGE=docker.io/library/amazonlinux:2023
 ARG RUNTIME_IMAGE=docker.io/library/amazonlinux:2023
 
 # ---------- 1) Builder ----------
-FROM ${BUILDER_IMAGE} AS builder
+FROM ${BUILDER_IMAGE} AS builder # NOSONAR - version tag is in the ARG default above
 
 # Build deps (toolchain + headers)
 RUN dnf install -y \
@@ -40,7 +40,7 @@ COPY Pipfile Pipfile.lock ./
 RUN pipenv install --deploy
 
 # ---------- 2) Runtime ----------
-FROM ${RUNTIME_IMAGE}
+FROM ${RUNTIME_IMAGE} # NOSONAR - version tag is in the ARG default above
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ENV LANG=C.UTF-8
