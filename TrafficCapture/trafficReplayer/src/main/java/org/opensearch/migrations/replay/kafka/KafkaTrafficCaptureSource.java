@@ -330,7 +330,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             // which could then have knock-on effects throughout the fleet since we're recovering from
             // the last recovery/partition reassignment.
             try {
-                Thread.sleep(1); // 1 ms
+                Thread.sleep(5); // 5 ms
             } catch (InterruptedException e) {
                 log.atTrace()
                     .setMessage("Ignoring an interrupt for the sleep that yields the Kafka producer thread" +
