@@ -9,12 +9,6 @@
 package org.opensearch.migrations.replay.kafka;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-
-import com.google.protobuf.ByteString;
-import com.google.protobuf.Timestamp;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectObservation;
@@ -27,7 +21,11 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
 
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 @Slf4j
 class TrafficStreamDumperTest {

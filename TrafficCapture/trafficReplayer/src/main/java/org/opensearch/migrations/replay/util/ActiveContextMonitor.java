@@ -173,14 +173,12 @@ public class ActiveContextMonitor implements Runnable {
         var sb = new StringBuilder();
         sb.append("scopes=").append(globalContextTracker.size());
 
-        // Count by type, split into long-lived and ephemeral
         var longLived = new java.util.TreeMap<String, Long>();
         var ephemeral = new java.util.TreeMap<String, Long>();
         var breached = new java.util.ArrayList<String>();
 
         perActivityContextTracker.getActiveScopeTypes().forEach(type -> {
             var count = perActivityContextTracker.numScopesFor(type);
-            // Get a sample to determine the activity name
             var sample = perActivityContextTracker.getOldestActiveScopes(type).findFirst().orElse(null);
             if (sample == null) return;
             var activityName = sample.getActivityName();
@@ -189,35 +187,7 @@ public class ActiveContextMonitor implements Runnable {
                 longLived.put(activityName, count);
             } else {
                 ephemeral.put(activityName, count);
-                // Check for breached items
-                var expectedMax = EXPECTED_MAX_AGE.getOrDefault(activityName, Duration.ofMinutes(5));
-                perActivityContextTracker.getOldestActiveScopes(type)
-                    .limit(3)
-                    .forEach(scope -> {
-                        var age = getAge(scope.getStartTimeNano());
-                        if (age.compareTo(expectedMax) > 0) {
-                            var desc = new StringBuilder();
-                            desc.append(activityName).append(" age=").append(formatDuration(age));
-                            // Walk up to nearest long-lived ancestor for context
-                            var parent = scope.getEnclosingScope();
-                            int hops = 0;
-                            while (parent != null && hops < 3) {
-                                var parentName = parent.getActivityName();
-                                desc.append(" → ").append(parentName);
-                                var attrs = parent.getPopulatedSpanAttributes().asMap();
-                                attrs.entrySet().stream()
-                                    .filter(e -> e.getKey().getKey().contains("connectionId")
-                                        || e.getKey().getKey().contains("channelKey"))
-                                    .findFirst()
-                                    .ifPresent(e -> desc.append(" ").append(e.getKey().getKey())
-                                        .append("=").append(e.getValue()));
-                                if (LONG_LIVED_ACTIVITIES.contains(parentName)) break;
-                                parent = parent.getEnclosingScope();
-                                hops++;
-                            }
-                            breached.add(desc.toString());
-                        }
-                    });
+                collectBreachedScopes(type, activityName, breached);
             }
         });
 
@@ -231,6 +201,41 @@ public class ActiveContextMonitor implements Runnable {
 
         var level = breached.isEmpty() ? Level.INFO : Level.WARN;
         compactSummaryLogger.atLevel(level).setMessage("{}").addArgument(sb).log();
+    }
+
+    @SuppressWarnings("unchecked")
+    private void collectBreachedScopes(Object type, String activityName, java.util.List<String> breached) {
+        var expectedMax = EXPECTED_MAX_AGE.getOrDefault(activityName, Duration.ofMinutes(5));
+        var typedType = (Class<IScopedInstrumentationAttributes>) type;
+        perActivityContextTracker.getOldestActiveScopes(typedType)
+            .limit(3)
+            .forEach(scope -> {
+                var age = getAge(scope.getStartTimeNano());
+                if (age.compareTo(expectedMax) > 0) {
+                    breached.add(describeBreach(scope, activityName, age));
+                }
+            });
+    }
+
+    private String describeBreach(IScopedInstrumentationAttributes scope, String activityName, Duration age) {
+        var desc = new StringBuilder();
+        desc.append(activityName).append(" age=").append(formatDuration(age));
+        var parent = scope.getEnclosingScope();
+        int hops = 0;
+        while (parent != null && hops < 3) {
+            var parentName = parent.getActivityName();
+            desc.append(" → ").append(parentName);
+            parent.getPopulatedSpanAttributes().asMap().entrySet().stream()
+                .filter(e -> e.getKey().getKey().contains("connectionId")
+                    || e.getKey().getKey().contains("channelKey"))
+                .findFirst()
+                .ifPresent(e -> desc.append(" ").append(e.getKey().getKey())
+                    .append("=").append(e.getValue()));
+            if (LONG_LIVED_ACTIVITIES.contains(parentName)) break;
+            parent = parent.getEnclosingScope();
+            hops++;
+        }
+        return desc.toString();
     }
 
     private static String formatDuration(Duration d) {

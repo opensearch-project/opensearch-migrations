@@ -44,17 +44,17 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     public static final int MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL = 10;
 
     public static final AtomicInteger targetConnectionPoolUniqueCounter = new AtomicInteger();
-    private volatile CapturedTrafficToHttpTransactionAccumulator currentAccumulator;
-    private volatile ReplayEngine currentReplayEngine;
+    private final AtomicReference<CapturedTrafficToHttpTransactionAccumulator> currentAccumulator = new AtomicReference<>();
+    private final AtomicReference<ReplayEngine> currentReplayEngine = new AtomicReference<>();
 
     /** Returns the current accumulator, or null if not yet initialized. */
     public CapturedTrafficToHttpTransactionAccumulator getCurrentAccumulator() {
-        return currentAccumulator;
+        return currentAccumulator.get();
     }
 
     /** Returns the current replay engine, or null if not yet initialized. */
     public ReplayEngine getCurrentReplayEngine() {
-        return currentReplayEngine;
+        return currentReplayEngine.get();
     }
 
     public interface IStreamableWorkTracker<T> extends IWorkTracker<T> {
@@ -170,7 +170,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
         );
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
-        this.currentReplayEngine = replayEngine;
+        this.currentReplayEngine.set(replayEngine);
         // Wire session close callback so KafkaTrafficCaptureSource can track synthetic close drain
         clientConnectionPool.setGlobalOnSessionClose(session ->
             trafficSource.onNetworkConnectionClosed(
@@ -188,7 +188,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer, trafficSource,
                     quiescentDuration)
             );
-        this.currentAccumulator = trafficToHttpTransactionAccumulator;
+        this.currentAccumulator.set(trafficToHttpTransactionAccumulator);
         try {
             pullCaptureFromSourceToAccumulator(trafficSource, trafficToHttpTransactionAccumulator);
         } catch (InterruptedException ex) {

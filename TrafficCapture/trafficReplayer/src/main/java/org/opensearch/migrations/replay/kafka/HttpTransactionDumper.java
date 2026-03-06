@@ -13,9 +13,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.function.Consumer;
 
-import lombok.NonNull;
-import lombok.extern.slf4j.Slf4j;
-
 import org.opensearch.migrations.replay.AccumulationCallbacks;
 import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
 import org.opensearch.migrations.replay.RequestResponsePacketPair;
@@ -23,6 +20,9 @@ import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
+
+import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * AccumulationCallbacks implementation for dump-http mode.

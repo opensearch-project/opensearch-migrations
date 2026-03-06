@@ -107,13 +107,13 @@ public class TrafficStreamDumper {
             var obs = observations.get(i);
             if (obs.hasSegmentEnd()) {
                 i++; // absorb into current run
-                continue;
+            } else {
+                byte[] data = reads ? getReadData(obs) : getWriteData(obs);
+                if (data.length == 0) { break; }
+                allBytes.add(data);
+                totalSize += data.length;
+                i++;
             }
-            byte[] data = reads ? getReadData(obs) : getWriteData(obs);
-            if (data == null) break;
-            allBytes.add(data);
-            totalSize += data.length;
-            i++;
         }
 
         sb.append(' ').append(reads ? 'R' : 'W').append('[').append(totalSize).append(']');
@@ -126,13 +126,13 @@ public class TrafficStreamDumper {
     private static byte[] getReadData(TrafficObservation obs) {
         if (obs.hasRead()) return obs.getRead().getData().toByteArray();
         if (obs.hasReadSegment()) return obs.getReadSegment().getData().toByteArray();
-        return null;
+        return new byte[0];
     }
 
     private static byte[] getWriteData(TrafficObservation obs) {
         if (obs.hasWrite()) return obs.getWrite().getData().toByteArray();
         if (obs.hasWriteSegment()) return obs.getWriteSegment().getData().toByteArray();
-        return null;
+        return new byte[0];
     }
 
     static String buildPreview(List<byte[]> chunks, int maxBytes) {
