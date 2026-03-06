@@ -1,0 +1,449 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "create-snapshot"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "runcreatesnapshot",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceConfig"
+            },
+            {
+              "name": "snapshotConfig"
+            },
+            {
+              "name": "createSnapshotConfig"
+            },
+            {
+              "name": "sourceK8sLabel"
+            },
+            {
+              "name": "targetK8sLabel"
+            },
+            {
+              "name": "snapshotK8sLabel"
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "snapshot"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "SOURCE_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
+                  "key": "username",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "SOURCE_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
+                  "key": "password",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "JDK_JAVA_OPTIONS",
+              "value": "{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.createSnapshotConfig))}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/root/createSnapshot/bin/CreateSnapshot"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "1800Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "1800Mi"
+            }
+          },
+          "args": [
+            "---INLINE-JSON",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceAwsServiceSigningName\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], \"sourceAwsRegion\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceCaCert\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict(\"sourceHost\", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : ({}))), sprig.dict(\"sourceInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.merge(sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'loggingConfigurationOverrideConfigMap', 'jvmArgs'), sprig.dict(\"noWait\", true))), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"snapshotRepoName\", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig.repoName')), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], \"s3Region\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))))}}"
+          ]
+        },
+        "metadata": {
+          "labels": {
+            "migrations.opensearch.org/source": "{{inputs.parameters.sourceK8sLabel}}",
+            "migrations.opensearch.org/target": "{{inputs.parameters.targetK8sLabel}}",
+            "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
+            "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "checksnapshotstatusinternal",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "configContents"
+            },
+            {
+              "name": "sourceK8sLabel"
+            },
+            {
+              "name": "targetK8sLabel"
+            },
+            {
+              "name": "snapshotK8sLabel"
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "snapshotStatusCheck"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "runmigrationcommandforstatus",
+                "name": "migration-console"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configContents",
+                    "value": "{{inputs.parameters.configContents}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}"
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}"
+                  },
+                  {
+                    "name": "taskK8sLabel",
+                    "value": "{{inputs.parameters.taskK8sLabel}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "command",
+                    "value": "set -e\n  touch /tmp/status-output.txt\n  touch /tmp/phase-output.txt\n  \n  # Quick status check - if SUCCESS, we're done\n  status=$(console --config-file=/config/migration_services.yaml snapshot status)\n  if [ \"$status\" = \"SUCCESS\" ]; then\n    echo \"Snapshot completed successfully\" > /tmp/status-output.txt\n    exit 0\n  fi\n  \n  # Deep check and save output in case there was a race condition\n  deep_output=$(console --config-file=/config/migration_services.yaml snapshot status --deep-check)\n  \n  # Check if deep check also returned SUCCESS (snapshot completed during execution)\n  if [ \"$deep_output\" = \"SUCCESS\" ]; then\n    echo \"Snapshot completed successfully\" > /tmp/status-output.txt\n    exit 0\n  fi\n  \n  # Process deep check output with awk for in-progress snapshots\n  echo \"$deep_output\" | awk '\n    /Total shards:/ { total = $3 }\n    /Successful shards:/ { successful = $3 }\n    /Data processed:/ { data = $3; unit = $4 }\n    /Estimated time to completion:/ { \n      sub(/.*: /, \"\");\n      eta = $0\n    }\n    END {\n      if (total) {\n        output = \"Shards: \" successful \"/\" total \" | Data: \" data \" \" unit\n        if (eta != \"0h 0m 0s\") {\n          output = output \" | ETA: \" eta\n        }\n        print output\n      }\n    }\n  ' > /tmp/status-output.txt\n  echo Checked > /tmp/phase-output.txt\n  \n  exit 1"
+                  }
+                ]
+              },
+              "name": "checkSnapshotCompletion"
+            }
+          ]
+        ],
+        "retryStrategy": {
+          "limit": "200",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "5",
+            "factor": "2",
+            "cap": "300"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "checksnapshotstatus",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "configContents"
+            },
+            {
+              "name": "sourceK8sLabel"
+            },
+            {
+              "name": "targetK8sLabel"
+            },
+            {
+              "name": "snapshotK8sLabel"
+            },
+            {
+              "name": "groupName",
+              "value": "checks"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "checksnapshotstatusinternal",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configContents",
+                    "value": "{{inputs.parameters.configContents}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}"
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  }
+                ]
+              },
+              "name": "runStatusChecks"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "snapshotworkflow",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceConfig"
+            },
+            {
+              "name": "snapshotConfig"
+            },
+            {
+              "name": "createSnapshotConfig"
+            },
+            {
+              "name": "targetLabel"
+            },
+            {
+              "name": "semaphoreConfigMapName"
+            },
+            {
+              "name": "semaphoreKey"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "runcreatesnapshot",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "createSnapshotConfig",
+                    "value": "{{inputs.parameters.createSnapshotConfig}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')}}"
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetLabel}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}"
+                  }
+                ]
+              },
+              "name": "createSnapshot"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "getconsoleconfig",
+                "name": "migration-console"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  }
+                ]
+              },
+              "name": "getConsoleConfig"
+            }
+          ],
+          [
+            {
+              "template": "checksnapshotstatus",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "configContents",
+                    "value": "{{steps.getConsoleConfig.outputs.parameters.configContents}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')}}"
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetLabel}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}"
+                  }
+                ]
+              },
+              "name": "waitForCompletion"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchdatasnapshotready",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')+'-'+jsonpath(inputs.parameters.snapshotConfig, '$.label')}}"
+                  },
+                  {
+                    "name": "snapshotName",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.snapshotName')}}"
+                  }
+                ]
+              },
+              "name": "patchDataSnapshot"
+            }
+          ]
+        ],
+        "synchronization": {
+          "semaphores": [
+            {
+              "configMapKeyRef": {
+                "name": "{{inputs.parameters.semaphoreConfigMapName}}",
+                "key": "{{inputs.parameters.semaphoreKey}}"
+              }
+            }
+          ]
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "snapshotConfig",
+              "valueFrom": {
+                "expression": "inputs.parameters.snapshotConfig"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

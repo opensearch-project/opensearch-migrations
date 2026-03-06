@@ -1,0 +1,50 @@
+# Basic snapshot migration: single source/target, metadata + document backfill, no traffic
+skipApprovals : true
+sourceClusters:
+  source:
+    endpoint: "https://elasticsearch-master-headless:9200"
+    allowInsecure: true
+    version: "ES 7.10"
+    authConfig:
+      basic:
+        secretName: "source-creds"
+    snapshotInfo:
+      repos:
+        default:
+          awsRegion: "us-east-2"
+          endpoint: "localstack://10.106.183.16:4566"
+          s3RepoPathUri: "s3://migrations-default-123456789012-dev-us-east-2"
+      snapshots:
+        snap1:
+          config:
+            createSnapshotConfig: {}
+            requiredForCompleteMigration: true
+          repoName: "default"
+
+targetClusters:
+  target:
+    endpoint: "https://opensearch-cluster-master-headless:9200"
+    allowInsecure: true
+    authConfig:
+      basic:
+        secretName: "target-creds"
+
+snapshotMigrationConfigs:
+  - fromSource: "source"
+    toTarget: "target"
+    perSnapshotConfig:
+      snap1:
+        - metadataMigrationConfig:
+            skipEvaluateApproval: true
+            skipMigrateApproval: true
+          documentBackfillConfig:
+            maxConnections: 4
+            documentsPerBulkRequest: 1000
+            maxShardSizeBytes: 1000000000
+            "resources": {
+              requests: { cpu: "25m",   memory: "1Gi", ephemeral-storage: "5Gi" },
+              limits: { cpu: "1000m", memory: "2Gi", ephemeral-storage: "5Gi" },
+            }
+traffic:
+  proxies: {}
+  replayers: {}

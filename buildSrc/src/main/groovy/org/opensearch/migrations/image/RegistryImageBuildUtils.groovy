@@ -114,6 +114,12 @@ class RegistryImageBuildUtils {
                             if (targetArch != "multi") dest = "${registryDestination}_${targetArch}"
                             image = dest
 
+                            // For single-arch builds, also tag as the base name (without suffix)
+                            // to match BuildKit behavior and allow local k8s deployments to find images
+                            def tagList = []
+                            if (targetArch != "multi") {
+                                tagList.add(config.imageTag.toString())
+                            }
                             def versionTag = rootProject.findProperty("imageVersion")
                             if (versionTag) {
                                 def suffix = (targetArch != "multi") ? "_${targetArch}" : ""
@@ -122,8 +128,9 @@ class RegistryImageBuildUtils {
                                         config.get("repoName", null)?.toString())[0]
                                 // Extract just the tag portion for Jib's tags list
                                 def formattedTag = versionDest.toString().split(":")[-1]
-                                tags = ["${formattedTag}${suffix}".toString()]
+                                tagList.add("${formattedTag}${suffix}".toString())
                             }
+                            if (tagList) tags = tagList
                         }
                         extraDirectories {
                             paths {

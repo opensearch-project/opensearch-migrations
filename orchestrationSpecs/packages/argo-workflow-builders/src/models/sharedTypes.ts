@@ -40,8 +40,9 @@ export type NamedTask<
     LoopT extends PlainObject = never,
     Extra extends Record<string, any> = {}
 > = { name: string } & (
-        | { template: string; templateRef?: never }
-        | { template?: never; templateRef: { template: string, name: string } }
+        | { template: string; templateRef?: never; inline?: never }
+        | { template?: never; templateRef: { template: string, name: string }; inline?: never }
+        | { template?: never; templateRef?: never; inline: Record<string, any> }
     ) &
     WorkflowTask<IN, OUT, LoopT> & Extra;
 

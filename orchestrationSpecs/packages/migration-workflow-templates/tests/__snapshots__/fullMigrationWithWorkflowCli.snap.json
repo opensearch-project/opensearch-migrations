@@ -1,0 +1,288 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "full-migration-with-workflow-cli"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "entrypoint": "main",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        },
+        {
+          "name": "monitor-retry-limit",
+          "value": "33"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "configureandsubmitworkflow",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "migrationConfigBase64"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "MIGRATION_CONFIG_BASE64",
+              "value": "{{inputs.parameters.migrationConfigBase64}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/bin/bash",
+            "-c"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "args": [
+            "#!/bin/bash\n#\n# ============================================================================\n# WARNING: TEST HELPER SCRIPT - SHOULD BE MOVED TO SEPARATE PACKAGE\n# ============================================================================\n# This script is part of the test workflow infrastructure and creates a\n# logical dependency cycle:\n# - migration-workflow-templates package provides workflow templates\n# - workflow CLI (in migration console) depends on migration-workflow-templates\n# - This test script depends on workflow CLI\n#\n# TODO: Move test workflows and helpers to a separate package (e.g.,\n# migration-workflow-templates-test) to break this dependency cycle.\n# ============================================================================\n\nset -e -x\n\n# Activate the Python virtual environment to get access to workflow CLI\n. /etc/profile.d/venv.sh\nsource /.venv/bin/activate\n\necho \"Building and submitting migration workflow...\"\n\n# Decode base64 migration config from environment variable and write to file\necho \"$MIGRATION_CONFIG_BASE64\" | base64 -d > /tmp/migration_config.json\n\necho \"Migration config contents:\"\ncat /tmp/migration_config.json\n\necho \"Loading configuration from JSON...\"\ncat /tmp/migration_config.json | workflow configure edit --stdin\n\n# Submit workflow\necho \"Submitting workflow...\"\nWORKFLOW_OUTPUT=$(workflow submit 2>&1)\nEXIT_CODE=$?\necho \"Workflow submit output: $WORKFLOW_OUTPUT\"\n[ $EXIT_CODE -eq 0 ] || exit $EXIT_CODE\n"
+          ]
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "monitorworkflow",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/bin/bash",
+            "-c"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "args": [
+            "#!/bin/bash\n#\n# ============================================================================\n# WARNING: TEST HELPER SCRIPT - SHOULD BE MOVED TO SEPARATE PACKAGE\n# ============================================================================\n# This script is part of the test workflow infrastructure and creates a\n# logical dependency cycle:\n# - migration-workflow-templates package provides workflow templates\n# - workflow CLI (in migration console) depends on migration-workflow-templates\n# - This test script depends on workflow CLI\n#\n# TODO: Move test workflows and helpers to a separate package (e.g.,\n# migration-workflow-templates-test) to break this dependency cycle.\n# ============================================================================\n\nset -e -x\n\necho \"Checking workflow status\"\n. /etc/profile.d/venv.sh\nsource /.venv/bin/activate\n\nSTATUS_OUTPUT=$(workflow status --workflow-name migration-workflow 2>&1)\nSTATUS_EXIT_CODE=$?\necho \"Status output:\"\necho \"$STATUS_OUTPUT\"\n\n# If the command failed (e.g., connection error), retry\nif [ $STATUS_EXIT_CODE -ne 0 ]; then\n    echo \"Failed to get workflow status (exit code: $STATUS_EXIT_CODE), will retry...\"\n    exit 1\nfi\n\n# Check if workflow is running or pending - retry\nif echo \"$STATUS_OUTPUT\" | grep -q \"Phase: Running\\|Phase: Pending\"; then\n    echo \"Workflow still running or pending, will retry...\"\n    exit 1\nfi\n\n# All other states are terminal (Succeeded, Failed, Suspended, Error, etc.)\necho \"Workflow is in terminal state\"\nmkdir -p /tmp/outputs\necho \"$STATUS_OUTPUT\" > /tmp/outputs/monitorResult\nexit 0\n"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "{{workflow.parameters.monitor-retry-limit}}",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "60",
+            "factor": "1"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "monitorResult",
+              "description": "Workflow status output from monitor script",
+              "valueFrom": {
+                "path": "/tmp/outputs/monitorResult"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "evaluateworkflowresult",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "monitorResult"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "MONITOR_RESULT",
+              "value": "{{inputs.parameters.monitorResult}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/bin/bash",
+            "-c"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "args": [
+            "\nset -e\necho \"Evaluating workflow result...\"\necho \"Monitor output: $MONITOR_RESULT\"\n\n# Check if the output contains \"Phase: Succeeded\"\nif echo \"$MONITOR_RESULT\" | grep -q \"Phase: Succeeded\"; then\n    echo \"Migration workflow completed successfully\"\n    exit 0\nelse\n    echo \"Migration workflow did not succeed\"\n    exit 1\nfi\n            "
+          ]
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deletemigrationworkflow",
+        "inputs": {
+          "parameters": []
+        },
+        "resource": {
+          "manifest": "apiVersion: argoproj.io/v1alpha1\nkind: Workflow\nmetadata:\n  name: migration-workflow\n",
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found"
+          ]
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "main",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "migrationConfigBase64"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "configureandsubmitworkflow",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "migrationConfigBase64",
+                    "value": "{{inputs.parameters.migrationConfigBase64}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  }
+                ]
+              },
+              "name": "configureAndSubmitWorkflow"
+            }
+          ],
+          [
+            {
+              "template": "monitorworkflow",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  }
+                ]
+              },
+              "name": "monitorWorkflow"
+            }
+          ],
+          [
+            {
+              "template": "evaluateworkflowresult",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "monitorResult",
+                    "value": "{{steps.monitorWorkflow.outputs.parameters.monitorResult}}"
+                  }
+                ]
+              },
+              "name": "evaluateWorkflowResult"
+            }
+          ],
+          [
+            {
+              "template": "deletemigrationworkflow",
+              "arguments": {
+                "parameters": []
+              },
+              "name": "deleteMigrationWorkflow"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}

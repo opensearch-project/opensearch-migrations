@@ -10,7 +10,7 @@ import {
     WorkflowAndTemplatesScope
 } from "./workflowTypes";
 import {Workflow} from "./workflowBuilder";
-import {DeepWiden, NonSerializedPlainObject, PlainObject} from "./plainObject";
+import {DeepWiden, PlainObject, Serialized} from "./plainObject";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {NamedTask, TaskType} from "./sharedTypes";
@@ -31,13 +31,14 @@ import {
     HasRequiredByDef,
     NormalizeInputs
 } from "./parameterConversions";
+import {TemplateBuilder} from "./templateBuilder";
 
 export type WhenCondition = (SimpleExpression<boolean> | {templateExp: TemplateExpression<boolean>});
 
 export type TaskOpts<
     S extends TasksOutputsScope,
     Label extends TaskType,
-    LoopT extends NonSerializedPlainObject
+    LoopT extends PlainObject
 > = {
     loopWith?: LoopWithUnion<LoopT> | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => LoopWithUnion<LoopT>),
     when?: WhenCondition | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => WhenCondition)
@@ -59,7 +60,7 @@ function reduceWhen<
 function reduceLoopWith<
     S extends TasksOutputsScope,
     Label extends TaskType,
-    LoopT extends NonSerializedPlainObject
+    LoopT extends PlainObject
 >(
     loopWith: LoopWithUnion<LoopT> | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => LoopWithUnion<LoopT>) | undefined,
     tasks: AllTasksAsOutputReferenceableInner<S, Label>
@@ -76,6 +77,9 @@ type ParamsPushedSymbol = typeof PARAMS_PUSHED;
 
 // Sentinel to indicate "use local template by key"
 export const INTERNAL: unique symbol = Symbol("INTERNAL_TEMPLATE");
+
+// Sentinel to indicate "use inline template"
+export const INLINE: unique symbol = Symbol("INLINE_TEMPLATE");
 
 function loopItem<T extends PlainObject>(): TemplateExpression<T> {
     return new LoopItemExpression<T>();
@@ -137,7 +141,7 @@ export type ParamProviderCallbackObject<
     TasksScope extends Record<string, TasksWithOutputs<any, any>>,
     Label extends TaskType,
     Inputs extends InputParametersRecord,
-    LoopItemsType extends NonSerializedPlainObject = never
+    LoopItemsType extends PlainObject = never
 > =
     {
         register: (params: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<Inputs>>) => ParamsPushedSymbol;
@@ -155,7 +159,7 @@ export type ParamsRegistrationFn<
     TaskScope extends TasksOutputsScope,
     Inputs extends InputParametersRecord,
     Label extends TaskType,
-    LoopT extends NonSerializedPlainObject
+    LoopT extends PlainObject
 > = (ctx: ParamProviderCallbackObject<TaskScope, Label, Inputs, LoopT>) => ParamsPushedSymbol;
 
 // Tri-state discriminator for inputs: "empty" | "allOptional" | "hasRequired"
@@ -180,16 +184,23 @@ export type NormalizeInputsOfWfTemplate<
         ? NormalizeInputs<X> extends InputParametersRecord ? NormalizeInputs<X> : {}
         : {};
 
+type ForbiddenParamsRegistration = { __no_params_allowed__: never };
+
 export type ParamsTuple<
     I extends InputParametersRecord,
     Name extends string,
     S extends TasksOutputsScope,
     Label extends TaskType,
-    LoopT extends NonSerializedPlainObject,
+    LoopT extends PlainObject,
     OptsType extends TaskOpts<S, Label, LoopT>
 > =
     InputKind<I> extends "empty"
-        ? [opts?: OptsType]
+        ? [opts?: OptsType] | [
+            paramsFn: UniqueNameConstraintOutsideDeclaration<
+                Name, S, ParamsRegistrationFn<S, ForbiddenParamsRegistration, Label, LoopT>
+            >,
+            opts?: OptsType
+        ]
         : InputKind<I> extends "allOptional"
             ? [
                 paramsFn?: UniqueNameConstraintOutsideDeclaration<
@@ -208,7 +219,7 @@ export function unpackParams<
     I extends InputParametersRecord,
     S extends TasksOutputsScope,
     Label extends TaskType,
-    LoopT extends NonSerializedPlainObject
+    LoopT extends PlainObject
 >(
     args: readonly unknown[]
 ): {
@@ -236,12 +247,40 @@ export type OutputsOf<T> =
 
 export type IsInternal<Src> = Src extends typeof INTERNAL ? true : false;
 
+export type IsInline<Src> = Src extends typeof INLINE ? true : false;
+
+type InlineBuilderResult = {
+    getBody(): any;
+    retryParameters?: any;
+    inputsScope?: any;
+    outputsScope?: any;
+};
+
+export type InlineTemplateFn<C extends WorkflowAndTemplatesScope> =
+    (builder: TemplateBuilder<C, {}, {}, {}>) => any;
+
+export type InlineInputsFrom<Fn> = 
+    Fn extends (builder: any) => infer R
+        ? R extends { inputsScope: infer I }
+            ? I extends InputParametersRecord ? I : {}
+            : {}
+        : {};
+
+export type InlineOutputsFrom<Fn> = 
+    Fn extends (builder: any) => infer R
+        ? R extends { outputsScope: infer O }
+            ? O extends OutputParametersRecord ? O : {}
+            : {}
+        : {};
+
 export type KeyFor<C extends WorkflowAndTemplatesScope, Src> =
     IsInternal<Src> extends true
         ? Extract<keyof C["templates"], string>
-        : Src extends Workflow<any, any, any>
-            ? Extract<keyof Src["templates"], string>
-            : never;
+        : IsInline<Src> extends true
+            ? never
+            : Src extends Workflow<any, any, any>
+                ? Extract<keyof Src["templates"], string>
+                : never;
 
 export type InputsFrom<C extends WorkflowAndTemplatesScope, Src, K> =
     IsInternal<Src> extends true
@@ -318,7 +357,7 @@ export abstract class TaskBuilder<
 
     /** Hook for subclasses/wrappers to customize task creation (e.g. DAG adds `when`). */
     protected onTaskPushed<
-        LoopT extends NonSerializedPlainObject,
+        LoopT extends PlainObject,
         OptsType extends TaskOpts<S, Label, LoopT>
     >(task: NamedTask, opts?: OptsType): NamedTask {
         const reducedWhen = reduceWhen(opts?.when, this.getTaskOutputsByTaskName());
@@ -330,7 +369,7 @@ export abstract class TaskBuilder<
 
     protected getParamsFromCallback<
         Inputs extends InputParametersRecord,
-        LoopT extends NonSerializedPlainObject = never
+        LoopT extends PlainObject = never
     >(
         inputs: Inputs,
         fn: ParamsRegistrationFn<S, Inputs, Label, LoopT>,
@@ -353,9 +392,9 @@ export abstract class TaskBuilder<
 
     public addTask<
         Name extends string,
-        TemplateSource,                      // typeof INTERNAL | Workflow<...>
-        K extends KeyFor<C, TemplateSource>, // tie K to S so key autocompletes
-        LoopT extends NonSerializedPlainObject,
+        TemplateSource extends typeof INTERNAL | Workflow<any, any, any>,
+        K extends KeyFor<C, TemplateSource>,
+        LoopT extends PlainObject,
         OptsType extends TaskOpts<S, Label, LoopT>
     >(
         name: UniqueNameConstraintAtDeclaration<Name, S>,
@@ -365,26 +404,66 @@ export abstract class TaskBuilder<
     ): ApplyRebinder<
         RB,
         C,
-        ExtendScope<S, { [P in Name]: TasksWithOutputs<Name, OutputsFrom<C, S, K>> }>
-    > {
-        const keyStr = key as unknown as string;
-        const inputs = (source === INTERNAL) ?
-            (this.parentWorkflowScope.templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K> :
-            (((source as Workflow<any, any, any>).templates as any)?.[keyStr]?.inputs as InputsFrom<C, TemplateSource, K>);
-        const {paramsFn, opts} = unpackParams<InputsFrom<C, TemplateSource, K>, S, Label, LoopT>(args);
-        const loopWith = reduceLoopWith(opts?.loopWith, this.getTaskOutputsByTaskName());
-        const params = inputs === undefined ? {} :
-            this.getParamsFromCallback<InputsFrom<C, TemplateSource, K>, LoopT>(inputs, paramsFn as any, loopWith);
-
-        if (source === INTERNAL) {
-            const outputs = (this.parentWorkflowScope.templates as any)?.[keyStr]?.outputs as OutputsFrom<C, TemplateSource, K>;
-            const templateCall = this.callTemplate(name as string, keyStr, params, loopWith);
-            return this.addTaskHelper(name, templateCall as any, outputs, opts);
+        ExtendScope<S, { [P in Name]: TasksWithOutputs<Name, OutputsFrom<C, TemplateSource, K>> }>
+    >;
+    public addTask<
+        Name extends string,
+        InlineFnType extends InlineTemplateFn<C>,
+        LoopT extends PlainObject = never,
+        OptsType extends TaskOpts<S, Label, LoopT> = TaskOpts<S, Label, LoopT>
+    >(
+        name: UniqueNameConstraintAtDeclaration<Name, S>,
+        source: UniqueNameConstraintOutsideDeclaration<Name, S, typeof INLINE>,
+        inlineFn: UniqueNameConstraintOutsideDeclaration<Name, S, InlineFnType>,
+        ...args: ParamsTuple<InlineInputsFrom<InlineFnType>, Name, S, Label, LoopT, OptsType>
+    ): ApplyRebinder<
+        RB,
+        C,
+        ExtendScope<S, { [P in Name]: TasksWithOutputs<Name, InlineOutputsFrom<InlineFnType>> }>
+    >;
+    public addTask(name: any, sourceOrInline: any, keyOrFn?: any, ...restArgs: any[]): any {
+        if (sourceOrInline === INLINE) {
+            const inlineFn = keyOrFn as (builder: any) => InlineBuilderResult;
+            const args = restArgs;
+            const {paramsFn, opts} = unpackParams<any, S, Label, any>(args);
+            const loopWith = reduceLoopWith(opts?.loopWith, this.getTaskOutputsByTaskName());
+            
+            // Import TemplateBuilder dynamically to avoid circular dependency
+            const {TemplateBuilder} = require("./templateBuilder");
+            const templateBuilder = new TemplateBuilder(this.parentWorkflowScope, {}, {}, {});
+            const bodyBuilder = inlineFn(templateBuilder);
+            const inputs = bodyBuilder.inputsScope || {};
+            const params = this.getParamsFromCallback<any, any>(inputs, paramsFn as any, loopWith);
+            const outputs = bodyBuilder.outputsScope || {};
+            
+            const inlineCall = this.callInlineTemplate(name as string, bodyBuilder, params, loopWith);
+            return this.addTaskHelper(name, inlineCall as any, outputs, opts);
         } else {
-            const wf = source as unknown as Workflow<any, any, any>;
-            const outputs = (wf.templates as any)?.[keyStr]?.outputs as OutputsFrom<C, TemplateSource, K>;
-            const templateCall = this.callExternalTemplate(name as string, source as any, keyStr as any, params);
-            return this.addTaskHelper(name, templateCall as any, outputs, opts);
+            const source = sourceOrInline;
+            const key = keyOrFn;
+            const args = restArgs;
+            
+            const keyStr = key as unknown as string;
+            const inputs = (source === INTERNAL) ?
+                (this.parentWorkflowScope.templates as any)?.[keyStr]?.inputs as any :
+                (((source as Workflow<any, any, any>).templates as any)?.[keyStr]?.inputs as any);
+            const {paramsFn, opts} = unpackParams<any, S, Label, any>(args);
+            const loopWith = reduceLoopWith(opts?.loopWith, this.getTaskOutputsByTaskName());
+            const params = inputs === undefined ? {} :
+                this.getParamsFromCallback<any, any>(inputs, paramsFn as any, loopWith);
+
+            if (source === INTERNAL) {
+                const outputs = (this.parentWorkflowScope.templates as any)?.[keyStr]?.outputs as any;
+                const templateCall =
+                    this.callTemplate(name as string, keyStr, params, loopWith);
+                return this.addTaskHelper(name, templateCall as any, outputs, opts);
+            } else {
+                const wf = source as unknown as Workflow<any, any, any>;
+                const outputs = (wf.templates as any)?.[keyStr]?.outputs as any;
+                const templateCall =
+                    this.callExternalTemplate(name as string, source as any, keyStr as any, params, loopWith);
+                return this.addTaskHelper(name, templateCall as any, outputs, opts);
+            }
         }
     }
 
@@ -393,7 +472,7 @@ export abstract class TaskBuilder<
         TKey extends string,
         IN extends InputParametersRecord,
         OUT extends OutputParametersRecord,
-        LoopT extends NonSerializedPlainObject,
+        LoopT extends PlainObject,
         OptsType extends TaskOpts<S, Label, LoopT>
     >(
         name: UniqueNameConstraintAtDeclaration<TKey, S>,
@@ -424,7 +503,7 @@ export abstract class TaskBuilder<
 
     protected buildParamProviderCallbackObject<
         Inputs extends InputParametersRecord,
-        LoopT extends NonSerializedPlainObject = never
+        LoopT extends PlainObject = never
     >(
         inputs: Inputs,
         register: (params: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<Inputs>>) => ParamsPushedSymbol,
@@ -451,7 +530,7 @@ export abstract class TaskBuilder<
 
     protected callTemplate<
         TKey extends Extract<keyof TemplateSignaturesScope, string>,
-        LoopT extends NonSerializedPlainObject = never
+        LoopT extends PlainObject = never
     >(
         name: string,
         templateKey: TKey,
@@ -487,6 +566,29 @@ export abstract class TaskBuilder<
         return {
             name,
             templateRef: {name: wf.metadata.k8sMetadata.name, template: templateKey},
+            ...(loopWith ? {withLoop: loopWith} : {}),
+            args: params
+        } as any;
+    }
+
+    protected callInlineTemplate<
+        IN extends InputParametersRecord,
+        OUT extends OutputParametersRecord,
+        LoopT extends PlainObject = never
+    >(
+        name: string,
+        bodyBuilder: { getBody(): any; inputsScope?: any, retryParameters?: any },
+        params: ParamsWithLiteralsOrExpressionsIncludingSerialized<CallerParams<IN>>,
+        loopWith?: LoopWithUnion<LoopT>
+    ): NamedTask<IN, OUT, LoopT> {
+        const body = bodyBuilder.getBody();
+        return {
+            name,
+            inline: {
+                ...(bodyBuilder.inputsScope ? {inputsScope: bodyBuilder.inputsScope} : {}),
+                ...body,
+                ...(bodyBuilder.retryParameters ? {retryStrategy: bodyBuilder.retryParameters} : {})
+            },
             ...(loopWith ? {withLoop: loopWith} : {}),
             args: params
         } as any;

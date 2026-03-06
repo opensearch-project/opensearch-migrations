@@ -1,0 +1,189 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "setup-capture"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "deployproxyservice",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyName"
+            },
+            {
+              "name": "listenPort"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: v1\nkind: Service\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  annotations:\n    service.beta.kubernetes.io/aws-load-balancer-type: external\n    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip\nspec:\n  type: LoadBalancer\n  selector:\n    migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  ports:\n    - port: {{inputs.parameters.listenPort}}\n      targetPort: {{inputs.parameters.listenPort}}\n      protocol: TCP\n",
+          "action": "apply",
+          "setOwnerReference": false
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deployproxydeployment",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyConfig"
+            },
+            {
+              "name": "listenPort"
+            },
+            {
+              "name": "podReplicas"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{=fromJSON(inputs.parameters.proxyConfig)['name']}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{=fromJSON(inputs.parameters.proxyConfig)['name']}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{=fromJSON(inputs.parameters.proxyConfig)['name']}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          env:\n            - name: BACKSIDE_URI_STRING\n              value: \"{{=jsonpath(inputs.parameters.proxyConfig, '$.sourceEndpoint')}}\"\n            - name: FRONTSIDE_PORT\n              value: \"{{inputs.parameters.listenPort}}\"\n            - name: KAFKA_CONNECTION\n              value: \"{{=jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaConnection')}}\"\n            - name: KAFKA_TOPIC\n              value: \"{{=jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic')}}\"\n            - name: OTEL_COLLECTOR_ENDPOINT\n              value: \"{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.otelCollectorEndpoint')}}\"\n            - name: ALLOW_INSECURE_CONNECTIONS_TO_BACKSIDE\n              value: \"{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.noCapture')}}\"\n          command:\n            - /bin/sh\n            - -c\n            - |-\n              set -e\n              ARGS=\"\"\n              ARGS=\"${ARGS}${BACKSIDE_URI_STRING:+ --destinationUri $BACKSIDE_URI_STRING}\"\n              ARGS=\"${ARGS}${FRONTSIDE_PORT:+ --listenPort $FRONTSIDE_PORT}\"\n              ARGS=\"${ARGS}${KAFKA_CONNECTION:+ --kafkaConnection $KAFKA_CONNECTION}\"\n              ARGS=\"${ARGS}${KAFKA_TOPIC:+ --kafkaTopic $KAFKA_TOPIC}\"\n              ARGS=\"${ARGS}${OTEL_COLLECTOR_ENDPOINT:+ --otelCollectorEndpoint $OTEL_COLLECTOR_ENDPOINT}\"\n              if [ \"$ALLOW_INSECURE_CONNECTIONS_TO_BACKSIDE\" = \"true\" ]; then ARGS=\"${ARGS} --insecureDestination\"; fi\n              echo \"Starting proxy with: $ARGS\"\n              exec /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy $ARGS\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n",
+          "action": "apply",
+          "setOwnerReference": false
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "setupproxy",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyConfig"
+            },
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "kafkaTopicName"
+            },
+            {
+              "name": "proxyName"
+            },
+            {
+              "name": "listenPort"
+            },
+            {
+              "name": "podReplicas"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "createkafkatopic",
+                "name": "setup-kafka"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "topicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "clusterConfig",
+                    "value": "{{=toJSON({})}}"
+                  }
+                ]
+              },
+              "name": "createKafkaTopic"
+            }
+          ],
+          [
+            {
+              "template": "deployproxyservice",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "listenPort",
+                    "value": "{{inputs.parameters.listenPort}}"
+                  }
+                ]
+              },
+              "name": "deployService"
+            }
+          ],
+          [
+            {
+              "template": "deployproxydeployment",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyConfig",
+                    "value": "{{inputs.parameters.proxyConfig}}"
+                  },
+                  {
+                    "name": "listenPort",
+                    "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "podReplicas",
+                    "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  }
+                ]
+              },
+              "name": "deployProxy"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}
