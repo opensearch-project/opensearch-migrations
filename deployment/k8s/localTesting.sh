@@ -12,12 +12,16 @@ minikube config set cpus $MINIKUBE_CPU_COUNT
 minikube config set memory $MINIKUBE_MEMORY_SIZE
 
 INSECURE_REGISTRY_CIDR="${INSECURE_REGISTRY_CIDR:-0.0.0.0/0}"
-minikube start \
-  --extra-config=kubelet.authentication-token-webhook=true \
-  --extra-config=kubelet.authorization-mode=Webhook \
-  --extra-config=scheduler.bind-address=0.0.0.0 \
-  --extra-config=controller-manager.bind-address=0.0.0.0 \
-  --insecure-registry="${INSECURE_REGISTRY_CIDR}"
+if minikube status --format='{{.Host}}' 2>/dev/null | grep -q Running; then
+  echo "minikube is already running, skipping start"
+else
+  minikube start \
+    --extra-config=kubelet.authentication-token-webhook=true \
+    --extra-config=kubelet.authorization-mode=Webhook \
+    --extra-config=scheduler.bind-address=0.0.0.0 \
+    --extra-config=controller-manager.bind-address=0.0.0.0 \
+    --insecure-registry="${INSECURE_REGISTRY_CIDR}"
+fi
 
 cd "${MIGRATIONS_REPO_ROOT_DIR}"
 gradlew() {
