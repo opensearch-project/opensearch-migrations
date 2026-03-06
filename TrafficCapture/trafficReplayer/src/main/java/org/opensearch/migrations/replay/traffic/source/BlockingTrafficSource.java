@@ -225,20 +225,13 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         sb.append(" lastTimestamp=").append(lastTs.equals(Instant.EPOCH) ? "EPOCH" : lastTs);
         if (!stopAt.equals(Instant.EPOCH) && !lastTs.equals(Instant.EPOCH)) {
             var headroom = Duration.between(lastTs, stopAt);
-            sb.append(" headroom=").append(formatDuration(headroom));
+            sb.append(" headroom=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(headroom));
         }
-        sb.append(" bufferWindow=").append(formatDuration(bufferTimeWindow));
+        sb.append(" bufferWindow=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(bufferTimeWindow));
         sb.append(" readGatePermits=").append(readGate.availablePermits());
         heartbeatLogger.atInfo().setMessage("{}").addArgument(sb).log();
     }
 
-    private static String formatDuration(Duration d) {
-        long totalSeconds = d.getSeconds();
-        if (totalSeconds < 0) return "-" + formatDuration(d.negated());
-        if (totalSeconds < 60) return totalSeconds + "s";
-        if (totalSeconds < 3600) return (totalSeconds / 60) + "m" + (totalSeconds % 60) + "s";
-        return (totalSeconds / 3600) + "h" + ((totalSeconds % 3600) / 60) + "m";
-    }
 
     @Override
     public void close() throws Exception {

@@ -58,8 +58,10 @@ public class ExpiringTrafficStreamMap {
         this.minimumGuaranteedLifetime = minimumGuaranteedLifetime;
         this.behavioralPolicy = behavioralPolicy;
         this.newConnectionCounter = new AtomicInteger(0);
-        // Initialize with epoch — first real observation will create the proper starting bucket
-        this.expiringBucketQueue = new ExpiringKeyQueue(granularity, "global", new EpochMillis(0));
+        this.expiringBucketQueue = new ExpiringKeyQueue(
+            granularity,
+            "global",
+            new EpochMillis(ACCUMULATION_TIMESTAMP_NOT_SET_YET_SENTINEL));
     }
 
     public int numberOfConnectionsCreated() {
@@ -75,10 +77,10 @@ public class ExpiringTrafficStreamMap {
         Accumulation accumulation,
         int attempts
     ) {
-        var expiringQueue = expiringBucketQueue;
-        var latestPossibleKeyValueAtIncoming = expiringQueue.getLatestPossibleKeyValue();
+        var latestPossibleKeyValueAtIncoming = expiringBucketQueue.getLatestPossibleKeyValue();
         // for expiration tracking purposes, push incoming packets' timestamps to be monotonic?
-        var timestampMillis = new EpochMillis(Math.max(observedTimestampMillis.millis, expiringQueue.lastKey().millis));
+        var timestampMillis =
+            new EpochMillis(Math.max(observedTimestampMillis.millis, expiringBucketQueue.lastKey().millis));
 
         if (accumulation.hasBeenExpired()) {
             behavioralPolicy.onNewDataArrivingAfterItsAccumulationHadBeenRemoved(trafficStreamKey);
@@ -103,10 +105,10 @@ public class ExpiringTrafficStreamMap {
             }
         }
 
-        var targetBucketHashSet = getHashSetWithoutExpiring(expiringQueue, timestampMillis);
+        var targetBucketHashSet = getHashSet(expiringBucketQueue, timestampMillis);
 
         if (targetBucketHashSet == null) {
-            var startOfWindow = expiringQueue.firstKey().toInstant();
+            var startOfWindow = expiringBucketQueue.firstKey().toInstant();
             assert !timestampMillis.test(startOfWindow, (ts, windowStart) -> ts < windowStart)
                 : "Only expected the target bucket to be missing when the incoming timestamp was before the "
                     + "expiring queue's time window";
@@ -118,7 +120,7 @@ public class ExpiringTrafficStreamMap {
             return false;
         }
         if (lastPacketTimestamp.millis > ACCUMULATION_TIMESTAMP_NOT_SET_YET_SENTINEL) {
-            var sourceBucket = getHashSetWithoutExpiring(expiringQueue, lastPacketTimestamp);
+            var sourceBucket = getHashSet(expiringBucketQueue, lastPacketTimestamp);
             if (sourceBucket != targetBucketHashSet) {
                 if (sourceBucket == null) {
                     behavioralPolicy.onNewDataArrivingAfterItsAccumulationHasBeenExpired(
@@ -138,16 +140,16 @@ public class ExpiringTrafficStreamMap {
 
         // Now that the connection is fully settled in its new bucket with updated timestamp,
         // run the deferred expiry sweep. Any sweep triggered here will see a consistent state.
-        runDeferredExpiry(expiringQueue, timestampMillis);
+        runDeferredExpiry(expiringBucketQueue, timestampMillis);
 
         return true;
     }
 
-    private ConcurrentHashMap<ScopedConnectionIdKey, Boolean> getHashSetWithoutExpiring(
+    private ConcurrentHashMap<ScopedConnectionIdKey, Boolean> getHashSet(
         ExpiringKeyQueue expiringQueue,
         EpochMillis timestampMillis
     ) {
-        return expiringQueue.getHashSetForTimestampWithDeferredExpiry(timestampMillis);
+        return expiringQueue.getHashSetForTimestamp(timestampMillis);
     }
 
     private void runDeferredExpiry(ExpiringKeyQueue expiringQueue, EpochMillis timestampMillis) {

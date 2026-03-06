@@ -267,11 +267,11 @@ public class ReplayEngine {
             var currentSourceTime = sourceTimeOp.get();
             var lastCompleted = Instant.ofEpochMilli(lastCompletedMs);
             var lag = Duration.between(lastCompleted, currentSourceTime);
-            sb.append(" schedulingLag=").append(formatDuration(lag));
+            sb.append(" schedulingLag=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(lag));
             sb.append(" lastCompletedSourceTime=").append(lastCompleted);
         }
 
-        sb.append(" bufferWindow=").append(formatDuration(contentTimeController.getBufferTimeWindow()));
+        sb.append(" bufferWindow=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(contentTimeController.getBufferTimeWindow()));
 
         // Response codes since last heartbeat
         sb.append(" targetResponses={");
@@ -290,11 +290,4 @@ public class ReplayEngine {
         heartbeatLogger.atInfo().setMessage("{}").addArgument(sb).log();
     }
 
-    private static String formatDuration(Duration d) {
-        long totalSeconds = d.getSeconds();
-        if (totalSeconds < 0) return "-" + formatDuration(d.negated());
-        if (totalSeconds < 60) return totalSeconds + "s";
-        if (totalSeconds < 3600) return (totalSeconds / 60) + "m" + (totalSeconds % 60) + "s";
-        return (totalSeconds / 3600) + "h" + ((totalSeconds % 3600) / 60) + "m";
-    }
 }
