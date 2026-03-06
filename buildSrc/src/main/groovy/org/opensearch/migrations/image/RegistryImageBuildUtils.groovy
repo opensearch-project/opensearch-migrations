@@ -79,7 +79,10 @@ class RegistryImageBuildUtils {
 
                     def baseEndpoint = config.get("baseImageRegistryEndpoint", "").toString()
                     def baseImage
-                    if (baseEndpoint == intermediateRegistry.hostUrl) {
+                    if (config.containsKey("baseImageOverride")) {
+                        // Pre-resolved base image (e.g., from pull-through cache rewriting)
+                        baseImage = config.get("baseImageOverride").toString()
+                    } else if (baseEndpoint == intermediateRegistry.hostUrl) {
                         baseImage = resolveBaseImage(intermediateRegistry, config.get("baseImageGroup", "").toString(),
                                 config.baseImageName.toString(), config.baseImageTag.toString())
                     } else {
