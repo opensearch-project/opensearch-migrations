@@ -23,6 +23,14 @@ import lombok.extern.slf4j.Slf4j;
  * First, we're fine buffering a variable number of items and secondly, this should be threadsafe and able to
  * be used in highly concurrent contexts.
  *
+ * NOTE: This uses a single global ExpiringKeyQueue rather than per-nodeId queues. The original per-nodeId
+ * design was intended to handle clock skew between capture proxies, but it created a critical blind spot:
+ * when a capture node went quiet, its stale connections would never be expired because the sweep only ran
+ * on the active node's queue. Since all timestamps share a single monotonic timeline after adjustment,
+ * a single queue is correct. If clock skew between capture proxies becomes a problem in the future,
+ * the right fix is to detect and evict proxies with excessive skew from the capture fleet rather than
+ * trying to maintain independent expiry timelines.
+ *
  * Potential TODO - there may be a race condition in the ExpiringTrafficStream maps/sets where items could be expunged
  * from the collections while they're still in use since this doesn't have visibility into how items are used.
  * Requiring collection items to have atomically updated refCounts would mitigate that situation.
@@ -34,7 +42,7 @@ public class ExpiringTrafficStreamMap {
     public static final int ACCUMULATION_TIMESTAMP_NOT_SET_YET_SENTINEL = 0;
 
     protected final AccumulatorMap connectionAccumulationMap;
-    protected final ConcurrentHashMap<String, ExpiringKeyQueue> nodeToExpiringBucketMap;
+    protected final ExpiringKeyQueue expiringBucketQueue;
     protected final Duration minimumGuaranteedLifetime;
     protected final Duration granularity;
     protected final BehavioralPolicy behavioralPolicy;
@@ -48,25 +56,14 @@ public class ExpiringTrafficStreamMap {
         connectionAccumulationMap = new AccumulatorMap();
         this.granularity = granularity;
         this.minimumGuaranteedLifetime = minimumGuaranteedLifetime;
-        this.nodeToExpiringBucketMap = new ConcurrentHashMap<>();
         this.behavioralPolicy = behavioralPolicy;
         this.newConnectionCounter = new AtomicInteger(0);
+        // Initialize with epoch — first real observation will create the proper starting bucket
+        this.expiringBucketQueue = new ExpiringKeyQueue(granularity, "global", new EpochMillis(0));
     }
 
     public int numberOfConnectionsCreated() {
         return newConnectionCounter.get();
-    }
-
-    private ExpiringKeyQueue getOrCreateNodeMap(String partitionId, EpochMillis timestamp) {
-        // optimistic get - if it's already there, proceed with it.
-        var ekq = nodeToExpiringBucketMap.get(partitionId);
-        if (ekq != null) {
-            return ekq;
-        } else {
-            var newMap = new ExpiringKeyQueue(this.granularity, partitionId, timestamp);
-            var priorMap = nodeToExpiringBucketMap.putIfAbsent(partitionId, newMap);
-            return priorMap == null ? newMap : priorMap;
-        }
     }
 
     /**
@@ -78,7 +75,7 @@ public class ExpiringTrafficStreamMap {
         Accumulation accumulation,
         int attempts
     ) {
-        var expiringQueue = getOrCreateNodeMap(trafficStreamKey.getNodeId(), observedTimestampMillis);
+        var expiringQueue = expiringBucketQueue;
         var latestPossibleKeyValueAtIncoming = expiringQueue.getLatestPossibleKeyValue();
         // for expiration tracking purposes, push incoming packets' timestamps to be monotonic?
         var timestampMillis = new EpochMillis(Math.max(observedTimestampMillis.millis, expiringQueue.lastKey().millis));
@@ -106,7 +103,7 @@ public class ExpiringTrafficStreamMap {
             }
         }
 
-        var targetBucketHashSet = getHashSetForTimestampWhileExpiringOldBuckets(expiringQueue, timestampMillis);
+        var targetBucketHashSet = getHashSetWithoutExpiring(expiringQueue, timestampMillis);
 
         if (targetBucketHashSet == null) {
             var startOfWindow = expiringQueue.firstKey().toInstant();
@@ -121,7 +118,7 @@ public class ExpiringTrafficStreamMap {
             return false;
         }
         if (lastPacketTimestamp.millis > ACCUMULATION_TIMESTAMP_NOT_SET_YET_SENTINEL) {
-            var sourceBucket = getHashSetForTimestampWhileExpiringOldBuckets(expiringQueue, lastPacketTimestamp);
+            var sourceBucket = getHashSetWithoutExpiring(expiringQueue, lastPacketTimestamp);
             if (sourceBucket != targetBucketHashSet) {
                 if (sourceBucket == null) {
                     behavioralPolicy.onNewDataArrivingAfterItsAccumulationHasBeenExpired(
@@ -134,25 +131,31 @@ public class ExpiringTrafficStreamMap {
                     return false;
                 }
                 // this will do nothing if it was already removed, such as in the previous recursive run
-                sourceBucket.remove(trafficStreamKey.getConnectionId());
+                sourceBucket.remove(makeKey(trafficStreamKey));
             }
         }
-        targetBucketHashSet.put(trafficStreamKey.getConnectionId(), Boolean.TRUE);
+        targetBucketHashSet.put(makeKey(trafficStreamKey), Boolean.TRUE);
+
+        // Now that the connection is fully settled in its new bucket with updated timestamp,
+        // run the deferred expiry sweep. Any sweep triggered here will see a consistent state.
+        runDeferredExpiry(expiringQueue, timestampMillis);
+
         return true;
     }
 
-    private ConcurrentHashMap<String, Boolean> getHashSetForTimestampWhileExpiringOldBuckets(
+    private ConcurrentHashMap<ScopedConnectionIdKey, Boolean> getHashSetWithoutExpiring(
         ExpiringKeyQueue expiringQueue,
         EpochMillis timestampMillis
     ) {
-        return expiringQueue.getHashSetForTimestamp(
-            timestampMillis,
-            () -> expiringQueue.expireOldSlots(
-                connectionAccumulationMap,
-                behavioralPolicy,
-                minimumGuaranteedLifetime,
-                timestampMillis
-            )
+        return expiringQueue.getHashSetForTimestampWithDeferredExpiry(timestampMillis);
+    }
+
+    private void runDeferredExpiry(ExpiringKeyQueue expiringQueue, EpochMillis timestampMillis) {
+        expiringQueue.expireOldSlots(
+            connectionAccumulationMap,
+            behavioralPolicy,
+            minimumGuaranteedLifetime,
+            timestampMillis
         );
     }
 
@@ -198,7 +201,7 @@ public class ExpiringTrafficStreamMap {
     }
 
     public void clear() {
-        nodeToExpiringBucketMap.clear();
+        expiringBucketQueue.clear();
         // leave everything else fall aside, like we do for remove()
     }
 }
