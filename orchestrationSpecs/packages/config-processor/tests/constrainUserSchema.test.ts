@@ -20,7 +20,7 @@ const SIMPLE_TARGET_ONLY_CONFIG = `{
       }
     }
   },
-  migrationConfigs: [
+  snapshotMigrationConfigs: [
     {
       "fromSource": "source1",
       "toTarget": "target1"
