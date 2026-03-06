@@ -5,7 +5,7 @@ ARG RUNTIME_IMAGE=docker.io/library/amazoncorretto:11-al2023-headless
 # =======================
 # Stage 1: Certificate Generation
 # =======================
-FROM ${CERT_BUILDER_IMAGE} AS cert-builder # NOSONAR - version tag is in the ARG default above
+FROM ${CERT_BUILDER_IMAGE} AS cert-builder
 
 # Install OpenSSL
 RUN yum update -y && \
@@ -25,7 +25,7 @@ RUN mkdir -p /certs && \
 # =======================
 # Stage 2: Final Image
 # =======================
-FROM ${RUNTIME_IMAGE} # NOSONAR - version tag is in the ARG default above
+FROM ${RUNTIME_IMAGE}
 
 # Set environment variables
 ENV CONFIG_HOME=/usr/share/captureProxy/config

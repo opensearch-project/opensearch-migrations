@@ -48,6 +48,35 @@ class PullThroughCacheHelper {
         return "${ecrEndpoint}/${prefix}/${parts.path}"
     }
 
+    /**
+     * Build a base image config map for Gradle image build tasks, rewriting through
+     * pull-through cache when the endpoint is configured.
+     *
+     * Returns a map with keys: baseImageRegistryEndpoint, baseImageGroup, baseImageName, baseImageTag,
+     * and optionally baseImageOverride if the image was rewritten through the cache.
+     */
+    Map baseImageConfig(String endpoint, String group, String name, String tag) {
+        def base = [baseImageRegistryEndpoint: endpoint, baseImageGroup: group, baseImageName: name, baseImageTag: tag]
+        def fullRef = group ? "${endpoint}/${group}/${name}:${tag}" : "${endpoint}/${name}:${tag}"
+        def rewritten = rewrite(fullRef)
+        if (rewritten != fullRef) {
+            base.baseImageOverride = rewritten
+        }
+        return base
+    }
+
+    /**
+     * Parses an image reference into its registry and path components.
+     *
+     * Expected behavior:
+     *   "nginx:latest"                          → registry="docker.io", path="library/nginx:latest"  (implicit Docker Hub + library prefix)
+     *   "grafana/grafana:11.6.1"                → registry="docker.io", path="grafana/grafana:11.6.1" (no dot in first segment → Docker Hub)
+     *   "docker.io/library/amazoncorretto:17"   → registry="docker.io", path="library/amazoncorretto:17"
+     *   "public.ecr.aws/aws-observability/col"  → registry="public.ecr.aws", path="aws-observability/col"
+     *   "quay.io/prom/prometheus:latest"        → registry="quay.io", path="prom/prometheus:latest"
+     *   "nginx"                                 → registry="docker.io", path="library/nginx" (single segment, no tag)
+     *   "myimage@sha256:abc..."                 → registry="docker.io", path="library/myimage@sha256:abc..."
+     */
     private static Map parseImageRef(String imageRef) {
         def refWithoutTag = imageRef
         def tagPart = ''
