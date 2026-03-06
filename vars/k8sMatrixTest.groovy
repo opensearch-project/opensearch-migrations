@@ -2,7 +2,7 @@ def call(Map config = [:]) {
     def jobName = config.jobName ?: "k8s-matrix-test"
     def defaultChildJobName = "k8s-local-integ-test"
     if (jobName.startsWith("main-")) {
-        defaultChildJobName = "Periodic runs from MAIN/main-k8s-local-integ-test"
+        defaultChildJobName = "main/main-k8s-local-integ-test"
     } else if (jobName.startsWith("pr-")) {
         defaultChildJobName = "pr-checks/pr-k8s-local-integ-test"
     }
