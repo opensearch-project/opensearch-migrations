@@ -78,9 +78,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     /** Emit a periodic heartbeat log summarizing the accumulator state. */
     public void logHeartbeat() {
         var sb = new StringBuilder();
-        int waiting = 0, reads = 0, writes = 0, ignoring = 0;
+        int waiting = 0;
+        int reads = 0;
+        int writes = 0;
+        int ignoring = 0;
         String oldestWriteConn = null;
-        long oldestWriteAgeMs = 0;
         long oldestWriteLastPacketAgeMs = 0;
         String oldestWriteOffset = null;
 

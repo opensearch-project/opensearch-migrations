@@ -382,8 +382,12 @@ public class TrafficReplayer {
         return p;
     }
 
+    private static final String MODE_DUMP_RAW = "dump-raw";
+    private static final String MODE_DUMP_HTTP = "dump-http";
+    private static final String MODE_DUMP_BOTH = "dump-both";
+
     static boolean isDumpMode(Parameters params) {
-        return "dump-raw".equals(params.mode) || "dump-http".equals(params.mode) || "dump-both".equals(params.mode);
+        return MODE_DUMP_RAW.equals(params.mode) || MODE_DUMP_HTTP.equals(params.mode) || MODE_DUMP_BOTH.equals(params.mode);
     }
 
     private static void validateDumpModeParams(Parameters params) {
@@ -467,9 +471,9 @@ public class TrafficReplayer {
 
             var endOffsets = consumer.endOffsets(partitions);
 
-            if ("dump-raw".equals(params.mode)) {
+            if (MODE_DUMP_RAW.equals(params.mode)) {
                 runDumpRawFromKafka(params, consumer, endOffsets);
-            } else if ("dump-http".equals(params.mode)) {
+            } else if (MODE_DUMP_HTTP.equals(params.mode)) {
                 runDumpHttpFromKafka(params, consumer, endOffsets, topContext, false);
             } else {
                 runDumpHttpFromKafka(params, consumer, endOffsets, topContext, true);
@@ -492,21 +496,29 @@ public class TrafficReplayer {
         java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets
     ) {
         while (true) {
-            var records = consumer.poll(java.time.Duration.ofSeconds(2));
-            if (records.isEmpty()) break;
-            boolean done = false;
-            for (var record : records) {
-                if (pastEnd(record, params, endOffsets)) { done = true; break; }
-                try {
-                    var ts = org.opensearch.migrations.trafficcapture.protos.TrafficStream.parseFrom(record.value());
-                    System.out.println(org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
-                        ts, record.partition(), record.offset(), params.previewBytesRead, params.previewBytesWrite, getBaseEpoch(ts)));
-                } catch (com.google.protobuf.InvalidProtocolBufferException e) {
-                    log.warn("Skipping unparseable record at p:{} o:{}", record.partition(), record.offset());
-                }
-            }
-            if (done) break;
+            var polled = consumer.poll(java.time.Duration.ofSeconds(2));
+            if (polled.isEmpty()) return;
+            if (processRawRecords(polled, params, endOffsets)) return;
         }
+    }
+
+    private static boolean processRawRecords(
+        org.apache.kafka.clients.consumer.ConsumerRecords<String, byte[]> records,
+        Parameters params,
+        java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets
+    ) {
+        for (var consumerRecord : records) {
+            if (pastEnd(consumerRecord, params, endOffsets)) return true;
+            try {
+                var trafficStream = org.opensearch.migrations.trafficcapture.protos.TrafficStream.parseFrom(consumerRecord.value());
+                System.out.println(org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
+                    trafficStream, consumerRecord.partition(), consumerRecord.offset(),
+                    params.previewBytesRead, params.previewBytesWrite, getBaseEpoch(trafficStream)));
+            } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+                log.warn("Skipping unparseable record at p:{} o:{}", consumerRecord.partition(), consumerRecord.offset());
+            }
+        }
+        return false;
     }
 
     private static void runDumpHttpFromKafka(
@@ -525,10 +537,10 @@ public class TrafficReplayer {
         );
         try {
             while (true) {
-                var records = consumer.poll(java.time.Duration.ofSeconds(2));
-                if (records.isEmpty()) break;
-                if (processRecordsForDump(records, params, endOffsets, emitRaw, accumulator, dumper, channelContextManager, topContext)) {
-                    break;
+                var polled = consumer.poll(java.time.Duration.ofSeconds(2));
+                if (polled.isEmpty()) return;
+                if (processRecordsForDump(polled, params, endOffsets, emitRaw, accumulator, dumper, channelContextManager, topContext)) {
+                    return;
                 }
             }
         } finally {
@@ -549,22 +561,24 @@ public class TrafficReplayer {
         for (var consumerRecord : records) {
             if (pastEnd(consumerRecord, params, endOffsets)) { return true; }
             try {
-                var ts = org.opensearch.migrations.trafficcapture.protos.TrafficStream.parseFrom(consumerRecord.value());
-                getBaseEpoch(ts);
+                var trafficStream = org.opensearch.migrations.trafficcapture.protos.TrafficStream.parseFrom(consumerRecord.value());
+                getBaseEpoch(trafficStream);
                 dumper.setBaseEpochSeconds(baseEpoch);
                 if (emitRaw) {
                     System.out.println("RAW " + org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
-                        ts, consumerRecord.partition(), consumerRecord.offset(), params.previewBytesRead, params.previewBytesWrite, baseEpoch));
+                        trafficStream, consumerRecord.partition(), consumerRecord.offset(), params.previewBytesRead, params.previewBytesWrite, baseEpoch));
                 }
-                var key = new org.opensearch.migrations.replay.kafka.TrafficStreamKeyWithKafkaRecordId(
-                    tsk -> {
-                        var channelCtx = channelContextManager.retainOrCreateContext(tsk);
-                        return topContext.createTrafficStreamContextForKafkaSource(channelCtx, consumerRecord.key(), 0);
-                    },
-                    ts,
-                    new org.opensearch.migrations.replay.kafka.PojoKafkaCommitOffsetData(0, consumerRecord.partition(), consumerRecord.offset())
-                );
-                accumulator.accept(new org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey(ts, key));
+                accumulator.accept(new org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey(
+                    trafficStream,
+                    new org.opensearch.migrations.replay.kafka.TrafficStreamKeyWithKafkaRecordId(
+                        tsk -> {
+                            var channelCtx = channelContextManager.retainOrCreateContext(tsk);
+                            return topContext.createTrafficStreamContextForKafkaSource(channelCtx, consumerRecord.key(), 0);
+                        },
+                        trafficStream,
+                        new org.opensearch.migrations.replay.kafka.PojoKafkaCommitOffsetData(0, consumerRecord.partition(), consumerRecord.offset())
+                    )
+                ));
             } catch (com.google.protobuf.InvalidProtocolBufferException e) {
                 log.warn("Skipping unparseable record at p:{} o:{}", consumerRecord.partition(), consumerRecord.offset());
             }
@@ -588,7 +602,7 @@ public class TrafficReplayer {
         org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource source,
         RootReplayerContext topContext
     ) throws Exception {
-        if ("dump-raw".equals(params.mode)) {
+        if (MODE_DUMP_RAW.equals(params.mode)) {
             while (true) {
                 try {
                     var chunks = source.readNextTrafficStreamChunk(topContext::createReadChunkContext).get();
@@ -602,7 +616,7 @@ public class TrafficReplayer {
                 }
             }
         } else {
-            boolean emitRaw = "dump-both".equals(params.mode);
+            boolean emitRaw = MODE_DUMP_BOTH.equals(params.mode);
             var prefix = emitRaw ? "msg " : "";
             var dumper = new org.opensearch.migrations.replay.kafka.HttpTransactionDumper(System.out, prefix);
             var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
