@@ -329,14 +329,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             // We should be draining very fast and if we block, we risk falling out of the Kafka group,
             // which could then have knock-on effects throughout the fleet since we're recovering from
             // the last recovery/partition reassignment.
-            try {
-                Thread.sleep(5); // 5 ms
-            } catch (InterruptedException e) {
-                log.atTrace()
-                    .setMessage("Ignoring an interrupt for the sleep that yields the Kafka producer thread" +
-                        " so that other threads can drain the work from the revoked partition generations").log();
-                Thread.currentThread().interrupt();
-            }
+            java.util.concurrent.locks.LockSupport.parkNanos(5_000_000); // yield for up to 5 ms
             return Collections.emptyList();
         }
         try {
