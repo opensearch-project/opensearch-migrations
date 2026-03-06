@@ -15,7 +15,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
-import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
+import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -425,226 +425,25 @@ public class TrafficReplayer {
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
 
+        var runner = new KafkaTopicDumper();
+
         if (params.inputFilename != null) {
-            // File input — use InputStreamOfTraffic
             try (var source = TrafficCaptureSourceFactory.createUnbufferedTrafficCaptureSource(topContext, params)) {
-                runDumpFromSource(params, source, topContext);
+                runner.runDumpFromSource(params.mode, source,
+                    params.previewBytesRead, params.previewBytesWrite,
+                    params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
+                    topContext);
             }
         } else if (params.kafkaTrafficBrokers != null && params.kafkaTrafficTopic != null) {
-            runDumpFromKafka(params, topContext);
+            runner.runDumpFromKafka(params.mode, params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
+                params.kafkaTrafficEnableMSKAuth, params.kafkaTrafficPropertyFile,
+                params.startOffset, params.startTime, params.endOffset, params.endTime,
+                params.previewBytesRead, params.previewBytesWrite,
+                params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
+                topContext);
         } else {
             System.err.println("Dump modes require either -i (file input) or --kafka-traffic-brokers and --kafka-traffic-topic");
             System.exit(2);
-        }
-    }
-
-    private static void runDumpFromKafka(Parameters params, RootReplayerContext topContext) throws Exception {
-        var kafkaProps = KafkaTrafficCaptureSource.buildKafkaProperties(
-            params.kafkaTrafficBrokers, "unused-dump-group",
-            params.kafkaTrafficEnableMSKAuth, params.kafkaTrafficPropertyFile);
-        // Remove group.id — dump modes use assign(), not subscribe()
-        kafkaProps.remove(org.apache.kafka.clients.consumer.ConsumerConfig.GROUP_ID_CONFIG);
-
-        try (var consumer = new org.apache.kafka.clients.consumer.KafkaConsumer<String, byte[]>(kafkaProps)) {
-            var partitions = consumer.partitionsFor(params.kafkaTrafficTopic).stream()
-                .map(pi -> new org.apache.kafka.common.TopicPartition(pi.topic(), pi.partition()))
-                .collect(java.util.stream.Collectors.toList());
-            consumer.assign(partitions);
-
-            // Seek to start position
-            if (params.startOffset != null) {
-                partitions.forEach(tp -> consumer.seek(tp, params.startOffset));
-            } else if (params.startTime != null) {
-                var timestampsToSearch = partitions.stream()
-                    .collect(java.util.stream.Collectors.toMap(tp -> tp, tp -> params.startTime * 1000));
-                var offsets = consumer.offsetsForTimes(timestampsToSearch);
-                offsets.forEach((tp, offsetAndTimestamp) -> {
-                    if (offsetAndTimestamp != null) {
-                        consumer.seek(tp, offsetAndTimestamp.offset());
-                    } else {
-                        consumer.seekToEnd(java.util.Collections.singleton(tp));
-                    }
-                });
-            } else {
-                consumer.seekToBeginning(partitions);
-            }
-
-            var endOffsets = consumer.endOffsets(partitions);
-
-            if (MODE_DUMP_RAW.equals(params.mode)) {
-                runDumpRawFromKafka(params, consumer, endOffsets);
-            } else {
-                runDumpHttpFromKafka(params, consumer, endOffsets, topContext, MODE_DUMP_BOTH.equals(params.mode));
-            }
-        }
-    }
-
-    private static long baseEpoch = -1;
-
-    private static long getBaseEpoch(org.opensearch.migrations.trafficcapture.protos.TrafficStream ts) {
-        if (baseEpoch < 0 && !ts.getSubStreamList().isEmpty()) {
-            baseEpoch = ts.getSubStreamList().get(0).getTs().getSeconds();
-        }
-        return baseEpoch;
-    }
-
-    private static void runDumpRawFromKafka(
-        Parameters params,
-        org.apache.kafka.clients.consumer.KafkaConsumer<String, byte[]> consumer,
-        java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets
-    ) {
-        for (var polled = consumer.poll(java.time.Duration.ofSeconds(2));
-             !polled.isEmpty();
-             polled = consumer.poll(java.time.Duration.ofSeconds(2))) {
-            if (processRawRecords(polled, params, endOffsets)) return;
-        }
-    }
-
-    @SuppressWarnings("java:S1854") // trafficStream assignment is used; SonarQube false positive in try-catch
-    private static boolean processRawRecords(
-        org.apache.kafka.clients.consumer.ConsumerRecords<String, byte[]> records,
-        Parameters params,
-        java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets
-    ) {
-        for (var consumerRecord : records) {
-            if (pastEnd(consumerRecord, params, endOffsets)) return true;
-            try {
-                var trafficStream = org.opensearch.migrations.trafficcapture.protos.TrafficStream.parseFrom(consumerRecord.value());
-                System.out.println(org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
-                    trafficStream, consumerRecord.partition(), consumerRecord.offset(),
-                    params.previewBytesRead, params.previewBytesWrite, getBaseEpoch(trafficStream)));
-            } catch (com.google.protobuf.InvalidProtocolBufferException e) {
-                log.warn("Skipping unparseable record at p:{} o:{}", consumerRecord.partition(), consumerRecord.offset());
-            }
-        }
-        return false;
-    }
-
-    private static void runDumpHttpFromKafka(
-        Parameters params,
-        org.apache.kafka.clients.consumer.KafkaConsumer<String, byte[]> consumer,
-        java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets,
-        RootReplayerContext topContext,
-        boolean emitRaw
-    ) {
-        var channelContextManager = new org.opensearch.migrations.replay.tracing.ChannelContextManager(topContext);
-        var dumper = new org.opensearch.migrations.replay.kafka.HttpTransactionDumper(System.out, "msg ");
-        var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
-            Duration.ofSeconds(params.observedPacketConnectionTimeout),
-            "(see command line option " + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
-            dumper
-        );
-        try {
-            for (var polled = consumer.poll(java.time.Duration.ofSeconds(2));
-                 !polled.isEmpty();
-                 polled = consumer.poll(java.time.Duration.ofSeconds(2))) {
-                if (processRecordsForDump(polled, params, endOffsets, emitRaw, accumulator, dumper, channelContextManager, topContext)) {
-                    return;
-                }
-            }
-        } finally {
-            accumulator.close();
-        }
-    }
-
-    @SuppressWarnings("java:S1854") // trafficStream assignment is used; SonarQube false positive in try-catch
-    private static boolean processRecordsForDump(
-        org.apache.kafka.clients.consumer.ConsumerRecords<String, byte[]> records,
-        Parameters params,
-        java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets,
-        boolean emitRaw,
-        CapturedTrafficToHttpTransactionAccumulator accumulator,
-        org.opensearch.migrations.replay.kafka.HttpTransactionDumper dumper,
-        org.opensearch.migrations.replay.tracing.ChannelContextManager channelContextManager,
-        RootReplayerContext topContext
-    ) {
-        for (var consumerRecord : records) {
-            if (pastEnd(consumerRecord, params, endOffsets)) { return true; }
-            try {
-                var trafficStream = org.opensearch.migrations.trafficcapture.protos.TrafficStream.parseFrom(consumerRecord.value());
-                getBaseEpoch(trafficStream);
-                dumper.setBaseEpochSeconds(baseEpoch);
-                if (emitRaw) {
-                    System.out.println("RAW " + org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
-                        trafficStream, consumerRecord.partition(), consumerRecord.offset(), params.previewBytesRead, params.previewBytesWrite, baseEpoch));
-                }
-                accumulator.accept(new org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey(
-                    trafficStream,
-                    new org.opensearch.migrations.replay.kafka.TrafficStreamKeyWithKafkaRecordId(
-                        tsk -> {
-                            var channelCtx = channelContextManager.retainOrCreateContext(tsk);
-                            return topContext.createTrafficStreamContextForKafkaSource(channelCtx, consumerRecord.key(), 0);
-                        },
-                        trafficStream,
-                        new org.opensearch.migrations.replay.kafka.PojoKafkaCommitOffsetData(0, consumerRecord.partition(), consumerRecord.offset())
-                    )
-                ));
-            } catch (com.google.protobuf.InvalidProtocolBufferException e) {
-                log.warn("Skipping unparseable record at p:{} o:{}", consumerRecord.partition(), consumerRecord.offset());
-            }
-        }
-        return false;
-    }
-
-    @SuppressWarnings("java:S1854") // topicPartition is used on the return line
-    private static boolean pastEnd(
-        org.apache.kafka.clients.consumer.ConsumerRecord<String, byte[]> consumerRecord,
-        Parameters params,
-        java.util.Map<org.apache.kafka.common.TopicPartition, Long> endOffsets
-    ) {
-        if (params.endOffset != null && consumerRecord.offset() > params.endOffset) return true;
-        if (params.endTime != null && consumerRecord.timestamp() > params.endTime * 1000) return true;
-        var topicPartition = new org.apache.kafka.common.TopicPartition(consumerRecord.topic(), consumerRecord.partition());
-        return consumerRecord.offset() >= endOffsets.getOrDefault(topicPartition, Long.MAX_VALUE);
-    }
-
-    @SuppressWarnings("java:S3776") // Complexity is from straightforward mode branching, not worth splitting further
-    private static void runDumpFromSource(
-        Parameters params,
-        org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource source,
-        RootReplayerContext topContext
-    ) throws Exception {
-        if (MODE_DUMP_RAW.equals(params.mode)) {
-            while (true) {
-                try {
-                    var chunks = source.readNextTrafficStreamChunk(topContext::createReadChunkContext).get();
-                    for (var tswk : chunks) {
-                        System.out.println(org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
-                            tswk.getStream(), -1, -1, params.previewBytesRead, params.previewBytesWrite, getBaseEpoch(tswk.getStream())));
-                    }
-                } catch (java.util.concurrent.ExecutionException e) {
-                    if (e.getCause() instanceof java.io.EOFException) break;
-                    throw e;
-                }
-            }
-        } else {
-            boolean emitRaw = MODE_DUMP_BOTH.equals(params.mode);
-            var prefix = emitRaw ? "msg " : "";
-            var dumper = new org.opensearch.migrations.replay.kafka.HttpTransactionDumper(System.out, prefix);
-            var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
-                Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                "(see command line option " + PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
-                dumper
-            );
-            try {
-                while (true) {
-                    try {
-                        var chunks = source.readNextTrafficStreamChunk(topContext::createReadChunkContext).get();
-                        for (var tswk : chunks) {
-                            if (emitRaw) {
-                                System.out.println("RAW " + org.opensearch.migrations.replay.kafka.TrafficStreamDumper.format(
-                                    tswk.getStream(), -1, -1, params.previewBytesRead, params.previewBytesWrite, getBaseEpoch(tswk.getStream())));
-                            }
-                            accumulator.accept(tswk);
-                        }
-                    } catch (java.util.concurrent.ExecutionException e) {
-                        if (e.getCause() instanceof java.io.EOFException) break;
-                        throw e;
-                    }
-                }
-            } finally {
-                accumulator.close();
-            }
         }
     }
 

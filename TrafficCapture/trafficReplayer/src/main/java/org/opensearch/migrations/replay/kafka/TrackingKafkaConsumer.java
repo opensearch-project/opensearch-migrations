@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
+import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
@@ -586,7 +587,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                     tracker.peekHeadMetadata().ifPresent(meta -> {
                         sb.append(", conn=").append(meta.connectionId);
                         var age = Duration.between(meta.addedAt, clock.instant());
-                        sb.append(", age=").append(formatDuration(age));
+                        sb.append(", age=").append(Utils.formatDurationInSeconds(age));
                     });
                     sb.append("}");
                 });
@@ -604,12 +605,6 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
     }
 
-    private static String formatDuration(Duration d) {
-        long totalSeconds = d.getSeconds();
-        if (totalSeconds < 60) return totalSeconds + "s";
-        if (totalSeconds < 3600) return (totalSeconds / 60) + "m" + (totalSeconds % 60) + "s";
-        return (totalSeconds / 3600) + "h" + ((totalSeconds % 3600) / 60) + "m";
-    }
 
     String nextCommitsToString() {
         return "nextCommits="

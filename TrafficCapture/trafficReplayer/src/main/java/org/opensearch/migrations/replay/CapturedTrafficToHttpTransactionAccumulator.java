@@ -9,6 +9,7 @@ import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
+import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.kafka.TrafficSourceReaderInterruptedClose;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -117,12 +118,12 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
         if (oldestWriteConn != null) {
             sb.append(" oldestInWrites={conn=").append(oldestWriteConn)
-                .append(", lastPacketAge=").append(formatDuration(Duration.ofMillis(oldestWriteLastPacketAgeMs)))
+                .append(", lastPacketAge=").append(Utils.formatDurationInSeconds(Duration.ofMillis(oldestWriteLastPacketAgeMs)))
                 .append(", tsk=").append(oldestWriteOffset);
             sb.append("}");
         }
 
-        sb.append(" expiryConfig=").append(formatDuration(connectionTimeout));
+        sb.append(" expiryConfig=").append(Utils.formatDurationInSeconds(connectionTimeout));
         sb.append(" totals={requests=").append(requestCounter.get())
             .append(", closed=").append(closedConnectionCounter.get())
             .append(", expired=").append(connectionsExpiredCounter.get())
@@ -131,12 +132,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         heartbeatLogger.atInfo().setMessage("{}").addArgument(sb).log();
     }
 
-    private static String formatDuration(Duration d) {
-        long totalSeconds = d.getSeconds();
-        if (totalSeconds < 60) return totalSeconds + "s";
-        if (totalSeconds < 3600) return (totalSeconds / 60) + "m" + (totalSeconds % 60) + "s";
-        return (totalSeconds / 3600) + "h" + ((totalSeconds % 3600) / 60) + "m";
-    }
 
     public CapturedTrafficToHttpTransactionAccumulator(
         Duration minTimeout,

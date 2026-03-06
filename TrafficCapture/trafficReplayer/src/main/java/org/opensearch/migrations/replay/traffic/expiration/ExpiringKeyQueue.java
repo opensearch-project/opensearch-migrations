@@ -43,7 +43,7 @@ class ExpiringKeyQueue extends ConcurrentSkipListMap<EpochMillis, ConcurrentHash
      * @param timestamp
      * @return
      */
-    private ConcurrentHashMap<ScopedConnectionIdKey, Boolean> getHashSetForTimestamp(EpochMillis timestamp) {
+    ConcurrentHashMap<ScopedConnectionIdKey, Boolean> getHashSetForTimestamp(EpochMillis timestamp) {
         return Optional.ofNullable(this.floorEntry(timestamp)).map(kvp -> {
             var shiftedKey = kvp.getKey().toInstant().plus(granularity);
             if (timestamp.test(shiftedKey, (newTimestamp, computedFloor) -> newTimestamp >= computedFloor)) {

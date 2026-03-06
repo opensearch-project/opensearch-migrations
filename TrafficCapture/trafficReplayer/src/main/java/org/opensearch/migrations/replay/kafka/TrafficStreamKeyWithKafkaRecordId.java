@@ -13,12 +13,12 @@ import lombok.Getter;
 
 @EqualsAndHashCode(callSuper = true)
 @Getter
-public class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndContext implements KafkaCommitOffsetData {
+class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndContext implements KafkaCommitOffsetData {
     private final int generation;
     private final int partition;
     private final long offset;
 
-    public TrafficStreamKeyWithKafkaRecordId(
+    TrafficStreamKeyWithKafkaRecordId(
         Function<ITrafficStreamKey, IReplayContexts.IKafkaRecordContext> contextFactory,
         TrafficStream trafficStream,
         KafkaCommitOffsetData ok
@@ -26,7 +26,7 @@ public class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndCo
         this(contextFactory, trafficStream, ok.getGeneration(), ok.getPartition(), ok.getOffset());
     }
 
-    public TrafficStreamKeyWithKafkaRecordId(
+    TrafficStreamKeyWithKafkaRecordId(
         Function<ITrafficStreamKey, IReplayContexts.IKafkaRecordContext> contextFactory,
         TrafficStream trafficStream,
         int generation,

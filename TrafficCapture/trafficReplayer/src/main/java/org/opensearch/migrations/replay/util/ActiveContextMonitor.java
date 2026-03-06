@@ -219,7 +219,7 @@ public class ActiveContextMonitor implements Runnable {
 
     private String describeBreach(IScopedInstrumentationAttributes scope, String activityName, Duration age) {
         var desc = new StringBuilder();
-        desc.append(activityName).append(" age=").append(formatDuration(age));
+        desc.append(activityName).append(" age=").append(Utils.formatDurationInSeconds(age));
         var parent = scope.getEnclosingScope();
         int hops = 0;
         while (parent != null && hops < 3) {
@@ -236,14 +236,6 @@ public class ActiveContextMonitor implements Runnable {
             hops++;
         }
         return desc.toString();
-    }
-
-    private static String formatDuration(Duration d) {
-        long totalSeconds = d.getSeconds();
-        if (totalSeconds < 0) return "-" + formatDuration(d.negated());
-        if (totalSeconds < 60) return totalSeconds + "s";
-        if (totalSeconds < 3600) return (totalSeconds / 60) + "m" + (totalSeconds % 60) + "s";
-        return (totalSeconds / 3600) + "h" + ((totalSeconds % 3600) / 60) + "m";
     }
 
     Duration getAge(long recordedNanoTime) {
