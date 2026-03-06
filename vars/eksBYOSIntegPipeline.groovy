@@ -49,7 +49,7 @@ def call(Map config = [:]) {
             dataNodeCount: 24,
             dedicatedManagerNodeCount: 4,
             ebsVolumeSize: 2048,
-            ebsThroughput: 500
+            ebsThroughput: 1000
         ]
     ]
     pipeline {
