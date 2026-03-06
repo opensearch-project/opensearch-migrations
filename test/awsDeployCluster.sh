@@ -125,6 +125,7 @@ else
 fi
 cd amazon-opensearch-service-sample-cdk && git pull
 npm install
+npm run build
 
 cd ..
 cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
