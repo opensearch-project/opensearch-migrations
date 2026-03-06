@@ -226,7 +226,8 @@ class Cluster:
         return r
 
     def execute_benchmark_workload(self, workload: str,
-                                   workload_params='bulk_size:10,bulk_indexing_clients:1'):
+                                   workload_params='bulk_size:10,bulk_indexing_clients:1',
+                                   test_procedure: str = None):
         client_options = "verify_certs:false"
         if not self.allow_insecure:
             client_options += ",use_ssl:true"
@@ -249,6 +250,8 @@ class Cluster:
                    "--test-mode --kill-running-processes "
                    f"--workload-params={workload_params} "
                    f"--client-options={client_options}")
+        if test_procedure:
+            command += f" --test-procedure={test_procedure}"
         # While a little wordier, this approach prevents us from censoring the password if it appears in other contexts,
         # e.g. username:admin,password:admin.
         display_command = command.replace(f"basic_auth_password:{password_to_censor}", "basic_auth_password:********")

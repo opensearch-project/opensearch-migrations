@@ -78,6 +78,43 @@ def run_test_benchmarks(cluster: Cluster):
     cluster.execute_benchmark_workload(workload="nyc_taxis")
 
 
+def run_aoss_test_benchmarks(cluster: Cluster, collection_type: str):
+    """Run OSB workloads appropriate for a specific AOSS collection type.
+    
+    collection_type: 'search', 'timeseries', or 'vector'
+    """
+    if collection_type == 'search':
+        cluster.execute_benchmark_workload(workload="geonames")
+        cluster.execute_benchmark_workload(workload="pmc")
+        cluster.execute_benchmark_workload(workload="so")
+    elif collection_type == 'timeseries':
+        cluster.execute_benchmark_workload(workload="http_logs")
+        cluster.execute_benchmark_workload(workload="eventdata")
+    elif collection_type == 'vector':
+        cluster.execute_benchmark_workload(
+            workload="vectorsearch",
+            workload_params="target_index_name:vectors_faiss,"
+                            "target_index_body:indices/faiss-index.json,"
+                            "target_field_name:target_field,"
+                            "target_index_dimension:768,"
+                            "target_index_space_type:l2,"
+                            "bulk_size:10,bulk_indexing_clients:1",
+            test_procedure="no-train-test-index-only"
+        )
+        cluster.execute_benchmark_workload(
+            workload="vectorsearch",
+            workload_params="target_index_name:vectors_lucene_filtered,"
+                            "target_index_body:indices/filters/lucene-index-attributes.json,"
+                            "target_field_name:target_field,"
+                            "target_index_dimension:768,"
+                            "target_index_space_type:l2,"
+                            "bulk_size:10,bulk_indexing_clients:1",
+            test_procedure="no-train-test-index-only"
+        )
+    else:
+        raise ValueError(f"Unknown AOSS collection type: {collection_type}. Use 'search', 'timeseries', or 'vector'.")
+
+
 # As a default we exclude system indices and searchguard indices
 def clear_indices(cluster: Cluster):
     clear_indices_path = "/*,-.*,-searchguard*,-sg7*,.migrations_working_state*"

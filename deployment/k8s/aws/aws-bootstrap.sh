@@ -952,8 +952,20 @@ if [[ "$build_images" == "true" ]]; then
   BUILD_TARGET="buildImagesToRegistry"
   export MULTI_ARCH_NATIVE
 
-  # When mirroring, buildkit still pulls from public registries — building on
-  # isolated clusters is not supported. Use --ma-images-source instead.
+  # Login to ECR first, then create K8s secret, then set up BuildKit.
+  # The builder needs credentials available at creation time.
+  echo "Building images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
+  ecr_domain="${MIGRATIONS_ECR_REGISTRY%%/*}"
+  echo "Logging in to ECR registry: $ecr_domain"
+  aws ecr get-login-password --region "${AWS_CFN_REGION}" \
+    | docker login --username AWS --password-stdin "$ecr_domain" \
+    || { echo "ECR login failed"; exit 1; }
+
+  BUILDKIT_NS="${BUILDKIT_NAMESPACE:-buildkit}"
+  echo "Creating ECR credentials secret in namespace $BUILDKIT_NS..."
+  kubectl create secret generic ecr-creds -n "$BUILDKIT_NS" \
+    --from-file=config.json="$HOME/.docker/config.json" \
+    --dry-run=client -o yaml | kubectl apply -f -
 
   if docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
     echo "Buildkit already configured and healthy, skipping setup"
@@ -961,13 +973,6 @@ if [[ "$build_images" == "true" ]]; then
     echo "Setting up buildkit for local builds..."
     "${base_dir}/buildImages/setUpK8sImageBuildServices.sh"
   fi
-
-  echo "Building images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"
-  ecr_domain="${MIGRATIONS_ECR_REGISTRY%%/*}"
-  echo "Logging in to ECR registry: $ecr_domain"
-  aws ecr get-login-password --region "${AWS_CFN_REGION}" \
-    | docker login --username AWS --password-stdin "$ecr_domain" \
-    || { echo "ECR login failed"; exit 1; }
 
   "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
 
