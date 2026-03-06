@@ -152,7 +152,7 @@ def call(Map config = [:]) {
                                           --base-dir "\$(pwd)" \
                                           --skip-console-exec \
                                           --skip-setting-k8s-context \
-                                          2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
+                                          2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
                                     """
 
                                     // Capture MA VPC info for source domain deployment
