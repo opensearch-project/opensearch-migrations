@@ -173,6 +173,7 @@ public class RoutingShardColocationTest extends SourceTestBase {
         var sourceOps = new ClusterOperations(sourceCluster);
         sourceOps.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, REPO_NAME);
         sourceOps.restoreSnapshot(REPO_NAME, SNAPSHOT_NAME);
+        sourceOps.deleteSnapshot(REPO_NAME, SNAPSHOT_NAME);
         sourceOps.refresh(INDEX_NAME);
 
         FileSystemUtils.deleteDirectories(tempSnapshotDir.toString());
