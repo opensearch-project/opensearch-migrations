@@ -164,16 +164,11 @@ def call(Map config = [:]) {
                                     writeFile file: '/tmp/ma-outputs.json', text: exportsJson
 
                                     env.MA_VPC_ID = sh(
-                                        script: "jq -r '.[] | select(.OutputKey | test(\"VpcId\")) | .OutputValue' /tmp/ma-outputs.json",
-                                        returnStdout: true
-                                    ).trim()
-                                    env.MA_SUBNET_IDS = sh(
-                                        script: "jq -r '[.[] | select(.OutputKey | test(\"PrivateSubnet\")) | .OutputValue] | join(\",\")' /tmp/ma-outputs.json",
+                                        script: "jq -r '[.[] | select(.OutputKey | test(\"VpcId\"))] | first | .OutputValue' /tmp/ma-outputs.json",
                                         returnStdout: true
                                     ).trim()
 
                                     echo "MA VPC: ${env.MA_VPC_ID}"
-                                    echo "MA Subnets: ${env.MA_SUBNET_IDS}"
                                 }
                             }
                         }
@@ -200,6 +195,7 @@ def call(Map config = [:]) {
                                                 clusterVersion: "${params.SOURCE_VERSION}",
                                                 clusterType: "OPENSEARCH_MANAGED_SERVICE",
                                                 openAccessPolicyEnabled: true,
+                                                allowAllVpcTraffic: true,
                                                 domainRemovalPolicy: "DESTROY"
                                             ],
                                             [
