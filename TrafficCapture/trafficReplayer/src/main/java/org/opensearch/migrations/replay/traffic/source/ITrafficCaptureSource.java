@@ -66,4 +66,7 @@ public interface ITrafficCaptureSource extends AutoCloseable {
     default Optional<Instant> getNextRequiredTouch() {
         return Optional.empty();
     }
+
+    /** Emit a periodic heartbeat log. Default no-op for non-Kafka sources. */
+    default void logHeartbeat() {}
 }

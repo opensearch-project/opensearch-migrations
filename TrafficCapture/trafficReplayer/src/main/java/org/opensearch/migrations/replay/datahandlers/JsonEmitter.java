@@ -242,7 +242,7 @@ public class JsonEmitter implements AutoCloseable {
         } else if (o instanceof ObjectNode) {
             writeStartObject();
             push(((ObjectNode) o).properties().iterator(), this::writeEndObject);
-        } else if (o.getClass().isArray()) {
+        } else if (o != null && o.getClass().isArray()) {
             writeStartArray();
             push(Arrays.stream((Object[]) o).iterator(), this::writeEndArray);
         } else if (o instanceof ArrayNode) {

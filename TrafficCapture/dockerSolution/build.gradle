@@ -37,7 +37,8 @@ dockerFilesForExternalServices.each { dockerImageName, projectName ->
 
         def applications = [
                 project(":CreateSnapshot"),
-                project(":MetadataMigration")
+                project(":MetadataMigration"),
+                project(":libraries:kafkaUtils")
         ]
         // Setup additional sync task which doesn't depend on the base image being built, for other projects to use
         syncTaskProviderNoDocker = getMigrationConsoleSyncTask(project, dockerImageName, projectName, libraries, applications, sourceDirectoryOverrides, false)

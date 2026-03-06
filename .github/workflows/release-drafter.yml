@@ -106,6 +106,7 @@ jobs:
         run: |
           # Preface Traffic Capture version with 0. to signal interface immaturity
           ./gradlew :buildImages:buildImagesToRegistry \
+            -Pbuilder=local-remote-builder \
             -PintermediateRegistry=localhost:5000 \
             -PregistryEndpoint=opensearchstaging \
             -PimageVersion=${{ steps.get_data.outputs.version }} \

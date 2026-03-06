@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BUILDER_NAME="local-remote-builder"
-
 # Use KUBE_CONTEXT env var if set, for explicit context targeting
 CONTEXT_ARGS=()
 if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+  CONTEXT="${KUBE_CONTEXT}"
   CONTEXT_ARGS=("--context=${KUBE_CONTEXT}")
+else
+  CONTEXT=$(kubectl config current-context 2>/dev/null)
 fi
+
+# Derive builder name from context so each cluster gets its own builder
+# NOTE: This naming convention must match RegistryImageBuildUtils.groovy's builder name derivation
+BUILDER_NAME="builder-${CONTEXT//[^a-zA-Z0-9_-]/-}"
 
 # Check if builder already exists and is healthy
 if docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
@@ -22,11 +27,6 @@ docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
 NAMESPACE="${BUILDKIT_NAMESPACE:-buildkit}"
 
 # Detect cloud vs local K8s
-if [[ -n "${KUBE_CONTEXT:-}" ]]; then
-  CONTEXT="${KUBE_CONTEXT}"
-else
-  CONTEXT=$(kubectl config current-context 2>/dev/null)
-fi
 if [[ "$CONTEXT" =~ (eks:|gke_|aks-|migration-eks-) ]]; then
   echo "Detected cloud K8s, using kubernetes driver with native multi-arch builds"
   
@@ -73,5 +73,6 @@ else
 fi
 
 docker buildx use "$BUILDER_NAME"
+echo "BUILDX_BUILDER=${BUILDER_NAME}"
 echo "Bootstrapping builder..."
 docker buildx inspect --bootstrap

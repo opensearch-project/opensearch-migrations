@@ -326,11 +326,10 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         if (outstandingTrafficSourceReaderInterruptedCloseSessions.get() > 0) {
             log.atDebug().setMessage("Returning empty batch: {} synthetic close sessions still outstanding")
                 .addArgument(outstandingTrafficSourceReaderInterruptedCloseSessions::get).log();
-            // The spin here is intentional.
             // We should be draining very fast and if we block, we risk falling out of the Kafka group,
             // which could then have knock-on effects throughout the fleet since we're recovering from
             // the last recovery/partition reassignment.
-            Thread.yield();
+            java.util.concurrent.locks.LockSupport.parkNanos(5_000_000); // yield for up to 5 ms
             return Collections.emptyList();
         }
         try {
@@ -403,6 +402,15 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             trafficStreamKey,
             (TrafficStreamKeyWithKafkaRecordId) trafficStreamKey
         );
+    }
+
+    /**
+     * Log a periodic heartbeat summarizing the Kafka consumer state.
+     * Safe to call from any thread — uses only atomic reads and synchronized blocks.
+     */
+    @Override
+    public void logHeartbeat() {
+        trackingKafkaConsumer.logHeartbeat();
     }
 
     @Override

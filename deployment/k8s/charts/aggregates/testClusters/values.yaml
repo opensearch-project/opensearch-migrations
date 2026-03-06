@@ -4,6 +4,11 @@ conditionalPackageInstalls:
 
 useDedicatedKarpenterPool: false
 
+# Override to restrict instance types in the dedicated search NodePool.
+# If empty, allows any c/m/r instance gen 6+.
+# nodePoolInstanceTypes:
+#   - m6i.2xlarge
+
 source:
   http:
     tls:

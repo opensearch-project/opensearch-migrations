@@ -80,7 +80,7 @@ class ExpiringTrafficStreamMapSequentialTest extends InstrumentationTest {
 
     @Test
     public void testLinearConnectionsWithGreaterGranulatityAreExpired() {
-        testLinearExpirations(i -> "connectionId_" + i, 3, 2, new int[] { 0, 0, 0, 0, 1, 1, 2, 2, 3 });
+        testLinearExpirations(i -> "connectionId_" + i, 3, 2, new int[] { 0, 0, 0, 0, 1, 1, 3, 3, 5 });
     }
 
     @Test

@@ -52,6 +52,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
     @Getter
     private final Duration bufferTimeWindow;
     private final ExecutorService executorForBlockingActivity;
+    private static final org.slf4j.Logger heartbeatLogger =
+        org.slf4j.LoggerFactory.getLogger("BackpressureHeartbeat");
 
     public BlockingTrafficSource(ISimpleTrafficCaptureSource underlying, Duration bufferTimeWindow) {
         this.underlyingSource = underlying;
@@ -182,7 +184,11 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                     }
                 }
             } catch (InterruptedException e) {
-                log.atWarn().setCause(e).setMessage("Interrupted while waiting to read more data").log();
+                log.atWarn().setCause(e).setMessage("Interrupted while waiting to read more data." +
+                        " stopReadingAt={} lastTimestamp={}")
+                    .addArgument(stopReadingAtRef)
+                    .addArgument(lastTimestampSecondsRef)
+                    .log();
                 Thread.currentThread().interrupt();
                 break;
             }
@@ -202,6 +208,30 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         }
         return commitResult;
     }
+
+    @Override
+    public void logHeartbeat() {
+        underlyingSource.logHeartbeat();
+        logBackpressureHeartbeat();
+    }
+
+    private void logBackpressureHeartbeat() {
+        var stopAt = stopReadingAtRef.get();
+        var lastTs = lastTimestampSecondsRef.get();
+        var engaged = !stopAt.equals(Instant.EPOCH) && stopAt.isBefore(lastTs);
+        var sb = new StringBuilder();
+        sb.append("engaged=").append(engaged);
+        sb.append(" stopReadingAt=").append(stopAt.equals(Instant.EPOCH) ? "EPOCH" : stopAt);
+        sb.append(" lastTimestamp=").append(lastTs.equals(Instant.EPOCH) ? "EPOCH" : lastTs);
+        if (!stopAt.equals(Instant.EPOCH) && !lastTs.equals(Instant.EPOCH)) {
+            var headroom = Duration.between(lastTs, stopAt);
+            sb.append(" headroom=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(headroom));
+        }
+        sb.append(" bufferWindow=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(bufferTimeWindow));
+        sb.append(" readGatePermits=").append(readGate.availablePermits());
+        heartbeatLogger.atInfo().setMessage("{}").addArgument(sb).log();
+    }
+
 
     @Override
     public void close() throws Exception {
