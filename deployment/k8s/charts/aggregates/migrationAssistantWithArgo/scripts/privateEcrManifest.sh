@@ -64,7 +64,7 @@ quay.io/thanos/thanos:v0.38.0
 
 # --- etcd-operator ---
 ghcr.io/aenix-io/etcd-operator:v0.4.2
-gcr.io/kubebuilder/kube-rbac-proxy:v0.16.0
+registry.k8s.io/kubebuilder/kube-rbac-proxy:v0.16.0
 quay.io/coreos/etcd:v3.5.12
 
 # --- otel collector ---

@@ -218,6 +218,8 @@ charts:
         vpa:
           enabled: false
       kubeRbacProxy:
+        image:
+          repository: registry.k8s.io/kubebuilder/kube-rbac-proxy
         vpa:
           enabled: false
 
