@@ -21,22 +21,22 @@
     "@eslint/js": "^9.39.3",
     "@types/eslint__js": "^9.14.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^25.3.0",
-    "aws-cdk": "2.1107.0",
-    "aws-cdk-lib": "2.240.0",
+    "@types/node": "^25.3.3",
+    "aws-cdk": "2.1108.0",
+    "aws-cdk-lib": "2.241.0",
     "constructs": "10.5.1",
     "eslint": "^9.39.3",
     "jest": "^30.2.0",
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.1",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.56.0"
+    "typescript-eslint": "^8.56.1"
   },
   "dependencies": {
     "@aws-cdk/aws-servicecatalogappregistry-alpha": "2.240.0-alpha.0",
     "@jest/globals": "^30.2.0",
-    "cdk": "2.1107.0",
-    "globals": "^17.3.0",
+    "cdk": "2.1108.0",
+    "globals": "^17.4.0",
     "source-map-support": "^0.5.21"
   }
 }
