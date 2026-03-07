@@ -1056,8 +1056,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "source",
                       "snapshot"
                     ]
-                  },
-                  "minItems": 1
+                  }
                 },
                 "replayerConfig": {
                   "type": "object",
@@ -1159,7 +1158,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "fromProxy",
                 "kafkaClusterName",
                 "kafkaConfig",
-                "toTarget"
+                "toTarget",
+                "dependsOnSnapshotMigrations"
               ]
             },
             "default": []
@@ -2080,7 +2080,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "snapshot"
                   ]
                 },
-                "minItems": 1
+                "default": []
               },
               "replayerConfig": {
                 "type": "object",

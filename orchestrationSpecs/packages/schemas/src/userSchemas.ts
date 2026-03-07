@@ -533,7 +533,7 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     });
                 }
 
-                for (let j = 0; j < (rc.dependsOnSnapshotMigrations).length; j++) {
+                for (let j = 0; j < (rc.dependsOnSnapshotMigrations?.length ?? 0); j++) {
                     const dep = rc.dependsOnSnapshotMigrations![j];
                     if (!(dep.source in data.sourceClusters)) {
                         ctx.addIssue({
