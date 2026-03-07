@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: nightly-k8s-matrix
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    schedule: nightly
+spec:
+  schedule: "0 22 * * *"
+  timezone: "UTC"
+  concurrencyPolicy: Replace  # cancel previous if still running
+  startingDeadlineSeconds: 300  # skip if >5min late
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 14
+  workflowSpec:
+    workflowTemplateRef:
+      name: k8s-matrix-test
+    arguments:
+      parameters:
+        - name: source-version
+          value: "all"
+        - name: target-versions
+          value: '["OS_1.3","OS_2.19","OS_3.1"]'
+    # Nightly runs get longer TTL for debugging
+    ttlStrategy:
+      secondsAfterCompletion: 86400  # 24 hours
+      secondsAfterSuccess: 43200     # 12 hours
+      secondsAfterFailure: 172800    # 48 hours
+    podGC:
+      strategy: OnPodCompletion

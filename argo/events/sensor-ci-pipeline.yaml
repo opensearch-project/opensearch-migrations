@@ -1,0 +1,70 @@
+# Triggers CI pipeline on PR and push events (replaces CI.yml GHA workflow trigger)
+apiVersion: argoproj.io/v1alpha1
+kind: Sensor
+metadata:
+  name: ci-pipeline-sensor
+  namespace: argo-events
+spec:
+  dependencies:
+    - name: pr-push
+      eventSourceName: github-migrations
+      eventName: pr-events
+      filters:
+        data:
+          - path: body.action
+            type: string
+            value:
+              - opened
+              - synchronize
+              - reopened
+              - ""  # push events have no action field
+  triggers:
+    - template:
+        name: ci-pipeline
+        conditions: pr-push
+        argoWorkflow:
+          operation: submit
+          source:
+            resource:
+              apiVersion: argoproj.io/v1alpha1
+              kind: Workflow
+              metadata:
+                generateName: ci-
+                namespace: ma
+                labels:
+                  trigger: github-event
+                  test-type: ci-pipeline
+              spec:
+                workflowTemplateRef:
+                  name: argo-ci-pipeline
+                arguments:
+                  parameters:
+                    - name: repo-url
+                      value: ""
+                    - name: branch
+                      value: ""
+                    - name: sha
+                      value: ""
+                    - name: pr-number
+                      value: ""
+          parameters:
+            - src:
+                dependencyName: pr-push
+                dataKey: body.pull_request.head.repo.clone_url
+                useRawData: true
+              dest: spec.arguments.parameters.0.value
+            - src:
+                dependencyName: pr-push
+                dataKey: body.pull_request.head.ref
+                useRawData: true
+              dest: spec.arguments.parameters.1.value
+            - src:
+                dependencyName: pr-push
+                dataKey: body.pull_request.head.sha
+                useRawData: true
+              dest: spec.arguments.parameters.2.value
+            - src:
+                dependencyName: pr-push
+                dataKey: body.pull_request.number
+                useRawData: true
+              dest: spec.arguments.parameters.3.value

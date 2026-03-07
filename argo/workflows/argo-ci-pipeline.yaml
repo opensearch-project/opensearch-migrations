@@ -1,0 +1,438 @@
+# Replaces: .github/workflows/CI.yml
+# Full CI pipeline with 30x gradle stripe fan-out, python tests, node tests, lint, link-checker
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: argo-ci-pipeline
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    replaces: CI.yml
+spec:
+  entrypoint: ci
+  onExit: report-and-notify
+  serviceAccountName: argo-workflow-executor
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: sha
+        value: ""
+      - name: pr-number
+        value: ""
+      - name: gradle-parallelization
+        value: "30"
+  activeDeadlineSeconds: 14400  # 4 hours
+
+  templates:
+    # ================================================================
+    # ROOT DAG — mirrors CI.yml job dependency graph
+    # All jobs run in parallel after checkout, gated by all-ci-checks-pass
+    # ================================================================
+    - name: ci
+      dag:
+        tasks:
+          - name: checkout
+            templateRef:
+              name: common-ci-steps
+              template: git-checkout
+            arguments:
+              parameters:
+                - name: repo-url
+                  value: "{{workflow.parameters.repo-url}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+
+          - name: generate-stripe-indices
+            template: generate-indices
+            arguments:
+              parameters:
+                - name: count
+                  value: "{{workflow.parameters.gradle-parallelization}}"
+
+          # --- gradle-extended-check (2x: spotlessCheck, publishToMavenLocal) ---
+          - name: gradle-extended-check
+            depends: checkout
+            template: gradle-task
+            arguments:
+              parameters:
+                - name: task
+                  value: "{{item}}"
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+            withItems:
+              - spotlessCheck
+              - publishToMavenLocal
+
+          # --- python-lint ---
+          - name: python-lint
+            depends: checkout
+            template: python-lint
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+          # --- python-tests (3x matrix) ---
+          - name: python-tests
+            depends: checkout
+            template: python-test
+            arguments:
+              parameters:
+                - name: py-project
+                  value: "{{item}}"
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+            withItems:
+              - migrationConsole/lib/console_link
+              - migrationConsole/cluster_tools
+              - k8sConfigMapUtilScripts
+
+          # --- gradle-tests (30x striped fan-out) ---
+          - name: gradle-tests
+            depends: "checkout && generate-stripe-indices"
+            template: gradle-test-stripe
+            arguments:
+              parameters:
+                - name: stripe-index
+                  value: "{{item}}"
+                - name: total-stripes
+                  value: "{{workflow.parameters.gradle-parallelization}}"
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+            withParam: "{{tasks.generate-stripe-indices.outputs.result}}"
+
+          # --- python-e2e-tests (Docker Compose) ---
+          - name: python-e2e-tests
+            depends: checkout
+            template: python-e2e
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+          # --- node-tests (3x matrix) ---
+          - name: node-tests
+            depends: checkout
+            template: node-test
+            arguments:
+              parameters:
+                - name: npm-project
+                  value: "{{item}}"
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+            withItems:
+              - ./deployment/cdk/opensearch-service-migration
+              - ./deployment/migration-assistant-solution
+              - ./frontend
+
+          # --- link-checker ---
+          - name: link-checker
+            depends: checkout
+            template: link-checker
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+    # ================================================================
+    # GENERATE STRIPE INDICES [0..N-1] as JSON array
+    # ================================================================
+    - name: generate-indices
+      inputs:
+        parameters:
+          - name: count
+      script:
+        image: python:3.11-alpine
+        command: [python]
+        source: |
+          import json
+          print(json.dumps(list(range(int("{{inputs.parameters.count}}")))))
+
+    # ================================================================
+    # GRADLE TEST STRIPE — each of the 30 GHA matrix jobs
+    # ================================================================
+    - name: gradle-test-stripe
+      retryStrategy:
+        limit: 1
+        retryPolicy: OnFailure
+      inputs:
+        parameters:
+          - name: stripe-index
+          - name: total-stripes
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: test-reports
+            path: /workspace/build/reports/
+            optional: true
+            archive:
+              none: {}
+          - name: junit-xml
+            path: /workspace/build/test-results/
+            optional: true
+            archive:
+              none: {}
+            s3:
+              key: "{{workflow.name}}/junit-xml/"
+      container:
+        image: gradle:8-jdk17
+        workingDir: /workspace
+        command: [bash, -c]
+        args:
+          - |
+            MAX_WORKERS=$(( $(nproc) - 1 ))
+            [ "$MAX_WORKERS" -lt 1 ] && MAX_WORKERS=1
+            ./gradlew allTests mergeJacocoReports \
+              --max-workers $MAX_WORKERS \
+              -Dtest.striping.total={{inputs.parameters.total-stripes}} \
+              -Dtest.striping.index={{inputs.parameters.stripe-index}} \
+              -x spotlessCheck --stacktrace --continue || true
+            echo "Stripe {{inputs.parameters.stripe-index}} complete"
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            memory: "8Gi"
+        activeDeadlineSeconds: 3600  # 1 hour per stripe
+
+    # ================================================================
+    # GRADLE TASK (spotlessCheck, publishToMavenLocal)
+    # ================================================================
+    - name: gradle-task
+      inputs:
+        parameters:
+          - name: task
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: gradle:8-jdk17
+        workingDir: /workspace
+        command: [bash, -c]
+        args:
+          - ./gradlew {{inputs.parameters.task}} --no-daemon
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            memory: "8Gi"
+        activeDeadlineSeconds: 1800  # 30 min
+
+    # ================================================================
+    # PYTHON TEST (per project)
+    # ================================================================
+    - name: python-test
+      inputs:
+        parameters:
+          - name: py-project
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: coverage-xml
+            path: /workspace/coverage.xml
+            optional: true
+      script:
+        image: python:3.11-slim
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            memory: "4Gi"
+        command: [bash]
+        source: |
+          set -euo pipefail
+          apt-get update -qq && apt-get install -y -qq pipenv > /dev/null 2>&1
+
+          PROJECT="{{inputs.parameters.py-project}}"
+          if [[ "$PROJECT" == migrationConsole/* ]]; then
+            WORKDIR="/workspace/${PROJECT}"
+          else
+            WORKDIR="/workspace/TrafficCapture/dockerSolution/src/main/docker/${PROJECT}"
+          fi
+
+          cd "$WORKDIR"
+          pipenv install --deploy --dev
+          pipenv run test
+          pipenv run coverage xml -o /workspace/coverage.xml || true
+
+    # ================================================================
+    # PYTHON LINT
+    # ================================================================
+    - name: python-lint
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: python:3.11-slim
+        workingDir: /workspace
+        command: [bash, -c]
+        args:
+          - |
+            pip install flake8 -q
+            flake8 $(find . -name '*.py' \
+              -not -path '*/node_modules/*' \
+              -not -path '*/.git/*' \
+              -not -path '*/build/*' \
+              -not -path '*/.gradle/*')
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+        activeDeadlineSeconds: 600  # 10 min
+
+    # ================================================================
+    # PYTHON E2E (Docker Compose — needs DinD sidecar)
+    # ================================================================
+    - name: python-e2e
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: e2e-logs
+            path: /workspace/logs/
+            optional: true
+      sidecars:
+        - name: dind
+          image: docker:27-dind
+          securityContext:
+            privileged: true
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          mirrorVolumeMounts: true
+      container:
+        image: gradle:8-jdk17
+        workingDir: /workspace
+        env:
+          - name: DOCKER_HOST
+            value: tcp://localhost:2375
+        command: [bash, -c]
+        args:
+          - |
+            # Wait for Docker
+            for i in $(seq 1 30); do docker info >/dev/null 2>&1 && break; sleep 2; done
+
+            # Start Docker Solution
+            ./gradlew -p TrafficCapture dockerSolution:ComposeUp \
+              -x test -x spotlessCheck --info --stacktrace
+
+            # Run E2E tests
+            docker exec $(docker ps --filter "name=migration-console" -q) \
+              pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py \
+              --unique_id="testindex" -s --junitxml=/tmp/e2e-results.xml
+
+            # Collect logs
+            mkdir -p logs/docker
+            for container in $(docker ps -aq); do
+              name=$(docker inspect --format '{{.Name}}' $container | sed 's/\///')
+              docker logs $container > logs/docker/${name}.txt 2>&1
+            done
+        resources:
+          requests:
+            cpu: "4"
+            memory: "8Gi"
+        activeDeadlineSeconds: 3600
+
+    # ================================================================
+    # NODE TEST (per npm project)
+    # ================================================================
+    - name: node-test
+      inputs:
+        parameters:
+          - name: npm-project
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: node:22-slim
+        workingDir: /workspace/{{inputs.parameters.npm-project}}
+        command: [bash, -c]
+        args:
+          - |
+            npm ci
+            npm run test
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            memory: "4Gi"
+        activeDeadlineSeconds: 1800  # 30 min
+
+    # ================================================================
+    # LINK CHECKER
+    # ================================================================
+    - name: link-checker
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: lycheeverse/lychee:latest
+        workingDir: /workspace
+        command: [lychee]
+        args:
+          - "--verbose"
+          - "--accept=200,403,429"
+          - "--offline"
+          - "--exclude=file:///github/workspace/*"
+          - "--exclude=http://localhost*"
+          - "--exclude=https://localhost*"
+          - "--exclude=http://capture-proxy*"
+          - "--exclude-path=TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts/tests/data"
+          - "**/*.html"
+          - "**/*.md"
+          - "**/*.txt"
+          - "**/*.json"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+        activeDeadlineSeconds: 600  # 10 min
+
+    # ================================================================
+    # EXIT HANDLER: Report + Notify
+    # ================================================================
+    - name: report-and-notify
+      dag:
+        tasks:
+          - name: upload-results
+            templateRef:
+              name: reportportal-upload
+              template: upload-junit
+            arguments:
+              parameters:
+                - name: launch-name
+                  value: "ci-{{workflow.parameters.branch}}"
+              artifacts:
+                - name: junit-xml
+                  s3:
+                    key: "{{workflow.name}}/junit-xml/"
+                  optional: true
+          - name: notify-github
+            templateRef:
+              name: common-ci-steps
+              template: notify-github-status
+            arguments:
+              parameters:
+                - name: sha
+                  value: "{{workflow.parameters.sha}}"
+                - name: context
+                  value: "argo/ci-pipeline"

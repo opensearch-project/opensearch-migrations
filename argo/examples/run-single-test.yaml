@@ -1,0 +1,19 @@
+# Submit with: argo submit -n ma argo/examples/run-single-test.yaml --watch
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: k8s-local-test-
+  namespace: ma
+  labels:
+    test-type: k8s-local
+spec:
+  workflowTemplateRef:
+    name: k8s-local-test
+  arguments:
+    parameters:
+      - name: source-version
+        value: "ES_7.10"
+      - name: target-version
+        value: "OS_2.19"
+      - name: test-ids
+        value: "all"

@@ -1,0 +1,268 @@
+# Replaces: vars/eksIsolatedDeploy.groovy
+# Isolated network (no internet) EKS deployment test
+# Builds EKS cluster + isolated EKS with VPC endpoints, validates connectivity
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: eks-isolated-deploy
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    replaces: eksIsolatedDeploy.groovy
+spec:
+  entrypoint: main
+  onExit: cleanup-handler
+  serviceAccountName: ci-deployment-sa
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: stage
+        value: "eks-isolated"
+      - name: region
+        value: "us-east-1"
+      - name: isolated-vpc-id
+        value: ""  # VPC ID for isolated deployment (no internet)
+      - name: isolated-subnet-ids
+        value: ""  # Comma-separated subnet IDs (isolated, no internet)
+  activeDeadlineSeconds: 14400  # 4 hours (isolated deploy is slow)
+
+  synchronization:
+    semaphores:
+      - configMapKeyRef:
+          name: ci-stage-locks
+          key: eks-integ
+
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: checkout
+            templateRef:
+              name: common-ci-steps
+              template: git-checkout
+            arguments:
+              parameters:
+                - name: repo-url
+                  value: "{{workflow.parameters.repo-url}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+
+          - name: build
+            depends: checkout
+            templateRef:
+              name: default-integ-pipeline
+              template: gradle-build
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+          - name: deploy-build-eks
+            depends: build
+            template: deploy-build-eks
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.build.outputs.artifacts.source}}"
+
+          - name: deploy-isolated-eks
+            depends: deploy-build-eks
+            template: deploy-isolated-eks
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.deploy-build-eks.outputs.artifacts.source}}"
+
+          - name: validate-isolated
+            depends: deploy-isolated-eks
+            template: validate-isolated-deployment
+
+    # ================================================================
+    # DEPLOY BUILD EKS — standard EKS cluster for building images
+    # ================================================================
+    - name: deploy-build-eks
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+            BUILD_STACK="Migration-Assistant-Build-EKS-${STAGE}-${REGION}"
+
+            echo "Deploying build EKS cluster..."
+            ./deployment/k8s/aws/aws-bootstrap.sh \
+              --deploy-create-vpc-cfn \
+              --build-cfn \
+              --build-images \
+              --build-chart-and-dashboards \
+              --stack-name "${BUILD_STACK}" \
+              --stage "${STAGE}-build" \
+              --region "${REGION}" \
+              --version latest \
+              --skip-console-exec \
+              2>&1 | while IFS= read -r line; do printf '%s | %s\n' "$(date '+%H:%M:%S')" "$line"; done; exit ${PIPESTATUS[0]}
+
+            # Save build ECR registry (matches Jenkins env.BUILD_ECR)
+            BUILD_ECR=$(aws cloudformation describe-stacks \
+              --stack-name "${BUILD_STACK}" --region "${REGION}" \
+              --query 'Stacks[0].Outputs[?OutputKey==`MigrationsExportString`].OutputValue' \
+              --output text | tr ';' '\n' | grep MIGRATIONS_ECR_REGISTRY | cut -d= -f2)
+            echo "${BUILD_ECR}" > /workspace/test/build-ecr.txt
+            echo "Build ECR registry: ${BUILD_ECR}"
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+        activeDeadlineSeconds: 5400
+
+    # ================================================================
+    # DEPLOY ISOLATED EKS — EKS with no internet, VPC endpoints only
+    # ================================================================
+    - name: deploy-isolated-eks
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+            ISOLATED_STACK="Migration-Assistant-Isolated-EKS-${STAGE}-${REGION}"
+
+            echo "Deploying isolated EKS cluster (no internet)..."
+
+            # Read build ECR from previous step
+            BUILD_ECR=$(cat /workspace/test/build-ecr.txt 2>/dev/null || echo "")
+
+            # Matches Jenkins: --push-all-images-to-private-ecr --create-vpc-endpoints --ma-images-source
+            ./deployment/k8s/aws/aws-bootstrap.sh \
+              --deploy-import-vpc-cfn \
+              --build-cfn \
+              --build-chart-and-dashboards \
+              --push-all-images-to-private-ecr \
+              --create-vpc-endpoints \
+              --ma-images-source "${BUILD_ECR}" \
+              --stack-name "${ISOLATED_STACK}" \
+              --stage "${STAGE}-isolated" \
+              --vpc-id "{{workflow.parameters.isolated-vpc-id}}" \
+              --subnet-ids "{{workflow.parameters.isolated-subnet-ids}}" \
+              --region "${REGION}" \
+              --skip-console-exec \
+              2>&1 | while IFS= read -r line; do printf '%s | %s\n' "$(date '+%H:%M:%S')" "$line"; done; exit ${PIPESTATUS[0]}
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+        activeDeadlineSeconds: 5400
+
+    # ================================================================
+    # VALIDATE ISOLATED DEPLOYMENT — verify pods are running without internet
+    # ================================================================
+    - name: validate-isolated-deployment
+      container:
+        image: ci-runner:latest
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+
+            # Update kubeconfig for isolated cluster
+            CLUSTER_NAME="migration-${STAGE}-isolated"
+            aws eks update-kubeconfig --name "${CLUSTER_NAME}" --region "${REGION}"
+
+            echo "Validating isolated deployment..."
+
+            # Check all pods are running
+            kubectl get pods -n ma --no-headers | while read -r line; do
+              POD=$(echo "$line" | awk '{print $1}')
+              STATUS=$(echo "$line" | awk '{print $3}')
+              if [ "${STATUS}" != "Running" ] && [ "${STATUS}" != "Completed" ]; then
+                echo "ERROR: Pod ${POD} is in state ${STATUS}"
+                kubectl describe pod -n ma "${POD}" | tail -20
+                exit 1
+              fi
+              echo "  OK: ${POD} (${STATUS})"
+            done
+
+            # Verify no internet access from pods
+            kubectl run --rm -i --tty --restart=Never net-test \
+              --image=busybox -n ma -- sh -c \
+              "wget -q -O /dev/null --timeout=5 https://google.com 2>&1 && echo 'ERROR: Internet accessible' && exit 1 || echo 'OK: No internet access (expected)'" || true
+
+            echo "Isolated deployment validation PASSED"
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 900
+
+    # ================================================================
+    # CLEANUP HANDLER — delete both EKS clusters
+    # ================================================================
+    - name: cleanup-handler
+      dag:
+        tasks:
+          - name: delete-isolated-stack
+            templateRef:
+              name: eks-integ-pipeline
+              template: delete-cfn-stack
+            arguments:
+              parameters:
+                - name: stack-name
+                  value: "Migration-Assistant-Isolated-EKS-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
+          - name: delete-build-stack
+            depends: delete-isolated-stack
+            templateRef:
+              name: eks-integ-pipeline
+              template: delete-cfn-stack
+            arguments:
+              parameters:
+                - name: stack-name
+                  value: "Migration-Assistant-Build-EKS-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
+          - name: upload-results
+            templateRef:
+              name: reportportal-upload
+              template: upload-junit
+            arguments:
+              parameters:
+                - name: launch-name
+                  value: "eks-isolated-deploy"

@@ -1,0 +1,47 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: build-images
+  namespace: ma
+  labels:
+    app: ci-pipeline
+spec:
+  entrypoint: build
+  serviceAccountName: argo-workflow-executor
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: platform
+        value: "amd64"
+  activeDeadlineSeconds: 3600  # 1 hour
+
+  templates:
+    - name: build
+      dag:
+        tasks:
+          - name: checkout
+            templateRef:
+              name: common-ci-steps
+              template: git-checkout
+            arguments:
+              parameters:
+                - name: repo-url
+                  value: "{{workflow.parameters.repo-url}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+
+          - name: build-images
+            depends: checkout
+            templateRef:
+              name: common-ci-steps
+              template: build-docker-images
+            arguments:
+              parameters:
+                - name: platform
+                  value: "{{workflow.parameters.platform}}"
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"

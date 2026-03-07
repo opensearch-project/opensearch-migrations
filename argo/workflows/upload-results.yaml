@@ -1,0 +1,277 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: reportportal-upload
+  namespace: ma
+  labels:
+    app: ci-pipeline
+spec:
+  templates:
+    # ================================================================
+    # UPLOAD JUNIT XML — post-hoc import of test results
+    # ================================================================
+    - name: upload-junit
+      inputs:
+        parameters:
+          - name: launch-name
+          - name: source-version
+            default: ""
+          - name: target-version
+            default: ""
+          - name: rp-endpoint
+            default: "http://reportportal-api.reportportal.svc:8585"
+          - name: rp-project
+            default: "opensearch_migrations"
+        artifacts:
+          - name: junit-xml
+            path: /results/
+            optional: true
+      script:
+        image: python:3.11-alpine
+        command: [python]
+        source: |
+          import os, glob, json, sys
+          try:
+              import requests
+          except ImportError:
+              os.system("pip install requests -q")
+              import requests
+
+          rp_endpoint = "{{inputs.parameters.rp-endpoint}}"
+          rp_project = "{{inputs.parameters.rp-project}}"
+          rp_token = os.environ.get("RP_TOKEN", "")
+
+          xml_files = glob.glob("/results/**/*.xml", recursive=True)
+          if not xml_files:
+              print("No JUnit XML files found — skipping ReportPortal upload")
+              sys.exit(0)
+
+          if not rp_token:
+              print("No RP_TOKEN set — skipping ReportPortal upload")
+              sys.exit(0)
+
+          # Check connectivity
+          try:
+              requests.get(f"{rp_endpoint}/health", timeout=5)
+          except Exception:
+              print(f"ReportPortal not reachable at {rp_endpoint} — skipping upload")
+              sys.exit(0)
+
+          print(f"Found {len(xml_files)} XML files to upload")
+
+          attrs = [{"key": "workflow", "value": "{{workflow.name}}"}]
+          source = "{{inputs.parameters.source-version}}"
+          target = "{{inputs.parameters.target-version}}"
+          if source:
+              attrs.append({"key": "source", "value": source})
+          if target:
+              attrs.append({"key": "target", "value": target})
+
+          launch_import = {
+              "name": "{{inputs.parameters.launch-name}}",
+              "attributes": attrs
+          }
+
+          headers = {"Authorization": f"Bearer {rp_token}"}
+          url = f"{rp_endpoint}/api/v1/{rp_project}/launch/import"
+
+          success = 0
+          for xml_file in xml_files:
+              try:
+                  with open(xml_file, "rb") as f:
+                      resp = requests.post(
+                          url,
+                          headers=headers,
+                          files={"file": (os.path.basename(xml_file), f, "application/xml")},
+                          data={"launchImportRq": json.dumps(launch_import)}
+                      )
+                  if resp.ok:
+                      success += 1
+                      print(f"  Uploaded {xml_file}")
+                  else:
+                      print(f"  Failed {xml_file}: {resp.status_code} {resp.text[:200]}")
+              except Exception as e:
+                  print(f"  Error uploading {xml_file}: {e}")
+
+          print(f"\nUploaded {success}/{len(xml_files)} files to ReportPortal")
+        env:
+          - name: RP_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: reportportal-token
+                key: token
+                optional: true
+
+    # ================================================================
+    # UPLOAD JSON REPORTS — for testAutomation JSON format
+    # ================================================================
+    - name: upload-json-reports
+      inputs:
+        parameters:
+          - name: launch-name
+          - name: rp-endpoint
+            default: "http://reportportal-api.reportportal.svc:8585"
+          - name: rp-project
+            default: "opensearch_migrations"
+        artifacts:
+          - name: test-reports
+            path: /reports/
+            optional: true
+      script:
+        image: python:3.11-alpine
+        command: [python]
+        source: |
+          import os, glob, json, sys
+          try:
+              import requests
+          except ImportError:
+              os.system("pip install requests -q")
+              import requests
+
+          rp_endpoint = "{{inputs.parameters.rp-endpoint}}"
+          rp_project = "{{inputs.parameters.rp-project}}"
+          rp_token = os.environ.get("RP_TOKEN", "")
+
+          json_files = glob.glob("/reports/**/*.json", recursive=True)
+          if not json_files:
+              print("No JSON report files found — skipping ReportPortal upload")
+              sys.exit(0)
+
+          if not rp_token:
+              print("No RP_TOKEN set — skipping ReportPortal upload")
+              sys.exit(0)
+
+          # Check connectivity before proceeding
+          try:
+              requests.get(f"{rp_endpoint}/health", timeout=5)
+          except Exception:
+              print(f"ReportPortal not reachable at {rp_endpoint} — skipping upload")
+              sys.exit(0)
+
+          headers = {
+              "Authorization": f"Bearer {rp_token}",
+              "Content-Type": "application/json"
+          }
+
+          for json_file in json_files:
+              try:
+                  with open(json_file) as f:
+                      data = json.load(f)
+              except (json.JSONDecodeError, IOError) as e:
+                  print(f"Skipping {json_file}: {e}")
+                  continue
+
+              summary = data.get("summary", {})
+              tests = data.get("tests", [])
+              source = summary.get("source_version", "unknown")
+              target = summary.get("target_version", "unknown")
+
+              # Start launch
+              launch_resp = requests.post(
+                  f"{rp_endpoint}/api/v2/{rp_project}/launch",
+                  headers=headers,
+                  json={
+                      "name": "{{inputs.parameters.launch-name}}",
+                      "startTime": "{{workflow.creationTimestamp}}",
+                      "attributes": [
+                          {"key": "source", "value": source},
+                          {"key": "target", "value": target},
+                          {"key": "workflow", "value": "{{workflow.name}}"}
+                      ]
+                  }
+              )
+              if not launch_resp.ok:
+                  print(f"Failed to create launch: {launch_resp.text[:200]}")
+                  continue
+
+              launch_id = launch_resp.json().get("id")
+
+              # Report each test
+              for test in tests:
+                  status = "PASSED" if test["result"] == "passed" else "FAILED"
+                  item_resp = requests.post(
+                      f"{rp_endpoint}/api/v2/{rp_project}/item",
+                      headers=headers,
+                      json={
+                          "launchUuid": launch_id,
+                          "name": test["name"],
+                          "type": "TEST",
+                          "description": test.get("description", ""),
+                          "startTime": "{{workflow.creationTimestamp}}",
+                      }
+                  )
+                  if item_resp.ok:
+                      item_id = item_resp.json().get("id")
+                      # Finish test item with status
+                      requests.put(
+                          f"{rp_endpoint}/api/v2/{rp_project}/item/{item_id}",
+                          headers=headers,
+                          json={
+                              "launchUuid": launch_id,
+                              "endTime": "now",
+                              "status": status,
+                          }
+                      )
+
+              # Finish launch
+              requests.put(
+                  f"{rp_endpoint}/api/v2/{rp_project}/launch/{launch_id}/finish",
+                  headers=headers,
+                  json={"endTime": "now"}
+              )
+              print(f"Uploaded {len(tests)} tests from {json_file} ({source} -> {target})")
+        env:
+          - name: RP_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: reportportal-token
+                key: token
+                optional: true
+
+    # ================================================================
+    # PYTEST WITH REPORTPORTAL — live streaming via pytest-reportportal
+    # ================================================================
+    - name: run-tests-with-rp-streaming
+      inputs:
+        parameters:
+          - name: source-version
+          - name: target-version
+          - name: registry-prefix
+          - name: rp-endpoint
+            default: "http://reportportal-api.reportportal.svc:8585"
+          - name: rp-project
+            default: "opensearch_migrations"
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: test-reports
+            path: /workspace/libraries/testAutomation/reports
+            optional: true
+      container:
+        image: python:3.11-slim
+        workingDir: /workspace/libraries/testAutomation
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            apt-get update -qq && apt-get install -y -qq pipenv kubectl helm > /dev/null 2>&1
+            pipenv install --deploy
+            pip install pytest-reportportal
+
+            mkdir -p ./reports
+
+            pipenv run app \
+              --source-version={{inputs.parameters.source-version}} \
+              --target-version={{inputs.parameters.target-version}} \
+              --test-reports-dir='./reports' \
+              --copy-logs \
+              --registry-prefix='{{inputs.parameters.registry-prefix}}'
+        env:
+          - name: RP_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: reportportal-token
+                key: token
+                optional: true

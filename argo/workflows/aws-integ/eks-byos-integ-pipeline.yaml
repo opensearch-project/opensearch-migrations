@@ -1,0 +1,689 @@
+# Replaces: vars/eksBYOSIntegPipeline.groovy
+# Bring-Your-Own-Snapshot: S3 snapshot → target-only AOS → EKS → RFS backfill test
+# Matches Jenkins exactly: deployTargetClusterOnly → CDK synth → CFN create-stack →
+# configure EKS → build docker images → helm install → BYOS test → complex cleanup
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: eks-byos-integ-pipeline
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    replaces: eksBYOSIntegPipeline.groovy
+spec:
+  entrypoint: main
+  onExit: cleanup-handler
+  serviceAccountName: ci-deployment-sa
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: stage
+        value: "eksbyos"
+      - name: source-version
+        value: "ES_7.10"
+      - name: target-version
+        value: "OS_2.19"
+      - name: target-cluster-size
+        value: "default"  # default or large
+      - name: region
+        value: "us-east-1"
+      - name: s3-repo-uri
+        value: "s3://migrations-snapshots-library-us-east-1/large-snapshot-es5x/"
+      - name: snapshot-name
+        value: "large-snapshot"
+      - name: rfs-workers
+        value: "1"
+      - name: test-ids
+        value: "0010"
+      - name: monitor-retry-limit
+        value: "900"
+  activeDeadlineSeconds: 64800  # 18 hours (matches Jenkins)
+
+  synchronization:
+    semaphores:
+      - configMapKeyRef:
+          name: ci-stage-locks
+          key: eks-integ
+
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: checkout
+            templateRef:
+              name: common-ci-steps
+              template: git-checkout
+            arguments:
+              parameters:
+                - name: repo-url
+                  value: "{{workflow.parameters.repo-url}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+
+          - name: build
+            depends: checkout
+            templateRef:
+              name: default-integ-pipeline
+              template: gradle-build
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+          - name: deploy-target-cluster
+            depends: build
+            template: deploy-target-cluster
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.build.outputs.artifacts.source}}"
+
+          - name: synth-and-deploy-eks
+            depends: deploy-target-cluster
+            template: synth-and-deploy-eks
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.deploy-target-cluster.outputs.artifacts.source}}"
+
+          - name: configure-eks
+            depends: synth-and-deploy-eks
+            template: configure-eks
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.synth-and-deploy-eks.outputs.artifacts.source}}"
+
+          - name: build-docker-images
+            depends: configure-eks
+            template: build-docker-images
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.configure-eks.outputs.artifacts.source}}"
+
+          - name: install-helm-chart
+            depends: build-docker-images
+            template: install-helm-chart
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.build-docker-images.outputs.artifacts.source}}"
+
+          - name: run-byos-test
+            depends: install-helm-chart
+            template: run-byos-test
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.install-helm-chart.outputs.artifacts.source}}"
+
+    # Deploy target-only AOS domain (matches Jenkins deployTargetClusterOnly)
+    - name: deploy-target-cluster
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace/test
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+            SIZE="{{workflow.parameters.target-cluster-size}}"
+
+            # Size configs matching Jenkins targetClusterSizes
+            if [ "${SIZE}" = "large" ]; then
+              DATA_TYPE="r6g.8xlarge.search"; MGR_TYPE="m6g.2xlarge.search"
+              DATA_COUNT=24; MGR_COUNT=4; EBS_SIZE=2048
+            else
+              DATA_TYPE="r6g.large.search"; MGR_TYPE="m6g.large.search"
+              DATA_COUNT=2; MGR_COUNT=0; EBS_SIZE=100
+            fi
+
+            CONTEXT_FILE="tmp/cluster-context-byos.json"
+            mkdir -p tmp
+            cat > "${CONTEXT_FILE}" << EOF
+            {
+              "stage": "${STAGE}",
+              "vpcAZCount": 2,
+              "clusters": [{
+                "clusterId": "target",
+                "clusterVersion": "{{workflow.parameters.target-version}}",
+                "clusterType": "OPENSEARCH_MANAGED_SERVICE",
+                "openAccessPolicyEnabled": true,
+                "domainRemovalPolicy": "DESTROY",
+                "dataNodeType": "${DATA_TYPE}",
+                "dedicatedManagerNodeType": "${MGR_TYPE}",
+                "dataNodeCount": ${DATA_COUNT},
+                "dedicatedManagerNodeCount": ${MGR_COUNT},
+                "ebsEnabled": true,
+                "ebsVolumeSize": ${EBS_SIZE},
+                "nodeToNodeEncryption": true
+              }]
+            }
+            EOF
+
+            ./awsDeployCluster.sh --stage "${STAGE}" --context-file "${CONTEXT_FILE}"
+            cp "tmp/cluster-details-${STAGE}.json" /workspace/test/cluster-details.json
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 2700  # 45 min
+
+    # CDK synth + CFN create-stack (matches Jenkins 'Synth MA Stack' + 'Deploy EKS CFN Stack')
+    - name: synth-and-deploy-eks
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+            STACK_NAME_SUFFIX="${STAGE}-${REGION}"
+            MA_STACK_NAME="Migration-Assistant-Infra-Import-VPC-eks-${STACK_NAME_SUFFIX}"
+
+            CLUSTER_DETAILS=$(cat /workspace/test/cluster-details.json)
+            VPC_ID=$(echo "$CLUSTER_DETAILS" | jq -r '.target.vpcId')
+            SUBNET_IDS=$(echo "$CLUSTER_DETAILS" | jq -r '.target.subnetIds')
+
+            # CDK synth (matches Jenkins 'Synth MA Stack')
+            cd deployment/migration-assistant-solution
+            npm install --dev
+            npx cdk synth '*'
+
+            # CFN create-stack (matches Jenkins 'Deploy EKS CFN Stack')
+            aws cloudformation create-stack \
+              --stack-name "${MA_STACK_NAME}" \
+              --template-body file://cdk.out/Migration-Assistant-Infra-Import-VPC-eks.template.json \
+              --parameters \
+                ParameterKey=Stage,ParameterValue=${STAGE} \
+                ParameterKey=VPCId,ParameterValue=${VPC_ID} \
+                "ParameterKey=VPCSubnetIds,ParameterValue=\"${SUBNET_IDS}\"" \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --region "${REGION}"
+
+            echo "Waiting for stack ${MA_STACK_NAME}..."
+            aws cloudformation wait stack-create-complete \
+              --stack-name "${MA_STACK_NAME}" --region "${REGION}"
+
+            # Save stack name for cleanup
+            echo "${MA_STACK_NAME}" > /workspace/test/ma-stack-name.txt
+            echo "${STACK_NAME_SUFFIX}" > /workspace/test/stack-name-suffix.txt
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 3000  # 50 min
+
+    # Configure EKS (matches Jenkins 'Configure EKS' stage)
+    - name: configure-eks
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: ci-runner:latest
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+            STACK_NAME_SUFFIX=$(cat /workspace/test/stack-name-suffix.txt)
+            MA_STACK_NAME=$(cat /workspace/test/ma-stack-name.txt)
+
+            # Parse CFN exports
+            RAW_OUTPUT=$(aws cloudformation describe-stacks \
+              --stack-name "${MA_STACK_NAME}" \
+              --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
+              --output text)
+            [ -z "${RAW_OUTPUT}" ] && { echo "ERROR: MigrationsExportString not found"; exit 1; }
+
+            REGISTRY=$(echo "${RAW_OUTPUT}" | tr ';' '\n' | grep MIGRATIONS_ECR_REGISTRY | cut -d= -f2)
+            EKS_CLUSTER=$(echo "${RAW_OUTPUT}" | tr ';' '\n' | grep MIGRATIONS_EKS_CLUSTER_NAME | cut -d= -f2)
+            EKS_SG=$(echo "${RAW_OUTPUT}" | tr ';' '\n' | grep EKS_CLUSTER_SECURITY_GROUP | cut -d= -f2)
+
+            # Save exports
+            cat > /workspace/test/eks-exports.json << EOF
+            {"registryEndpoint":"${REGISTRY}","eksClusterName":"${EKS_CLUSTER}","clusterSecurityGroup":"${EKS_SG}"}
+            EOF
+
+            # EKS access entry + kubeconfig (matches Jenkins)
+            PRINCIPAL_ARN="arn:aws:iam::${TEST_ACCOUNT_ID}:role/ArgoTestDeploymentRole"
+            aws eks describe-access-entry --cluster-name "${EKS_CLUSTER}" --principal-arn "${PRINCIPAL_ARN}" >/dev/null 2>&1 || \
+              aws eks create-access-entry --cluster-name "${EKS_CLUSTER}" --principal-arn "${PRINCIPAL_ARN}" --type STANDARD
+            aws eks associate-access-policy --cluster-name "${EKS_CLUSTER}" --principal-arn "${PRINCIPAL_ARN}" \
+              --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy --access-scope type=cluster
+            aws eks update-kubeconfig --region "${REGION}" --name "${EKS_CLUSTER}"
+
+            for i in $(seq 1 10); do
+              kubectl get namespace default >/dev/null 2>&1 && break
+              echo "Waiting for kubectl (attempt $i/10)"; sleep 5
+            done
+
+            kubectl create namespace ma --dry-run=client -o yaml | kubectl apply -f -
+
+            # Target configmap (no source for BYOS)
+            CLUSTER_DETAILS=$(cat /workspace/test/cluster-details.json)
+            TARGET_ENDPOINT=$(echo "$CLUSTER_DETAILS" | jq -r '.target.endpoint')
+            TARGET_SG=$(echo "$CLUSTER_DETAILS" | jq -r '.target.securityGroupId')
+
+            # Expand version
+            TARGET_VER="{{workflow.parameters.target-version}}"
+            PREFIX=$(echo "$TARGET_VER" | cut -d_ -f1)
+            NUMS=$(echo "$TARGET_VER" | cut -d_ -f2 | tr '.' '-')
+            [ "$PREFIX" = "ES" ] && EXPANDED="elasticsearch-${NUMS}" || EXPANDED="opensearch-${NUMS}"
+
+            cat > /tmp/target-cluster-config.json << EOF
+            {"endpoint":"${TARGET_ENDPOINT}","allow_insecure":true,"sigv4":{"region":"${REGION}","service":"es"},"version":"${TARGET_VER}"}
+            EOF
+            kubectl create configmap "target-${EXPANDED}-migration-config" \
+              --from-file=cluster-config=/tmp/target-cluster-config.json \
+              --namespace ma --dry-run=client -o yaml | kubectl apply -f -
+
+            # SG ingress rule
+            if [ -n "${TARGET_SG}" ] && [ "${TARGET_SG}" != "null" ]; then
+              EXISTS=$(aws ec2 describe-security-groups --group-ids "${TARGET_SG}" \
+                --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='${EKS_SG}']]" --output text 2>/dev/null || true)
+              [ -z "${EXISTS}" ] && aws ec2 authorize-security-group-ingress \
+                --group-id "${TARGET_SG}" --protocol -1 --port -1 --source-group "${EKS_SG}" || true
+            fi
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 600  # 10 min
+
+    # Build docker images (matches Jenkins 'Build Docker Images' stage)
+    - name: build-docker-images
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            REGION="{{workflow.parameters.region}}"
+            REGISTRY=$(cat /workspace/test/eks-exports.json | jq -r '.registryEndpoint')
+
+            # Cross-arch build setup (matches Jenkins QEMU + buildx)
+            docker run --privileged --rm tonistiigi/binfmt --install all || true
+            docker buildx rm ecr-builder 2>/dev/null || true
+            docker buildx create --name ecr-builder --driver docker-container --bootstrap
+            docker buildx use ecr-builder
+
+            ./gradlew buildImagesToRegistry -PregistryEndpoint="${REGISTRY}" -Pbuilder=ecr-builder
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+        activeDeadlineSeconds: 3600  # 1 hour
+
+    # Install helm chart (matches Jenkins 'Install Helm Chart' stage)
+    - name: install-helm-chart
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace/deployment/k8s/aws
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+            EKS_CLUSTER=$(cat /workspace/test/eks-exports.json | jq -r '.eksClusterName')
+
+            aws eks update-kubeconfig --region "${REGION}" --name "${EKS_CLUSTER}"
+            ./aws-bootstrap.sh --skip-git-pull --base-dir /workspace --use-public-images false --skip-console-exec --stage "${STAGE}"
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 600  # 10 min
+
+    # Run BYOS test (matches Jenkins 'Run BYOS Migration Test' stage)
+    - name: run-byos-test
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: test-results
+            path: /tmp/test-results/
+            optional: true
+            archive:
+              none: {}
+            s3:
+              key: "{{workflow.name}}/test-results/"
+      container:
+        image: ci-runner:latest
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+            EKS_CLUSTER=$(cat /workspace/test/eks-exports.json | jq -r '.eksClusterName')
+
+            aws eks update-kubeconfig --region "${REGION}" --name "${EKS_CLUSTER}"
+
+            # Wait for migration-console pod
+            kubectl wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=600s
+
+            # Apply workflow template
+            kubectl apply -f /workspace/migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml -n ma
+
+            # Normalize S3 URI
+            S3_URI="{{workflow.parameters.s3-repo-uri}}"
+            [[ "${S3_URI}" != */ ]] && S3_URI="${S3_URI}/"
+
+            # Pass env vars via file (matches Jenkins: avoids logging secrets)
+            cat > /tmp/byos-env.sh << ENVEOF
+            export BYOS_SNAPSHOT_NAME='{{workflow.parameters.snapshot-name}}'
+            export BYOS_S3_REPO_URI='${S3_URI}'
+            export BYOS_S3_REGION='${REGION}'
+            export BYOS_POD_REPLICAS='{{workflow.parameters.rfs-workers}}'
+            export BYOS_MONITOR_RETRY_LIMIT='{{workflow.parameters.monitor-retry-limit}}'
+            ENVEOF
+
+            kubectl cp /tmp/byos-env.sh ma/migration-console-0:/tmp/byos-env.sh
+            kubectl exec migration-console-0 -n ma -- bash -c "
+              source /tmp/byos-env.sh && \
+              cd /root/lib/integ_test && \
+              pipenv run pytest integ_test/ma_workflow_test.py \
+                --source_version={{workflow.parameters.source-version}} \
+                --target_version={{workflow.parameters.target-version}} \
+                --test_ids={{workflow.parameters.test-ids}} \
+                --reuse_clusters -s \
+                --junitxml=/tmp/byos-results.xml" || true
+
+            # Copy test results out of migration-console
+            mkdir -p /tmp/test-results
+            kubectl cp ma/migration-console-0:/tmp/byos-results.xml /tmp/test-results/byos-results.xml 2>/dev/null || true
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 43200  # 12 hours
+
+    # ================================================================
+    # CLEANUP HANDLER — matches Jenkins post { always } with retry loops,
+    # ENI drain gates, and orphaned SG cleanup
+    # ================================================================
+    - name: cleanup-handler
+      dag:
+        tasks:
+          - name: upload-results
+            templateRef:
+              name: reportportal-upload
+              template: upload-junit
+            arguments:
+              parameters:
+                - name: launch-name
+                  value: "eks-byos-{{workflow.parameters.stage}}"
+              artifacts:
+                - name: junit-xml
+                  s3:
+                    key: "{{workflow.name}}/test-results/"
+                  optional: true
+          - name: revoke-sg-and-delete-ma
+            template: cleanup-ma-stack-with-retries
+          - name: delete-target-domain
+            depends: revoke-sg-and-delete-ma
+            template: cleanup-cfn-stack-with-retries
+            arguments:
+              parameters:
+                - name: stack-name
+                  value: "OpenSearchDomain-target-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
+                - name: max-attempts
+                  value: "2"
+          - name: cleanup-network
+            depends: delete-target-domain
+            template: cleanup-network-stack-with-eni-drain
+
+    # MA stack deletion with retry + orphaned SG cleanup (matches Jenkins exactly)
+    - name: cleanup-ma-stack-with-retries
+      container:
+        image: ci-runner:latest
+        command: [bash, -c]
+        args:
+          - |
+            set +e
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+            MA_STACK_NAME=$(cat /workspace/test/ma-stack-name.txt 2>/dev/null || echo "Migration-Assistant-Infra-Import-VPC-eks-${STAGE}-${REGION}")
+            EKS_EXPORTS=$(cat /workspace/test/eks-exports.json 2>/dev/null || echo '{}')
+            EKS_CLUSTER=$(echo "$EKS_EXPORTS" | jq -r '.eksClusterName // empty')
+            EKS_SG=$(echo "$EKS_EXPORTS" | jq -r '.clusterSecurityGroup // empty')
+            CLUSTER_DETAILS=$(cat /workspace/test/cluster-details.json 2>/dev/null || echo '{}')
+
+            # Revoke SG ingress (matches Jenkins)
+            TARGET_SG=$(echo "$CLUSTER_DETAILS" | jq -r '.target.securityGroupId // empty')
+            if [ -n "${EKS_SG}" ] && [ -n "${TARGET_SG}" ]; then
+              aws ec2 describe-security-groups --group-ids "${TARGET_SG}" >/dev/null 2>&1 && \
+                aws ec2 revoke-security-group-ingress --group-id "${TARGET_SG}" \
+                  --protocol -1 --port -1 --source-group "${EKS_SG}" 2>/dev/null || true
+            fi
+
+            # Delete MA stack with retries (matches Jenkins MAX_ATTEMPTS=3)
+            stack_status() {
+              local out rc
+              out=$(aws cloudformation describe-stacks --stack-name "$1" --query 'Stacks[0].StackStatus' --output text 2>&1) || rc=$?
+              if [ "${rc:-0}" -ne 0 ]; then
+                echo "$out" | grep -qiE 'does not exist|ValidationError' && echo "DELETED" && return 0
+                echo "ERROR" >&2; return 2
+              fi
+              echo "$out"
+            }
+
+            for ATTEMPT in 1 2 3; do
+              echo "CLEANUP: Attempt ${ATTEMPT}/3 - Deleting MA stack ${MA_STACK_NAME}"
+              aws cloudformation delete-stack --stack-name "${MA_STACK_NAME}" --region "${REGION}" || true
+              DEADLINE=$((SECONDS + 1800))
+              while [ $SECONDS -lt $DEADLINE ]; do
+                STATUS=$(stack_status "${MA_STACK_NAME}") || { sleep 20; continue; }
+                echo "CLEANUP: MA stack status: ${STATUS}"
+                [ "${STATUS}" = "DELETED" ] || [ "${STATUS}" = "DELETE_COMPLETE" ] && break 2
+                [ "${STATUS}" = "DELETE_FAILED" ] && break
+                sleep 60
+              done
+              [ $ATTEMPT -lt 3 ] && sleep 120
+            done
+
+            # Wait for EKS cluster to disappear
+            if [ -n "${EKS_CLUSTER}" ]; then
+              DEADLINE=$((SECONDS + 900))
+              while [ $SECONDS -lt $DEADLINE ]; do
+                aws eks describe-cluster --name "${EKS_CLUSTER}" >/dev/null 2>&1 || break
+                echo "CLEANUP: EKS cluster still exists; waiting..."; sleep 30
+              done
+            fi
+
+            # Delete orphaned EKS security groups (matches Jenkins)
+            if [ -n "${EKS_CLUSTER}" ]; then
+              EKS_SGS=$(aws ec2 describe-security-groups \
+                --filters "Name=tag:aws:eks:cluster-name,Values=${EKS_CLUSTER}" \
+                --query 'SecurityGroups[*].GroupId' --output text 2>/dev/null || true)
+              for SG in ${EKS_SGS}; do
+                for i in 1 2 3 4 5; do
+                  aws ec2 delete-security-group --group-id "${SG}" >/dev/null 2>&1 && break
+                  sleep 30
+                done
+              done
+            fi
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 3600
+
+    # CFN stack deletion with retries
+    - name: cleanup-cfn-stack-with-retries
+      inputs:
+        parameters:
+          - name: stack-name
+          - name: max-attempts
+            default: "2"
+      retryStrategy:
+        limit: 2
+        retryPolicy: Always
+        backoff:
+          duration: "120s"
+          factor: 2
+      container:
+        image: amazon/aws-cli:2.15.0
+        command: [bash, -c]
+        args:
+          - |
+            set +e
+            REGION="{{workflow.parameters.region}}"
+            STACK="{{inputs.parameters.stack-name}}"
+
+            STATUS=$(aws cloudformation describe-stacks --stack-name "${STACK}" --region "${REGION}" \
+              --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+            [ "${STATUS}" = "DOES_NOT_EXIST" ] && exit 0
+
+            aws cloudformation delete-stack --stack-name "${STACK}" --region "${REGION}" || true
+            aws cloudformation wait stack-delete-complete --stack-name "${STACK}" --region "${REGION}"
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 3600
+
+    # Network stack cleanup with ENI drain gate (matches Jenkins exactly)
+    - name: cleanup-network-stack-with-eni-drain
+      container:
+        image: amazon/aws-cli:2.15.0
+        command: [bash, -c]
+        args:
+          - |
+            set +e
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+            NETWORK_STACK="NetworkInfra-${STAGE}-${REGION}"
+
+            STATUS=$(aws cloudformation describe-stacks --stack-name "${NETWORK_STACK}" --region "${REGION}" \
+              --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+            [ "${STATUS}" = "DOES_NOT_EXIST" ] && exit 0
+
+            # Get subnets from stack
+            SUBNETS=$(aws cloudformation describe-stack-resources --stack-name "${NETWORK_STACK}" \
+              --query 'StackResources[?ResourceType==`AWS::EC2::Subnet`].PhysicalResourceId' --output text 2>/dev/null || true)
+
+            # ENI drain gate (matches Jenkins: wait for ENIs to clear before deleting network)
+            if [ -n "${SUBNETS}" ]; then
+              DEADLINE=$((SECONDS + 1800))
+              while [ $SECONDS -lt $DEADLINE ]; do
+                REMAINING=0
+                for S in ${SUBNETS}; do
+                  COUNT=$(aws ec2 describe-network-interfaces --filters Name=subnet-id,Values="${S}" \
+                    --query 'length(NetworkInterfaces)' --output text 2>/dev/null || echo 0)
+                  if [ "${COUNT}" != "0" ]; then
+                    REMAINING=1
+                    # Delete available ENIs
+                    ENIS=$(aws ec2 describe-network-interfaces --filters Name=subnet-id,Values="${S}" \
+                      --query 'NetworkInterfaces[?Status==`available`].NetworkInterfaceId' --output text 2>/dev/null || true)
+                    for ENI in ${ENIS}; do
+                      aws ec2 delete-network-interface --network-interface-id "${ENI}" 2>/dev/null || true
+                    done
+                  fi
+                done
+                [ "${REMAINING}" = "0" ] && break
+                echo "CLEANUP: ENI drain gate waiting..."; sleep 30
+              done
+            fi
+
+            # Delete network stack with retries (matches Jenkins MAX_ATTEMPTS=5)
+            for ATTEMPT in 1 2 3 4 5; do
+              echo "CLEANUP: Attempt ${ATTEMPT}/5 - Deleting network stack"
+              aws cloudformation delete-stack --stack-name "${NETWORK_STACK}" --region "${REGION}" || true
+              DEADLINE=$((SECONDS + 1800))
+              while [ $SECONDS -lt $DEADLINE ]; do
+                STATUS=$(aws cloudformation describe-stacks --stack-name "${NETWORK_STACK}" --region "${REGION}" \
+                  --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DELETED")
+                echo "CLEANUP: Network stack status: ${STATUS}"
+                [ "${STATUS}" = "DELETED" ] || [ "${STATUS}" = "DELETE_COMPLETE" ] && exit 0
+                [ "${STATUS}" = "DELETE_FAILED" ] && break
+                sleep 60
+              done
+              # On failure, clean ENIs from failing subnet
+              FAILED_SUBNET=$(aws cloudformation describe-stack-events --stack-name "${NETWORK_STACK}" \
+                --query 'StackEvents[?ResourceStatus==`DELETE_FAILED`].ResourceStatusReason' \
+                --output text 2>/dev/null | grep -oE 'subnet-[a-f0-9]+' | head -1 || true)
+              if [ -n "${FAILED_SUBNET}" ]; then
+                ENIS=$(aws ec2 describe-network-interfaces --filters Name=subnet-id,Values="${FAILED_SUBNET}" \
+                  --query 'NetworkInterfaces[?Status==`available`].NetworkInterfaceId' --output text 2>/dev/null || true)
+                for ENI in ${ENIS}; do aws ec2 delete-network-interface --network-interface-id "${ENI}" 2>/dev/null || true; done
+              fi
+              sleep 60
+            done
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 10800  # 3 hours for cleanup

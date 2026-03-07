@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ci-stage-locks
+  namespace: ma
+data:
+  # Minikube limits — increase for production EKS
+  k8s-matrix: "1"      # only 1 matrix at a time on minikube
+  k8s-local: "2"       # allow 2 concurrent local tests
+  integ-test: "1"      # 1 AWS integ test at a time
+  eks-integ: "1"       # 1 EKS integ test at a time
+  full-es68: "1"       # 1 full ES 6.8 test at a time
+  rfs-integ: "1"       # 1 RFS test at a time
+  gradle-ci: "3"       # 3 concurrent CI pipelines (production)

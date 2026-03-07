@@ -1,0 +1,10 @@
+apiVersion: argoproj.io/v1alpha1
+kind: EventBus
+metadata:
+  name: default
+  namespace: argo-events
+spec:
+  nats:
+    native:
+      replicas: 1  # single replica for minikube (use 3 in production)
+      auth: none

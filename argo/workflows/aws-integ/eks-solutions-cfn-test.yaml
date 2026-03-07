@@ -1,0 +1,232 @@
+# Replaces: vars/eksSolutionsCFNTest.groovy
+# EKS CFN deployment validation — tests Create-VPC and Import-VPC modes
+# Deploys EKS cluster via aws-bootstrap.sh, validates stack outputs, tears down
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: eks-solutions-cfn-test
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    replaces: eksSolutionsCFNTest.groovy
+spec:
+  entrypoint: main
+  onExit: cleanup-handler
+  serviceAccountName: ci-deployment-sa
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: stage
+        value: "eks-cfn-test"
+      - name: region
+        value: "us-east-1"
+  activeDeadlineSeconds: 10800  # 3 hours
+
+  synchronization:
+    semaphores:
+      - configMapKeyRef:
+          name: ci-stage-locks
+          key: eks-integ
+
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: checkout
+            templateRef:
+              name: common-ci-steps
+              template: git-checkout
+            arguments:
+              parameters:
+                - name: repo-url
+                  value: "{{workflow.parameters.repo-url}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+
+          - name: build
+            depends: checkout
+            templateRef:
+              name: default-integ-pipeline
+              template: gradle-build
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+          - name: test-create-vpc
+            depends: build
+            template: test-cfn-mode
+            arguments:
+              parameters:
+                - name: mode
+                  value: "create-vpc"
+              artifacts:
+                - name: source
+                  from: "{{tasks.build.outputs.artifacts.source}}"
+
+          - name: test-import-vpc
+            depends: test-create-vpc
+            template: test-cfn-mode
+            arguments:
+              parameters:
+                - name: mode
+                  value: "import-vpc"
+              artifacts:
+                - name: source
+                  from: "{{tasks.build.outputs.artifacts.source}}"
+
+    # ================================================================
+    # TEST CFN MODE — deploy EKS via aws-bootstrap.sh, validate, destroy
+    # ================================================================
+    - name: test-cfn-mode
+      inputs:
+        parameters:
+          - name: mode
+        artifacts:
+          - name: source
+            path: /workspace
+      retryStrategy:
+        limit: 1
+        retryPolicy: OnFailure
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+            REGION="{{workflow.parameters.region}}"
+            MODE="{{inputs.parameters.mode}}"
+            STACK_NAME="Migration-Assistant-Infra-${MODE}-eks-${STAGE}-${REGION}"
+
+            echo "=== Testing ${MODE} mode ==="
+
+            BOOTSTRAP_ARGS="--stack-name ${STACK_NAME} --stage ${STAGE} --region ${REGION}"
+            BOOTSTRAP_ARGS="${BOOTSTRAP_ARGS} --build-cfn --build-images --build-chart-and-dashboards"
+            BOOTSTRAP_ARGS="${BOOTSTRAP_ARGS} --base-dir $(pwd) --skip-console-exec"
+
+            TEST_VPC_STACK="test-vpc-${STAGE}-${REGION}"
+
+            if [ "${MODE}" = "create-vpc" ]; then
+              BOOTSTRAP_ARGS="${BOOTSTRAP_ARGS} --deploy-create-vpc-cfn"
+            else
+              # Import-VPC: create a test VPC with NAT gateway via CFN (matches Jenkins getTestVpcTemplate)
+              echo "Creating test VPC stack for import..."
+              aws cloudformation create-stack \
+                --stack-name "${TEST_VPC_STACK}" --region "${REGION}" \
+                --template-body '{"AWSTemplateFormatVersion":"2010-09-09","Description":"Test VPC for Import-VPC EKS CFN testing with NAT Gateway","Parameters":{"Stage":{"Type":"String","Default":"test"}},"Resources":{"VPC":{"Type":"AWS::EC2::VPC","Properties":{"CidrBlock":"10.200.0.0/16","EnableDnsHostnames":true,"EnableDnsSupport":true,"Tags":[{"Key":"Name","Value":{"Fn::Sub":"test-vpc-${Stage}"}}]}},"InternetGateway":{"Type":"AWS::EC2::InternetGateway"},"VPCGatewayAttachment":{"Type":"AWS::EC2::VPCGatewayAttachment","Properties":{"VpcId":{"Ref":"VPC"},"InternetGatewayId":{"Ref":"InternetGateway"}}},"PublicSubnet":{"Type":"AWS::EC2::Subnet","Properties":{"VpcId":{"Ref":"VPC"},"CidrBlock":"10.200.0.0/24","AvailabilityZone":{"Fn::Select":[0,{"Fn::GetAZs":""}]},"MapPublicIpOnLaunch":true}},"PublicRouteTable":{"Type":"AWS::EC2::RouteTable","Properties":{"VpcId":{"Ref":"VPC"}}},"PublicRoute":{"Type":"AWS::EC2::Route","DependsOn":"VPCGatewayAttachment","Properties":{"RouteTableId":{"Ref":"PublicRouteTable"},"DestinationCidrBlock":"0.0.0.0/0","GatewayId":{"Ref":"InternetGateway"}}},"PublicSubnetRTAssoc":{"Type":"AWS::EC2::SubnetRouteTableAssociation","Properties":{"SubnetId":{"Ref":"PublicSubnet"},"RouteTableId":{"Ref":"PublicRouteTable"}}},"NatEIP":{"Type":"AWS::EC2::EIP","DependsOn":"VPCGatewayAttachment","Properties":{"Domain":"vpc"}},"NatGateway":{"Type":"AWS::EC2::NatGateway","Properties":{"AllocationId":{"Fn::GetAtt":["NatEIP","AllocationId"]},"SubnetId":{"Ref":"PublicSubnet"}}},"PrivateSubnetA":{"Type":"AWS::EC2::Subnet","Properties":{"VpcId":{"Ref":"VPC"},"CidrBlock":"10.200.1.0/24","AvailabilityZone":{"Fn::Select":[0,{"Fn::GetAZs":""}]}}},"PrivateSubnetB":{"Type":"AWS::EC2::Subnet","Properties":{"VpcId":{"Ref":"VPC"},"CidrBlock":"10.200.2.0/24","AvailabilityZone":{"Fn::Select":[1,{"Fn::GetAZs":""}]}}},"PrivateRouteTable":{"Type":"AWS::EC2::RouteTable","Properties":{"VpcId":{"Ref":"VPC"}}},"PrivateRoute":{"Type":"AWS::EC2::Route","Properties":{"RouteTableId":{"Ref":"PrivateRouteTable"},"DestinationCidrBlock":"0.0.0.0/0","NatGatewayId":{"Ref":"NatGateway"}}},"PrivateSubnetARTAssoc":{"Type":"AWS::EC2::SubnetRouteTableAssociation","Properties":{"SubnetId":{"Ref":"PrivateSubnetA"},"RouteTableId":{"Ref":"PrivateRouteTable"}}},"PrivateSubnetBRTAssoc":{"Type":"AWS::EC2::SubnetRouteTableAssociation","Properties":{"SubnetId":{"Ref":"PrivateSubnetB"},"RouteTableId":{"Ref":"PrivateRouteTable"}}}},"Outputs":{"VpcId":{"Value":{"Ref":"VPC"}},"SubnetIds":{"Value":{"Fn::Join":[",",[{"Ref":"PrivateSubnetA"},{"Ref":"PrivateSubnetB"}]]}}}}' \
+                --parameters ParameterKey=Stage,ParameterValue=${STAGE}
+              aws cloudformation wait stack-create-complete --stack-name "${TEST_VPC_STACK}" --region "${REGION}"
+
+              VPC_ID=$(aws cloudformation describe-stacks --stack-name "${TEST_VPC_STACK}" --region "${REGION}" \
+                --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text)
+              SUBNET_IDS=$(aws cloudformation describe-stacks --stack-name "${TEST_VPC_STACK}" --region "${REGION}" \
+                --query 'Stacks[0].Outputs[?OutputKey==`SubnetIds`].OutputValue' --output text)
+              echo "Test VPC: ${VPC_ID}, Subnets: ${SUBNET_IDS}"
+              BOOTSTRAP_ARGS="${BOOTSTRAP_ARGS} --deploy-import-vpc-cfn --vpc-id ${VPC_ID} --subnet-ids ${SUBNET_IDS}"
+            fi
+
+            # Deploy via aws-bootstrap.sh (matches Jenkins)
+            ./deployment/k8s/aws/aws-bootstrap.sh ${BOOTSTRAP_ARGS} \
+              --version latest 2>&1 | \
+              while IFS= read -r line; do printf '%s | %s\n' "$(date '+%H:%M:%S')" "$line"; done; exit ${PIPESTATUS[0]}
+
+            # Validate: migration-console pod is ready (matches Jenkins 'Validate EKS Deployment')
+            echo "Validating EKS deployment..."
+            kubectl wait --namespace ma --for=condition=ready pod/migration-console-0 --timeout=600s
+            kubectl exec -n ma migration-console-0 -- /bin/bash -lc 'console --version'
+            echo "EKS deployment validation PASSED"
+
+            # Cleanup main stack
+            echo "Deleting stack ${STACK_NAME}..."
+            aws cloudformation delete-stack --stack-name "${STACK_NAME}" --region "${REGION}"
+            aws cloudformation wait stack-delete-complete --stack-name "${STACK_NAME}" --region "${REGION}" || true
+
+            # Cleanup test VPC stack if import mode
+            if [ "${MODE}" = "import-vpc" ]; then
+              echo "Deleting test VPC stack ${TEST_VPC_STACK}..."
+              aws cloudformation delete-stack --stack-name "${TEST_VPC_STACK}" --region "${REGION}"
+              aws cloudformation wait stack-delete-complete --stack-name "${TEST_VPC_STACK}" --region "${REGION}" || true
+            fi
+
+            # Cleanup kubectl context
+            kubectl config get-contexts 2>/dev/null | grep "migration-eks-cluster-${STAGE}-${REGION}" | \
+              awk '{print $2}' | xargs -r kubectl config delete-context || true
+
+            echo "=== ${MODE} mode test PASSED ==="
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+        activeDeadlineSeconds: 5400  # 90 min per mode
+
+    # ================================================================
+    # CLEANUP HANDLER
+    # ================================================================
+    - name: cleanup-handler
+      dag:
+        tasks:
+          - name: delete-create-vpc-stack
+            template: delete-cfn-stack-safe
+            arguments:
+              parameters:
+                - name: stack-name
+                  value: "Migration-Assistant-Infra-create-vpc-eks-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
+          - name: delete-import-vpc-stack
+            template: delete-cfn-stack-safe
+            arguments:
+              parameters:
+                - name: stack-name
+                  value: "Migration-Assistant-Infra-import-vpc-eks-{{workflow.parameters.stage}}-{{workflow.parameters.region}}"
+          - name: upload-results
+            templateRef:
+              name: reportportal-upload
+              template: upload-junit
+            arguments:
+              parameters:
+                - name: launch-name
+                  value: "eks-solutions-cfn-test"
+
+    - name: delete-cfn-stack-safe
+      inputs:
+        parameters:
+          - name: stack-name
+      retryStrategy:
+        limit: 2
+        retryPolicy: Always
+        backoff:
+          duration: "30s"
+          factor: 2
+      container:
+        image: amazon/aws-cli:2.15.0
+        command: [bash, -c]
+        args:
+          - |
+            set +e
+            STACK="{{inputs.parameters.stack-name}}"
+            STATUS=$(aws cloudformation describe-stacks --stack-name "${STACK}" \
+              --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+            if [ "${STATUS}" = "DOES_NOT_EXIST" ]; then
+              echo "Stack ${STACK} does not exist, skipping"
+              exit 0
+            fi
+            echo "Deleting stack ${STACK} (status: ${STATUS})..."
+            aws cloudformation delete-stack --stack-name "${STACK}" --region "{{workflow.parameters.region}}"
+            aws cloudformation wait stack-delete-complete --stack-name "${STACK}" --region "{{workflow.parameters.region}}" || true
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 1800

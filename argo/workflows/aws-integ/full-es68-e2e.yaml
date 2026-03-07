@@ -1,0 +1,336 @@
+# Replaces: vars/fullES68SourceE2ETest.groovy
+# Full ES 6.8 → OS 2.19 migration test (capture+replay+RFS+transformations)
+# Thin wrapper around default-integ-pipeline with ES 6.8 CDK context
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: full-es68-e2e
+  namespace: ma
+  labels:
+    app: ci-pipeline
+    replaces: fullES68SourceE2ETest.groovy
+spec:
+  entrypoint: main
+  onExit: cleanup-handler
+  serviceAccountName: ci-deployment-sa
+  arguments:
+    parameters:
+      - name: repo-url
+        value: "https://github.com/opensearch-project/opensearch-migrations.git"
+      - name: branch
+        value: "main"
+      - name: stage
+        value: "full-es68"
+  activeDeadlineSeconds: 10800  # 3 hours
+
+  synchronization:
+    semaphores:
+      - configMapKeyRef:
+          name: ci-stage-locks
+          key: full-es68
+
+  templates:
+    - name: main
+      dag:
+        tasks:
+          - name: checkout
+            templateRef:
+              name: common-ci-steps
+              template: git-checkout
+            arguments:
+              parameters:
+                - name: repo-url
+                  value: "{{workflow.parameters.repo-url}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+
+          - name: build
+            depends: checkout
+            templateRef:
+              name: default-integ-pipeline
+              template: gradle-build
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+          - name: setup-context
+            depends: checkout
+            template: setup-es68-context
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.checkout.outputs.artifacts.source}}"
+
+          - name: deploy
+            depends: "build && setup-context"
+            templateRef:
+              name: default-integ-pipeline
+              template: deploy-cdk-stack
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.build.outputs.artifacts.source}}"
+
+          - name: pre-integ-cleanup
+            depends: deploy
+            template: pre-integ-cleanup
+
+          - name: run-tests
+            depends: pre-integ-cleanup
+            template: run-full-es68-tests
+            arguments:
+              artifacts:
+                - name: source
+                  from: "{{tasks.deploy.outputs.artifacts.source}}"
+
+    # ES 6.8 specific CDK context setup
+    - name: setup-es68-context
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      script:
+        image: python:3.11-alpine
+        command: [sh]
+        source: |
+          set -euo pipefail
+          STAGE="{{workflow.parameters.stage}}"
+          cd /workspace/test
+
+          cat > sourceJenkinsContext.json << 'SRCEOF'
+          {
+            "source-single-node-ec2": {
+              "suffix": "ec2-source-STAGE_PLACEHOLDER",
+              "networkStackSuffix": "ec2-source-STAGE_PLACEHOLDER",
+              "distVersion": "6.8.23",
+              "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-6.8.23.tar.gz",
+              "captureProxyEnabled": false,
+              "securityDisabled": true,
+              "minDistribution": false,
+              "cpuArch": "x64",
+              "isInternal": true,
+              "singleNodeCluster": true,
+              "networkAvailabilityZones": 2,
+              "dataNodeCount": 1,
+              "managerNodeCount": 0,
+              "serverAccessType": "ipv4",
+              "restrictServerAccessTo": "0.0.0.0/0",
+              "enableImdsCredentialRefresh": true,
+              "requireImdsv2": true
+            }
+          }
+          SRCEOF
+          sed -i "s/STAGE_PLACEHOLDER/${STAGE}/g" sourceJenkinsContext.json
+
+          cat > migrationJenkinsContext.json << 'MIGEOF'
+          {
+            "full-migration": {
+              "stage": "STAGE_PLACEHOLDER",
+              "vpcId": "<VPC_ID>",
+              "engineVersion": "OS_2.19",
+              "domainName": "os-cluster-STAGE_PLACEHOLDER",
+              "dataNodeCount": 2,
+              "openAccessPolicyEnabled": true,
+              "domainRemovalPolicy": "DESTROY",
+              "artifactBucketRemovalPolicy": "DESTROY",
+              "captureProxyServiceEnabled": true,
+              "targetClusterProxyServiceEnabled": true,
+              "trafficReplayerServiceEnabled": true,
+              "trafficReplayerExtraArgs": "--speedup-factor 10.0",
+              "reindexFromSnapshotServiceEnabled": true,
+              "reindexFromSnapshotExtraArgs": "--doc-transformer-config-base64 W3siVHlwZU1hcHBpbmdTYW5pdGl6YXRpb25UcmFuc2Zvcm1lclByb3ZpZGVyIjp7InJlZ2V4TWFwcGluZ3MiOlt7InNvdXJjZUluZGV4UGF0dGVybiI6IihtYXRjaF9hbGxfdGVzdF9lMmVfMDAwMV8uKikiLCJzb3VyY2VUeXBlUGF0dGVybiI6Ii4qIiwidGFyZ2V0SW5kZXhQYXR0ZXJuIjoiJDFfdHJhbnNmb3JtZWQifSx7InNvdXJjZUluZGV4UGF0dGVybiI6IiguKikiLCJzb3VyY2VUeXBlUGF0dGVybiI6IiguKikiLCJ0YXJnZXRJbmRleFBhdHRlcm4iOiIkMSJ9XSwic291cmNlUHJvcGVydGllcyI6eyJ2ZXJzaW9uIjp7Im1ham9yIjo2LCJtaW5vciI6OH19fX1d",
+              "sourceCluster": {
+                "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
+                "auth": {"type": "none"},
+                "version": "ES_6.8.23"
+              },
+              "tlsSecurityPolicy": "TLS_1_2",
+              "enforceHTTPS": true,
+              "nodeToNodeEncryptionEnabled": true,
+              "encryptionAtRestEnabled": true,
+              "vpcEnabled": true,
+              "vpcAZCount": 2,
+              "mskAZCount": 2,
+              "migrationAssistanceEnabled": true,
+              "replayerOutputEFSRemovalPolicy": "DESTROY",
+              "migrationConsoleServiceEnabled": true,
+              "otelCollectorEnabled": true
+            }
+          }
+          MIGEOF
+          sed -i "s/STAGE_PLACEHOLDER/${STAGE}/g" migrationJenkinsContext.json
+
+    # Pre-integ cleanup: delete snapshot, snapshot repo, S3 snapshot files
+    - name: pre-integ-cleanup
+      container:
+        image: ci-runner:latest
+        command: [bash, -c]
+        args:
+          - |
+            set +e
+            STAGE="{{workflow.parameters.stage}}"
+            SOURCE_ENDPOINT="https://alb.migration.${STAGE}.local:9201"
+            CLUSTER_NAME="migration-${STAGE}-ecs-cluster"
+
+            # Assume role
+            TASK_ARN=$(aws ecs list-tasks --cluster "${CLUSTER_NAME}" \
+              --family "migration-${STAGE}-migration-console" | jq -r '.taskArns[0]')
+
+            # Delete snapshot
+            aws ecs execute-command --cluster "${CLUSTER_NAME}" --task "${TASK_ARN}" \
+              --container 'migration-console' --interactive \
+              --command "curl -k -X DELETE ${SOURCE_ENDPOINT}/_snapshot/migration_assistant_repo/rfs-snapshot" || true
+
+            # Delete snapshot repo
+            aws ecs execute-command --cluster "${CLUSTER_NAME}" --task "${TASK_ARN}" \
+              --container 'migration-console' --interactive \
+              --command "curl -k -X DELETE ${SOURCE_ENDPOINT}/_snapshot/migration_assistant_repo" || true
+
+            # Delete S3 snapshot files
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            REGION=$(aws configure get region || echo us-east-1)
+            aws s3 rm "s3://migration-artifacts-${ACCOUNT_ID}-${STAGE}-${REGION}/rfs-snapshot-repo" --recursive || true
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 600  # 10 min
+
+    # Run full ES 6.8 tests with custom test command
+    - name: run-full-es68-tests
+      inputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: test-results
+            path: /workspace/test/reports/
+            optional: true
+            archive:
+              none: {}
+            s3:
+              key: "{{workflow.name}}/test-results/"
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace/test
+        command: [bash, -c]
+        args:
+          - |
+            set -euo pipefail
+            STAGE="{{workflow.parameters.stage}}"
+
+            UNIQUE_ID="integ_full_$(date +%s)_argo"
+            TEST_DIR="/root/lib/integ_test/integ_test"
+            RESULT_FILE="${TEST_DIR}/reports/${UNIQUE_ID}/report.xml"
+
+            COMMAND="pipenv run pytest --log-file=${TEST_DIR}/reports/${UNIQUE_ID}/pytest.log \
+              --junitxml=${RESULT_FILE} \
+              ${TEST_DIR}/full_tests.py \
+              --source_proxy_alb_endpoint https://alb.migration.${STAGE}.local:9201 \
+              --target_proxy_alb_endpoint https://alb.migration.${STAGE}.local:9202 \
+              --unique_id ${UNIQUE_ID} --stage ${STAGE} -s"
+
+            ./awsRunIntegTests.sh --command "${COMMAND}" \
+              --test-result-file "${RESULT_FILE}" --stage "${STAGE}"
+
+            mkdir -p /workspace/test/reports/
+            cp -r ${TEST_DIR}/reports/ /workspace/test/reports/ 2>/dev/null || true
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 3600
+
+    # Cleanup handler — destroy CDK stacks + upload results
+    - name: cleanup-handler
+      dag:
+        tasks:
+          - name: destroy-stacks
+            template: destroy-es68-stacks
+          - name: upload-results
+            templateRef:
+              name: reportportal-upload
+              template: upload-junit
+            arguments:
+              parameters:
+                - name: launch-name
+                  value: "full-es68-e2e"
+                - name: source-version
+                  value: "ES_6.8"
+                - name: target-version
+                  value: "OS_2.19"
+              artifacts:
+                - name: junit-xml
+                  s3:
+                    key: "{{workflow.name}}/test-results/"
+                  optional: true
+          - name: notify
+            depends: destroy-stacks
+            templateRef:
+              name: common-ci-steps
+              template: notify-github-status
+            arguments:
+              parameters:
+                - name: sha
+                  value: ""
+                - name: context
+                  value: "argo/full-es68-e2e"
+
+    - name: destroy-es68-stacks
+      retryStrategy:
+        limit: 2
+        retryPolicy: Always
+        backoff:
+          duration: "30s"
+          factor: 2
+      container:
+        image: ci-runner:latest
+        workingDir: /workspace/test
+        command: [bash, -c]
+        args:
+          - |
+            set +e
+            STAGE="{{workflow.parameters.stage}}"
+
+            echo "=== Destroying ES 6.8 E2E stacks for stage: ${STAGE} ==="
+
+            # Destroy migration stack (full-migration context)
+            cd /workspace/test 2>/dev/null && \
+              npx cdk destroy --force \
+                --context stage="${STAGE}" \
+                --context contextId="full-migration" \
+                2>&1 | tail -20 || true
+
+            # Destroy source cluster stack
+            npx cdk destroy --force \
+              --context stage="${STAGE}" \
+              --context contextId="source-single-node-ec2" \
+              2>&1 | tail -20 || true
+
+            # Fallback: delete by name pattern
+            for STACK in $(aws cloudformation list-stacks \
+              --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+              --query "StackSummaries[?contains(StackName,'${STAGE}')].StackName" \
+              --output text 2>/dev/null); do
+              echo "Deleting remaining stack: ${STACK}"
+              aws cloudformation delete-stack --stack-name "${STACK}" || true
+            done
+
+            echo "=== ES 6.8 cleanup complete ==="
+        env:
+          - name: TEST_ACCOUNT_ID
+            valueFrom:
+              secretKeyRef:
+                name: migrations-test-account-id
+                key: account-id
+        activeDeadlineSeconds: 3600
