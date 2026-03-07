@@ -39,6 +39,11 @@ public class ReplayEngine {
      */
     private final AtomicLong totalCountOfScheduledTasksOutstanding;
     ScheduledFuture<?> updateContentTimeControllerScheduledFuture;
+    // Heartbeat: response status code counters (reset each heartbeat)
+    private final java.util.concurrent.ConcurrentHashMap<Integer, AtomicLong> responseCodeCounters =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    private static final org.slf4j.Logger heartbeatLogger =
+        org.slf4j.LoggerFactory.getLogger("ReplayHeartbeat");
 
     /**
      *
@@ -244,4 +249,45 @@ public class ReplayEngine {
     public void setFirstTimestamp(Instant firstPacketTimestamp) {
         timeShifter.setFirstTimestamp(firstPacketTimestamp);
     }
+
+    /** Record a target response status code for heartbeat reporting. */
+    public void recordTargetResponseCode(int statusCode) {
+        responseCodeCounters.computeIfAbsent(statusCode, k -> new AtomicLong()).incrementAndGet();
+    }
+
+    /** Emit a periodic heartbeat log summarizing the replay engine state. */
+    public void logHeartbeat() {
+        var sb = new StringBuilder();
+        sb.append("tasksOutstanding=").append(totalCountOfScheduledTasksOutstanding.get());
+
+        // Scheduling lag: how far wall clock is ahead of source time
+        var sourceTimeOp = timeShifter.transformRealTimeToSourceTime(Instant.now());
+        var lastCompletedMs = lastCompletedSourceTimeEpochMs.get();
+        if (sourceTimeOp.isPresent() && lastCompletedMs > 0) {
+            var currentSourceTime = sourceTimeOp.get();
+            var lastCompleted = Instant.ofEpochMilli(lastCompletedMs);
+            var lag = Duration.between(lastCompleted, currentSourceTime);
+            sb.append(" schedulingLag=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(lag));
+            sb.append(" lastCompletedSourceTime=").append(lastCompleted);
+        }
+
+        sb.append(" bufferWindow=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(contentTimeController.getBufferTimeWindow()));
+
+        // Response codes since last heartbeat
+        sb.append(" targetResponses={");
+        var first = new java.util.concurrent.atomic.AtomicBoolean(true);
+        responseCodeCounters.entrySet().stream()
+            .sorted(java.util.Map.Entry.comparingByKey())
+            .forEach(e -> {
+                var count = e.getValue().getAndSet(0);
+                if (count > 0) {
+                    if (!first.getAndSet(false)) sb.append(", ");
+                    sb.append(e.getKey()).append("=").append(count);
+                }
+            });
+        sb.append("}");
+
+        heartbeatLogger.atInfo().setMessage("{}").addArgument(sb).log();
+    }
+
 }

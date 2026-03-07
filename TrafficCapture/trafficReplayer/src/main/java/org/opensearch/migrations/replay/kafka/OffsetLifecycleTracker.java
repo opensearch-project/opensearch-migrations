@@ -1,5 +1,9 @@
 package org.opensearch.migrations.replay.kafka;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.StringJoiner;
@@ -17,11 +21,28 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 class OffsetLifecycleTracker {
     private final PriorityQueue<Long> pQueue = new PriorityQueue<>();
+    private final Map<Long, OffsetMetadata> offsetMetadataMap = new HashMap<>();
     private long cursorHighWatermark;
     final int consumerConnectionGeneration;
+    private final Clock clock;
+
+    static class OffsetMetadata {
+        final String connectionId;
+        final Instant addedAt;
+
+        OffsetMetadata(String connectionId, Instant addedAt) {
+            this.connectionId = connectionId;
+            this.addedAt = addedAt;
+        }
+    }
 
     OffsetLifecycleTracker(int generation) {
+        this(generation, Clock.systemUTC());
+    }
+
+    OffsetLifecycleTracker(int generation, Clock clock) {
         this.consumerConnectionGeneration = generation;
+        this.clock = clock;
     }
 
     boolean isEmpty() {
@@ -33,9 +54,14 @@ class OffsetLifecycleTracker {
     }
 
     void add(long offset) {
+        add(offset, null);
+    }
+
+    void add(long offset, String connectionId) {
         synchronized (pQueue) {
             cursorHighWatermark = offset;
             pQueue.add(offset);
+            offsetMetadataMap.put(offset, new OffsetMetadata(connectionId, clock.instant()));
         }
     }
 
@@ -52,10 +78,11 @@ class OffsetLifecycleTracker {
                 throw new IllegalStateException(
                     "Expected all live records to have an entry and for them to be removed only once");
             }
+            offsetMetadataMap.remove(offsetToRemove);
 
             if (offsetToRemove == topCursor) {
-                topCursor = Optional.ofNullable(pQueue.peek()).orElse(cursorHighWatermark + 1); // most recent cursor
-                                                                                                // was previously popped
+                // most recent cursor was previously popped
+                topCursor = Optional.ofNullable(pQueue.peek()).orElse(cursorHighWatermark + 1);
                 log.atDebug().setMessage("Commit called for {}, and new topCursor={}")
                     .addArgument(offsetToRemove)
                     .addArgument(topCursor)
@@ -71,12 +98,33 @@ class OffsetLifecycleTracker {
         }
     }
 
+    /** Returns the offset at the head of the queue (lowest uncommitted offset), or empty if queue is empty. */
+    Optional<Long> peekHeadOffset() {
+        synchronized (pQueue) {
+            return Optional.ofNullable(pQueue.peek());
+        }
+    }
+
+    /** Returns metadata for the head offset, or empty if queue is empty. */
+    Optional<OffsetMetadata> peekHeadMetadata() {
+        synchronized (pQueue) {
+            var head = pQueue.peek();
+            if (head == null) return Optional.empty();
+            return Optional.ofNullable(offsetMetadataMap.get(head));
+        }
+    }
+
+    long getHighWatermark() {
+        synchronized (pQueue) {
+            return cursorHighWatermark;
+        }
+    }
+
     @Override
     public String toString() {
         synchronized (pQueue) {
-            return new StringJoiner(", ", OffsetLifecycleTracker.class.getSimpleName() + "[", "]").add(
-                "pQueue=" + pQueue
-            )
+            return new StringJoiner(", ", OffsetLifecycleTracker.class.getSimpleName() + "[", "]")
+                .add("pQueue=" + pQueue)
                 .add("cursorHighWatermark=" + cursorHighWatermark)
                 .add("consumerConnectionGeneration=" + consumerConnectionGeneration)
                 .toString();

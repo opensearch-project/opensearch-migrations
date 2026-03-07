@@ -1,0 +1,16 @@
+useDedicatedKarpenterPool: true
+
+target:
+  singleNode: false
+  replicas: 5
+  resources:
+    requests:
+      cpu: "8"
+      memory: 32Gi
+    limits:
+      cpu: "8"
+      memory: 32Gi
+  opensearchJavaOpts: "-Xms16g -Xmx16g"
+  persistence:
+    enabled: true
+    size: 500Gi
