@@ -158,6 +158,10 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             var workDequeuedByLimiterFuture = new TextTrackedFuture<TrafficStreamLimiter.WorkItem>(
                 () -> "waiting for " + ctx + " to be queued and run through TrafficStreamLimiter"
             );
+            log.atDebug().setMessage("[{}] Queuing request to TrafficStreamLimiter, permits={}")
+                .addArgument(ctx::getConnectionId)
+                .addArgument(liveTrafficStreamLimiter.liveTrafficStreamCostGate::availablePermits)
+                .log();
             var wi = liveTrafficStreamLimiter.queueWork(1, ctx, workDequeuedByLimiterFuture.future::complete);
             var httpSentRequestFuture = workDequeuedByLimiterFuture.thenCompose(
                     ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, quiescentDurationForRequest),
@@ -197,6 +201,14 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     }
                     // Count the final outcome once per request (not per retry)
                     countFinalOutcome(summary, t);
+                    // Record target response codes for heartbeat reporting
+                    if (summary != null) {
+                        for (var resp : summary.responses()) {
+                            if (resp.getRawResponse() != null) {
+                                replayEngine.recordTargetResponseCode(resp.getRawResponse().status().code());
+                            }
+                        }
+                    }
                     commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
                     return null;
                 } else {
@@ -424,10 +436,19 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     .filter(s -> !s.isEmpty())
                     .ifPresent(s -> log.atDebug().setMessage("TrafficStream Summary: {{}}").addArgument(s).log());
             }
-            log.atInfo().setMessage("Read {} traffic stream(s) from source")
+            log.atDebug().setMessage("Read {} traffic stream(s) from source")
                 .addArgument(trafficStreams::size)
                 .log();
+            var batchStart = System.nanoTime();
             trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
+            var batchDurationMs = (System.nanoTime() - batchStart) / 1_000_000;
+            if (batchDurationMs > 5_000) {
+                log.atWarn().setMessage("Batch processing took {}ms ({} records). " +
+                        "This delays the next Kafka poll. max.poll.interval.ms may be at risk.")
+                    .addArgument(batchDurationMs)
+                    .addArgument(trafficStreams::size)
+                    .log();
+            }
         }
     }
 }

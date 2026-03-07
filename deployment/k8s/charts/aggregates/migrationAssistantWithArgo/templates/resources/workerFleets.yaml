@@ -1,0 +1,41 @@
+{{- range $name, $fleet := .Values.workerFleets }}
+{{- if $fleet.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-fleet-{{ $name }}
+spec:
+  replicas: {{ $fleet.replicas | default 0 }}
+  selector:
+    matchLabels:
+      app: worker-fleet-{{ $name }}
+  template:
+    metadata:
+      labels:
+        app: worker-fleet-{{ $name }}
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: migration-console-access-role
+      containers:
+        - name: console
+          image: {{ $.Values.images.migrationConsole.repository }}:{{ $.Values.images.migrationConsole.tag }}
+          imagePullPolicy: {{ $.Values.images.migrationConsole.pullPolicy }}
+          resources:
+            requests:
+              cpu: {{ $fleet.resources.requests.cpu }}
+              memory: {{ $fleet.resources.requests.memory }}
+            limits:
+              cpu: {{ $fleet.resources.limits.cpu }}
+              memory: {{ $fleet.resources.limits.memory }}
+          env:
+            - name: MIGRATIONS_CLI_CONSOLE_DISABLE_LEGACY_COMMANDS
+              value: "true"
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              /root/start-console.sh
+{{- end }}
+{{- end }}
