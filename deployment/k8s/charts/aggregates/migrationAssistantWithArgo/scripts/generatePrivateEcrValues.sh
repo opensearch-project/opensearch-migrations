@@ -138,7 +138,7 @@ charts:
           repository: "${M}/ghcr.io/aenix-io/etcd-operator"
       kubeRbacProxy:
         image:
-          repository: "${M}/gcr.io/kubebuilder/kube-rbac-proxy"
+          repository: "${M}/registry.k8s.io/kubebuilder/kube-rbac-proxy"
 
   opentelemetry-operator:
     repository: "oci://${ECR}/charts/opentelemetry-operator"
