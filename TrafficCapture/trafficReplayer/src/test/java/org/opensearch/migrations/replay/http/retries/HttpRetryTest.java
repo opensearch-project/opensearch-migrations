@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
@@ -51,13 +52,21 @@ public class HttpRetryTest {
     }
 
     public static SimpleHttpResponse makeTransientErrorResponse(Duration responseWaitTime) {
+        return makeErrorResponse(responseWaitTime, 404, "Not Found");
+    }
+
+    public static SimpleHttpResponse makeForbiddenResponse(Duration responseWaitTime) {
+        return makeErrorResponse(responseWaitTime, 403, "Forbidden");
+    }
+
+    private static SimpleHttpResponse makeErrorResponse(Duration responseWaitTime, int statusCode, String reason) {
         try {
             Thread.sleep(responseWaitTime.toMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw Lombok.sneakyThrow(e);
         }
-        return new SimpleHttpResponse(Map.of(), null, "Not Found", 404);
+        return new SimpleHttpResponse(Map.of(), null, reason, statusCode);
     }
 
     private TrackedFuture<String, TransformedTargetRequestAndResponseList>
@@ -74,6 +83,12 @@ public class HttpRetryTest {
 
     private TrackedFuture<String, TransformedTargetRequestAndResponseList>
     scheduleSingleRequest(ClientConnectionPool clientConnectionPool, TestContext rootContext) {
+        return scheduleSingleRequest(clientConnectionPool, rootContext, null);
+    }
+
+    private TrackedFuture<String, TransformedTargetRequestAndResponseList>
+    scheduleSingleRequest(ClientConnectionPool clientConnectionPool, TestContext rootContext,
+                          Supplier<TrackedFuture<String, ByteBufList>> retransformCallback) {
         var retryFactory = new RetryCollectingVisitorFactory(new DefaultRetry());
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
@@ -95,7 +110,8 @@ public class HttpRetryTest {
             startTimeForThisRequest,
             Duration.ofMillis(1),
             sourceRequestPackets,
-            retryVisitor
+            retryVisitor,
+            retransformCallback
         ).whenComplete((v,t) -> requestContext.close(), () -> "test request context closure");
     }
 
@@ -143,6 +159,34 @@ public class HttpRetryTest {
             var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
             Assertions.assertEquals(1, InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "requestConnectingCount"));
             Assertions.assertEquals(0, InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "requestConnectingExceptionCount"));
+        }
+    }
+
+    @Test
+    public void testRetransformCallbackIsInvokedOn403() throws Exception {
+        var requestsReceivedCounter = new AtomicInteger();
+        var retransformCallCount = new AtomicInteger();
+        try (var rootContext = TestContext.withAllTracking();
+             var httpServer = SimpleHttpServer.makeServer(false,
+                 r -> requestsReceivedCounter.incrementAndGet() > 1
+                     ? TestHttpServerContext.makeResponse(r, Duration.ofMillis(100))
+                     : makeForbiddenResponse(Duration.ofMillis(100))))
+        {
+            var clientConnectionPool = TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
+                httpServer.localhostEndpoint(), false, 1,
+                "targetConnectionPool for testRetransformCallbackIsInvokedOn403");
+            Supplier<TrackedFuture<String, ByteBufList>> retransformCallback = () -> {
+                retransformCallCount.incrementAndGet();
+                return TextTrackedFuture.completedFuture(makeRequest(), () -> "retransformed request");
+            };
+            var responseFuture = scheduleSingleRequest(clientConnectionPool, rootContext, retransformCallback)
+                .whenComplete((v, t) -> clientConnectionPool.shutdownNow(), () -> "cleanup");
+            var response = Assertions.assertDoesNotThrow(() -> responseFuture.get());
+            Assertions.assertNotNull(response.responses());
+            Assertions.assertEquals(2, response.responses().size());
+            Assertions.assertEquals(403, response.responses().get(0).getRawResponse().status().code());
+            Assertions.assertEquals(200, response.responses().get(1).getRawResponse().status().code());
+            Assertions.assertEquals(1, retransformCallCount.get());
         }
     }
 

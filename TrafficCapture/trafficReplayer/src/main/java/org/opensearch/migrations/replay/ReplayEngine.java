@@ -178,7 +178,7 @@ public class ReplayEngine {
         ByteBufList packets,
         RequestSenderOrchestrator.RetryVisitor<T> retryVisitor
     ) {
-        return scheduleRequest(ctx, originalStart, originalEnd, numPackets, packets, retryVisitor, null);
+        return scheduleRequest(ctx, originalStart, originalEnd, numPackets, packets, retryVisitor, null, null);
     }
 
     public <T> TrackedFuture<String, T> scheduleRequest(
@@ -189,6 +189,20 @@ public class ReplayEngine {
         ByteBufList packets,
         RequestSenderOrchestrator.RetryVisitor<T> retryVisitor,
         Duration quiescentDurationForRequest
+    ) {
+        return scheduleRequest(ctx, originalStart, originalEnd, numPackets, packets, retryVisitor,
+            quiescentDurationForRequest, null);
+    }
+
+    public <T> TrackedFuture<String, T> scheduleRequest(
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Instant originalStart,
+        Instant originalEnd,
+        int numPackets,
+        ByteBufList packets,
+        RequestSenderOrchestrator.RetryVisitor<T> retryVisitor,
+        Duration quiescentDurationForRequest,
+        Supplier<TrackedFuture<String, ByteBufList>> retransformCallback
     ) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "request";
@@ -213,7 +227,7 @@ public class ReplayEngine {
             .addArgument(interval)
             .addArgument(numPackets)
             .log();
-        var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets, retryVisitor);
+        var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets, retryVisitor, retransformCallback);
         return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
     }
 

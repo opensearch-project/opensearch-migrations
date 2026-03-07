@@ -27,8 +27,8 @@ class OpenSearchDefaultRetryTest {
         "200, 500, RETRY",
         "200, 429, RETRY",
         "404, 200, DONE",
-        "200, 401, DONE",
-        "200, 403, DONE"
+        "200, 401, RETRANSFORM",
+        "200, 403, RETRANSFORM"
     })
     public void testStatusCodeResults(int sourceStatusCode, int targetStatusCode,
                                       RequestSenderOrchestrator.RetryDirective expectedDirective)
@@ -96,8 +96,8 @@ class OpenSearchDefaultRetryTest {
         "200, 404, true,  true,  5, DONE",
 
         "404, 200, false, false, 0, DONE",
-        "200, 401, false, false, 0, DONE",
-        "200, 403, false, false, 0, DONE",
+        "200, 401, false, false, 0, RETRANSFORM",
+        "200, 403, false, false, 0, RETRANSFORM",
         "200, 500, false, false, 0, RETRY",
         "200, 429, false, false, 0, RETRY"
     })
@@ -148,8 +148,8 @@ class OpenSearchDefaultRetryTest {
         "200, 500, RETRY",
         "200, 429, RETRY",
         "404, 200, DONE",
-        "200, 401, DONE",
-        "200, 403, DONE"
+        "200, 401, RETRANSFORM",
+        "200, 403, RETRANSFORM"
     })
     public void testNonBulkResults(int sourceStatus, int targetStatus,
                                    RequestSenderOrchestrator.RetryDirective expectedDirective)

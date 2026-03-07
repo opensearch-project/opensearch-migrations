@@ -21,8 +21,6 @@ public class DefaultRetry implements RequestRetryEvaluator {
         switch (statusCode) {
             case 200:
             case 201:
-            case 401:
-            case 403:
                 return true;
             default:
                 return statusCode >= 300 && statusCode < 400;
@@ -64,6 +62,10 @@ public class DefaultRetry implements RequestRetryEvaluator {
                 TrackedFuture<String, ? extends IRequestResponsePacketPair> reconstructedSourceTransactionFuture) {
         var rr = currentResponse.getRawResponse();
         if (rr != null) {
+            if (rr.status().code() == 401 || rr.status().code() == 403) {
+                return makeDeterminationFuture(RequestSenderOrchestrator.RetryDirective.RETRANSFORM,
+                    "returning RETRANSFORM because response was " + rr.status().code() + " (auth/signature may be stale)");
+            }
             if (retryIsUnnecessaryGivenStatusCode(rr.status().code())) {
                 return makeDeterminationFuture(RequestSenderOrchestrator.RetryDirective.DONE,
                     "returning DONE because response code was terminal");
