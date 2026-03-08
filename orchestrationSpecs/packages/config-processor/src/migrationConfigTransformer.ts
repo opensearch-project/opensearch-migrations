@@ -283,6 +283,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 name: proxyName,
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
                 sourceEndpoint: sourceCluster.endpoint ?? "",
+                sourceAllowInsecure: sourceCluster.allowInsecure ?? false,
                 proxyConfig: proxy.proxyConfig
             };
         });

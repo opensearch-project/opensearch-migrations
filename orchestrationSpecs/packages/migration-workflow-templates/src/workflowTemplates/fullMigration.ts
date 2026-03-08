@@ -444,6 +444,7 @@ export const FullMigration = WorkflowBuilder.create({
                         name: expr.get(c.item, "name"),
                         kafkaConfig: expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
                         sourceEndpoint: expr.get(c.item, "sourceEndpoint"),
+                        sourceAllowInsecure: expr.get(c.item, "sourceAllowInsecure"),
                         proxyConfig: expr.deserializeRecord(expr.get(c.item, "proxyConfig"))
                     })),
                     // proxyConfig:      expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>(),

@@ -15,6 +15,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
+import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
@@ -369,13 +370,13 @@ public class TrafficReplayer {
 
     private static Parameters parseArgs(String[] args) {
         Parameters p = EnvVarParameterPuller.injectFromEnv(new Parameters(), "TRAFFIC_REPLAYER_");
-        JCommander jCommander = new JCommander(p);
+        var parser = JsonCommandLineParser.newBuilder().addObject(p).build();
         try {
-            jCommander.parse(args);
+            parser.parse(args);
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
             System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
-            jCommander.usage();
+            parser.getJCommander().usage();
             System.exit(2);
             return null;
         }

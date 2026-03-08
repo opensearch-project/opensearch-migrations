@@ -24,6 +24,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.common.settings.Settings;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
+import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.jcommander.NoSplitter;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -184,9 +185,9 @@ public class CaptureProxy {
 
     static Parameters parseArgs(String[] args) {
         Parameters p = EnvVarParameterPuller.injectFromEnv(new Parameters(), "CAPTURE_PROXY_");
-        JCommander jCommander = new JCommander(p);
+        var parser = JsonCommandLineParser.newBuilder().addObject(p).build();
         try {
-            jCommander.parse(args);
+            parser.parse(args);
             // Exactly one these 3 options are required. See that exactly one is set by summing up their presence
             if (Stream.of(p.traceDirectory, p.kafkaParameters.kafkaConnection, (p.noCapture ? "" : null))
                 .mapToInt(s -> s != null ? 1 : 0)
@@ -199,7 +200,7 @@ public class CaptureProxy {
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
             System.err.println("Got args: " + String.join("; ", args));
-            jCommander.usage();
+            parser.getJCommander().usage();
             System.exit(2);
             return null;
         }
@@ -350,6 +351,7 @@ public class CaptureProxy {
         );
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
+            .filter(s -> !s.isEmpty())
             .map(sslConfigFile -> new DefaultSecurityKeyStore(
                 getSettings(sslConfigFile),
                 Paths.get(sslConfigFile).toAbsolutePath().getParent()))

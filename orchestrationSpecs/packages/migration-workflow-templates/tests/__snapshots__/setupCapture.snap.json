@@ -50,7 +50,10 @@
         "inputs": {
           "parameters": [
             {
-              "name": "proxyConfig"
+              "name": "proxyName"
+            },
+            {
+              "name": "jsonConfig"
             },
             {
               "name": "listenPort"
@@ -67,7 +70,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{=fromJSON(inputs.parameters.proxyConfig)['name']}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{=fromJSON(inputs.parameters.proxyConfig)['name']}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{=fromJSON(inputs.parameters.proxyConfig)['name']}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          env:\n            - name: BACKSIDE_URI_STRING\n              value: \"{{=jsonpath(inputs.parameters.proxyConfig, '$.sourceEndpoint')}}\"\n            - name: FRONTSIDE_PORT\n              value: \"{{inputs.parameters.listenPort}}\"\n            - name: KAFKA_CONNECTION\n              value: \"{{=jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaConnection')}}\"\n            - name: KAFKA_TOPIC\n              value: \"{{=jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic')}}\"\n            - name: OTEL_COLLECTOR_ENDPOINT\n              value: \"{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.otelCollectorEndpoint')}}\"\n            - name: ALLOW_INSECURE_CONNECTIONS_TO_BACKSIDE\n              value: \"{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.noCapture')}}\"\n          command:\n            - /bin/sh\n            - -c\n            - |-\n              set -e\n              ARGS=\"\"\n              ARGS=\"${ARGS}${BACKSIDE_URI_STRING:+ --destinationUri $BACKSIDE_URI_STRING}\"\n              ARGS=\"${ARGS}${FRONTSIDE_PORT:+ --listenPort $FRONTSIDE_PORT}\"\n              ARGS=\"${ARGS}${KAFKA_CONNECTION:+ --kafkaConnection $KAFKA_CONNECTION}\"\n              ARGS=\"${ARGS}${KAFKA_TOPIC:+ --kafkaTopic $KAFKA_TOPIC}\"\n              ARGS=\"${ARGS}${OTEL_COLLECTOR_ENDPOINT:+ --otelCollectorEndpoint $OTEL_COLLECTOR_ENDPOINT}\"\n              if [ \"$ALLOW_INSECURE_CONNECTIONS_TO_BACKSIDE\" = \"true\" ]; then ARGS=\"${ARGS} --insecureDestination\"; fi\n              echo \"Starting proxy with: $ARGS\"\n              exec /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy $ARGS\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n",
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          command:\n            - /runJavaWithClasspath.sh\n          args:\n            - org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -155,8 +158,8 @@
               "arguments": {
                 "parameters": [
                   {
-                    "name": "proxyConfig",
-                    "value": "{{inputs.parameters.proxyConfig}}"
+                    "name": "proxyName",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['name']}}"
                   },
                   {
                     "name": "listenPort",
@@ -173,6 +176,10 @@
                   {
                     "name": "imageCaptureProxyPullPolicy",
                     "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "jsonConfig",
+                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'podReplicas', 'resources', 'loggingConfigurationOverrideConfigMap'), sprig.dict(\"destinationUri\", fromJSON(inputs.parameters.proxyConfig)['sourceEndpoint'], \"insecureDestination\", fromJSON(inputs.parameters.proxyConfig)['sourceAllowInsecure'], \"kafkaConnection\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaConnection'), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'))))}}"
                   }
                 ]
               },

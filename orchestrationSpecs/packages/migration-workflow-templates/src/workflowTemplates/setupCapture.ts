@@ -3,6 +3,7 @@ import {
     expr,
     INTERNAL,
     makeDirectTypeProxy,
+    makeStringTypeProxy,
     Serialized,
     selectInputsForRegister,
     typeToken,
@@ -36,17 +37,31 @@ function makeProxyServiceManifest(proxyName: BaseExpression<string>, listenPort:
     };
 }
 
+function makeProxyParamsDict(
+    proxyConfig: BaseExpression<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>
+) {
+    const config = expr.deserializeRecord(proxyConfig);
+    return expr.mergeDicts(
+        expr.omit(
+            expr.get(config, "proxyConfig"),
+            "podReplicas", "resources", "loggingConfigurationOverrideConfigMap"
+        ),
+        expr.makeDict({
+            destinationUri: expr.get(config, "sourceEndpoint"),
+            insecureDestination: expr.get(config, "sourceAllowInsecure"),
+            kafkaConnection: expr.jsonPathStrict(proxyConfig, "kafkaConfig", "kafkaConnection"),
+            kafkaTopic: expr.jsonPathStrict(proxyConfig, "kafkaConfig", "kafkaTopic"),
+        })
+    );
+}
+
 function makeProxyDeploymentManifest(args: {
     proxyName: BaseExpression<string>,
     image: BaseExpression<string>,
     imagePullPolicy: BaseExpression<string>,
-    sourceEndpoint: BaseExpression<string>,
-    kafkaConnection: BaseExpression<string>,
-    kafkaTopic: BaseExpression<string>,
     listenPort: BaseExpression<Serialized<number>>,
     podReplicas: BaseExpression<number>,
-    otelCollectorEndpoint: BaseExpression<string>,
-    allowInsecure: BaseExpression<boolean>,
+    jsonConfig: BaseExpression<string>,
 }) {
     return {
         apiVersion: "apps/v1",
@@ -62,27 +77,12 @@ function makeProxyDeploymentManifest(args: {
                         name: "proxy",
                         image: args.image,
                         imagePullPolicy: args.imagePullPolicy,
-                        env: [
-                            { name: "BACKSIDE_URI_STRING",  value: args.sourceEndpoint },
-                            { name: "FRONTSIDE_PORT",       value: args.listenPort },
-                            { name: "KAFKA_CONNECTION",     value: args.kafkaConnection },
-                            { name: "KAFKA_TOPIC",          value: args.kafkaTopic },
-                            { name: "OTEL_COLLECTOR_ENDPOINT", value: args.otelCollectorEndpoint },
-                            { name: "ALLOW_INSECURE_CONNECTIONS_TO_BACKSIDE", value: args.allowInsecure },
-                            // TODO: MSK auth, SSL config, header overrides
+                        command: ["/runJavaWithClasspath.sh"],
+                        args: [
+                            "org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy",
+                            "---INLINE-JSON",
+                            makeStringTypeProxy(args.jsonConfig)
                         ],
-                        command: ["/bin/sh", "-c", [
-                            "set -e",
-                            "ARGS=\"\"",
-                            "ARGS=\"${ARGS}${BACKSIDE_URI_STRING:+ --destinationUri $BACKSIDE_URI_STRING}\"",
-                            "ARGS=\"${ARGS}${FRONTSIDE_PORT:+ --listenPort $FRONTSIDE_PORT}\"",
-                            "ARGS=\"${ARGS}${KAFKA_CONNECTION:+ --kafkaConnection $KAFKA_CONNECTION}\"",
-                            "ARGS=\"${ARGS}${KAFKA_TOPIC:+ --kafkaTopic $KAFKA_TOPIC}\"",
-                            "ARGS=\"${ARGS}${OTEL_COLLECTOR_ENDPOINT:+ --otelCollectorEndpoint $OTEL_COLLECTOR_ENDPOINT}\"",
-                            "if [ \"$ALLOW_INSECURE_CONNECTIONS_TO_BACKSIDE\" = \"true\" ]; then ARGS=\"${ARGS} --insecureDestination\"; fi",
-                            "echo \"Starting proxy with: $ARGS\"",
-                            "exec /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy $ARGS"
-                        ].join("\n")],
                         ports: [{ containerPort: makeDirectTypeProxy(args.listenPort) }]
                     }]
                 }
@@ -101,8 +101,6 @@ export const SetupCapture = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
 
-    // Define leaf templates first so setupProxy can reference them via INTERNAL
-
     .addTemplate("deployProxyService", t => t
         .addRequiredInput("proxyName",  typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
@@ -116,7 +114,8 @@ export const SetupCapture = WorkflowBuilder.create({
 
 
     .addTemplate("deployProxyDeployment", t => t
-        .addRequiredInput("proxyConfig",   typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyName",     typeToken<string>())
+        .addRequiredInput("jsonConfig",    typeToken<string>())
         .addRequiredInput("listenPort",    typeToken<number>())
         .addRequiredInput("podReplicas",   typeToken<number>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
@@ -125,16 +124,12 @@ export const SetupCapture = WorkflowBuilder.create({
                 action: "apply",
                 setOwnerReference: false,
                 manifest: makeProxyDeploymentManifest({
-                    proxyName:             expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "name"),
-                    image:                 b.inputs.imageCaptureProxyLocation,
-                    imagePullPolicy:       b.inputs.imageCaptureProxyPullPolicy,
-                    sourceEndpoint:        expr.jsonPathStrict(b.inputs.proxyConfig, "sourceEndpoint"),
-                    kafkaConnection:       expr.jsonPathStrict(b.inputs.proxyConfig, "kafkaConfig", "kafkaConnection"),
-                    kafkaTopic:            expr.jsonPathStrict(b.inputs.proxyConfig, "kafkaConfig", "kafkaTopic"),
-                    listenPort:            b.inputs.listenPort,
-                    podReplicas:           expr.deserializeRecord(b.inputs.podReplicas),
-                    otelCollectorEndpoint: expr.cast(expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "otelCollectorEndpoint")).to<string>(),
-                    allowInsecure:         expr.cast(expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "noCapture")).to<boolean>(),
+                    proxyName:       b.inputs.proxyName,
+                    image:           b.inputs.imageCaptureProxyLocation,
+                    imagePullPolicy: b.inputs.imageCaptureProxyPullPolicy,
+                    listenPort:      b.inputs.listenPort,
+                    podReplicas:     expr.deserializeRecord(b.inputs.podReplicas),
+                    jsonConfig:      expr.toBase64(b.inputs.jsonConfig),
                 })
             }))
     )
@@ -167,9 +162,12 @@ export const SetupCapture = WorkflowBuilder.create({
             .addStep("deployProxy", INTERNAL, "deployProxyDeployment", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    proxyConfig:  b.inputs.proxyConfig,
+                    proxyName:    expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "name"),
                     listenPort:   b.inputs.listenPort,
                     podReplicas:  b.inputs.podReplicas,
+                    jsonConfig:   expr.asString(expr.serialize(
+                        makeProxyParamsDict(b.inputs.proxyConfig) as any
+                    )),
                 })
             )
         )

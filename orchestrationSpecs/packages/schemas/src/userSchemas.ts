@@ -142,14 +142,16 @@ export const RESOURCE_REQUIREMENTS = z.object({
 export type ResourceRequirementsType = z.infer<typeof RESOURCE_REQUIREMENTS>;
 
 export const PROXY_OPTIONS = z.object({
+    // -- deployment-level fields (not passed to the proxy CLI) --
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
     podReplicas: z.number().default(1).optional(),
     resources: RESOURCE_REQUIREMENTS
-        .describe("Resource limits and requests for replayer container.")
+        .describe("Resource limits and requests for proxy container.")
         .default(DEFAULT_RESOURCES.REPLAYER).optional(),
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
 
-    setHeaders: z.array(z.string()).optional(),
+    // -- proxy CLI params (passed via ---INLINE-JSON) --
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
+    setHeader: z.array(z.string()).optional(),
     destinationConnectionPoolSize: z.number().default(0).optional(),
     destinationConnectionPoolTimeout: z.string()
         .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
@@ -159,24 +161,27 @@ export const PROXY_OPTIONS = z.object({
     maxTrafficBufferSize: z.number().default(1048576).optional(),
     noCapture: z.boolean().default(false).optional(),
     numThreads: z.number().default(1).optional(),
-    // TODO - this should become a record of different settings...
-    //  we can still create and mount a file, but fof the configuration UX, it should be strongly typed
-    sslConfigSettings: z.string().default("").optional(),
+    sslConfigFile: z.string().optional(),
+    enableMSKAuth: z.boolean().default(false).optional(),
     suppressCaptureForHeaderMatch: z.array(z.string()).default([]).optional(),
-    suppressCaptureForMethod: z.array(z.string()).default([]).optional(),
-    suppressCaptureForUriPath: z.array(z.string()).default([]).optional(),
+    suppressCaptureForMethod: z.string().default("").optional(),
+    suppressCaptureForUriPath: z.string().default("").optional(),
     suppressMethodAndPath: z.string().default("").optional(),
 });
 
 export const REPLAYER_OPTIONS = z.object({
-    speedupFactor: z.number().default(1.1).optional(),
+    // -- deployment-level fields (not passed to the replayer CLI) --
     podReplicas: z.number().default(1).optional(),
-    authHeaderOverride: z.string().default("").optional(),
     jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
     resources: RESOURCE_REQUIREMENTS
         .describe("Resource limits and requests for replayer container.")
         .default(DEFAULT_RESOURCES.REPLAYER).optional(),
+
+    // -- replayer CLI params (passed via ---INLINE-JSON) --
+    speedupFactor: z.number().default(1.1).optional(),
+    authHeaderValue: z.string().default("").optional(),
+    otelCollectorEndpoint: z.string().default("").optional(),
 });
 
 // Note: noWait is not included here as it is hardcoded to true in the workflow.

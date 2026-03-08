@@ -160,6 +160,7 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
     name: z.string(),
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     sourceEndpoint: z.string(),
+    sourceAllowInsecure: z.boolean().default(false),
     proxyConfig: PROXY_OPTIONS
 })
 

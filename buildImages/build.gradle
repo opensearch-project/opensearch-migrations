@@ -53,6 +53,7 @@ def jibProjects = [
                 baseImageTag   : "latest",
                 imageName      : "capture_proxy",
                 imageTag       : "latest",
+                extraPermissions: ['/runJavaWithClasspath.sh': '755'],
                 requiredDependencies: [
                     "": ["buildKit_captureProxyBase"],
                     ":TrafficCapture:trafficCaptureProxyServer": ["syncVersionFile_capture_proxy"]

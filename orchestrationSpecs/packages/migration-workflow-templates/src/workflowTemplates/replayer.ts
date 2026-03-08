@@ -1,7 +1,6 @@
 
 import {z} from "zod";
 import {
-    getZodKeys,
     NAMED_TARGET_CLUSTER_CONFIG,
     REPLAYER_OPTIONS,
     ResourceRequirementsType,
@@ -11,7 +10,6 @@ import {
     expr,
     IMAGE_PULL_POLICY,
     INTERNAL, makeDirectTypeProxy, makeStringTypeProxy,
-    selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister, Serialized,
     typeToken,
     WorkflowBuilder
@@ -19,22 +17,52 @@ import {
 import {setupLog4jConfigForContainer} from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {extractTargetKeysToExpressionMap, makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
+
+function makeReplayerTargetParamDict(
+    targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>
+) {
+    const tc = expr.deserializeRecord(targetConfig);
+    const safeAuth = expr.getLoose(tc, "authConfig");
+    return expr.mergeDicts(
+        expr.makeDict({
+            targetUri: expr.get(tc, "endpoint"),
+            insecure: expr.dig(expr.deserializeRecord(targetConfig), ["allowInsecure"], false),
+        }),
+        expr.ternary(
+            expr.hasKey(tc, "authConfig"),
+            expr.ternary(
+                expr.hasKey(safeAuth, "sigv4"),
+                expr.makeDict({
+                    sigv4AuthHeaderServiceRegion: expr.concat(
+                        expr.getLoose(expr.getLoose(safeAuth, "sigv4"), "service"),
+                        expr.literal(","),
+                        expr.getLoose(expr.getLoose(safeAuth, "sigv4"), "region")
+                    )
+                }),
+                expr.literal({})
+            ),
+            expr.literal({})
+        )
+    );
+}
 
 function makeParamsDict(
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     options: BaseExpression<Serialized<z.infer<typeof REPLAYER_OPTIONS>>>,
-    // kafka stuff will need to come in here too
+    kafkaBrokers: BaseExpression<string>,
+    kafkaTopic: BaseExpression<string>,
+    kafkaGroupId: BaseExpression<string>,
 ) {
     return expr.mergeDicts(
         expr.mergeDicts(
-            makeTargetParamDict(targetConfig),
+            makeReplayerTargetParamDict(targetConfig),
             expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources", "jvmArgs")
         ),
-        expr.mergeDicts(
-            expr.makeDict({}),
-            expr.makeDict({})
-        )
+        expr.makeDict({
+            kafkaTrafficBrokers: kafkaBrokers,
+            kafkaTrafficTopic: kafkaTopic,
+            kafkaTrafficGroupId: kafkaGroupId,
+        })
     );
 }
 
@@ -158,12 +186,18 @@ export const Replayer = WorkflowBuilder.create({
             .addStep("deployReplayer", INTERNAL, "createDeployment", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    ...extractTargetKeysToExpressionMap(b.inputs.targetConfig),
-                    ...selectInputsFieldsAsExpressionRecord(expr.deserializeRecord(b.inputs.replayerConfig), c,
-                        getZodKeys(REPLAYER_OPTIONS)),
                     sessionName: "",
+                    podReplicas: expr.dig(expr.deserializeRecord(b.inputs.replayerConfig), ["podReplicas"], 1),
+                    jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.replayerConfig), ["jvmArgs"], ""),
+                    loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.replayerConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     jsonConfig: expr.asString(expr.serialize(
-                        makeParamsDict(b.inputs.targetConfig, b.inputs.replayerConfig)
+                        makeParamsDict(
+                            b.inputs.targetConfig,
+                            b.inputs.replayerConfig,
+                            b.inputs.kafkaTrafficBrokers,
+                            b.inputs.kafkaTopicName,
+                            b.inputs.kafkaGroupId,
+                        ) as any
                     )),
                     resources: expr.serialize(expr.getLoose(expr.deserializeRecord(b.inputs.replayerConfig), "resources"))
                 })))
