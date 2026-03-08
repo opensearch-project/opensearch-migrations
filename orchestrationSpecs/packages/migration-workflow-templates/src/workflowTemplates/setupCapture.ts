@@ -44,7 +44,7 @@ function makeProxyParamsDict(
     return expr.mergeDicts(
         expr.omit(
             expr.get(config, "proxyConfig"),
-            "podReplicas", "resources", "loggingConfigurationOverrideConfigMap"
+            "podReplicas", "resources", "loggingConfigurationOverrideConfigMap", "tls"
         ),
         expr.makeDict({
             destinationUri: expr.get(config, "sourceEndpoint"),
@@ -253,10 +253,21 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("proxyName",         typeToken<string>())
         .addRequiredInput("listenPort",        typeToken<number>())
         .addRequiredInput("podReplicas",       typeToken<number>())
-        .addOptionalInput("tlsSecretName",     c =>"")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
 
-        .addSteps(b => b
+        .addSteps(b => {
+            // Extract TLS mode from proxyConfig — empty string if tls is not configured
+            const tlsMode = expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "mode") as any;
+            const hasCertManagerTls = expr.regexMatch("^certManager$", tlsMode);
+            const hasExistingSecretTls = expr.regexMatch("^existingSecret$", tlsMode);
+            const hasTls = expr.or(hasCertManagerTls, hasExistingSecretTls) as unknown as BaseExpression<boolean, "complicatedExpression">;
+            // Secret name: for certManager mode, use <proxyName>-tls; for existingSecret, extract from config
+            const certManagerSecretName = expr.concat(b.inputs.proxyName, expr.literal("-tls"));
+            const existingSecretName = expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "secretName") as any;
+            const tlsSecretName = expr.ternary(hasCertManagerTls, certManagerSecretName,
+                expr.ternary(hasExistingSecretTls, existingSecretName, expr.literal(""))) as any;
+
+            return b
             .addStep("createKafkaTopic", SetupKafka, "createKafkaTopic", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -265,11 +276,32 @@ export const SetupCapture = WorkflowBuilder.create({
                     clusterConfig: expr.serialize(expr.literal({})),
                 })
             )
-            .addStep("deployService", INTERNAL, "deployProxyService", c =>
+            .addStepGroup(g => g
+                .addStep("deployService", INTERNAL, "deployProxyService", c =>
+                    c.register({
+                        proxyName:  b.inputs.proxyName,
+                        listenPort: b.inputs.listenPort,
+                    })
+                )
+                .addStep("provisionCert", INTERNAL, "provisionProxyCert", c =>
+                    c.register({
+                        certName:    certManagerSecretName,
+                        secretName:  certManagerSecretName,
+                        issuerName:  expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "issuerRef", "name") as any,
+                        issuerKind:  expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "issuerRef", "kind") as any,
+                        issuerGroup: expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "issuerRef", "group") as any,
+                        dnsNames:    expr.serialize(expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "dnsNames") as any),
+                        duration:    expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "duration") as any,
+                        renewBefore: expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "renewBefore") as any,
+                    }),
+                    { when: { templateExp: hasCertManagerTls } }
+                )
+            )
+            .addStep("waitForCert", INTERNAL, "waitForCertReady", c =>
                 c.register({
-                    proxyName:  b.inputs.proxyName,
-                    listenPort: b.inputs.listenPort,
-                })
+                    certName: certManagerSecretName,
+                }),
+                { when: { templateExp: hasCertManagerTls } }
             )
             .addStepGroup(g => g
                 .addStep("deployProxyNoTls", INTERNAL, "deployProxyDeployment", c =>
@@ -282,7 +314,7 @@ export const SetupCapture = WorkflowBuilder.create({
                             makeProxyParamsDict(b.inputs.proxyConfig) as any
                         )),
                     }),
-                    { when: { templateExp: expr.isEmpty(b.inputs.tlsSecretName) } }
+                    { when: { templateExp: expr.not(hasTls) } }
                 )
                 .addStep("deployProxyWithTls", INTERNAL, "deployProxyDeploymentWithTls", c =>
                     c.register({
@@ -290,15 +322,15 @@ export const SetupCapture = WorkflowBuilder.create({
                         proxyName:      expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "name"),
                         listenPort:     b.inputs.listenPort,
                         podReplicas:    b.inputs.podReplicas,
-                        tlsSecretName:  b.inputs.tlsSecretName,
+                        tlsSecretName:  tlsSecretName,
                         jsonConfig:     expr.asString(expr.serialize(
                             makeProxyParamsDict(b.inputs.proxyConfig) as any
                         )),
                     }),
-                    { when: { templateExp: expr.not(expr.isEmpty(b.inputs.tlsSecretName)) } }
+                    { when: { templateExp: hasTls } }
                 )
-            )
-        )
+            );
+        })
     )
 
 

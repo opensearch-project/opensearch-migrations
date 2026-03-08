@@ -199,10 +199,6 @@
               "name": "podReplicas"
             },
             {
-              "name": "tlsSecretName",
-              "value": ""
-            },
-            {
               "name": "imageCaptureProxyLocation"
             },
             {
@@ -252,12 +248,68 @@
                 ]
               },
               "name": "deployService"
+            },
+            {
+              "template": "provisionproxycert",
+              "when": "{{=regexMatch('^certManager$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode'))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "certName",
+                    "value": "{{=inputs.parameters.proxyName+'-tls'}}"
+                  },
+                  {
+                    "name": "secretName",
+                    "value": "{{=inputs.parameters.proxyName+'-tls'}}"
+                  },
+                  {
+                    "name": "issuerName",
+                    "value": "{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.issuerRef.name')}}"
+                  },
+                  {
+                    "name": "issuerKind",
+                    "value": "{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.issuerRef.kind')}}"
+                  },
+                  {
+                    "name": "issuerGroup",
+                    "value": "{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.issuerRef.group')}}"
+                  },
+                  {
+                    "name": "dnsNames",
+                    "value": "{{=toJSON(jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.dnsNames'))}}"
+                  },
+                  {
+                    "name": "duration",
+                    "value": "{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.duration')}}"
+                  },
+                  {
+                    "name": "renewBefore",
+                    "value": "{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.renewBefore')}}"
+                  }
+                ]
+              },
+              "name": "provisionCert"
+            }
+          ],
+          [
+            {
+              "template": "waitforcertready",
+              "when": "{{=regexMatch('^certManager$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode'))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "certName",
+                    "value": "{{=inputs.parameters.proxyName+'-tls'}}"
+                  }
+                ]
+              },
+              "name": "waitForCert"
             }
           ],
           [
             {
               "template": "deployproxydeployment",
-              "when": "{{=0 == len(inputs.parameters.tlsSecretName)}}",
+              "when": "{{=!(regexMatch('^certManager$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode')) || regexMatch('^existingSecret$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode')))}}",
               "arguments": {
                 "parameters": [
                   {
@@ -273,10 +325,6 @@
                     "value": "{{inputs.parameters.podReplicas}}"
                   },
                   {
-                    "name": "tlsSecretName",
-                    "value": "{{inputs.parameters.tlsSecretName}}"
-                  },
-                  {
                     "name": "imageCaptureProxyLocation",
                     "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
                   },
@@ -286,7 +334,7 @@
                   },
                   {
                     "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'podReplicas', 'resources', 'loggingConfigurationOverrideConfigMap'), sprig.dict(\"destinationUri\", fromJSON(inputs.parameters.proxyConfig)['sourceEndpoint'], \"insecureDestination\", fromJSON(inputs.parameters.proxyConfig)['sourceAllowInsecure'], \"kafkaConnection\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaConnection'), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'))))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'podReplicas', 'resources', 'loggingConfigurationOverrideConfigMap', 'tls'), sprig.dict(\"destinationUri\", fromJSON(inputs.parameters.proxyConfig)['sourceEndpoint'], \"insecureDestination\", fromJSON(inputs.parameters.proxyConfig)['sourceAllowInsecure'], \"kafkaConnection\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaConnection'), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'))))}}"
                   }
                 ]
               },
@@ -294,7 +342,7 @@
             },
             {
               "template": "deployproxydeploymentwithtls",
-              "when": "{{=!(0 == len(inputs.parameters.tlsSecretName))}}",
+              "when": "{{=regexMatch('^certManager$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode')) || regexMatch('^existingSecret$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode'))}}",
               "arguments": {
                 "parameters": [
                   {
@@ -310,10 +358,6 @@
                     "value": "{{inputs.parameters.podReplicas}}"
                   },
                   {
-                    "name": "tlsSecretName",
-                    "value": "{{inputs.parameters.tlsSecretName}}"
-                  },
-                  {
                     "name": "imageCaptureProxyLocation",
                     "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
                   },
@@ -322,8 +366,12 @@
                     "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
                   },
                   {
+                    "name": "tlsSecretName",
+                    "value": "{{=((regexMatch('^certManager$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode'))) ? (inputs.parameters.proxyName+'-tls') : (((regexMatch('^existingSecret$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode'))) ? (jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.secretName')) : (''))))}}"
+                  },
+                  {
                     "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'podReplicas', 'resources', 'loggingConfigurationOverrideConfigMap'), sprig.dict(\"destinationUri\", fromJSON(inputs.parameters.proxyConfig)['sourceEndpoint'], \"insecureDestination\", fromJSON(inputs.parameters.proxyConfig)['sourceAllowInsecure'], \"kafkaConnection\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaConnection'), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'))))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'podReplicas', 'resources', 'loggingConfigurationOverrideConfigMap', 'tls'), sprig.dict(\"destinationUri\", fromJSON(inputs.parameters.proxyConfig)['sourceEndpoint'], \"insecureDestination\", fromJSON(inputs.parameters.proxyConfig)['sourceAllowInsecure'], \"kafkaConnection\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaConnection'), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'))))}}"
                   }
                 ]
               },

@@ -1089,7 +1089,7 @@ echo "Installing Migration Assistant chart now, this can take a couple minutes..
 helm install "$namespace" "${ma_chart_dir}" \
   --kube-context="${KUBE_CONTEXT}" \
   --namespace $namespace \
-  --timeout 10m \
+  --timeout 20m \
   $HELM_VALUES_FLAGS \
   ${extra_helm_values:+-f "$extra_helm_values"} \
   --set stageName="${STAGE}" \

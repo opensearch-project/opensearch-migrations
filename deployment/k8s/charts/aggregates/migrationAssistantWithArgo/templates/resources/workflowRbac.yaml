@@ -43,6 +43,11 @@ rules:
     resources: ["kafkas", "kafkatopics", "kafkanodepools", "kafkausers"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
+  # cert-manager Certificate resources (namespace-scoped)
+  - apiGroups: ["cert-manager.io"]
+    resources: ["certificates", "certificates/status"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
   # Allow Argo workflow to perform Helm installs for source and target clusters
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
@@ -61,5 +66,30 @@ subjects:
 roleRef:
   kind: Role
   name: workflow-deployer-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-cert-issuer-manager
+rules:
+  - apiGroups: ["cert-manager.io"]
+    resources: ["clusterissuers"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["awspca.cert-manager.io"]
+    resources: ["awspcaclusterissuers"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-cert-issuer-manager-binding
+subjects:
+  - kind: ServiceAccount
+    name: argo-workflow-executor
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-cert-issuer-manager
   apiGroup: rbac.authorization.k8s.io
 {{ end }}

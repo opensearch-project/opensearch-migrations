@@ -1,25 +1,42 @@
-{{- if .Values.awsPrivateCA.create }}
-apiVersion: acmpca.services.k8s.aws/v1alpha1
-kind: CertificateAuthority
-metadata:
-  name: migration-assistant-pca
-  annotations:
-    services.k8s.aws/deletion-policy: {{ .Values.awsPrivateCA.caConfig.deletionPolicy }}
-spec:
-  certificateAuthorityConfiguration:
-    keyAlgorithm: {{ .Values.awsPrivateCA.caConfig.keyAlgorithm }}
-    signingAlgorithm: {{ .Values.awsPrivateCA.caConfig.signingAlgorithm }}
-    subject:
-      commonName: {{ .Values.awsPrivateCA.caConfig.subject.commonName | quote }}
-  type: {{ .Values.awsPrivateCA.caConfig.type }}
-{{- end }}
----
 {{- if and (not .Values.awsPrivateCA.create) .Values.awsPrivateCA.arn }}
-apiVersion: awspca.cert-manager.io/v1beta1
-kind: AWSPCAClusterIssuer
+apiVersion: batch/v1
+kind: Job
 metadata:
-  name: aws-pca-issuer
+  name: create-pca-issuer-from-arn
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "51"
+    helm.sh/hook-delete-policy: hook-succeeded
 spec:
-  arn: {{ .Values.awsPrivateCA.arn }}
-  region: {{ .Values.awsPrivateCA.region }}
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      serviceAccountName: {{ .Values.argoWorkflowServiceAccountName | default "argo-workflow-executor" }}
+      containers:
+      - name: create-issuer
+        image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Creating AWSPCAClusterIssuer (retrying until aws-privateca-issuer is ready)..."
+          for i in $(seq 1 60); do
+            if cat <<'EOF' | kubectl apply -f - 2>&1; then
+          apiVersion: awspca.cert-manager.io/v1beta1
+          kind: AWSPCAClusterIssuer
+          metadata:
+            name: aws-pca-issuer
+          spec:
+            arn: {{ .Values.awsPrivateCA.arn }}
+            region: {{ .Values.awsPrivateCA.region }}
+          EOF
+              echo "AWSPCAClusterIssuer created successfully."
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "ERROR: Failed to create AWSPCAClusterIssuer after 60 attempts"
+          exit 1
+      restartPolicy: Never
+  backoffLimit: 3
 {{- end }}
