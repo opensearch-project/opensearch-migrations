@@ -111,10 +111,12 @@ function makeCertificateManifest(args: {
     issuerName: BaseExpression<string>,
     issuerKind: BaseExpression<string>,
     issuerGroup: BaseExpression<string>,
-    dnsNames: BaseExpression<string[]>,
+    dnsNames: BaseExpression<string>,
     duration: BaseExpression<string>,
     renewBefore: BaseExpression<string>,
 }) {
+    // dnsNames must be rendered as a raw JSON array in the manifest, not quoted.
+    // We use makeDirectTypeProxy to prevent quoting so the JSON array is inlined directly.
     return {
         apiVersion: "cert-manager.io/v1",
         kind: "Certificate",
@@ -126,7 +128,7 @@ function makeCertificateManifest(args: {
                 kind: args.issuerKind,
                 group: args.issuerGroup,
             },
-            dnsNames: args.dnsNames,
+            dnsNames: makeDirectTypeProxy(args.dnsNames as any),
             duration: args.duration,
             renewBefore: args.renewBefore,
         }
@@ -208,7 +210,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("issuerName",   typeToken<string>())
         .addRequiredInput("issuerKind",   typeToken<string>())
         .addRequiredInput("issuerGroup",  typeToken<string>())
-        .addRequiredInput("dnsNames",     typeToken<string[]>())
+        .addRequiredInput("dnsNames",     typeToken<string>())
         .addRequiredInput("duration",     typeToken<string>())
         .addRequiredInput("renewBefore",  typeToken<string>())
         .addResourceTask(b => b
@@ -221,7 +223,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     issuerName:   b.inputs.issuerName,
                     issuerKind:   b.inputs.issuerKind,
                     issuerGroup:  b.inputs.issuerGroup,
-                    dnsNames:     expr.deserializeRecord(b.inputs.dnsNames),
+                    dnsNames:     b.inputs.dnsNames,
                     duration:     b.inputs.duration,
                     renewBefore:  b.inputs.renewBefore,
                 })
@@ -256,16 +258,21 @@ export const SetupCapture = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
 
         .addSteps(b => {
-            // Extract TLS mode from proxyConfig — empty string if tls is not configured
-            const tlsMode = expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "mode") as any;
-            const hasCertManagerTls = expr.regexMatch("^certManager$", tlsMode);
-            const hasExistingSecretTls = expr.regexMatch("^existingSecret$", tlsMode);
+            // Extract TLS mode from proxyConfig using deserialized field access
+            const config = expr.deserializeRecord(b.inputs.proxyConfig);
+            const proxyOpts = expr.get(config, "proxyConfig") as any;
+            const tlsBlock = expr.get(proxyOpts, "tls") as any;
+            const tlsMode = expr.get(tlsBlock, "mode") as any;
+            const hasCertManagerTls = expr.equals(tlsMode, "certManager") as any;
+            const hasExistingSecretTls = expr.equals(tlsMode, "existingSecret") as any;
             const hasTls = expr.or(hasCertManagerTls, hasExistingSecretTls) as unknown as BaseExpression<boolean, "complicatedExpression">;
             // Secret name: for certManager mode, use <proxyName>-tls; for existingSecret, extract from config
             const certManagerSecretName = expr.concat(b.inputs.proxyName, expr.literal("-tls"));
-            const existingSecretName = expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "secretName") as any;
+            const existingSecretName = expr.get(tlsBlock, "secretName") as any;
             const tlsSecretName = expr.ternary(hasCertManagerTls, certManagerSecretName,
                 expr.ternary(hasExistingSecretTls, existingSecretName, expr.literal(""))) as any;
+            // Issuer fields for cert provisioning
+            const issuerRef = expr.get(tlsBlock, "issuerRef") as any;
 
             return b
             .addStep("createKafkaTopic", SetupKafka, "createKafkaTopic", c =>
@@ -287,12 +294,12 @@ export const SetupCapture = WorkflowBuilder.create({
                     c.register({
                         certName:    certManagerSecretName,
                         secretName:  certManagerSecretName,
-                        issuerName:  expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "issuerRef", "name") as any,
-                        issuerKind:  expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "issuerRef", "kind") as any,
-                        issuerGroup: expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "issuerRef", "group") as any,
-                        dnsNames:    expr.serialize(expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "dnsNames") as any),
-                        duration:    expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "duration") as any,
-                        renewBefore: expr.jsonPathStrict(b.inputs.proxyConfig, "proxyConfig", "tls", "renewBefore") as any,
+                        issuerName:  expr.get(issuerRef, "name") as any,
+                        issuerKind:  expr.get(issuerRef, "kind") as any,
+                        issuerGroup: expr.get(issuerRef, "group") as any,
+                        dnsNames:    expr.recordToString(expr.get(tlsBlock, "dnsNames") as any),
+                        duration:    expr.get(tlsBlock, "duration") as any,
+                        renewBefore: expr.get(tlsBlock, "renewBefore") as any,
                     }),
                     { when: { templateExp: hasCertManagerTls } }
                 )

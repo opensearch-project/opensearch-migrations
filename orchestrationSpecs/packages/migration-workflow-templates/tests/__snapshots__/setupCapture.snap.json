@@ -149,7 +149,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: cert-manager.io/v1\nkind: Certificate\nmetadata:\n  name: \"{{inputs.parameters.certName}}\"\nspec:\n  secretName: \"{{inputs.parameters.secretName}}\"\n  issuerRef:\n    name: \"{{inputs.parameters.issuerName}}\"\n    kind: \"{{inputs.parameters.issuerKind}}\"\n    group: \"{{inputs.parameters.issuerGroup}}\"\n  dnsNames: \"{{inputs.parameters.dnsNames}}\"\n  duration: \"{{inputs.parameters.duration}}\"\n  renewBefore: \"{{inputs.parameters.renewBefore}}\"\n",
+          "manifest": "apiVersion: cert-manager.io/v1\nkind: Certificate\nmetadata:\n  name: \"{{inputs.parameters.certName}}\"\nspec:\n  secretName: \"{{inputs.parameters.secretName}}\"\n  issuerRef:\n    name: \"{{inputs.parameters.issuerName}}\"\n    kind: \"{{inputs.parameters.issuerKind}}\"\n    group: \"{{inputs.parameters.issuerGroup}}\"\n  dnsNames: {{inputs.parameters.dnsNames}}\n  duration: \"{{inputs.parameters.duration}}\"\n  renewBefore: \"{{inputs.parameters.renewBefore}}\"\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -251,7 +251,7 @@
             },
             {
               "template": "provisionproxycert",
-              "when": "{{=regexMatch('^certManager$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode'))}}",
+              "when": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'certManager'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -264,27 +264,27 @@
                   },
                   {
                     "name": "issuerName",
-                    "value": "{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.issuerRef.name')}}"
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['issuerRef']['name']}}"
                   },
                   {
                     "name": "issuerKind",
-                    "value": "{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.issuerRef.kind')}}"
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['issuerRef']['kind']}}"
                   },
                   {
                     "name": "issuerGroup",
-                    "value": "{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.issuerRef.group')}}"
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['issuerRef']['group']}}"
                   },
                   {
                     "name": "dnsNames",
-                    "value": "{{=toJSON(jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.dnsNames'))}}"
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['dnsNames'])}}"
                   },
                   {
                     "name": "duration",
-                    "value": "{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.duration')}}"
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['duration']}}"
                   },
                   {
                     "name": "renewBefore",
-                    "value": "{{=jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.renewBefore')}}"
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['renewBefore']}}"
                   }
                 ]
               },
@@ -294,7 +294,7 @@
           [
             {
               "template": "waitforcertready",
-              "when": "{{=regexMatch('^certManager$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode'))}}",
+              "when": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'certManager'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -309,7 +309,7 @@
           [
             {
               "template": "deployproxydeployment",
-              "when": "{{=!(regexMatch('^certManager$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode')) || regexMatch('^existingSecret$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode')))}}",
+              "when": "{{=!(fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'certManager' || fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'existingSecret')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -342,7 +342,7 @@
             },
             {
               "template": "deployproxydeploymentwithtls",
-              "when": "{{=regexMatch('^certManager$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode')) || regexMatch('^existingSecret$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode'))}}",
+              "when": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'certManager' || fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'existingSecret'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -367,7 +367,7 @@
                   },
                   {
                     "name": "tlsSecretName",
-                    "value": "{{=((regexMatch('^certManager$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode'))) ? (inputs.parameters.proxyName+'-tls') : (((regexMatch('^existingSecret$', jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.mode'))) ? (jsonpath(inputs.parameters.proxyConfig, '$.proxyConfig.tls.secretName')) : (''))))}}"
+                    "value": "{{=((fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'certManager') ? (inputs.parameters.proxyName+'-tls') : (((fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'existingSecret') ? (fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['secretName']) : (''))))}}"
                   },
                   {
                     "name": "jsonConfig",
