@@ -1,0 +1,37 @@
+{{- if .Values.awsPrivateCA.create }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-pca-issuer
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: hook-succeeded
+spec:
+  template:
+    spec:
+      serviceAccountName: argo-workflow-executor
+      containers:
+      - name: create-issuer
+        image: bitnami/kubectl
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Waiting for PCA to be synced by ACK..."
+          kubectl wait certificateauthority/migration-assistant-pca \
+            --for=condition=ACK.ResourceSynced=True --timeout=300s
+          ARN=$(kubectl get certificateauthority migration-assistant-pca \
+            -o jsonpath='{.status.ackResourceMetadata.arn}')
+          echo "PCA ARN: $ARN"
+          cat <<EOF | kubectl apply -f -
+          apiVersion: awspca.cert-manager.io/v1beta1
+          kind: AWSPCAClusterIssuer
+          metadata:
+            name: aws-pca-issuer
+          spec:
+            arn: $ARN
+            region: {{ .Values.awsPrivateCA.region }}
+          EOF
+      restartPolicy: Never
+  backoffLimit: 3
+{{- end }}

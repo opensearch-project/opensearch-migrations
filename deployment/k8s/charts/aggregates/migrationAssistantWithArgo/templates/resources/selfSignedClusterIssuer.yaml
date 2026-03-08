@@ -1,0 +1,8 @@
+{{- if index .Values.conditionalPackageInstalls "cert-manager" }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: migrations-selfsigned
+spec:
+  selfSigned: {}
+{{- end }}

@@ -6,6 +6,9 @@ conditionalPackageInstalls:
   argo-workflows: true          # orchestrates the steps of a migration
   strimzi-kafka-operator: true  # Required by capture and replay
   fluent-bit: true
+  # TLS certificate infrastructure for capture proxy
+  aws-privateca-issuer: false   # opt-in: bridges cert-manager to AWS PCA
+  ack-acmpca-controller: false  # opt-in: manages AWS PCA as K8s resources via ACK
 
   # Simpler alternative to the opentelemetry-operator.
   # ONLY set up the otel-collector and require manual instrumentation
@@ -209,6 +212,19 @@ otelConfiguration:
           processors:
           exporters: [ debug ]
 
+# AWS Private CA configuration for TLS certificate issuance
+awsPrivateCA:
+  create: false          # true = create PCA via ACK, false = bring your own
+  arn: ""                # PCA ARN (required if create: false and using PCA)
+  region: ""             # AWS region of the PCA
+  caConfig:              # only used when create: true
+    type: SUBORDINATE
+    keyAlgorithm: RSA_2048
+    signingAlgorithm: SHA256WITHRSA
+    subject:
+      commonName: "Migration Assistant CA"
+    deletionPolicy: delete  # or retain (keeps PCA after helm uninstall)
+
 charts:
   cert-manager:
     version: 1.17.2
@@ -217,6 +233,22 @@ charts:
     values:
       crds:
         enabled: true
+
+  aws-privateca-issuer:
+    version: "1.4.0"
+    repository: "https://cert-manager.github.io/aws-privateca-issuer"
+    dependsOn: cert-manager
+    values:
+      serviceAccount:
+        name: aws-pca-issuer
+
+  ack-acmpca-controller:
+    version: "1.0.16"
+    repository: "oci://public.ecr.aws/aws-controllers-k8s/acmpca-chart"
+    dependsOn: cert-manager
+    values:
+      serviceAccount:
+        name: ack-acmpca-controller
 
   opentelemetry-operator:
     version: "0.86.4"

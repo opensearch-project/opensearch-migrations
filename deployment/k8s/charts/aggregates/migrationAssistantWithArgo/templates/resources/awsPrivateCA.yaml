@@ -1,0 +1,25 @@
+{{- if .Values.awsPrivateCA.create }}
+apiVersion: acmpca.services.k8s.aws/v1alpha1
+kind: CertificateAuthority
+metadata:
+  name: migration-assistant-pca
+  annotations:
+    services.k8s.aws/deletion-policy: {{ .Values.awsPrivateCA.caConfig.deletionPolicy }}
+spec:
+  certificateAuthorityConfiguration:
+    keyAlgorithm: {{ .Values.awsPrivateCA.caConfig.keyAlgorithm }}
+    signingAlgorithm: {{ .Values.awsPrivateCA.caConfig.signingAlgorithm }}
+    subject:
+      commonName: {{ .Values.awsPrivateCA.caConfig.subject.commonName | quote }}
+  type: {{ .Values.awsPrivateCA.caConfig.type }}
+{{- end }}
+---
+{{- if and (not .Values.awsPrivateCA.create) .Values.awsPrivateCA.arn }}
+apiVersion: awspca.cert-manager.io/v1beta1
+kind: AWSPCAClusterIssuer
+metadata:
+  name: aws-pca-issuer
+spec:
+  arn: {{ .Values.awsPrivateCA.arn }}
+  region: {{ .Values.awsPrivateCA.region }}
+{{- end }}

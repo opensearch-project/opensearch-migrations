@@ -54,6 +54,8 @@ vpc_id=""
 subnet_ids=""
 eks_access_principal_arn=""
 skip_cfn_deploy=false
+tls_mode="none"
+pca_arn=""
 build_chart_and_dashboards=false
 version=""
 create_vpc_endpoints=""
@@ -97,6 +99,8 @@ while [[ $# -gt 0 ]]; do
     --push-all-images-to-private-ecr) push_images_to_ecr=true; shift 1 ;;
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
+    --tls-mode) tls_mode="$2"; shift 2 ;;
+    --pca-arn) pca_arn="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
@@ -169,6 +173,15 @@ while [[ $# -gt 0 ]]; do
       echo "                                            release artifacts. Required when mixing --build-* flags (e.g."
       echo "                                            --build-cfn without --build-images) to avoid accidental"
       echo "                                            version mismatches between built and downloaded components."
+      echo ""
+      echo "TLS / Certificate options:"
+      echo "  --tls-mode <mode>                         TLS certificate strategy for the capture proxy."
+      echo "                                            none         - No TLS (default)"
+      echo "                                            self-signed  - Use cert-manager self-signed issuer"
+      echo "                                            pca-existing - Use an existing AWS Private CA"
+      echo "                                            pca-create   - Create a new AWS Private CA via ACK"
+      echo "  --pca-arn <arn>                           ARN of existing AWS Private CA"
+      echo "                                            (required with --tls-mode pca-existing)"
       echo ""
       echo "Examples:"
       echo "  # Deploy new infrastructure with a new VPC and bootstrap:"
@@ -321,6 +334,19 @@ validate_args() {
     echo "Error: --create-vpc-endpoints is only valid with --deploy-import-vpc-cfn." >&2
     exit 1
   fi
+  # Validate TLS mode
+  case "$tls_mode" in
+    none|self-signed) ;;
+    pca-existing)
+      if [[ -z "$pca_arn" ]]; then
+        echo "Error: --pca-arn is required with --tls-mode pca-existing." >&2
+        exit 1
+      fi ;;
+    pca-create) ;;
+    *)
+      echo "Error: Unknown --tls-mode: $tls_mode (expected: none, self-signed, pca-existing, pca-create)" >&2
+      exit 1 ;;
+  esac
 }
 validate_args
 
@@ -1043,6 +1069,22 @@ fi
 
 check_existing_ma_release "$namespace" "$namespace"
 
+# Build TLS-related helm --set flags
+TLS_HELM_FLAGS=""
+case "$tls_mode" in
+  pca-existing)
+    TLS_HELM_FLAGS="--set conditionalPackageInstalls.aws-privateca-issuer=true"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.arn=$pca_arn"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.region=${AWS_CFN_REGION}"
+    ;;
+  pca-create)
+    TLS_HELM_FLAGS="--set conditionalPackageInstalls.aws-privateca-issuer=true"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set conditionalPackageInstalls.ack-acmpca-controller=true"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.create=true"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.region=${AWS_CFN_REGION}"
+    ;;
+esac
+
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install "$namespace" "${ma_chart_dir}" \
   --kube-context="${KUBE_CONTEXT}" \
@@ -1055,6 +1097,7 @@ helm install "$namespace" "${ma_chart_dir}" \
   --set aws.account="${AWS_ACCOUNT}" \
   --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
   $IMAGE_FLAGS \
+  $TLS_HELM_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 
 echo "Deploying CloudWatch dashboards..."

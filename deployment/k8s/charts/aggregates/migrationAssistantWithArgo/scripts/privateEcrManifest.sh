@@ -33,6 +33,12 @@ quay.io/jetstack/cert-manager-webhook:v1.17.2
 quay.io/jetstack/cert-manager-cainjector:v1.17.2
 quay.io/jetstack/cert-manager-startupapicheck:v1.17.2
 
+# --- aws-privateca-issuer ---
+public.ecr.aws/cert-manager/aws-privateca-issuer:v1.4.0
+
+# --- ack-acmpca-controller ---
+public.ecr.aws/aws-controllers-k8s/acmpca-controller:1.0.16
+
 # --- strimzi (operator + runtime images) ---
 quay.io/strimzi/operator:0.47.0
 quay.io/strimzi/kafka:0.47.0-kafka-3.9.0
