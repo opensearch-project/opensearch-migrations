@@ -425,10 +425,6 @@
               "name": "sessionName"
             },
             {
-              "name": "indices",
-              "value": "[]"
-            },
-            {
               "name": "documentBackfillConfig"
             },
             {
@@ -617,10 +613,6 @@
               "name": "sessionName"
             },
             {
-              "name": "indices",
-              "value": "[]"
-            },
-            {
               "name": "documentBackfillConfig"
             },
             {
@@ -693,10 +685,6 @@
                   {
                     "name": "sessionName",
                     "value": "{{inputs.parameters.sessionName}}"
-                  },
-                  {
-                    "name": "indices",
-                    "value": "{{inputs.parameters.indices}}"
                   },
                   {
                     "name": "documentBackfillConfig",

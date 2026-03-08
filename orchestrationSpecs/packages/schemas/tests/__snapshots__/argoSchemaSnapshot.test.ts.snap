@@ -131,6 +131,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "sourceEndpoint": {
                   "type": "string"
                 },
+                "sourceAllowInsecure": {
+                  "type": "boolean",
+                  "default": false
+                },
                 "proxyConfig": {
                   "type": "object",
                   "properties": {
@@ -210,13 +214,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "limits",
                         "requests"
                       ],
-                      "description": "Resource limits and requests for replayer container."
+                      "description": "Resource limits and requests for proxy container."
                     },
                     "otelCollectorEndpoint": {
                       "type": "string",
                       "default": "http://otel-collector:4317"
                     },
-                    "setHeaders": {
+                    "setHeader": {
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -250,9 +254,102 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 1
                     },
-                    "sslConfigSettings": {
+                    "sslConfigFile": {
                       "type": "string",
-                      "default": ""
+                      "description": "Legacy: YAML config for OpenSearch security SSL. Prefer tls config for K8s deployments."
+                    },
+                    "tls": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "certManager"
+                              ]
+                            },
+                            "issuerRef": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "description": "Name of the cert-manager Issuer or ClusterIssuer."
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "Issuer",
+                                    "ClusterIssuer"
+                                  ],
+                                  "default": "ClusterIssuer",
+                                  "description": "Kind of the issuer resource."
+                                },
+                                "group": {
+                                  "type": "string",
+                                  "default": "cert-manager.io",
+                                  "description": "API group of the issuer. Use 'awspca.cert-manager.io' for AWS PCA issuers."
+                                }
+                              },
+                              "required": [
+                                "name"
+                              ]
+                            },
+                            "commonName": {
+                              "type": "string"
+                            },
+                            "dnsNames": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "description": "DNS names for the certificate. Must include the proxy's service DNS name."
+                            },
+                            "duration": {
+                              "type": "string",
+                              "default": "2160h",
+                              "description": "Requested certificate validity duration (default: 90 days)."
+                            },
+                            "renewBefore": {
+                              "type": "string",
+                              "default": "360h",
+                              "description": "How long before expiry to renew (default: 15 days)."
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "issuerRef",
+                            "dnsNames"
+                          ],
+                          "description": "Use cert-manager to provision a TLS certificate for the proxy."
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "existingSecret"
+                              ]
+                            },
+                            "secretName": {
+                              "type": "string",
+                              "description": "Name of an existing K8s TLS secret with tls.crt and tls.key."
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "secretName"
+                          ],
+                          "description": "Use a pre-existing K8s TLS secret."
+                        }
+                      ],
+                      "description": "TLS certificate configuration for the proxy. Mutually exclusive with sslConfigFile."
+                    },
+                    "enableMSKAuth": {
+                      "type": "boolean",
+                      "default": false
                     },
                     "suppressCaptureForHeaderMatch": {
                       "type": "array",
@@ -262,18 +359,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": []
                     },
                     "suppressCaptureForMethod": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "default": []
+                      "type": "string",
+                      "default": ""
                     },
                     "suppressCaptureForUriPath": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "default": []
+                      "type": "string",
+                      "default": ""
                     },
                     "suppressMethodAndPath": {
                       "type": "string",
@@ -1061,17 +1152,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "replayerConfig": {
                   "type": "object",
                   "properties": {
-                    "speedupFactor": {
-                      "type": "number",
-                      "default": 1.1
-                    },
                     "podReplicas": {
                       "type": "number",
                       "default": 1
-                    },
-                    "authHeaderOverride": {
-                      "type": "string",
-                      "default": ""
                     },
                     "jvmArgs": {
                       "type": "string",
@@ -1150,6 +1233,18 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "requests"
                       ],
                       "description": "Resource limits and requests for replayer container."
+                    },
+                    "speedupFactor": {
+                      "type": "number",
+                      "default": 1.1
+                    },
+                    "authHeaderValue": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "otelCollectorEndpoint": {
+                      "type": "string",
+                      "default": ""
                     }
                   }
                 }
@@ -1967,13 +2062,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "limits",
                       "requests"
                     ],
-                    "description": "Resource limits and requests for replayer container."
+                    "description": "Resource limits and requests for proxy container."
                   },
                   "otelCollectorEndpoint": {
                     "type": "string",
                     "default": "http://otel-collector:4317"
                   },
-                  "setHeaders": {
+                  "setHeader": {
                     "type": "array",
                     "items": {
                       "type": "string"
@@ -2007,9 +2102,102 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "number",
                     "default": 1
                   },
-                  "sslConfigSettings": {
+                  "sslConfigFile": {
                     "type": "string",
-                    "default": ""
+                    "description": "Legacy: YAML config for OpenSearch security SSL. Prefer tls config for K8s deployments."
+                  },
+                  "tls": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "certManager"
+                            ]
+                          },
+                          "issuerRef": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "description": "Name of the cert-manager Issuer or ClusterIssuer."
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "Issuer",
+                                  "ClusterIssuer"
+                                ],
+                                "default": "ClusterIssuer",
+                                "description": "Kind of the issuer resource."
+                              },
+                              "group": {
+                                "type": "string",
+                                "default": "cert-manager.io",
+                                "description": "API group of the issuer. Use 'awspca.cert-manager.io' for AWS PCA issuers."
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ]
+                          },
+                          "commonName": {
+                            "type": "string"
+                          },
+                          "dnsNames": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "description": "DNS names for the certificate. Must include the proxy's service DNS name."
+                          },
+                          "duration": {
+                            "type": "string",
+                            "default": "2160h",
+                            "description": "Requested certificate validity duration (default: 90 days)."
+                          },
+                          "renewBefore": {
+                            "type": "string",
+                            "default": "360h",
+                            "description": "How long before expiry to renew (default: 15 days)."
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "issuerRef",
+                          "dnsNames"
+                        ],
+                        "description": "Use cert-manager to provision a TLS certificate for the proxy."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "existingSecret"
+                            ]
+                          },
+                          "secretName": {
+                            "type": "string",
+                            "description": "Name of an existing K8s TLS secret with tls.crt and tls.key."
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "secretName"
+                        ],
+                        "description": "Use a pre-existing K8s TLS secret."
+                      }
+                    ],
+                    "description": "TLS certificate configuration for the proxy. Mutually exclusive with sslConfigFile."
+                  },
+                  "enableMSKAuth": {
+                    "type": "boolean",
+                    "default": false
                   },
                   "suppressCaptureForHeaderMatch": {
                     "type": "array",
@@ -2019,18 +2207,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": []
                   },
                   "suppressCaptureForMethod": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "default": []
+                    "type": "string",
+                    "default": ""
                   },
                   "suppressCaptureForUriPath": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "default": []
+                    "type": "string",
+                    "default": ""
                   },
                   "suppressMethodAndPath": {
                     "type": "string",
@@ -2085,17 +2267,9 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "replayerConfig": {
                 "type": "object",
                 "properties": {
-                  "speedupFactor": {
-                    "type": "number",
-                    "default": 1.1
-                  },
                   "podReplicas": {
                     "type": "number",
                     "default": 1
-                  },
-                  "authHeaderOverride": {
-                    "type": "string",
-                    "default": ""
                   },
                   "jvmArgs": {
                     "type": "string",
@@ -2174,6 +2348,18 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "requests"
                     ],
                     "description": "Resource limits and requests for replayer container."
+                  },
+                  "speedupFactor": {
+                    "type": "number",
+                    "default": 1.1
+                  },
+                  "authHeaderValue": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "otelCollectorEndpoint": {
+                    "type": "string",
+                    "default": ""
                   }
                 }
               }

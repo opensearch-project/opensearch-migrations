@@ -62,6 +62,10 @@
               "name": "podReplicas"
             },
             {
+              "name": "tlsSecretName",
+              "value": ""
+            },
+            {
               "name": "imageCaptureProxyLocation"
             },
             {
@@ -73,6 +77,100 @@
           "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          command:\n            - /runJavaWithClasspath.sh\n          args:\n            - org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n",
           "action": "apply",
           "setOwnerReference": false
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deployproxydeploymentwithtls",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyName"
+            },
+            {
+              "name": "jsonConfig"
+            },
+            {
+              "name": "listenPort"
+            },
+            {
+              "name": "podReplicas"
+            },
+            {
+              "name": "tlsSecretName"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          command:\n            - /runJavaWithClasspath.sh\n          args:\n            - org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n            - --sslCertChainFile\n            - /etc/proxy-tls/tls.crt\n            - --sslKeyFile\n            - /etc/proxy-tls/tls.key\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n          volumeMounts:\n            - name: tls-certs\n              mountPath: /etc/proxy-tls\n              readOnly: true\n      volumes:\n        - name: tls-certs\n          secret:\n            secretName: \"{{inputs.parameters.tlsSecretName}}\"\n",
+          "action": "apply",
+          "setOwnerReference": false
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "provisionproxycert",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "certName"
+            },
+            {
+              "name": "secretName"
+            },
+            {
+              "name": "issuerName"
+            },
+            {
+              "name": "issuerKind"
+            },
+            {
+              "name": "issuerGroup"
+            },
+            {
+              "name": "dnsNames"
+            },
+            {
+              "name": "duration"
+            },
+            {
+              "name": "renewBefore"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: cert-manager.io/v1\nkind: Certificate\nmetadata:\n  name: \"{{inputs.parameters.certName}}\"\nspec:\n  secretName: \"{{inputs.parameters.secretName}}\"\n  issuerRef:\n    name: \"{{inputs.parameters.issuerName}}\"\n    kind: \"{{inputs.parameters.issuerKind}}\"\n    group: \"{{inputs.parameters.issuerGroup}}\"\n  dnsNames: \"{{inputs.parameters.dnsNames}}\"\n  duration: \"{{inputs.parameters.duration}}\"\n  renewBefore: \"{{inputs.parameters.renewBefore}}\"\n",
+          "action": "apply",
+          "setOwnerReference": false
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "waitforcertready",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "certName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: cert-manager.io/v1\nkind: Certificate\nmetadata:\n  name: \"{{inputs.parameters.certName}}\"\n",
+          "action": "get",
+          "successCondition": "status.conditions.0.status == True",
+          "failureCondition": "status.conditions.0.status == False"
         },
         "outputs": {
           "parameters": []
@@ -99,6 +197,10 @@
             },
             {
               "name": "podReplicas"
+            },
+            {
+              "name": "tlsSecretName",
+              "value": ""
             },
             {
               "name": "imageCaptureProxyLocation"
@@ -155,6 +257,7 @@
           [
             {
               "template": "deployproxydeployment",
+              "when": "{{=0 == len(inputs.parameters.tlsSecretName)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -170,6 +273,10 @@
                     "value": "{{inputs.parameters.podReplicas}}"
                   },
                   {
+                    "name": "tlsSecretName",
+                    "value": "{{inputs.parameters.tlsSecretName}}"
+                  },
+                  {
                     "name": "imageCaptureProxyLocation",
                     "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
                   },
@@ -183,7 +290,44 @@
                   }
                 ]
               },
-              "name": "deployProxy"
+              "name": "deployProxyNoTls"
+            },
+            {
+              "template": "deployproxydeploymentwithtls",
+              "when": "{{=!(0 == len(inputs.parameters.tlsSecretName))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyName",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['name']}}"
+                  },
+                  {
+                    "name": "listenPort",
+                    "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "podReplicas",
+                    "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "tlsSecretName",
+                    "value": "{{inputs.parameters.tlsSecretName}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "jsonConfig",
+                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'podReplicas', 'resources', 'loggingConfigurationOverrideConfigMap'), sprig.dict(\"destinationUri\", fromJSON(inputs.parameters.proxyConfig)['sourceEndpoint'], \"insecureDestination\", fromJSON(inputs.parameters.proxyConfig)['sourceAllowInsecure'], \"kafkaConnection\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaConnection'), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'))))}}"
+                  }
+                ]
+              },
+              "name": "deployProxyWithTls"
             }
           ]
         ],

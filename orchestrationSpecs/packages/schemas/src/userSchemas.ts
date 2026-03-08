@@ -141,6 +141,33 @@ export const RESOURCE_REQUIREMENTS = z.object({
 
 export type ResourceRequirementsType = z.infer<typeof RESOURCE_REQUIREMENTS>;
 
+export const CERT_MANAGER_ISSUER_REF = z.object({
+    name: z.string().describe("Name of the cert-manager Issuer or ClusterIssuer."),
+    kind: z.enum(["Issuer", "ClusterIssuer"]).default("ClusterIssuer").optional()
+        .describe("Kind of the issuer resource."),
+    group: z.string().default("cert-manager.io").optional()
+        .describe("API group of the issuer. Use 'awspca.cert-manager.io' for AWS PCA issuers."),
+});
+
+export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
+    z.object({
+        mode: z.literal("certManager"),
+        issuerRef: CERT_MANAGER_ISSUER_REF,
+        commonName: z.string().optional(),
+        dnsNames: z.array(z.string()).min(1)
+            .describe("DNS names for the certificate. Must include the proxy's service DNS name."),
+        duration: z.string().default("2160h").optional()
+            .describe("Requested certificate validity duration (default: 90 days)."),
+        renewBefore: z.string().default("360h").optional()
+            .describe("How long before expiry to renew (default: 15 days)."),
+    }).describe("Use cert-manager to provision a TLS certificate for the proxy."),
+    z.object({
+        mode: z.literal("existingSecret"),
+        secretName: z.string()
+            .describe("Name of an existing K8s TLS secret with tls.crt and tls.key."),
+    }).describe("Use a pre-existing K8s TLS secret."),
+]);
+
 export const PROXY_OPTIONS = z.object({
     // -- deployment-level fields (not passed to the proxy CLI) --
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
@@ -161,7 +188,10 @@ export const PROXY_OPTIONS = z.object({
     maxTrafficBufferSize: z.number().default(1048576).optional(),
     noCapture: z.boolean().default(false).optional(),
     numThreads: z.number().default(1).optional(),
-    sslConfigFile: z.string().optional(),
+    sslConfigFile: z.string().optional()
+        .describe("Legacy: YAML config for OpenSearch security SSL. Prefer tls config for K8s deployments."),
+    tls: PROXY_TLS_CONFIG.optional()
+        .describe("TLS certificate configuration for the proxy. Mutually exclusive with sslConfigFile."),
     enableMSKAuth: z.boolean().default(false).optional(),
     suppressCaptureForHeaderMatch: z.array(z.string()).default([]).optional(),
     suppressCaptureForMethod: z.string().default("").optional(),
