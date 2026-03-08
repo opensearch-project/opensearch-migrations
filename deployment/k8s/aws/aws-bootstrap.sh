@@ -1069,8 +1069,49 @@ fi
 
 check_existing_ma_release "$namespace" "$namespace"
 
-# Build TLS-related helm --set flags
+# Build TLS-related helm --set flags and create Pod Identity Associations
 TLS_HELM_FLAGS=""
+
+# For any PCA mode, ensure Pod Identity Association exists
+if [[ "$tls_mode" == "pca-existing" || "$tls_mode" == "pca-create" ]]; then
+  echo "Ensuring Pod Identity Association for aws-pca-issuer..."
+  ARGO_ASSOC_ID=$(aws eks list-pod-identity-associations \
+    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --region "${AWS_CFN_REGION}" \
+    --namespace "${namespace}" \
+    --service-account argo-workflow-executor \
+    --query 'associations[0].associationId' --output text 2>/dev/null)
+  PID_ROLE_ARN=""
+  if [[ -n "$ARGO_ASSOC_ID" && "$ARGO_ASSOC_ID" != "None" ]]; then
+    PID_ROLE_ARN=$(aws eks describe-pod-identity-association \
+      --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --region "${AWS_CFN_REGION}" \
+      --association-id "$ARGO_ASSOC_ID" \
+      --query 'association.roleArn' --output text)
+
+    EXISTING=$(aws eks list-pod-identity-associations \
+      --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --region "${AWS_CFN_REGION}" \
+      --namespace "${namespace}" \
+      --service-account aws-pca-issuer \
+      --query 'associations[0].associationId' --output text 2>/dev/null)
+    if [[ -z "$EXISTING" || "$EXISTING" == "None" ]]; then
+      aws eks create-pod-identity-association \
+        --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+        --region "${AWS_CFN_REGION}" \
+        --namespace "${namespace}" \
+        --service-account aws-pca-issuer \
+        --role-arn "$PID_ROLE_ARN" \
+        --query 'association.associationId' --output text
+      echo "Created Pod Identity Association for aws-pca-issuer"
+    else
+      echo "Pod Identity Association for aws-pca-issuer already exists"
+    fi
+  else
+    echo "WARNING: Could not find existing Pod Identity role. aws-pca-issuer may not have AWS credentials." >&2
+  fi
+fi
+
 case "$tls_mode" in
   pca-existing)
     TLS_HELM_FLAGS="--set conditionalPackageInstalls.aws-privateca-issuer=true"
@@ -1082,6 +1123,26 @@ case "$tls_mode" in
     TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set conditionalPackageInstalls.ack-acmpca-controller=true"
     TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.create=true"
     TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.region=${AWS_CFN_REGION}"
+
+    # Also create Pod Identity for ACK controller
+    if [[ -n "$PID_ROLE_ARN" ]]; then
+      EXISTING_ACK=$(aws eks list-pod-identity-associations \
+        --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+        --region "${AWS_CFN_REGION}" \
+        --namespace "${namespace}" \
+        --service-account ack-acmpca-controller \
+        --query 'associations[0].associationId' --output text 2>/dev/null)
+      if [[ -z "$EXISTING_ACK" || "$EXISTING_ACK" == "None" ]]; then
+        aws eks create-pod-identity-association \
+          --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+          --region "${AWS_CFN_REGION}" \
+          --namespace "${namespace}" \
+          --service-account ack-acmpca-controller \
+          --role-arn "$PID_ROLE_ARN" \
+          --query 'association.associationId' --output text
+        echo "Created Pod Identity Association for ack-acmpca-controller"
+      fi
+    fi
     ;;
 esac
 
