@@ -345,7 +345,7 @@ def parse_args() -> argparse.Namespace:
         description="Process inputs for test automation runner"
     )
     source_versions = VALID_SOURCE_VERSIONS + ['all']
-    target_versions = VALID_TARGET_VERSIONS + list(TARGET_VERSION_ALIASES.keys()) + ['all']
+    target_versions = VALID_TARGET_VERSIONS + ['all']
     parser.add_argument(
         "--source-version",
         choices=source_versions,

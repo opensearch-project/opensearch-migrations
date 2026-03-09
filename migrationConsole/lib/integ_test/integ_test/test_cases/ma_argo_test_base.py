@@ -44,7 +44,10 @@ class MATestBase:
                                                                                     MigrationType.BACKFILL]
         self.source_version = ClusterVersion(version_str=user_args.source_version)
         self.target_type = user_args.target_type
-        self.target_version = None if self.target_type == "AOSS" else ClusterVersion(version_str=user_args.target_version)
+        self.target_version = (
+            None if self.target_type == "AOSS"
+            else ClusterVersion(version_str=user_args.target_version)
+        )
         self.argo_service = ArgoService()
         self.workflow_name = None
         self.source_cluster = None
