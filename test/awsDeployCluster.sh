@@ -118,12 +118,19 @@ if [[ -z "$PROVIDED_CONTEXT_FILE_PATH" ]]; then
   exit 1
 fi
 
+SAMPLE_CDK_REPO="https://github.com/aws-samples/amazon-opensearch-service-sample-cdk.git"
+SAMPLE_CDK_VERSION=$(git ls-remote --tags --sort=-v:refname "$SAMPLE_CDK_REPO" "v0.1.*" | head -n1 | sed 's/.*refs\/tags\///')
+if [[ -z "$SAMPLE_CDK_VERSION" ]]; then
+  echo "Error: Could not discover latest v0.1.x tag from $SAMPLE_CDK_REPO"
+  exit 1
+fi
+echo "Using sample CDK version: $SAMPLE_CDK_VERSION"
 if [ ! -d "amazon-opensearch-service-sample-cdk" ]; then
-  git clone https://github.com/aws-samples/amazon-opensearch-service-sample-cdk.git
+  git clone "$SAMPLE_CDK_REPO"
 else
   echo "Repo already exists, skipping clone."
 fi
-cd amazon-opensearch-service-sample-cdk && git pull
+cd amazon-opensearch-service-sample-cdk && git fetch --tags && git checkout "$SAMPLE_CDK_VERSION"
 npm install
 npm run build
 

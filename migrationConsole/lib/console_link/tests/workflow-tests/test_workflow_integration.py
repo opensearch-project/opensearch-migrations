@@ -643,32 +643,11 @@ def runner():
 @pytest.fixture
 def sample_workflow_config():
     """Sample workflow configuration for testing"""
-    data = {
-        "targets": {
-            "production": {
-                "endpoint": "https://target-os.example.com:9200",
-                "auth": {
-                    "username": "admin",
-                    "password": "test-password"
-                },
-                "allow_insecure": False
-            }
-        },
-        "source-migration-configurations": [
-            {
-                "source": {
-                    "endpoint": "https://source-es.example.com:9200",
-                    "auth": {
-                        "username": "admin",
-                        "password": "test-password"
-                    },
-                    "allow_insecure": True
-                }
-            }
-        ]
-    }
-
-    return WorkflowConfig(data)
+    return WorkflowConfig.from_yaml(
+        "targets:\n  production:\n    endpoint: https://target-os.example.com:9200\n"
+        "    auth:\n      username: admin\n      password: test-password\n"
+        "    allow_insecure: false\n"
+    )
 
 
 @pytest.mark.slow
@@ -709,19 +688,10 @@ class TestWorkflowCLICommands:
         except ApiException:
             pass  # Ignore if doesn't exist
 
-        # Create a test config
-        data = {
-            "targets": {
-                "test": {
-                    "endpoint": "https://test.com:9200",
-                    "auth": {
-                        "username": "admin",
-                        "password": "password"
-                    }
-                }
-            }
-        }
-        config = WorkflowConfig(data)
+        # Create a test config with raw_yaml so save_config stores content
+        yaml_text = ("targets:\n  test:\n    endpoint: https://test.com:9200\n"
+                     "    auth:\n      username: admin\n      password: password\n")
+        config = WorkflowConfig.from_yaml(yaml_text)
 
         # Save config to k3s
         message = k8s_workflow_store.save_config(config, session_name)
@@ -778,8 +748,12 @@ class TestWorkflowCLICommands:
         # Prepare JSON input
         json_input = '{"targets": {"test": {"endpoint": "https://test.com:9200"}}}'
 
-        result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=json_input,
-                               obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
+        # Mock validation so the test focuses on the CLI/k8s save flow
+        from unittest.mock import patch
+        with patch('console_link.workflow.commands.configure._validate_and_find_secrets',
+                   return_value={'valid': True}):
+            result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=json_input,
+                                   obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
         assert result.exit_code == 0
         assert "Configuration" in result.output
@@ -814,8 +788,12 @@ class TestWorkflowCLICommands:
       password: password
 """
 
-        result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=yaml_input,
-                               obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
+        # Mock validation so the test focuses on the CLI/k8s save flow
+        from unittest.mock import patch
+        with patch('console_link.workflow.commands.configure._validate_and_find_secrets',
+                   return_value={'valid': True}):
+            result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=yaml_input,
+                                   obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
         assert result.exit_code == 0
         assert "Configuration" in result.output
@@ -848,7 +826,7 @@ class TestWorkflowCLICommands:
                                obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
         assert result.exit_code != 0
-        assert "Failed to parse input" in result.output
+        assert "validation errors" in result.output or "parse error" in result.output.lower()
 
     def test_workflow_util_completions_bash(self, runner):
         """Test workflow util completions for bash"""

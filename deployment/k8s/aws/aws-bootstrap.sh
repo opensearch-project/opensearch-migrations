@@ -814,13 +814,12 @@ if [[ "$deploy_cfn" == "true" ]]; then
     # Buildkit setup
     local multi_arch_native=true
     export MULTI_ARCH_NATIVE="$multi_arch_native"
-    if docker buildx inspect local-remote-builder 2>/dev/null | grep -q "Status: running"; then
-      echo "✅ [parallel] Buildkit already running"
-    elif timeout 120 docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
-      echo "✅ [parallel] Buildkit bootstrapped"
+    local builder_name="builder-${_predicted_eks_name//[^a-zA-Z0-9_-]/-}"
+    if docker buildx inspect "$builder_name" --bootstrap &>/dev/null; then
+      echo "✅ [parallel] Buildkit already configured and healthy"
     else
       echo "⏳ [parallel] Setting up buildkit..."
-      docker buildx rm local-remote-builder 2>/dev/null || true
+      docker buildx rm "$builder_name" 2>/dev/null || true
       "${base_dir}/buildImages/setUpK8sImageBuildServices.sh" || {
         echo "1" > "$_parallel_status_dir/build_failed"
         echo "❌ [parallel] Buildkit setup failed"
@@ -842,10 +841,10 @@ if [[ "$deploy_cfn" == "true" ]]; then
     [[ "$skip_test_images" == "true" ]] && skip_test_arg="-PskipTestImages=true"
     echo "⏳ [parallel] Building images to ${_predicted_ecr_registry}..."
     "$base_dir/gradlew" -p "$base_dir" :buildImages:buildImagesToRegistry \
-      -PregistryEndpoint="$_predicted_ecr_registry" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
+      -PregistryEndpoint="$_predicted_ecr_registry" -Pbuilder="$builder_name" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
       || { echo "Image build failed, retrying in 10s..."; sleep 10; \
            "$base_dir/gradlew" -p "$base_dir" :buildImages:buildImagesToRegistry \
-             -PregistryEndpoint="$_predicted_ecr_registry" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test; } \
+             -PregistryEndpoint="$_predicted_ecr_registry" -Pbuilder="$builder_name" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test; } \
       || {
         echo "1" > "$_parallel_status_dir/build_failed"
         echo "❌ [parallel] Image build failed"
@@ -854,7 +853,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
 
     echo "✅ [parallel] Image build complete"
     echo "Cleaning up docker buildx builder to free buildkit pods..."
-    docker buildx rm local-remote-builder 2>/dev/null || true
+    docker buildx rm "$builder_name" 2>/dev/null || true
   }
 
   delete_stuck_stack
@@ -1225,13 +1224,12 @@ if [[ "$build_images" == "true" && "${_build_done:-}" != "true" ]]; then
   # When mirroring, buildkit still pulls from public registries — building on
   # isolated clusters is not supported. Use --ma-images-source instead.
 
-  if docker buildx inspect local-remote-builder 2>/dev/null | grep -q "Status: running"; then
-    echo "Buildkit already running, skipping setup"
-  elif timeout 120 docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
-    echo "Buildkit bootstrapped successfully, skipping setup"
+  BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
+  if docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
+    echo "Buildkit already configured and healthy, skipping setup"
   else
     echo "Setting up buildkit for local builds..."
-    docker buildx rm local-remote-builder 2>/dev/null || true
+    docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
     "${base_dir}/buildImages/setUpK8sImageBuildServices.sh"
   fi
 
@@ -1242,16 +1240,16 @@ if [[ "$build_images" == "true" && "${_build_done:-}" != "true" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  local skip_test_arg=""
+  skip_test_arg=""
   [[ "$skip_test_images" == "true" ]] && skip_test_arg="-PskipTestImages=true"
 
-  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
+  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
     || { echo "Image build failed, retrying in 10s..."; sleep 10; \
-         "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test; } \
+         "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test; } \
     || { echo "Image build failed on retry, giving up."; exit 1; }
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
-  docker buildx rm local-remote-builder 2>/dev/null || true
+  docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
   echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
 elif [[ "${_build_done:-}" == "true" ]]; then
   echo "Image build already completed during CFN deploy (parallel task)"

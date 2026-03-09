@@ -1,5 +1,6 @@
 import org.opensearch.migrations.image.RegistryImageBuildUtils
 import org.opensearch.migrations.image.RegistryImageBuildUtils.Registry
+import org.opensearch.migrations.image.PullThroughCacheHelper
 
 def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5001'
 def intermediateUrl = rootProject.findProperty('intermediateRegistry') ?: publishedUrl
@@ -7,9 +8,10 @@ def intermediateUrl = rootProject.findProperty('intermediateRegistry') ?: publis
 def publishedRegistry = new Registry(publishedUrl.toString())
 def intermediateRegistry = new Registry(intermediateUrl.toString())
 
-// When set, Jib base images from docker.io are pulled from this registry instead.
-// Use with the mirrorJibBaseImages step in k8sLocalDeployment to avoid Docker Hub rate limits.
-def jibBaseImageOverride = rootProject.findProperty('jibBaseImageRegistry')?.toString()
+// ECR pull-through cache: when set, rewrites upstream base image refs through ECR
+// Usage: ./gradlew buildImagesToRegistry -PpullThroughCacheEndpoint=123456789.dkr.ecr.us-east-1.amazonaws.com
+def ptcEndpoint = rootProject.findProperty('pullThroughCacheEndpoint')?.toString() ?: ''
+def ptc = new PullThroughCacheHelper(ptcEndpoint)
 
 def publishStyle = (rootProject.findProperty("publishStyle") ?: "paths").toString()
 def publishedRepoByImageName = [
@@ -26,12 +28,10 @@ def getRepoNameIfPublishing = { Map cfg ->
     return publishedRepoByImageName[imageName]
 }
 
+def correttoBase = ptc.baseImageConfig("docker.io", "library", "amazoncorretto", "17-al2023-headless")
+
 def jibProjects = [
-        "TrafficCapture:trafficReplayer": [
-                baseImageRegistryEndpoint: "docker.io",
-                baseImageGroup : "library",
-                baseImageName : "amazoncorretto",
-                baseImageTag  : "17-al2023-headless",
+        "TrafficCapture:trafficReplayer": correttoBase + [
                 imageName     : "traffic_replayer",
                 imageTag      : "latest",
                 extraPermissions: ['/runJavaWithClasspath.sh': '755'],
@@ -39,11 +39,7 @@ def jibProjects = [
                     ":TrafficCapture:trafficReplayer": ["syncVersionFile_traffic_replayer"]
                 ]
         ],
-        "TrafficCapture:transformationShim": [
-                baseImageRegistryEndpoint: "docker.io",
-                baseImageGroup : "library",
-                baseImageName : "amazoncorretto",
-                baseImageTag  : "17-al2023-headless",
+        "TrafficCapture:transformationShim": correttoBase + [
                 imageName     : "transformation_shim",
                 imageTag      : "latest",
                 requiredDependencies: [
@@ -65,10 +61,6 @@ def jibProjects = [
 ]
 jibProjects.values().each { cfg ->
     cfg.repoName = getRepoNameIfPublishing(cfg)
-    // Override docker.io base images with the specified registry (e.g. local registry on CI)
-    if (jibBaseImageOverride && cfg.baseImageRegistryEndpoint == "docker.io") {
-        cfg.baseImageRegistryEndpoint = jibBaseImageOverride
-    }
 }
 
 def buildKitProjects = [
@@ -78,8 +70,8 @@ def buildKitProjects = [
                 imageName:  "elasticsearch_test_console",
                 imageTag:   "latest",
                 buildArgs: [
-                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
-                                intermediateRegistry, "library", "amazonlinux", "2023")
+                        BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
+                        RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
                 ]
         ],
         [
@@ -88,10 +80,8 @@ def buildKitProjects = [
                 imageName:  "capture_proxy_base",
                 imageTag:   "latest",
                 buildArgs: [
-                        CERT_BUILDER_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
-                                intermediateRegistry, "library", "amazonlinux", "2023"),
-                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
-                                intermediateRegistry, "library", "amazoncorretto", "11-al2023-headless")
+                        CERT_BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
+                        RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:11-al2023-headless"),
                 ]
         ],
         [
@@ -100,8 +90,7 @@ def buildKitProjects = [
                 imageName:  "reindex_from_snapshot",
                 imageTag:   "latest",
                 buildArgs: [
-                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
-                                intermediateRegistry, "library", "amazoncorretto", "17-al2023-headless")
+                        BASE_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:17-al2023-headless"),
                 ],
                 requiredDependencies: [
                         ":DocumentsFromSnapshotMigration:copyDockerRuntimeJars",
