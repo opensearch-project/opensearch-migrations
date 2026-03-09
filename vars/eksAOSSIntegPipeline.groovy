@@ -4,8 +4,6 @@ def call(Map config = [:]) {
     def envVarMap = ['SEARCH': 'AOSS_SEARCH_ENDPOINT', 'TIMESERIES': 'AOSS_TIMESERIES_ENDPOINT', 'VECTORSEARCH': 'AOSS_VECTOR_ENDPOINT']
     def testId = testIdMap[collectionType]
     def endpointEnvVar = envVarMap[collectionType]
-    def benchmarkTypeMap = ['SEARCH': 'search', 'TIMESERIES': 'timeseries', 'VECTORSEARCH': 'vector']
-    def benchmarkType = benchmarkTypeMap[collectionType]
     def defaultStageId = config.defaultStageId ?: "aosssrch"
     def jobName = config.jobName ?: "eks-aoss-${collectionType.toLowerCase()}-integ-test"
     def clusterContextFilePath = "tmp/cluster-context-aoss-${currentBuild.number}.json"
@@ -191,130 +189,30 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Load Test Data on Source') {
+            stage('Run Migration & Tests') {
                 steps {
-                    timeout(time: 30, unit: 'MINUTES') {
+                    timeout(time: 2, unit: 'HOURS') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    sh "kubectl --context=${env.eksKubeContext} wait --namespace ma --for=condition=ready pod/migration-console-0 --timeout=600s"
-
-                                    def loadDataScript = """
-from console_link.middleware.clusters import run_aoss_test_benchmarks
-from console_link.models.cluster import Cluster
-cluster = Cluster(config={
-    "endpoint": "${env.SOURCE_ENDPOINT}",
-    "allow_insecure": True,
-    "no_auth": None
-})
-run_aoss_test_benchmarks(cluster, "${benchmarkType}")
-"""
-                                    writeFile file: '/tmp/load-data.py', text: loadDataScript
+                                    // Inject AOSS endpoint env var into migration-console pod
                                     sh """
-                                        kubectl --context=${env.eksKubeContext} cp /tmp/load-data.py ma/migration-console-0:/tmp/load-data.py
-                                        kubectl --context=${env.eksKubeContext} exec migration-console-0 -n ma -- bash -c 'source /.venv/bin/activate && python3 /tmp/load-data.py'
+                                        kubectl --context=${env.eksKubeContext} exec migration-console-0 -n ma -- bash -c 'echo "export ${endpointEnvVar}=${env.AOSS_COLLECTION_ENDPOINT}" >> /etc/profile.d/aoss-env.sh'
                                     """
-                                    echo "Test data loaded on source for ${collectionType} collection type"
                                 }
                             }
-                        }
-                    }
-                }
-            }
 
-            stage('Create Snapshot') {
-                steps {
-                    timeout(time: 30, unit: 'MINUTES') {
-                        script {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    env.SNAPSHOT_NAME = "aoss-test-${maStageName}"
-
-                                    def snapshotRole = sh(
-                                        script: """aws cloudformation describe-stacks --stack-name "${env.STACK_NAME}" \
-                                          --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
-                                          --output text | grep -o 'SNAPSHOT_ROLE=[^;]*' | cut -d= -f2""",
-                                        returnStdout: true
-                                    ).trim()
-
-                                    def s3Bucket = sh(
-                                        script: "kubectl --context=${env.eksKubeContext} get configmap migrations-default-s3-config -n ma -o jsonpath='{.data.BUCKET_NAME}'",
-                                        returnStdout: true
-                                    ).trim()
-                                    env.S3_REPO_URI = "s3://${s3Bucket}/aoss-snapshot-${maStageName}/"
-
-                                    def repoConfig = """{"type":"s3","settings":{"bucket":"${s3Bucket}","base_path":"aoss-snapshot-${maStageName}","region":"${params.REGION}","role_arn":"${snapshotRole}"}}"""
-                                    writeFile file: '/tmp/snapshot-repo-config.json', text: repoConfig
-
-                                    def snapshotScript = """
-import json, requests
-endpoint = "${env.SOURCE_ENDPOINT}"
-repo_url = f"{endpoint}/_snapshot/aoss-repo"
-with open("/tmp/snapshot-repo-config.json") as f:
-    repo_config = json.load(f)
-r = requests.put(repo_url, json=repo_config, verify=False)
-print(f"Register repo: {r.status_code} {r.text}")
-r.raise_for_status()
-snap_url = f"{endpoint}/_snapshot/aoss-repo/${env.SNAPSHOT_NAME}?wait_for_completion=true"
-r = requests.put(snap_url, verify=False)
-print(f"Create snapshot: {r.status_code} {r.text}")
-r.raise_for_status()
-"""
-                                    writeFile file: '/tmp/create-snapshot.py', text: snapshotScript
-
-                                    sh """
-                                        kubectl --context=${env.eksKubeContext} cp /tmp/snapshot-repo-config.json ma/migration-console-0:/tmp/snapshot-repo-config.json
-                                        kubectl --context=${env.eksKubeContext} cp /tmp/create-snapshot.py ma/migration-console-0:/tmp/create-snapshot.py
-                                        kubectl --context=${env.eksKubeContext} exec migration-console-0 -n ma -- bash -c 'source /.venv/bin/activate && python3 /tmp/create-snapshot.py'
-                                    """
-                                    echo "Snapshot created: ${env.SNAPSHOT_NAME} at ${env.S3_REPO_URI}"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Apply Workflow & Run Tests') {
-                steps {
-                    timeout(time: 60, unit: 'MINUTES') {
-                        script {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    sh """
-                                        kubectl --context=${env.eksKubeContext} apply -f migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml -n ma
-                                        echo "Workflow template applied"
-                                    """
-
-                                    def s3RepoUri = env.S3_REPO_URI
-                                    if (s3RepoUri && !s3RepoUri.endsWith('/')) {
-                                        s3RepoUri = s3RepoUri + '/'
+                            dir('libraries/testAutomation') {
+                                sh "pipenv install --deploy"
+                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                        sh "pipenv run app --source-version=${params.SOURCE_VERSION} --target-version=OS_2.x --test-ids='${testId}' --reuse-clusters --skip-delete --skip-install"
                                     }
-
-                                    sh """
-                                        cat > /tmp/aoss-env.sh << 'ENVEOF'
-export BYOS_SNAPSHOT_NAME='${env.SNAPSHOT_NAME}'
-export BYOS_S3_REPO_URI='${s3RepoUri}'
-export BYOS_S3_REGION='${params.REGION}'
-export BYOS_POD_REPLICAS='${params.RFS_WORKERS}'
-export BYOS_MONITOR_RETRY_LIMIT='60'
-export ${endpointEnvVar}='${env.AOSS_COLLECTION_ENDPOINT}'
-ENVEOF
-
-                                        kubectl --context=${env.eksKubeContext} cp /tmp/aoss-env.sh ma/migration-console-0:/tmp/aoss-env.sh
-                                        kubectl --context=${env.eksKubeContext} exec migration-console-0 -n ma -- bash -c '
-                                            source /tmp/aoss-env.sh && \
-                                            cd /root/lib/integ_test && \
-                                            pipenv run pytest integ_test/ma_workflow_test.py \
-                                                --source_version=${params.SOURCE_VERSION} \
-                                                --target_version=OS_2.x \
-                                                --test_ids=${testId} \
-                                                --reuse_clusters \
-                                                -s
-                                            '
-                                    """
                                 }
                             }
+                        }
+                    }
+                }
                         }
                     }
                 }

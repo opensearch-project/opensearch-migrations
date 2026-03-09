@@ -5,16 +5,14 @@ Each test targets a specific AOSS collection type (search, time-series, vector)
 and validates that indices, mappings, settings, and doc counts survive migration.
 
 Required environment variables:
-- BYOS_SNAPSHOT_NAME: Name of the snapshot
-- BYOS_S3_REPO_URI: S3 URI to snapshot repository
-- BYOS_S3_REGION: AWS region (default: us-east-1)
-- AOSS_SEARCH_ENDPOINT: AOSS search collection endpoint
-- AOSS_TIMESERIES_ENDPOINT: AOSS time-series collection endpoint
-- AOSS_VECTOR_ENDPOINT: AOSS vector collection endpoint
+- AOSS_SEARCH_ENDPOINT: AOSS search collection endpoint (Test0021)
+- AOSS_TIMESERIES_ENDPOINT: AOSS time-series collection endpoint (Test0022)
+- AOSS_VECTOR_ENDPOINT: AOSS vector collection endpoint (Test0023)
 """
 import logging
 import os
 
+from console_link.middleware.clusters import run_aoss_test_benchmarks
 from console_link.models.cluster import Cluster
 from ..cluster_version import (
     ElasticsearchV5_X, ElasticsearchV6_X, ElasticsearchV7_X,
@@ -38,84 +36,57 @@ class AOSSTestBase(MATestBase):
 
     # Subclasses set these
     aoss_endpoint_env_var = ""
+    collection_type = ""
     expected_indices = []
-    mapping_assertions = {}  # {index: {dotted.path: expected_value}}
-    settings_absent = {}     # {index: [dotted.path, ...]}
-    settings_present = {}    # {index: {dotted.path: expected_value}}
+    mapping_assertions = {}
+    settings_absent = {}
+    settings_present = {}
 
     def __init__(self, user_args: MATestUserArguments, description: str):
         MATestBase.__init__(self, user_args=user_args,
                             description=description,
                             migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL],
                             allow_source_target_combinations=AOSS_ALLOW_COMBINATIONS)
-        self.snapshot_name = os.environ['BYOS_SNAPSHOT_NAME']
-        self.s3_repo_uri = os.environ['BYOS_S3_REPO_URI']
-        self.s3_region = os.environ.get('BYOS_S3_REGION', 'us-east-1')
-        self.pod_replicas = int(os.environ.get('BYOS_POD_REPLICAS', '1'))
-        self.monitor_retry_limit = int(os.environ.get('BYOS_MONITOR_RETRY_LIMIT', '60'))
 
     def import_existing_clusters(self):
         endpoint = os.environ.get(self.aoss_endpoint_env_var)
         if not endpoint:
             raise ValueError(f"{self.aoss_endpoint_env_var} environment variable is required")
+        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
         self.target_cluster = Cluster(config={
             "endpoint": endpoint,
             "allow_insecure": False,
-            "sigv4": {"region": self.s3_region, "service": "aoss"}
+            "sigv4": {"region": region, "service": "aoss"}
         })
-        self.source_cluster = None
+        # Source cluster from configmap (set up by MA deployment)
+        self.source_cluster = self.argo_service.get_cluster_from_configmap(
+            f"source-{self.source_version.full_cluster_type}-"
+            f"{self.source_version.major_version}-{self.source_version.minor_version}"
+        )
+        if not self.source_cluster:
+            raise ValueError("Could not find source cluster configmap")
         self.imported_clusters = True
+        logger.info(f"Imported source: {self.source_cluster.endpoint}")
         logger.info(f"Imported AOSS target: {endpoint}")
 
+    def prepare_clusters(self):
+        """Load test data on source using OSB workloads."""
+        run_aoss_test_benchmarks(self.source_cluster, self.collection_type)
+
     def prepare_workflow_snapshot_and_migration_config(self):
+        """Let the workflow create the snapshot — no externally managed snapshot."""
         self.workflow_snapshot_and_migration_config = [{
-            "snapshotConfig": {
-                "snapshotNameConfig": {
-                    "externallyManagedSnapshot": self.snapshot_name
-                }
-            },
             "migrations": [{
                 "metadataMigrationConfig": {},
                 "documentBackfillConfig": {
-                    "podReplicas": self.pod_replicas,
                     "useTargetClusterForWorkCoordination": False
                 }
             }]
         }]
 
-    def prepare_workflow_parameters(self):
-        snapshot_repo = {"awsRegion": self.s3_region, "s3RepoPathUri": self.s3_repo_uri}
-        self.workflow_template = "full-migration-imported-clusters"
-        self.imported_clusters = True
-        self.parameters["source-configs"] = [{
-            "source": {
-                "endpoint": "",
-                "version": f"{self.source_version.cluster_type} "
-                           f"{self.source_version.major_version}.{self.source_version.minor_version}",
-                "snapshotRepo": snapshot_repo
-            },
-            "snapshot-and-migration-configs": self.workflow_snapshot_and_migration_config
-        }]
-        self.parameters["target-config"] = self.target_cluster.config
-        self.parameters["monitor-retry-limit"] = str(self.monitor_retry_limit)
-
-    def prepare_clusters(self):
-        pass
-
-    def workflow_perform_migrations(self, timeout_seconds: int = 50400):
-        super().workflow_perform_migrations(timeout_seconds=timeout_seconds)
-
-    def display_final_cluster_state(self):
-        try:
-            r = self.target_cluster.call_api("/_count")
-            logger.info(f"Target AOSS total doc count: {r.json().get('count', 'unknown')}")
-        except Exception as e:
-            logger.warning(f"Could not retrieve doc count from AOSS target: {e}")
-
     # --- Verification helpers ---
 
     def _get_nested(self, d, dotted_path):
-        """Traverse a dict by dotted path like 'properties.name.type'."""
         for key in dotted_path.split('.'):
             if not isinstance(d, dict):
                 return None
@@ -129,7 +100,6 @@ class AOSSTestBase(MATestBase):
     def _assert_mapping(self, index, dotted_path, expected):
         r = self.target_cluster.call_api(f"/{index}/_mapping")
         mappings = r.json()
-        # AOSS may nest under index name or not
         if index in mappings:
             props = mappings[index].get("mappings", {})
         else:
@@ -163,27 +133,18 @@ class AOSSTestBase(MATestBase):
         assert count > 0, f"{index}: expected docs > 0, got {count}"
 
     def verify_clusters(self):
-        # 1. All expected indices exist and have docs
         for index in self.expected_indices:
             self._assert_index_exists(index)
             self._assert_doc_count_positive(index)
-
-        # 2. Mapping assertions
         for index, checks in self.mapping_assertions.items():
             for path, expected in checks.items():
                 self._assert_mapping(index, path, expected)
-
-        # 3. Settings that must be absent
         for index, paths in self.settings_absent.items():
             for path in paths:
                 self._assert_setting_absent(index, path)
-
-        # 4. Settings that must have specific values
         for index, checks in self.settings_present.items():
             for path, expected in checks.items():
                 self._assert_setting_value(index, path, expected)
-
-        # 5. No extra indices
         r = self.target_cluster.call_api("/_count")
         total = r.json().get("count", 0)
         assert total > 0, "No documents found on AOSS target"
@@ -191,9 +152,8 @@ class AOSSTestBase(MATestBase):
 
 
 class Test0021SearchCollectionMigration(AOSSTestBase):
-    """Migration to AOSS search collection: geonames, pmc, so."""
-
     aoss_endpoint_env_var = "AOSS_SEARCH_ENDPOINT"
+    collection_type = "search"
     expected_indices = ["geonames", "pmc", "so"]
 
     mapping_assertions = {
@@ -231,13 +191,12 @@ class Test0021SearchCollectionMigration(AOSSTestBase):
     }
 
     def __init__(self, user_args: MATestUserArguments):
-        super().__init__(user_args, "Migration from S3 snapshot to AOSS search collection.")
+        super().__init__(user_args, "Migration from ES to AOSS search collection.")
 
 
 class Test0022TimeSeriesCollectionMigration(AOSSTestBase):
-    """Migration to AOSS time-series collection: http_logs (7 indices), eventdata."""
-
     aoss_endpoint_env_var = "AOSS_TIMESERIES_ENDPOINT"
+    collection_type = "timeseries"
     expected_indices = [
         "logs-181998", "logs-191998", "logs-201998", "logs-211998",
         "logs-221998", "logs-231998", "logs-241998", "eventdata",
@@ -289,13 +248,12 @@ class Test0022TimeSeriesCollectionMigration(AOSSTestBase):
     }
 
     def __init__(self, user_args: MATestUserArguments):
-        super().__init__(user_args, "Migration from S3 snapshot to AOSS time-series collection.")
+        super().__init__(user_args, "Migration from ES to AOSS time-series collection.")
 
 
 class Test0023VectorCollectionMigration(AOSSTestBase):
-    """Migration to AOSS vector collection: vectors_faiss, vectors_lucene_filtered."""
-
     aoss_endpoint_env_var = "AOSS_VECTOR_ENDPOINT"
+    collection_type = "vector"
     expected_indices = ["vectors_faiss", "vectors_lucene_filtered"]
 
     mapping_assertions = {
@@ -325,4 +283,4 @@ class Test0023VectorCollectionMigration(AOSSTestBase):
     }
 
     def __init__(self, user_args: MATestUserArguments):
-        super().__init__(user_args, "Migration from S3 snapshot to AOSS vector collection.")
+        super().__init__(user_args, "Migration from ES to AOSS vector collection.")
