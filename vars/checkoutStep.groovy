@@ -9,7 +9,7 @@ def call(Map config = [:]) {
         } else {
             echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
         }
-        git branch: config.branch ?: 'main',
+        git branch: config.commit ?: config.branch ?: 'main',
                 url: config.repo ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
     }
 }

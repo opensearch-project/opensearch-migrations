@@ -23,6 +23,7 @@ def call(Map config = [:]) {
                 genericVariables: [
                     [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
                     [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                    [key: 'GIT_COMMIT', value: '$.GIT_COMMIT'],
                     [key: 'job_name', value: '$.job_name']
                 ],
                 tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
@@ -36,6 +37,7 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             choice(
                     name: 'SOURCE_VERSION',
                     choices: ['all'] + allSourceVersions,
@@ -68,7 +70,7 @@ def call(Map config = [:]) {
                         } else {
                             echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
                         }
-                        git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
+                        git branch: "${params.GIT_COMMIT ?: params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
                     }
                 }
             }
@@ -103,7 +105,8 @@ def call(Map config = [:]) {
                                                     string(name: 'SOURCE_VERSION', value: source),
                                                     string(name: 'TARGET_VERSION', value: target),
                                                     string(name: 'GIT_REPO_URL', value: params.GIT_REPO_URL),
-                                                    string(name: 'GIT_BRANCH', value: params.GIT_BRANCH)
+                                                    string(name: 'GIT_BRANCH', value: params.GIT_BRANCH),
+                                                    string(name: 'GIT_COMMIT', value: params.GIT_COMMIT)
                                             ],
                                             wait: true,
                                             propagate: false // Don't fail parent if child fails
