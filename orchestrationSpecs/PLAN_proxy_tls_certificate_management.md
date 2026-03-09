@@ -19,6 +19,19 @@ consuming standard PEM files directly via Netty.
   but only used by the otel operator.
 - No AWS PCA integration exists.
 
+## Supported TLS Modes — Status
+
+| Mode | `--tls-mode` | Status | Notes |
+|---|---|---|---|
+| **Self-signed** | `self-signed` | ✅ **Fully supported** | Works on minikube and EKS. Zero-config default. |
+| **AWS Private CA** | `pca-existing`, `pca-create` | 🚧 **In progress** | Blocked on cert-manager approval. See [PCA remaining work](#pca-remaining-work). |
+| **ACME / Let's Encrypt** | `lets-encrypt` *(not yet implemented)* | 📋 **Planned** | Requires public DNS. See [ACME remaining work](#acme-remaining-work). |
+| **ACM Exportable Public Certs** | `acm-exportable` *(not yet implemented)* | 📋 **Planned** | New AWS feature (2025). No cert-manager issuer exists yet. See [ACM Exportable remaining work](#acm-exportable-remaining-work). |
+| **Pre-existing secret** | N/A (schema `mode: existingSecret`) | ✅ **Fully supported** | User provides their own K8s TLS secret. |
+| **No TLS** | `none` | ✅ **Fully supported** | Omit `tls` from migration config. |
+
+---
+
 ## Design Decisions
 
 - **Helm over CFN** for all K8s-side resources. CFN locks out Terraform users.
@@ -65,7 +78,7 @@ workflows depend on.**
 
 Responsible for:
 - **cert-manager** (always installed, already exists today)
-- **Self-signed ClusterIssuer** `migrations-selfsigned` (always created, zero-config default)
+- **Self-signed ClusterIssuer** `migrations-ca` (always created, zero-config default)
 - **`aws-privateca-issuer` controller** (conditional: `conditionalPackageInstalls.aws-privateca-issuer`)
   - Bridges cert-manager ↔ AWS PCA
   - Service account `aws-pca-issuer` (Pod Identity Association created in Layer 1)
@@ -159,7 +172,7 @@ flowchart TD
 
 ---
 
-## Phase 1: Java — PEM-based SSL in CaptureProxy
+## Phase 1: Java — PEM-based SSL in CaptureProxy ✅ Done
 
 **Goal:** Add a new TLS loading path that reads PEM files directly via Netty, without OpenSearch.
 
@@ -197,11 +210,9 @@ protected static Supplier<SSLEngine> loadSslEngineFromPem(
 - `ProxyChannelInitializer` is untouched — it already accepts `Supplier<SSLEngine>`
 - No new dependencies required
 
-**Shippable independently.** New flags are unused until the workflow catches up.
-
 ---
 
-## Phase 2: Schema — User-facing TLS Configuration
+## Phase 2: Schema — User-facing TLS Configuration ✅ Done
 
 **Goal:** Let users specify how TLS certs should be provisioned for the proxy.
 
@@ -234,101 +245,48 @@ const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
 ]);
 ```
 
-**Add to `PROXY_OPTIONS`:**
-```typescript
-tls: PROXY_TLS_CONFIG.optional(),
-```
-
-Deprecate `sslConfigFile` in the K8s-facing schema. It remains only for the legacy non-K8s path.
-
 **User-facing config examples:**
 
 ```jsonc
-// Non-AWS / minikube (self-signed)
+// Non-AWS / minikube (self-signed) — FULLY SUPPORTED
 "tls": {
   "mode": "certManager",
-  "issuerRef": { "name": "migrations-selfsigned" },
+  "issuerRef": { "name": "migrations-ca" },
   "dnsNames": ["proxy-source.migrations.svc.cluster.local"]
 }
 
-// AWS with PCA (created by ACK via helm, or user-provided)
+// AWS with PCA (created by ACK via helm, or user-provided) — IN PROGRESS
 "tls": {
   "mode": "certManager",
   "issuerRef": { "name": "aws-pca-issuer", "group": "awspca.cert-manager.io" },
   "dnsNames": ["proxy-source.migrations.svc.cluster.local"]
 }
 
-// Pre-existing secret (any environment)
+// Pre-existing secret (any environment) — FULLY SUPPORTED
 "tls": {
   "mode": "existingSecret",
   "secretName": "my-proxy-tls-cert"
 }
 
-// No TLS (omit tls entirely)
+// No TLS (omit tls entirely) — FULLY SUPPORTED
 ```
 
 ---
 
-## Phase 3: Workflow — Cert Provisioning in setupCapture
+## Phase 3: Workflow — Cert Provisioning in setupCapture ✅ Done
 
 **Goal:** Integrate cert creation, validation, and mounting into the proxy deployment workflow.
 
 **Files changed:**
-- `orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/setupCapture.ts`
+- `orchestrationSpecs/k8sResources/setup-capture.yaml` (generated from `setupCapture.ts`)
 
-### 3a. Validation step: `validateTlsPrerequisites`
+The workflow already implements:
+- `provisionproxycert` — creates cert-manager Certificate CR
+- `waitforcertready` — polls until Certificate `Ready` condition is `True`
+- `deployproxydeploymentwithtls` — mounts TLS secret, passes `--sslCertChainFile` / `--sslKeyFile`
+- Conditional branching in `setupproxy` based on `tls.mode`
 
-Runs before any cert or proxy creation. A lightweight container step using `kubectl`:
-
-1. If `issuerRef.group == "awspca.cert-manager.io"`:
-   - Check CRD exists: `kubectl get crd awspcaclusterissuers.awspca.cert-manager.io`
-   - Fail with: "AWS PCA issuer controller is not installed. Enable `aws-privateca-issuer` in helm values."
-2. Check CRD exists: `kubectl get crd certificates.cert-manager.io`
-   - Fail with: "cert-manager is not installed."
-3. Check issuer is ready:
-   ```bash
-   kubectl get <kind> <name> -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
-   ```
-   - Fail with: "Issuer '<name>' is not ready — check Pod Identity Association and PCA ARN."
-
-For `mode: "existingSecret"`, validate the secret exists and has `tls.crt` and `tls.key` keys.
-
-### 3b. Certificate creation: `provisionProxyCert`
-
-For `mode: "certManager"`, create a cert-manager Certificate resource:
-
-```yaml
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: <proxyName>-tls
-spec:
-  secretName: <proxyName>-tls
-  issuerRef:
-    name: <from user config>
-    kind: <from user config>
-    group: <from user config>
-  commonName: <from user config>
-  dnsNames: <from user config>
-  duration: <from user config>
-  renewBefore: <from user config>
-```
-
-### 3c. Wait for cert: `waitForCert`
-
-Use `waitForResourceBuilder` to poll until the Certificate's `Ready` condition is `True`.
-This handles both fully-automated issuance (self-signed, PCA with auto-approve) and any
-scenario requiring external approval.
-
-### 3d. Modified proxy deployment
-
-Update `makeProxyDeploymentManifest` to conditionally:
-- Mount the TLS secret (either `<proxyName>-tls` or user-provided `secretName`) as a volume
-  at `/etc/proxy-tls/`
-- Add `--sslCertChainFile /etc/proxy-tls/tls.crt --sslKeyFile /etc/proxy-tls/tls.key` to
-  the container args
-
-### 3e. Updated step sequence in `setupProxy`
+**Step sequence in `setupProxy`:**
 
 ```mermaid
 flowchart TD
@@ -345,291 +303,214 @@ flowchart TD
 
 ## Phase 4: Infrastructure — Issuers, Controllers, and IAM
 
-This phase spans two layers (CDK and Helm) because the AWS-side and K8s-side resources
-must be coordinated.
+### 4a–4b: Self-signed ClusterIssuer + Helm scaffolding ✅ Done
 
-### 4a. CDK/CFN: IAM and Pod Identity (`deployment/migration-assistant-solution/lib/eks-infra.ts`)
+The helm chart already creates the `migrations-ca` ClusterIssuer (a CA-backed self-signed issuer)
+via a post-install hook Job. This is the zero-config default for all environments.
 
-Add ACM PCA permissions to the existing `podIdentityRole` policy:
+### 4c–4g: AWS PCA support 🚧 In progress
 
-```typescript
-new PolicyStatement({
-    effect: Effect.ALLOW,
-    actions: [
-        'acm-pca:IssueCertificate',
-        'acm-pca:GetCertificate',
-        'acm-pca:DescribeCertificateAuthority',
-        'acm-pca:ListCertificateAuthorities',
-        'acm-pca:CreateCertificateAuthority',    // only if ACK PCA creation is supported
-        'acm-pca:DeleteCertificateAuthority',
-        'acm-pca:UpdateCertificateAuthority',
-        'acm-pca:TagCertificateAuthority',
-    ],
-    resources: ['*'],
-})
-```
+The helm chart, bootstrap script, and values files have been wired up. The remaining blocker
+is the cert-manager approval problem described below.
 
-Add Pod Identity Associations for the new service accounts:
+---
 
-```typescript
-new CfnPodIdentityAssociation(this, 'PcaIssuerPodIdentityAssociation', {
-    clusterName: props.clusterName,
-    namespace: namespace,
-    serviceAccount: 'aws-pca-issuer',
-    roleArn: podIdentityRole.roleArn,
-});
+## PCA Remaining Work
 
-new CfnPodIdentityAssociation(this, 'AckAcmpcaPodIdentityAssociation', {
-    clusterName: props.clusterName,
-    namespace: namespace,
-    serviceAccount: 'ack-acmpca-controller',
-    roleArn: podIdentityRole.roleArn,
-});
-```
+### The approval blocker
 
-These are conditional — only needed when the user enables PCA. Could be gated behind a
-CDK context variable or always created (harmless if the controllers aren't installed).
+cert-manager 1.17 requires `CertificateRequest` objects to be approved before any issuer
+processes them. The built-in approver only auto-approves for `cert-manager.io` group issuers.
+For `awspca.cert-manager.io`, the request sits unapproved indefinitely.
 
-**For non-CFN users:** Document the equivalent CLI commands:
-```bash
-aws eks create-pod-identity-association \
-  --cluster-name <cluster> --namespace <ns> \
-  --service-account aws-pca-issuer --role-arn <role>
-aws eks create-pod-identity-association \
-  --cluster-name <cluster> --namespace <ns> \
-  --service-account ack-acmpca-controller --role-arn <role>
-```
+**Fix: install `cert-manager-approver-policy`** (the officially supported path).
 
-### 4b. Helm: Self-signed ClusterIssuer (default, all environments)
+This requires two things together:
 
-**Files:** `deployment/k8s/charts/aggregates/migrationAssistantWithArgo/templates/resources/`
+1. **Disable cert-manager's built-in approver** by adding to the cert-manager chart values:
+   ```yaml
+   charts:
+     cert-manager:
+       values:
+         extraArgs:
+           - --controllers=*,-certificaterequests-approver
+   ```
+   This flag is not currently set in `values.yaml`.
 
-Always created:
+2. **Install `cert-manager-approver-policy`** as a conditional chart and create a
+   `CertificateRequestPolicy` that approves for the PCA issuer group:
+   ```yaml
+   # values.yaml addition
+   conditionalPackageInstalls:
+     cert-manager-approver-policy: false  # enabled automatically when aws-privateca-issuer is enabled
 
-```yaml
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: migrations-selfsigned
-spec:
-  selfSigned: {}
-```
+   charts:
+     cert-manager-approver-policy:
+       version: "0.13.0"
+       repository: "https://charts.jetstack.io"
+       dependsOn: cert-manager
+   ```
 
-Zero-config default for minikube / non-AWS K8s.
+   ```yaml
+   # new helm template: templates/resources/pcaApproverPolicy.yaml
+   {{- if index .Values.conditionalPackageInstalls "aws-privateca-issuer" }}
+   apiVersion: policy.cert-manager.io/v1alpha1
+   kind: CertificateRequestPolicy
+   metadata:
+     name: allow-pca-issuer
+   spec:
+     allowed:
+       issuers:
+         - group: "awspca.cert-manager.io"
+           kind: "AWSPCAClusterIssuer"
+           name: "*"
+     selector:
+       issuerRef:
+         group: "awspca.cert-manager.io"
+   {{- end }}
+   ```
 
-### 4c. Helm: AWS PCA Issuer controller (conditional)
+3. **RBAC**: `argo-workflow-executor` needs `certificaterequests` approval permissions
+   if manual approval is ever needed as a fallback. Add to `workflowRbac.yaml`:
+   ```yaml
+   - apiGroups: ["cert-manager.io"]
+     resources: ["certificaterequests", "certificaterequests/status"]
+     verbs: ["get", "list", "watch", "update", "patch"]
+   ```
 
-**Files:** `deployment/k8s/charts/aggregates/migrationAssistantWithArgo/values.yaml`
+### CDK/CFN changes not yet done
 
-```yaml
-conditionalPackageInstalls:
-  aws-privateca-issuer: false  # opt-in for AWS users
-
-charts:
-  aws-privateca-issuer:
-    version: "1.4.0"
-    repository: "https://cert-manager.github.io/aws-privateca-issuer"
-    dependsOn: cert-manager
-    values:
-      serviceAccount:
-        name: aws-pca-issuer
-        # Pod Identity Association created in CDK (Layer 1)
-```
-
-### 4d. Helm: ACK ACM-PCA controller (conditional, for PCA creation)
-
-```yaml
-conditionalPackageInstalls:
-  ack-acmpca-controller: false  # opt-in, only if user wants helm to create the PCA
-
-charts:
-  ack-acmpca-controller:
-    version: "1.0.0"
-    repository: "oci://public.ecr.aws/aws-controllers-k8s/acmpca-chart"
-    dependsOn: cert-manager
-    values:
-      serviceAccount:
-        name: ack-acmpca-controller
-        # Pod Identity Association created in CDK (Layer 1)
-```
-
-### 4e. Helm: PCA creation and issuer wiring
-
-```yaml
-awsPrivateCA:
-  create: false          # true = create PCA via ACK, false = bring your own
-  arn: ""                # only needed if create: false
-  region: ""
-  caConfig:              # only used when create: true
-    type: SUBORDINATE
-    keyAlgorithm: RSA_2048
-    signingAlgorithm: SHA256WITHRSA
-    subject:
-      commonName: "Migration Assistant CA"
-    deletionPolicy: delete  # or retain (keeps PCA after helm uninstall)
-```
-
-**If `awsPrivateCA.create: true`:**
-
-CertificateAuthority CR (ACK reconciles into real AWS PCA):
-```yaml
-apiVersion: acmpca.services.k8s.aws/v1alpha1
-kind: CertificateAuthority
-metadata:
-  name: migration-assistant-pca
-  annotations:
-    services.k8s.aws/deletion-policy: {{ .Values.awsPrivateCA.caConfig.deletionPolicy }}
-spec:
-  certificateAuthorityConfiguration:
-    keyAlgorithm: {{ .Values.awsPrivateCA.caConfig.keyAlgorithm }}
-    signingAlgorithm: {{ .Values.awsPrivateCA.caConfig.signingAlgorithm }}
-    subject:
-      commonName: {{ .Values.awsPrivateCA.caConfig.subject.commonName }}
-  type: {{ .Values.awsPrivateCA.caConfig.type }}
-```
-
-Post-install hook Job (waits for ACK sync, reads ARN, creates issuer):
-```yaml
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: create-pca-issuer
-  annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: "10"
-    helm.sh/hook-delete-policy: hook-succeeded
-spec:
-  template:
-    spec:
-      serviceAccountName: argo-workflow-executor
-      containers:
-      - name: create-issuer
-        image: bitnami/kubectl
-        command: ["/bin/sh", "-c"]
-        args:
-        - |
-          echo "Waiting for PCA to be synced..."
-          kubectl wait certificateauthority/migration-assistant-pca \
-            --for=condition=ACK.ResourceSynced=True --timeout=300s
-          ARN=$(kubectl get certificateauthority migration-assistant-pca \
-            -o jsonpath='{.status.ackResourceMetadata.arn}')
-          cat <<EOF | kubectl apply -f -
-          apiVersion: awspca.cert-manager.io/v1beta1
-          kind: AWSPCAClusterIssuer
-          metadata:
-            name: aws-pca-issuer
-          spec:
-            arn: $ARN
-            region: {{ .Values.awsPrivateCA.region }}
-          EOF
-      restartPolicy: Never
-```
-
-**If `awsPrivateCA.create: false` and `awsPrivateCA.arn` is set:**
-
-Direct issuer template (no ACK, no hook):
-```yaml
-{{- if and (not .Values.awsPrivateCA.create) .Values.awsPrivateCA.arn }}
-apiVersion: awspca.cert-manager.io/v1beta1
-kind: AWSPCAClusterIssuer
-metadata:
-  name: aws-pca-issuer
-spec:
-  arn: {{ .Values.awsPrivateCA.arn }}
-  region: {{ .Values.awsPrivateCA.region }}
-{{- end }}
-```
-
-### 4f. Helm: ECR image mirroring
-
-**Files:** `deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh`
-
-Add new images for air-gapped environments:
-```
-# --- aws-privateca-issuer ---
-public.ecr.aws/cert-manager/aws-privateca-issuer:v1.4.0
-
-# --- ack-acmpca-controller ---
-public.ecr.aws/aws-controllers-k8s/acmpca-controller:1.0.0
-```
-
-### 4g. Bootstrap script: `--tls-mode` flag (`deployment/k8s/aws/aws-bootstrap.sh`)
-
-**Goal:** Single flag that keeps CFN and Helm in sync so the user can't accidentally
-enable PCA in helm but forget the Pod Identity in CFN (or vice versa).
-
-**New flags:**
-```bash
-# new defaults
-tls_mode="none"
-pca_arn=""
-
-# new argument parsing
---tls-mode) tls_mode="$2"; shift 2 ;;
---pca-arn) pca_arn="$2"; shift 2 ;;
-```
-
-**Validation:**
-```bash
-case "$tls_mode" in
-  none|self-signed) ;;
-  pca-existing)
-    [[ -n "$pca_arn" ]] || { echo "--pca-arn is required with --tls-mode pca-existing"; exit 1; } ;;
-  pca-create) ;;
-  *) echo "Unknown --tls-mode: $tls_mode (expected: none, self-signed, pca-existing, pca-create)"; exit 1 ;;
-esac
-```
-
-**What each mode does:**
-
-| `--tls-mode` | CFN parameter | Helm `--set` overrides |
-|---|---|---|
-| `none` (default) | `EnablePCA=false` | (nothing extra) |
-| `self-signed` | `EnablePCA=false` | (nothing extra — self-signed issuer is always created) |
-| `pca-existing` | `EnablePCA=true` | `conditionalPackageInstalls.aws-privateca-issuer=true`, `awsPrivateCA.arn=$pca_arn`, `awsPrivateCA.region=$region` |
-| `pca-create` | `EnablePCA=true`, `EnableACKPCA=true` | `conditionalPackageInstalls.aws-privateca-issuer=true`, `conditionalPackageInstalls.ack-acmpca-controller=true`, `awsPrivateCA.create=true`, `awsPrivateCA.region=$region` |
-
-The CFN `EnablePCA` parameter gates:
+The CDK stack (`deployment/migration-assistant-solution/lib/eks-infra.ts`) does not yet have:
 - ACM PCA IAM permissions on the `podIdentityRole`
-- Pod Identity Association for `aws-pca-issuer`
+- `CfnPodIdentityAssociation` for `aws-pca-issuer` and `ack-acmpca-controller`
 
-The CFN `EnableACKPCA` parameter additionally gates:
-- Pod Identity Association for `ack-acmpca-controller`
+The bootstrap script currently creates these Pod Identity Associations imperatively at deploy
+time as a workaround. The CDK changes would make this declarative and remove the workaround.
 
-**Help text addition:**
-```
-TLS / Certificate options:
-  --tls-mode <mode>                       TLS certificate strategy for the capture proxy.
-                                          none         - No TLS (default)
-                                          self-signed  - Use cert-manager self-signed issuer
-                                          pca-existing - Use an existing AWS Private CA
-                                          pca-create   - Create a new AWS Private CA via ACK
-  --pca-arn <arn>                         ARN of existing AWS Private CA
-                                          (required with --tls-mode pca-existing)
-```
+---
+
+## ACME Remaining Work
+
+ACME (Let's Encrypt or any ACME-compatible CA) is not yet implemented. It would be a new
+`--tls-mode lets-encrypt` option in the bootstrap script.
+
+**Key constraints:**
+- Requires a **publicly resolvable domain name** — internal cluster DNS names
+  (e.g., `proxy-source.migrations.svc.cluster.local`) are not valid for ACME validation.
+- DNS-01 challenge is required (HTTP-01 is impractical for K8s services). This means
+  Route53 access for cert-manager's controller service account.
+- The approval problem **does not apply** — ACME uses cert-manager's built-in issuer
+  (`cert-manager.io` group), which the built-in approver handles automatically.
+
+**What would need to be added:**
+
+1. **Layer 1 (CDK)**: Route53 permissions + Pod Identity Association for the `cert-manager`
+   controller service account (not the PCA issuer — cert-manager itself needs to create DNS records).
+
+2. **Layer 2 (Helm)**: A new conditional `ClusterIssuer` of type ACME:
+   ```yaml
+   apiVersion: cert-manager.io/v1
+   kind: ClusterIssuer
+   metadata:
+     name: lets-encrypt
+   spec:
+     acme:
+       server: https://acme-v02.api.letsencrypt.org/directory
+       email: <admin-email>
+       privateKeySecretRef:
+         name: lets-encrypt-account-key
+       solvers:
+       - dns01:
+           route53:
+             region: <region>
+   ```
+   New helm values needed: `acme.email`, `acme.server` (to support staging vs production).
+
+3. **Layer 3 (Workflow/Schema)**: No changes needed — the existing `certManager` mode with
+   `issuerRef: { name: "lets-encrypt" }` works as-is. The user must supply real public
+   `dnsNames` in their migration config.
+
+4. **Bootstrap script**: New `--tls-mode lets-encrypt` with `--lets-encrypt-email` and
+   `--lets-encrypt-domain` parameters.
+
+**Tradeoffs vs PCA:**
+
+| | ACME / Let's Encrypt | AWS PCA |
+|---|---|---|
+| Publicly trusted | Yes | No (private CA) |
+| Domain requirement | Public DNS required | Works for internal cluster names |
+| Approval problem | None | Needs approver-policy |
+| Cost | Free | ~$400/mo per CA |
+| Renewal | Automatic via cert-manager | Automatic via cert-manager |
+| AWS dependency | Route53 (for DNS-01) | ACM PCA |
+
+---
+
+## ACM Exportable Remaining Work
+
+AWS Certificate Manager added support for exportable public certificates in 2025, allowing
+the cert, private key, and chain to be exported as PEM files and deployed anywhere (EC2,
+containers, on-premises). This is a new option for publicly trusted certs without running
+your own CA.
+
+**Key constraints:**
+- Requires a **publicly resolvable domain name** (same as ACME).
+- **No cert-manager issuer exists yet** for ACM exportable certs. The ecosystem has not
+  caught up to this new feature. This is the primary blocker.
+- Renewal is not automatic — ACM renews the cert and sends an EventBridge notification,
+  but re-exporting and updating the K8s Secret must be handled separately (no cert-manager
+  integration means no automatic Secret rotation).
+- There is a per-cert cost (unlike free ACM certs for ALB/NLB).
+
+**What would need to be added (once a cert-manager issuer exists):**
+
+1. **Layer 1 (CDK)**: ACM permissions (`acm:RequestCertificate`, `acm:ExportCertificate`,
+   `acm:DescribeCertificate`) + Route53 permissions for DNS validation + Pod Identity
+   Association for the cert-manager controller service account.
+
+2. **Layer 2 (Helm)**: A new conditional `ClusterIssuer` using the ACM external issuer
+   (once one is published). Until then, a workflow-level approach is possible:
+   - `requestAcmCert` — create ACM certificate via ACK or AWS CLI
+   - `createValidationRecord` — write the CNAME validation record to Route53
+   - `waitForAcmIssuance` — poll `aws acm describe-certificate` until `ISSUED`
+   - `exportAndCreateSecret` — call `aws acm export-certificate`, create K8s Secret
+
+3. **Layer 3 (Workflow)**: If going the workflow-level route (bypassing cert-manager),
+   the `provisionCert` / `waitForCert` steps would be replaced with the ACM-specific
+   steps above. The `deployProxyWithTls` step is unchanged.
+
+4. **Renewal gap**: Until a cert-manager issuer exists, renewal requires an EventBridge
+   rule → Lambda → re-export → update K8s Secret → restart proxy pods. This is significant
+   operational overhead compared to cert-manager's automatic rotation.
+
+**Recommendation**: Wait for a cert-manager external issuer for ACM exportable certs before
+implementing this mode. Once that exists, the integration will be as clean as the PCA path.
+
+**Tradeoffs vs PCA and ACME:**
+
+| | ACM Exportable | ACME / Let's Encrypt | AWS PCA |
+|---|---|---|---|
+| Publicly trusted | Yes | Yes | No |
+| Domain requirement | Public DNS required | Public DNS required | Works for internal names |
+| cert-manager integration | None yet | Built-in | aws-privateca-issuer |
+| Renewal automation | Manual (EventBridge) | Automatic | Automatic |
+| Approval problem | None (no cert-manager) | None | Needs approver-policy |
+| Cost | Per cert | Free | ~$400/mo per CA |
 
 ---
 
 ## User Experience by Environment
 
-| Environment | Layer 1 (CDK/CFN) | Layer 2 (Helm values) | Layer 3 (Migration config) |
-|---|---|---|---|
-| **Minikube / non-AWS** | N/A | Defaults (cert-manager + self-signed) | `issuerRef: { name: "migrations-selfsigned" }` |
-| **EKS, self-signed** | Default stack (no PCA changes) | Defaults | `issuerRef: { name: "migrations-selfsigned" }` |
-| **EKS, existing PCA** | Add PCA permissions + Pod Identity for `aws-pca-issuer` | Enable `aws-privateca-issuer`, set `awsPrivateCA.arn` | `issuerRef: { name: "aws-pca-issuer", group: "awspca.cert-manager.io" }` |
-| **EKS, new PCA via ACK** | Add PCA permissions + Pod Identity for both SAs | Enable both controllers, set `awsPrivateCA.create: true` | Same as above |
-| **Any env, pre-existing cert** | N/A | Defaults | `mode: "existingSecret", secretName: "..."` |
-| **No TLS** | N/A | Defaults | Omit `tls` |
-
-## Implementation Order
-
-Each phase is independently shippable:
-
-1. **Phase 1 (Java)** — merge first. New PEM flags are unused until workflow catches up.
-2. **Phase 2 + 3 (Schema + Workflow)** — ship together. This is the integration point.
-3. **Phase 4 (Helm + CDK)** — independent. Users can manually create issuers without this.
-   Within Phase 4, the self-signed issuer (4b) should land first since it unblocks all
-   non-AWS testing. PCA support (4c-4f) and CDK changes (4a) can follow.
+| Environment | Layer 1 (CDK/CFN) | Layer 2 (Helm values) | Layer 3 (Migration config) | Status |
+|---|---|---|---|---|
+| **Minikube / non-AWS** | N/A | Defaults (cert-manager + self-signed) | `issuerRef: { name: "migrations-ca" }` | ✅ Supported |
+| **EKS, self-signed** | Default stack | Defaults | `issuerRef: { name: "migrations-ca" }` | ✅ Supported |
+| **Any env, pre-existing cert** | N/A | Defaults | `mode: "existingSecret", secretName: "..."` | ✅ Supported |
+| **No TLS** | N/A | Defaults | Omit `tls` | ✅ Supported |
+| **EKS, existing PCA** | PCA permissions + Pod Identity for `aws-pca-issuer` | Enable `aws-privateca-issuer`, set `awsPrivateCA.arn` | `issuerRef: { name: "aws-pca-issuer", group: "awspca.cert-manager.io" }` | 🚧 In progress |
+| **EKS, new PCA via ACK** | PCA permissions + Pod Identity for both SAs | Enable both controllers, `awsPrivateCA.create: true` | Same as above | 🚧 In progress |
+| **EKS, Let's Encrypt** | Route53 permissions + Pod Identity for cert-manager | ACME ClusterIssuer (not yet implemented) | `issuerRef: { name: "lets-encrypt" }` + public dnsNames | 📋 Planned |
+| **EKS, ACM Exportable** | ACM + Route53 permissions | ACM issuer (not yet implemented) | TBD | 📋 Planned |
 
 ## What is NOT needed
 
