@@ -47,6 +47,16 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             ObjectNodeUtils.removeFieldsByPath(mappings, field);
         }
 
+        // Copy routing_num_shards from top-level metadata into settings.
+        // The source snapshot stores this at the top level of the index metadata JSON,
+        // but the create index API expects it as a setting named "number_of_routing_shards".
+        // Without this, the target gets a different default, causing documents with custom
+        // routing to land on different shards (hash % routing_num_shards % num_shards).
+        var routingNumShards = index.getRawJson().path("routing_num_shards");
+        if (!routingNumShards.isMissingNode()) {
+            settings.put("number_of_routing_shards", routingNumShards.intValue());
+        }
+
         // Assemble the request body
         ObjectNode body = mapper.createObjectNode();
         body.set("aliases", indexMetadata.getAliases());
