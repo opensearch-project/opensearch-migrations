@@ -4331,7 +4331,7 @@ stringData:
             "factor": "2",
           },
           "limit": 3,
-          "retryPolicy": "OnError",
+          "retryPolicy": "Always",
         },
       },
       {
@@ -4371,7 +4371,7 @@ spec:
             "factor": "2",
           },
           "limit": 3,
-          "retryPolicy": "OnError",
+          "retryPolicy": "Always",
         },
       },
       {
@@ -4480,7 +4480,7 @@ spec:
             "factor": "2",
           },
           "limit": 3,
-          "retryPolicy": "OnError",
+          "retryPolicy": "Always",
         },
       },
       {
@@ -4578,7 +4578,7 @@ metadata:
             "factor": "2",
           },
           "limit": 3,
-          "retryPolicy": "OnError",
+          "retryPolicy": "Always",
         },
       },
       {
@@ -4610,7 +4610,7 @@ metadata:
             "factor": "2",
           },
           "limit": 3,
-          "retryPolicy": "OnError",
+          "retryPolicy": "Always",
         },
       },
       {
@@ -4642,7 +4642,7 @@ metadata:
             "factor": "2",
           },
           "limit": 3,
-          "retryPolicy": "OnError",
+          "retryPolicy": "Always",
         },
       },
       {
