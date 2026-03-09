@@ -42,7 +42,7 @@ def call(Map config = [:]) {
         }
 
         environment {
-            TEST_VPC_STACK_NAME = "test-vpc-${stage}-${params.REGION}"
+            TEST_VPC_STACK_NAME = "test-vpc-${stage}-${currentBuild.number}-${params.REGION}"
         }
 
         stages {
@@ -104,7 +104,7 @@ def call(Map config = [:]) {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
                             def templateName = isImportVpc ? "Migration-Assistant-Infra-Import-VPC-eks" : "Migration-Assistant-Infra-Create-VPC-eks"
-                            env.STACK_NAME = "${templateName}-${stage}-${params.REGION}"
+                            env.STACK_NAME = "${templateName}-${stage}-${currentBuild.number}-${params.REGION}"
 
                             def bootstrapArgs = isImportVpc ?
                                 "--deploy-import-vpc-cfn --vpc-id ${env.TEST_VPC_ID} --subnet-ids ${env.TEST_SUBNET_IDS}" :
@@ -194,11 +194,10 @@ def call(Map config = [:]) {
                         }
                         echo "CloudFormation cleanup completed"
 
-                        // TODO (MIGRATIONS-2777): Run kubectl with an isolated KUBECONFIG per pipeline run
-                        // For now, do best effort cleanup of the migration EKS context created by aws-bootstrap.sh.
+                        // Clean up the kubeconfig context entry created by aws-bootstrap.sh
                         sh """
                             if command -v kubectl >/dev/null 2>&1; then
-                                kubectl config get-contexts 2>/dev/null | grep migration-eks-cluster-${stage}-${params.REGION} | awk '{print \$2}' | xargs -r kubectl config delete-context || echo "No kubectl context to clean up"
+                                kubectl config delete-context migration-eks-cluster-${stage}-${params.REGION} 2>/dev/null || echo "No kubectl context to clean up"
                             else
                                 echo "kubectl not found on agent; skipping context cleanup"
                             fi

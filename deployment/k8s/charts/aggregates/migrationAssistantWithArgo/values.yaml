@@ -82,7 +82,7 @@ images:
     tag: latest
     pullPolicy: IfNotPresent
   coordinatorCluster:
-    repository: docker.io/opensearchproject/opensearch
+    repository: mirror.gcr.io/opensearchproject/opensearch
     tag: "3.1.0"
     pullPolicy: IfNotPresent
 
@@ -106,6 +106,21 @@ workloadsNodePool:
   limits:
     cpu: "64000m"
     memory: "128Gi"
+
+# Worker fleets: migration-console-identical pods on bigger hardware.
+# Dormant at replicas: 0. Scale up with: kubectl scale deployment/worker-fleet-<name> --replicas=N
+# Pods get karpenter.sh/do-not-disrupt to prevent mid-task eviction.
+workerFleets: {}
+  # kafka-heavy:
+  #   enabled: true
+  #   replicas: 0
+  #   resources:
+  #     requests:
+  #       cpu: 4000m
+  #       memory: 8Gi
+  #     limits:
+  #       cpu: 4000m
+  #       memory: 8Gi
 
 stageName: dev
 
@@ -238,6 +253,8 @@ charts:
         vpa:
           enabled: false
       kubeRbacProxy:
+        image:
+          repository: registry.k8s.io/kubebuilder/kube-rbac-proxy
         vpa:
           enabled: false
 

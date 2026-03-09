@@ -117,6 +117,17 @@ public interface IWorkCoordinator extends AutoCloseable {
     ) throws IOException, InterruptedException;
 
     /**
+     * Same as {@link #createSuccessorWorkItemsAndMarkComplete} but aborts retries if they would exceed the deadline.
+     */
+    void createSuccessorWorkItemsAndMarkComplete(
+        String workItemId,
+        List<String> successorWorkItemIds,
+        int initialNextAcquisitionLeaseExponent,
+        Instant deadline,
+        Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException;
+
+    /**
      * @return the number of items that are not yet complete.  This will include items with and without claimed leases.
      * @throws IOException
      * @throws InterruptedException

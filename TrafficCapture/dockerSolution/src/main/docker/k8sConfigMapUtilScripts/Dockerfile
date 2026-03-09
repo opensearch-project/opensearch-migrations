@@ -1,4 +1,5 @@
-FROM mirror.gcr.io/library/amazonlinux:2023
+ARG BASE_IMAGE=docker.io/library/amazonlinux:2023
+FROM ${BASE_IMAGE}
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ENV LANG=C.UTF-8

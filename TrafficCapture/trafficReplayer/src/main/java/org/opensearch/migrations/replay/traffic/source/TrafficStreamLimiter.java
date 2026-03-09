@@ -61,9 +61,11 @@ public class TrafficStreamLimiter implements AutoCloseable {
         } catch (InterruptedException e) {
             if (!stopped.get()) {
                 WorkItem finalWorkItem = workItem;
-                log.atError().setMessage("consumeFromQueue() was interrupted with {} enqueued items")
+                log.atError().setMessage("consumeFromQueue() was interrupted with {}{} enqueued items" +
+                        " (active context={})")
                     .addArgument(() -> (finalWorkItem != null ? "an active task and " : ""))
                     .addArgument(workQueue::size)
+                    .addArgument(() -> finalWorkItem != null ? finalWorkItem.context : "none")
                     .log();
             }
             throw e;
