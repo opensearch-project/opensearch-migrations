@@ -1,7 +1,6 @@
 import os
 from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from console_link.api.custom_openapi import OpenApiWithNullables
 from console_link.api.system import system_router
 from console_link.api.backfill import backfill_router
 from console_link.api.sessions import session_router
@@ -16,10 +15,6 @@ app = FastAPI(
 )
 
 origins = [
-    # Enable development environments
-    "http://127.0.0.1:3000",
-    "http://localhost:3000",
-    # Enable prod container environments
     "http://127.0.0.1:8080",
     "http://localhost:8080",
 ]
@@ -31,9 +26,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-custom_openapi = OpenApiWithNullables(app)
-app.openapi = custom_openapi.openapi_with_nullables
 
 
 def add_to_session_router(router: APIRouter):

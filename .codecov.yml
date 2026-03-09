@@ -38,6 +38,5 @@ ignore:
   - "**/setup.py"
   - "**/jest.config.js"
   - "**/coverage/**/*"
-  - "**/frontend/out/**"
   - "**/generated/**"
   - "**/orchestrationSpecs/**"
