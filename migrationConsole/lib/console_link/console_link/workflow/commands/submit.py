@@ -119,7 +119,7 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
         runner = ScriptRunner()
 
         # Get config data as YAML
-        config_yaml = config.to_yaml()
+        config_yaml = config.raw_yaml
 
         # Get etcd_endpoints from environment variable or use default
         etcd_endpoints = os.getenv('ETCD_ENDPOINTS')

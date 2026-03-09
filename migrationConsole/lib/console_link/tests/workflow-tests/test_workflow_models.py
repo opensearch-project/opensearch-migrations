@@ -49,18 +49,17 @@ class TestWorkflowModels:
                 }
             }
         }
-        config = WorkflowConfig(data)
+        raw = ("targets:\n  test:\n    endpoint: https://test.com:9200\n"
+               "    auth:\n      username: admin\n      password: password\n")
+        config = WorkflowConfig(data, raw_yaml=raw)
 
-        # Test YAML serialization
-        yaml_str = config.to_yaml()
-        assert "targets:" in yaml_str
-        assert "test:" in yaml_str
-        config_dict = yaml.safe_load(yaml_str)
-        assert config_dict["targets"]["test"]["endpoint"] == "https://test.com:9200"
-        assert "username: admin" in yaml_str
+        # Test raw_yaml content
+        assert "targets:" in config.raw_yaml
+        assert "test:" in config.raw_yaml
+        assert "username: admin" in config.raw_yaml
 
         # Test YAML deserialization
-        config_from_yaml = WorkflowConfig.from_yaml(yaml_str)
+        config_from_yaml = WorkflowConfig.from_yaml(config.raw_yaml)
         assert config_from_yaml.data == data
         assert config_from_yaml.get("targets")["test"]["endpoint"] == "https://test.com:9200"
 
@@ -80,11 +79,11 @@ class TestWorkflowModels:
                 }
             }
         }
-        config = WorkflowConfig(data)
+        yaml_str = yaml.dump(data, default_flow_style=False)
+        config = WorkflowConfig.from_yaml(yaml_str)
 
-        # Verify all data is preserved through YAML
-        yaml_str = config.to_yaml()
-        config_from_yaml = WorkflowConfig.from_yaml(yaml_str)
+        # Verify all data is preserved through raw_yaml round-trip
+        config_from_yaml = WorkflowConfig.from_yaml(config.raw_yaml)
         assert config_from_yaml.data == data
 
     def test_workflow_config_empty_yaml(self):
@@ -117,11 +116,10 @@ targets:
         assert config.data["targets"]["test"]["endpoint"] == "https://test.com:9200"
         assert config.data["targets"]["test"]["auth"]["username"] == "admin"
 
-        # Convert back to YAML and verify comments are preserved
-        yaml_output = config.to_yaml()
-        assert "# Main configuration" in yaml_output or "targets:" in yaml_output
-        # Note: Comment preservation depends on ruamel.yaml's behavior
-        # The key is that the data structure is preserved correctly
+        # Verify comments are preserved exactly in raw_yaml
+        assert "# Main configuration" in config.raw_yaml
+        assert "# Production endpoint" in config.raw_yaml
+        assert config.raw_yaml == yaml_with_comments
 
     def test_command_result(self):
         """Test CommandResult wrapper."""
