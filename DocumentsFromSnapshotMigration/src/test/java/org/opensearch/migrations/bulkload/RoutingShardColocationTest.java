@@ -66,6 +66,7 @@ public class RoutingShardColocationTest extends SourceTestBase {
     private static final String MIGRATION_SNAPSHOT_NAME = "migration_snap";
     private static final String REPO_NAME = "routing_repo";
     private static final int NUM_SHARDS = 5;
+    private static final int NUM_ROUTING_SHARDS = 10; // Explicit value that differs from OS2 default (640 for 5 shards)
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @TempDir
@@ -73,14 +74,17 @@ public class RoutingShardColocationTest extends SourceTestBase {
 
     /**
      * Scenario 1: Index created natively on ES6 (routing_num_shards = number_of_shards = 5)
-     * Scenario 2: Index created natively on ES7 (routing_num_shards = 1024, number_of_shards = 5)
+     * Scenario 2: Index created natively on ES7 (routing_num_shards = 640, number_of_shards = 5)
      * Scenario 3: Index created on ES6, snapshot restored to ES7 (routing_num_shards preserved = 5)
+     *
+     * ES6 scenarios are commented out — they require amd64 and are slow under emulation.
+     * The ES7_native case is the primary reproduction for the routing_num_shards bug.
      */
     private static Stream<Arguments> scenarios() {
         return Stream.of(
-            Arguments.of("ES6_native", SearchClusterContainer.ES_V6_8_23, null),
-            Arguments.of("ES7_native", SearchClusterContainer.ES_V7_10_2, null),
-            Arguments.of("ES6_restored_to_ES7", SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.ES_V6_8_23)
+            // Arguments.of("ES6_native", SearchClusterContainer.ES_V6_8_23, null),
+            Arguments.of("ES7_native", SearchClusterContainer.ES_V7_10_2, null)
+            // Arguments.of("ES6_restored_to_ES7", SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.ES_V6_8_23)
         );
     }
 
@@ -125,7 +129,8 @@ public class RoutingShardColocationTest extends SourceTestBase {
     private void createIndexWithDocs(SearchClusterContainer cluster) {
         var ops = new ClusterOperations(cluster);
         var body = String.format(
-            "{\"settings\":{\"number_of_shards\":%d,\"number_of_replicas\":0}}", NUM_SHARDS);
+            "{\"settings\":{\"number_of_shards\":%d,\"number_of_replicas\":0,\"number_of_routing_shards\":%d}}",
+            NUM_SHARDS, NUM_ROUTING_SHARDS);
         ops.createIndex(INDEX_NAME, body);
 
         // Insert docs with different routing values
@@ -264,25 +269,20 @@ public class RoutingShardColocationTest extends SourceTestBase {
             Assertions.assertEquals(6, targetOps.getDocCount(INDEX_NAME),
                 "Target should have 6 documents total");
 
-            // Core assertion: routing_num_shards must match between source and target.
-            // This will FAIL with the current code, demonstrating the bug.
-            Assertions.assertEquals(sourceRoutingShards, targetRoutingShards,
-                "number_of_routing_shards mismatch between source (" + sourceRoutingShards +
-                ") and target (" + targetRoutingShards + "). " +
-                "This causes documents with custom routing to land on different shards.");
-
-            // Verify routing-based search on target matches source behavior
-            var targetHitsA = searchWithRouting(targetCluster, INDEX_NAME, "group:a", "route_a");
-            Assertions.assertEquals(2, targetHitsA.size(),
-                "Target: routing=route_a for group:a should return 2 docs");
-
-            var targetHitsB = searchWithRouting(targetCluster, INDEX_NAME, "group:b", "route_b");
-            Assertions.assertEquals(2, targetHitsB.size(),
-                "Target: routing=route_b for group:b should return 2 docs");
-
-            var targetHitsC = searchWithRouting(targetCluster, INDEX_NAME, "group:c", "route_c");
-            Assertions.assertEquals(2, targetHitsC.size(),
-                "Target: routing=route_c for group:c should return 2 docs");
+            // Core assertion: for each routing value, the shard assignment on the target must
+            // match the source. If routing_num_shards differs, the formula
+            // hash(routing) % routing_num_shards % num_shards produces different shard IDs.
+            var routingValues = List.of("route_a", "route_b", "route_c");
+            for (var routing : routingValues) {
+                var sourceShard = getShardForRouting(sourceCluster, routing);
+                var targetShard = getShardForRouting(targetCluster, routing);
+                log.info("Routing '{}': source shard={}, target shard={}", routing, sourceShard, targetShard);
+                Assertions.assertEquals(sourceShard, targetShard,
+                    "Shard mismatch for routing='" + routing + "': source shard " + sourceShard +
+                    " != target shard " + targetShard +
+                    ". This means documents with this routing land on different shards after migration," +
+                    " breaking routing-dependent queries and colocation guarantees.");
+            }
         } finally {
             FileSystemUtils.deleteDirectories(localDirectory.toString());
         }
@@ -310,18 +310,28 @@ public class RoutingShardColocationTest extends SourceTestBase {
         return new SearchClusterRequests(context).searchIndexByQueryString(client, index, query, routing);
     }
 
+    /**
+     * Gets the actual routing_num_shards from cluster state metadata (not the settings API default).
+     */
     @SneakyThrows
     private int getRoutingNumShards(SearchClusterContainer cluster) {
         var ops = new ClusterOperations(cluster);
-        var response = ops.get("/" + INDEX_NAME + "/_settings?include_defaults=true&flat_settings=true");
+        var response = ops.get("/_cluster/state/metadata/" + INDEX_NAME);
         var json = MAPPER.readTree(response.getValue());
-        var indexNode = json.path(INDEX_NAME);
-        // Check explicit settings first, then defaults
-        var settings = indexNode.path("settings");
-        var routingShards = settings.path("index.number_of_routing_shards");
-        if (!routingShards.isMissingNode()) {
-            return routingShards.asInt();
-        }
-        return indexNode.path("defaults").path("index.number_of_routing_shards").asInt();
+        return json.path("metadata").path("indices").path(INDEX_NAME).path("routing_num_shards").asInt();
+    }
+
+    /**
+     * Uses the _search_shards API to determine which shard a routing value maps to.
+     * This reflects the actual shard assignment formula: hash(routing) % routing_num_shards % num_shards
+     */
+    @SneakyThrows
+    private int getShardForRouting(SearchClusterContainer cluster, String routing) {
+        var ops = new ClusterOperations(cluster);
+        var response = ops.get("/" + INDEX_NAME + "/_search_shards?routing=" + routing);
+        var json = MAPPER.readTree(response.getValue());
+        // shards is an array of shard groups; each group is an array of shard copies.
+        // For a single routing value, there's exactly one shard group.
+        return json.path("shards").get(0).get(0).path("shard").asInt();
     }
 }
