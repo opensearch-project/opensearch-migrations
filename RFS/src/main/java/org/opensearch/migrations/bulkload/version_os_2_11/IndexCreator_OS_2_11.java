@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.version_os_2_11;
 
+import java.util.Map;
+
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
@@ -22,6 +24,16 @@ import lombok.extern.slf4j.Slf4j;
 @AllArgsConstructor
 public class IndexCreator_OS_2_11 implements IndexCreator {
     private static final ObjectMapper mapper = new ObjectMapper();
+
+    /**
+     * Maps top-level index metadata fields from the snapshot to their corresponding
+     * create index API setting names. The snapshot stores these at the top level of
+     * the index metadata JSON, but the create index API expects them as settings.
+     */
+    static final Map<String, String> METADATA_TO_SETTINGS = Map.of(
+        "routing_num_shards", "number_of_routing_shards"
+    );
+
     protected final OpenSearchClient client;
 
     public CreationResult create(
@@ -47,15 +59,24 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             ObjectNodeUtils.removeFieldsByPath(mappings, field);
         }
 
-        // Copy routing_num_shards from top-level metadata into settings.
-        // The source snapshot stores this at the top level of the index metadata JSON,
-        // but the create index API expects it as a setting named "number_of_routing_shards".
-        // Without this, the target gets a different default, causing documents with custom
-        // routing to land on different shards (hash % routing_num_shards % num_shards).
-        var routingNumShards = index.getRawJson().path("routing_num_shards");
-        if (!routingNumShards.isMissingNode()) {
-            settings.put("number_of_routing_shards", routingNumShards.intValue());
-        }
+        // Copy top-level metadata fields into settings.
+        // The source snapshot stores these at the top level of the index metadata JSON,
+        // but the create index API expects them as settings. Without this mapping,
+        // the target gets different defaults (e.g., routing_num_shards), causing issues
+        // like documents with custom routing landing on different shards.
+        var rawJson = index.getRawJson();
+        METADATA_TO_SETTINGS.forEach((metadataField, settingName) -> {
+            var value = rawJson.path(metadataField);
+            if (!value.isMissingNode()) {
+                settings.set(settingName, value);
+                log.atDebug()
+                    .setMessage("Copied metadata field '{}' as setting '{}' = {}")
+                    .addArgument(metadataField)
+                    .addArgument(settingName)
+                    .addArgument(value)
+                    .log();
+            }
+        });
 
         // Assemble the request body
         ObjectNode body = mapper.createObjectNode();
