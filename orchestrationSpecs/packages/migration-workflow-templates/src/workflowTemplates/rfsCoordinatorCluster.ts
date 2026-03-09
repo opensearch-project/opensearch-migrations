@@ -219,6 +219,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                 setOwnerReference: true,
                 manifest: createRfsCoordinatorSecretManifest(b.inputs.clusterName)
             }))
+        .addRetryParameters({limit: 3, retryPolicy: "OnError", backoff: {duration: "10", factor: "2"}})
     )
 
     .addTemplate("createRfsCoordinatorService", t => t
@@ -229,6 +230,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                 setOwnerReference: true,
                 manifest: createRfsCoordinatorServiceManifest(b.inputs.clusterName)
             }))
+        .addRetryParameters({limit: 3, retryPolicy: "OnError", backoff: {duration: "10", factor: "2"}})
     )
 
     .addTemplate("createRfsCoordinatorStatefulSet", t => t
@@ -241,6 +243,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                 successCondition: "status.readyReplicas > 0",
                 manifest: createRfsCoordinatorStatefulSetManifest(b.inputs.clusterName, b.inputs.coordinatorImage)
             }))
+        .addRetryParameters({limit: 3, retryPolicy: "OnError", backoff: {duration: "10", factor: "2"}})
     )
 
     .addTemplate("createRfsCoordinator", t => t
@@ -273,6 +276,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                     }
                 }
             }))
+        .addRetryParameters({limit: 3, retryPolicy: "OnError", backoff: {duration: "10", factor: "2"}})
     )
 
     .addTemplate("deleteRfsCoordinatorService", t => t
@@ -289,6 +293,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                     }
                 }
             }))
+        .addRetryParameters({limit: 3, retryPolicy: "OnError", backoff: {duration: "10", factor: "2"}})
     )
 
     .addTemplate("deleteRfsCoordinatorSecret", t => t
@@ -305,6 +310,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                     }
                 }
             }))
+        .addRetryParameters({limit: 3, retryPolicy: "OnError", backoff: {duration: "10", factor: "2"}})
     )
 
     .addTemplate("deleteRfsCoordinator", t => t

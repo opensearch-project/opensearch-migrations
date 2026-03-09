@@ -4325,6 +4325,14 @@ stringData:
 ",
           "setOwnerReference": true,
         },
+        "retryStrategy": {
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": 3,
+          "retryPolicy": "OnError",
+        },
       },
       {
         "inputs": {
@@ -4356,6 +4364,14 @@ spec:
       targetPort: https
 ",
           "setOwnerReference": true,
+        },
+        "retryStrategy": {
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": 3,
+          "retryPolicy": "OnError",
         },
       },
       {
@@ -4458,6 +4474,14 @@ spec:
           "setOwnerReference": true,
           "successCondition": "status.readyReplicas > 0",
         },
+        "retryStrategy": {
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": 3,
+          "retryPolicy": "OnError",
+        },
       },
       {
         "inputs": {
@@ -4548,6 +4572,14 @@ metadata:
   name: "{{inputs.parameters.clusterName}}"
 ",
         },
+        "retryStrategy": {
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": 3,
+          "retryPolicy": "OnError",
+        },
       },
       {
         "inputs": {
@@ -4572,6 +4604,14 @@ metadata:
   name: "{{inputs.parameters.clusterName}}"
 ",
         },
+        "retryStrategy": {
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": 3,
+          "retryPolicy": "OnError",
+        },
       },
       {
         "inputs": {
@@ -4595,6 +4635,14 @@ kind: Secret
 metadata:
   name: "{{=inputs.parameters.clusterName+'-creds'}}"
 ",
+        },
+        "retryStrategy": {
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": 3,
+          "retryPolicy": "OnError",
         },
       },
       {
