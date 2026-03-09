@@ -45,13 +45,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         var result = CreationResult.builder().name(index.getName());
         IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.getRawJson(), index.getId(), index.getName());
 
-        // Remove some settings which will cause errors if you try to pass them to the API
         ObjectNode settings = indexMetadata.getSettings();
-
-        String[] problemSettings = { "creation_date", "provided_name", "uuid", "version", "index.mapping.single_type", "index.mapper.dynamic" };
-        for (var field : problemSettings) {
-            ObjectNodeUtils.removeFieldsByPath(settings, field);
-        }
 
         ObjectNode mappings = indexMetadata.getMappings();
         String[] problemMappingFields = { "_all" };
@@ -124,48 +118,81 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                              ObjectNode body,
                              AwarenessAttributeSettings awarenessAttributeSettings) throws IncompatibleReplicaCountException {
         // Create the index; it's fine if it already exists
-        try {
-            var alreadyExists = false;
-            if (mode == MigrationMode.SIMULATE) {
-                alreadyExists = client.hasIndex(index.getName());
-            } else if (mode == MigrationMode.PERFORM) {
-                alreadyExists = client.createIndex(index.getName(), body, context).isEmpty();
-            }
+        var alreadyExists = false;
+        if (mode == MigrationMode.SIMULATE) {
+            alreadyExists = client.hasIndex(index.getName());
+        } else if (mode == MigrationMode.PERFORM) {
+            alreadyExists = createWithRetry(index.getName(), body, settings, context);
+        }
 
-            if (alreadyExists) {
-                result.failureType(CreationFailureType.ALREADY_EXISTS);
-            }
+        if (alreadyExists) {
+            result.failureType(CreationFailureType.ALREADY_EXISTS);
+        }
 
-            if (mode == MigrationMode.SIMULATE) {
-                checkForReplicaCountIncompatibility(settings, awarenessAttributeSettings);
-            }
-        } catch (InvalidResponse invalidResponse) {
-            var potentialAwarenessAttributeException = invalidResponse.containsAwarenessAttributeException();
-            if (potentialAwarenessAttributeException.isPresent()) {
-                log.warn("Index creation failed due to awareness attribute exception: " + potentialAwarenessAttributeException.get());
-                throw new IncompatibleReplicaCountException(potentialAwarenessAttributeException.get(), invalidResponse);
-            }
+        if (mode == MigrationMode.SIMULATE) {
+            checkForReplicaCountIncompatibility(settings, awarenessAttributeSettings);
+        }
+    }
 
-            var illegalArguments = invalidResponse.getIllegalArguments();
+    /**
+     * Attempts to create the index, retrying by removing unknown settings reported by the cluster.
+     * The cluster may report unknown settings in batches, so this loops until either the index is
+     * created successfully or no more removable illegal arguments are found.
+     *
+     * @return true if the index already existed, false if it was created
+     */
+    private boolean createWithRetry(String indexName, ObjectNode body, ObjectNode settings, ICreateIndexContext context) throws IncompatibleReplicaCountException {
+        while (true) {
+            try {
+                return client.createIndex(indexName, body, context).isEmpty();
+            } catch (InvalidResponse invalidResponse) {
+                handleInvalidResponse(invalidResponse, indexName, settings);
+            } catch (Exception e) {
+                // Reactor's retryWhen may wrap the original exception at any depth
+                Throwable cause = e;
+                InvalidResponse found = null;
+                while (cause != null) {
+                    if (cause instanceof InvalidResponse ir) {
+                        found = ir;
+                        break;
+                    }
+                    cause = cause.getCause();
+                }
+                if (found != null) {
+                    handleInvalidResponse(found, indexName, settings);
+                } else {
+                    log.warn("Unexpected exception type during index creation: {} - {}", e.getClass().getName(), e.getMessage());
+                    throw e;
+                }
+            }
+        }
+    }
 
-            if (illegalArguments.isEmpty()) {
-                log.debug("Cannot retry invalid response, there are no illegal arguments to remove.");
+    private void handleInvalidResponse(InvalidResponse invalidResponse, String indexName, ObjectNode settings) throws IncompatibleReplicaCountException {
+        var potentialAwarenessAttributeException = invalidResponse.containsAwarenessAttributeException();
+        if (potentialAwarenessAttributeException.isPresent()) {
+            log.warn("Index creation failed due to awareness attribute exception: " + potentialAwarenessAttributeException.get());
+            throw new IncompatibleReplicaCountException(potentialAwarenessAttributeException.get(), invalidResponse);
+        }
+
+        var illegalArguments = invalidResponse.getIllegalArguments();
+
+        if (illegalArguments.isEmpty()) {
+            log.debug("Cannot retry invalid response, there are no illegal arguments to remove.");
+            throw invalidResponse;
+        }
+
+        for (var illegalArgument : illegalArguments) {
+            if (!illegalArgument.startsWith("index.")) {
+                log.warn("Expecting all retryable errors to start with 'index.', instead saw " + illegalArgument);
                 throw invalidResponse;
             }
 
-            for (var illegalArgument : illegalArguments) {
-                if (!illegalArgument.startsWith("index.")) {
-                    log.warn("Expecting all retryable errors to start with 'index.', instead saw " + illegalArgument);
-                    throw invalidResponse;
-                }
-
-                var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
-                log.debug("Removing setting '{}' from index '{}' settings", shortenedIllegalArgument, index.getName());
-                ObjectNodeUtils.removeFieldsByPath(settings, shortenedIllegalArgument);
-            }
-
-            log.info("Reattempting creation of index '{}' after removing illegal arguments: {}", index.getName(), illegalArguments);
-            client.createIndex(index.getName(), body, context);
+            var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
+            log.debug("Removing setting '{}' from index '{}' settings", shortenedIllegalArgument, indexName);
+            ObjectNodeUtils.removeFieldsByPath(settings, shortenedIllegalArgument);
         }
+
+        log.info("Reattempting creation of index '{}' after removing illegal arguments: {}", indexName, illegalArguments);
     }
 }
