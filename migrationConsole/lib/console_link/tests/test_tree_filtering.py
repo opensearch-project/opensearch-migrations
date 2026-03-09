@@ -47,7 +47,11 @@ class TestTreeFiltering:
         self._test_filtering('meaningful_vs_noise.json', input_dir, expected_dir)
 
     def test_rfs_coordinator_retry(self, input_dir, expected_dir):
-        """Test that RFS coordinator retry nodes are collapsed but backfill retries are preserved."""
+        """Test that RFS coordinator retry nodes are collapsed but backfill retries are preserved.
+
+        Input fixture has children in reverse order (attempt-1 before attempt-0) to verify
+        selection uses attempt index, not list position (boundary_id reconstruction is unordered).
+        """
         self._test_filtering('rfs_coordinator_retry.json', input_dir, expected_dir)
     
     def _test_filtering(self, filename, input_dir, expected_dir):

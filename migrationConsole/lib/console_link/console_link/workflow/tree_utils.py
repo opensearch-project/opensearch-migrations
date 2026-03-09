@@ -123,9 +123,9 @@ def _extract_attempt_index(name: str) -> int:
 def _collapse_rfs_retry(node: Dict[str, Any]) -> Dict[str, Any]:
     """Collapse an RFS coordinator Retry node to its final attempt.
 
-    Picks the last succeeded attempt. If none succeeded, picks the attempt with
-    the highest retry suffix (or latest finished_at as tiebreaker), since
-    boundary_id reconstruction does not preserve Argo's original child order.
+    Picks the highest-indexed succeeded attempt. If none succeeded, picks the
+    attempt with the highest retry suffix (or latest finished_at as tiebreaker),
+    since boundary_id reconstruction does not preserve Argo's original child order.
     """
     children = node.get('children', [])
     if not children:

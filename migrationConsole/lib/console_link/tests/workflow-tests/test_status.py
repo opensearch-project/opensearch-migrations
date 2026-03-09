@@ -318,12 +318,14 @@ class TestStatusCommand:
                         'rfs-0': {
                             'id': 'rfs-0', 'displayName': 'createRfsCoordinatorStatefulSet(0)',
                             'type': 'Pod', 'phase': 'Error', 'boundaryID': 'rfs-retry',
-                            'startedAt': '2023-01-01T10:00:00Z'
+                            'startedAt': '2023-01-01T10:00:00Z',
+                            'finishedAt': '2023-01-01T10:00:30Z'
                         },
                         'rfs-1': {
                             'id': 'rfs-1', 'displayName': 'createRfsCoordinatorStatefulSet(1)',
                             'type': 'Pod', 'phase': 'Succeeded', 'boundaryID': 'rfs-retry',
-                            'startedAt': '2023-01-01T10:01:00Z'
+                            'startedAt': '2023-01-01T10:01:00Z',
+                            'finishedAt': '2023-01-01T10:02:00Z'
                         },
                         'backfill-retry': {
                             'id': 'backfill-retry', 'displayName': 'waitForCompletionInternal',
