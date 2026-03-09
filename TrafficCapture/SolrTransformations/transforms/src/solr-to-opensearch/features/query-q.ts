@@ -1,33 +1,31 @@
 /**
  * Query q parameter — convert Solr q param to OpenSearch query DSL.
  *
- * Handles:
- *   - *:* → match_all
- *   - field:value → term query
- *   - Anything else → query_string passthrough (lets OpenSearch parse it)
+ * Delegates to the structured Lexer → Parser → AST → Transformer pipeline
+ * via translateQ. Falls back to query_string passthrough on any error.
  *
  * Request-only. All output is Maps for zero-serialization GraalVM interop.
+ *
+ * Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 9.3, 9.4
  */
 import type { MicroTransform } from '../pipeline';
-import type { RequestContext, JavaMap } from '../context';
-
-function parseSolrQuery(q: string): JavaMap {
-  if (!q || q === '*:*') return new Map([['match_all', new Map()]]);
-
-  const fieldMatch = /^([^:]+):(.+)$/.exec(q);
-  if (fieldMatch) {
-    const [, field, value] = fieldMatch;
-    if (field === '*' && value === '*') return new Map([['match_all', new Map()]]);
-    return new Map([['term', new Map([[field, value]])]]);
-  }
-
-  return new Map([['query_string', new Map([['query', q]])]]);
-}
+import type { RequestContext } from '../context';
+import { translateQ } from '../translator/translateQ';
 
 export const request: MicroTransform<RequestContext> = {
   name: 'query-q',
   apply: (ctx) => {
     const q = ctx.params.get('q') || '*:*';
-    ctx.body.set('query', parseSolrQuery(q));
+    const defType = ctx.params.get('defType') ?? undefined;
+    const qf = ctx.params.get('qf') ?? undefined;
+    const pf = ctx.params.get('pf') ?? undefined;
+    const df = ctx.params.get('df') ?? undefined;
+
+    const result = translateQ({ q, defType, qf, pf, df });
+    ctx.body.set('query', result.dsl);
+
+    if (result.warnings.length > 0) {
+      ctx.body.set('_solr_warnings', result.warnings);
+    }
   },
 };

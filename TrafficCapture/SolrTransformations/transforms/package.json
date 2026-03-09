@@ -10,7 +10,8 @@
     "lint": "eslint src/",
     "format": "prettier --check src/",
     "format:fix": "prettier --write src/",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run --reporter=verbose"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.56.1",
@@ -19,7 +20,9 @@
     "esbuild": "^0.24.0",
     "eslint": "^10.0.2",
     "eslint-config-prettier": "^10.1.8",
-    "prettier": "^3.8.1"
+    "fast-check": "^4.1.1",
+    "prettier": "^3.8.1",
+    "vitest": "^3.2.1"
   },
   "optionalDependencies": {
     "@typescript/native-preview-darwin-arm64": "7.0.0-dev.20251210.1",
