@@ -47,6 +47,7 @@ def _launch_editor_for_config(config: Optional[WorkflowConfig] = None) -> Comman
         subprocess.run([editor, temp_file], check=True)
     except subprocess.CalledProcessError as e:
         logger.warning(f"Editor exited with non-zero status: {e.returncode}")
+        return CommandResult(success=False, value=e)
 
     try:
         # Read back the edited content
