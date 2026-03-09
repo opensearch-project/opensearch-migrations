@@ -155,18 +155,24 @@ def call(Map config = [:]) {
                                           2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
                                     """
 
-                                    // Capture MA VPC info for source domain deployment
-                                    def exportsJson = sh(
+                                    // Extract VPC ID from MigrationsExportString
+                                    def rawOutput = sh(
                                         script: """aws cloudformation describe-stacks --stack-name "${env.STACK_NAME}" \
-                                          --query 'Stacks[0].Outputs' --output json""",
+                                          --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
+                                          --output text""",
                                         returnStdout: true
                                     ).trim()
-                                    writeFile file: '/tmp/ma-outputs.json', text: exportsJson
-
-                                    env.MA_VPC_ID = sh(
-                                        script: "jq -r '[.[] | select(.OutputKey | test(\"VpcId\"))] | first | .OutputValue' /tmp/ma-outputs.json",
-                                        returnStdout: true
-                                    ).trim()
+                                    if (!rawOutput) {
+                                        error("Could not retrieve MigrationsExportString from ${env.STACK_NAME}")
+                                    }
+                                    def exportsMap = rawOutput.split(';')
+                                            .collect { it.trim().replaceFirst(/^export\s+/, '') }
+                                            .findAll { it.contains('=') }
+                                            .collectEntries {
+                                                def (key, value) = it.split('=', 2)
+                                                [(key): value]
+                                            }
+                                    env.MA_VPC_ID = exportsMap['VPC_ID']
 
                                     echo "MA VPC: ${env.MA_VPC_ID}"
                                 }
