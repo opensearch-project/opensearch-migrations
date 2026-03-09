@@ -82,10 +82,10 @@ jobs:
     timeout-minutes: 1080
     steps:
       - name: Jenkins Job Trigger and Monitor
-        uses: lewijacn/jenkins-trigger@1.0.4
+        uses: jugal-chauhan/jenkins-trigger@1.0.6
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
-          job_name: "eks-byos-integ-test"
+          job_name: ${{ github.event_name == 'push' && 'main-eks-byos-integ-test' || 'pr-eks-byos-integ-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
           job_timeout_minutes: "1080"
