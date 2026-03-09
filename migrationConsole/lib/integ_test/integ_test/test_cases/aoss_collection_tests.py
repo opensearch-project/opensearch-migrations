@@ -14,10 +14,6 @@ import os
 
 from console_link.middleware.clusters import run_aoss_test_benchmarks
 from console_link.models.cluster import Cluster
-from ..cluster_version import (
-    ElasticsearchV5_X, ElasticsearchV6_X, ElasticsearchV7_X,
-    OpensearchV1_X, OpensearchV2_X,
-)
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
 logger = logging.getLogger(__name__)
