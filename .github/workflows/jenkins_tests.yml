@@ -60,7 +60,6 @@ jobs:
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
     steps:
       - name: Jenkins Job Trigger and Monitor
         uses: jugal-chauhan/jenkins-trigger@1.0.6
@@ -69,4 +68,51 @@ jobs:
           job_name: ${{ github.event_name == 'push' && 'main-eks-integ-test' || 'pr-eks-integ-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
-          job_timeout_minutes: "120"
+
+  eks-aoss-search-integ-test:
+    if: |
+      (github.event.action == 'labeled' && github.event.label.name == 'run-aoss-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Jenkins Job Trigger and Monitor
+        uses: jugal-chauhan/jenkins-trigger@1.0.6
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: "pr-eks-aoss-search-integ-test"
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
+
+  eks-aoss-timeseries-integ-test:
+    if: |
+      (github.event.action == 'labeled' && github.event.label.name == 'run-aoss-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Jenkins Job Trigger and Monitor
+        uses: jugal-chauhan/jenkins-trigger@1.0.6
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: "pr-eks-aoss-timeseries-integ-test"
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
+
+  eks-aoss-vector-integ-test:
+    if: |
+      (github.event.action == 'labeled' && github.event.label.name == 'run-aoss-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Jenkins Job Trigger and Monitor
+        uses: jugal-chauhan/jenkins-trigger@1.0.6
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: "pr-eks-aoss-vector-integ-test"
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
