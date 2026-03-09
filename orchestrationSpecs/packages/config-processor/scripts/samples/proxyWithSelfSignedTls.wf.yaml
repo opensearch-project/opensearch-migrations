@@ -22,11 +22,11 @@ traffic:
       source: "source"
       proxyConfig:
         listenPort: 9201
-        noCapture: true
+
         tls:
           mode: "certManager"
           issuerRef:
-            name: "migrations-selfsigned"
+            name: "migrations-ca"
             kind: "ClusterIssuer"
           dnsNames:
             - "capture-proxy.ma.svc.cluster.local"

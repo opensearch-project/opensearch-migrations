@@ -46,12 +46,20 @@ function makeProxyParamsDict(
             expr.get(config, "proxyConfig"),
             "podReplicas", "resources", "loggingConfigurationOverrideConfigMap", "tls"
         ),
-        expr.makeDict({
-            destinationUri: expr.get(config, "sourceEndpoint"),
-            insecureDestination: expr.get(config, "sourceAllowInsecure"),
-            kafkaConnection: expr.jsonPathStrict(proxyConfig, "kafkaConfig", "kafkaConnection"),
-            kafkaTopic: expr.jsonPathStrict(proxyConfig, "kafkaConfig", "kafkaTopic"),
-        })
+        expr.mergeDicts(
+            expr.ternary(expr.dig(config, ["proxyConfig", "noCapture"], false),
+                expr.literal({}),
+                expr.makeDict({
+                    kafkaConnection: expr.jsonPathStrict(proxyConfig, "kafkaConfig", "kafkaConnection")
+                })
+            ),
+            expr.makeDict({
+                destinationUri: expr.get(config, "sourceEndpoint"),
+                insecureDestination: expr.get(config, "sourceAllowInsecure"),
+                kafkaTopic: expr.jsonPathStrict(proxyConfig, "kafkaConfig", "kafkaTopic"),
+
+            })
+        )
     );
 }
 
@@ -64,21 +72,16 @@ function makeProxyDeploymentManifest(args: {
     jsonConfig: BaseExpression<string>,
     tlsSecretName?: BaseExpression<string>,
 }) {
-    const baseArgs = [
-        "org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy",
-        "---INLINE-JSON",
-        makeStringTypeProxy(args.jsonConfig)
-    ];
-    const containerArgs = args.tlsSecretName
-        ? [...baseArgs, "--sslCertChainFile", "/etc/proxy-tls/tls.crt", "--sslKeyFile", "/etc/proxy-tls/tls.key"]
-        : baseArgs;
-
     const container: Record<string, any> = {
         name: "proxy",
         image: args.image,
         imagePullPolicy: args.imagePullPolicy,
         command: ["/runJavaWithClasspath.sh"],
-        args: containerArgs,
+        args: [
+            "org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy",
+            "---INLINE-JSON",
+            makeStringTypeProxy(args.jsonConfig)
+        ],
         ports: [{ containerPort: makeDirectTypeProxy(args.listenPort) }]
     };
     if (args.tlsSecretName) {
@@ -331,7 +334,13 @@ export const SetupCapture = WorkflowBuilder.create({
                         podReplicas:    b.inputs.podReplicas,
                         tlsSecretName:  tlsSecretName,
                         jsonConfig:     expr.asString(expr.serialize(
-                            makeProxyParamsDict(b.inputs.proxyConfig) as any
+                            expr.mergeDicts(
+                                makeProxyParamsDict(b.inputs.proxyConfig) as any,
+                                expr.makeDict({
+                                    sslCertChainFile: expr.literal("/etc/proxy-tls/tls.crt"),
+                                    sslKeyFile: expr.literal("/etc/proxy-tls/tls.key"),
+                                })
+                            ) as any
                         )),
                     }),
                     { when: { templateExp: hasTls } }
