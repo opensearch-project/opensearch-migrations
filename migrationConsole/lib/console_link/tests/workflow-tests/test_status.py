@@ -297,6 +297,71 @@ class TestStatusCommand:
         with pytest.raises(Exception):
             handler.handle_status_command(None, 'http://argo', 'ma', False, False, False)
 
+    def test_rfs_coordinator_retry_collapsed_in_status(self):
+        """RFS coordinator retry nodes are collapsed; backfill retries remain visible."""
+        workflows = {
+            'test-wf': {
+                'metadata': {'name': 'test-wf'},
+                'status': {
+                    'phase': 'Running',
+                    'startedAt': '2023-01-01T10:00:00Z',
+                    'nodes': {
+                        'root': {
+                            'id': 'root', 'displayName': 'root', 'type': 'Steps',
+                            'phase': 'Running', 'children': ['rfs-retry', 'backfill-retry']
+                        },
+                        'rfs-retry': {
+                            'id': 'rfs-retry', 'displayName': 'createRfsCoordinatorStatefulSet',
+                            'type': 'Retry', 'phase': 'Succeeded', 'boundaryID': 'root',
+                            'children': ['rfs-0', 'rfs-1']
+                        },
+                        'rfs-0': {
+                            'id': 'rfs-0', 'displayName': 'createRfsCoordinatorStatefulSet(0)',
+                            'type': 'Pod', 'phase': 'Error', 'boundaryID': 'rfs-retry',
+                            'startedAt': '2023-01-01T10:00:00Z'
+                        },
+                        'rfs-1': {
+                            'id': 'rfs-1', 'displayName': 'createRfsCoordinatorStatefulSet(1)',
+                            'type': 'Pod', 'phase': 'Succeeded', 'boundaryID': 'rfs-retry',
+                            'startedAt': '2023-01-01T10:01:00Z'
+                        },
+                        'backfill-retry': {
+                            'id': 'backfill-retry', 'displayName': 'waitForCompletionInternal',
+                            'type': 'Retry', 'phase': 'Running', 'boundaryID': 'root',
+                            'children': ['bf-0', 'bf-1']
+                        },
+                        'bf-0': {
+                            'id': 'bf-0', 'displayName': 'waitForCompletionInternal(0)',
+                            'type': 'Pod', 'phase': 'Failed', 'boundaryID': 'backfill-retry',
+                            'startedAt': '2023-01-01T10:02:00Z'
+                        },
+                        'bf-1': {
+                            'id': 'bf-1', 'displayName': 'waitForCompletionInternal(1)',
+                            'type': 'Pod', 'phase': 'Running', 'boundaryID': 'backfill-retry',
+                            'startedAt': '2023-01-01T10:03:00Z'
+                        }
+                    }
+                }
+            }
+        }
+
+        service = FakeWorkflowService(workflows)
+        handler = StatusCommandHandler(service)
+        handler.data_fetcher = FakeDataFetcher(workflows, service)
+
+        output = capture_output(lambda: handler.handle_status_command(
+            'test-wf', 'http://argo', 'ma', False, False, False))
+
+        # RFS retry attempts should be collapsed — no (0) or (1) suffixes visible
+        assert 'createRfsCoordinatorStatefulSet(0)' not in output
+        assert 'createRfsCoordinatorStatefulSet(1)' not in output
+        # The collapsed step name should still appear (without attempt suffix)
+        assert 'createRfsCoordinatorStatefulSet' in output
+
+        # Backfill retry attempts should remain visible
+        assert 'waitForCompletionInternal(0)' in output
+        assert 'waitForCompletionInternal(1)' in output
+
     def test_live_check_with_snapshot_node(self):
         workflows = {
             'test-wf': {

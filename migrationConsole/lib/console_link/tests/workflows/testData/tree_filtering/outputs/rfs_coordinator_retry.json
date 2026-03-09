@@ -1,0 +1,31 @@
+[
+  {
+    "id": "rfs-attempt-1",
+    "display_name": "createRfsCoordinatorStatefulSet",
+    "phase": "Succeeded",
+    "type": "Pod",
+    "boundary_id": "rfs-retry",
+    "started_at": "2023-01-01T10:01:00Z",
+    "finished_at": "2023-01-01T10:02:00Z",
+    "children": []
+  },
+  {
+    "id": "backfill-attempt-1",
+    "display_name": "waitForCompletionInternal(1)",
+    "phase": "Running",
+    "type": "Pod",
+    "boundary_id": "backfill-retry",
+    "started_at": "2023-01-01T10:03:00Z",
+    "children": []
+  },
+  {
+    "id": "backfill-attempt-0",
+    "display_name": "waitForCompletionInternal(0)",
+    "phase": "Failed",
+    "type": "Pod",
+    "boundary_id": "backfill-retry",
+    "started_at": "2023-01-01T10:02:00Z",
+    "finished_at": "2023-01-01T10:02:30Z",
+    "children": []
+  }
+]

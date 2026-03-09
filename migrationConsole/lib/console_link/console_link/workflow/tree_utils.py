@@ -1,6 +1,7 @@
 """Workflow tree processing and display utilities."""
 
 import logging
+import re
 from typing import Dict, List, Any, Optional
 from rich.console import Console
 from rich.tree import Tree
@@ -86,8 +87,76 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
     return root_nodes
 
 
+RFS_COORDINATOR_RESOURCE_TEMPLATES = frozenset({
+    "createRfsCoordinatorSecret",
+    "createRfsCoordinatorService",
+    "createRfsCoordinatorStatefulSet",
+    "deleteRfsCoordinatorSecret",
+    "deleteRfsCoordinatorService",
+    "deleteRfsCoordinatorStatefulSet",
+})
+
+
+def _normalize_attempt_suffix(name: str) -> str:
+    """Strip trailing attempt suffix like '(0)', '(1)' from display names."""
+    return re.sub(r'\(\d+\)$', '', name).strip()
+
+
+def _is_rfs_coordinator_retry(node: Dict[str, Any]) -> bool:
+    """Check if a Retry node is for an RFS coordinator resource template."""
+    normalized = _normalize_attempt_suffix(node.get('display_name', ''))
+    if normalized in RFS_COORDINATOR_RESOURCE_TEMPLATES:
+        return True
+    # Also check child attempt names
+    for child in node.get('children', []):
+        if _normalize_attempt_suffix(child.get('display_name', '')) in RFS_COORDINATOR_RESOURCE_TEMPLATES:
+            return True
+    return False
+
+
+def _extract_attempt_index(name: str) -> int:
+    """Extract retry attempt index from display name like 'foo(2)'. Returns -1 if none."""
+    m = re.search(r'\((\d+)\)$', name)
+    return int(m.group(1)) if m else -1
+
+
+def _collapse_rfs_retry(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Collapse an RFS coordinator Retry node to its final attempt.
+
+    Picks the last succeeded attempt. If none succeeded, picks the attempt with
+    the highest retry suffix (or latest finished_at as tiebreaker), since
+    boundary_id reconstruction does not preserve Argo's original child order.
+    """
+    children = node.get('children', [])
+    if not children:
+        collapsed = node.copy()
+        collapsed['display_name'] = _normalize_attempt_suffix(collapsed.get('display_name', ''))
+        collapsed['children'] = []
+        return collapsed
+
+    # Prefer last succeeded attempt (highest index among succeeded)
+    succeeded = [c for c in children if c.get('phase') == 'Succeeded']
+    if succeeded:
+        best = max(succeeded, key=lambda c: (
+            _extract_attempt_index(c.get('display_name', '')),
+            c.get('finished_at', '')
+        ))
+    else:
+        # No success — pick highest attempt index, break ties by finished_at
+        best = max(children, key=lambda c: (
+            _extract_attempt_index(c.get('display_name', '')),
+            c.get('finished_at', '')
+        ))
+
+    collapsed = best.copy()
+    collapsed['display_name'] = _normalize_attempt_suffix(collapsed.get('display_name', ''))
+    collapsed['children'] = []
+    return collapsed
+
+
 def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Filter tree nodes: preserve Pod/Suspend/Skipped nodes and containers with groupName."""
+    """Filter tree nodes: preserve Pod/Suspend/Skipped nodes and containers with groupName.
+    Collapse RFS coordinator retry nodes to a single logical step."""
 
     def should_keep_by_type(node):
         # Keep leaf nodes (actual work)
@@ -103,8 +172,10 @@ def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def filter_recursive(nodes):
         filtered = []
         for node in nodes:
-            if should_keep_by_type(node) or has_group_name(node):
-                # Keep leaf nodes (Pod, Suspend, Skipped) or containers with a meaningful groupName
+            # Collapse RFS coordinator retry nodes
+            if node.get('type') == 'Retry' and _is_rfs_coordinator_retry(node):
+                filtered.append(_collapse_rfs_retry(node))
+            elif should_keep_by_type(node) or has_group_name(node):
                 filtered_node = node.copy()
                 filtered_node['children'] = filter_recursive(node['children'])
                 filtered.append(filtered_node)
@@ -174,7 +245,6 @@ def clean_display_name(display_name: str) -> str:
 
     # Convert camelCase to Title Case
     # Insert space before uppercase letters that follow lowercase letters
-    import re
     spaced_name = re.sub(r'([a-z])([A-Z])', r'\1 \2', base_name)
 
     # Capitalize each word
