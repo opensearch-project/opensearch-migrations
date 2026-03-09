@@ -1,5 +1,8 @@
 package org.opensearch.migrations.utils.kafka;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig;
 
 import com.beust.jcommander.JCommander;
@@ -9,16 +12,20 @@ import com.beust.jcommander.ParametersDelegate;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class KafkaUtils {
+public class KafkaLoaderFromFile {
     public static final String DEFAULT_TOPIC_NAME = "logging-traffic-topic";
     public static final int DEFAULT_BATCH_SIZE = 500;
 
     public static class Parameters {
-        @Parameter(required = true,
+        @Parameter(required = false,
                 names = { "--inputFile", "input-file" },
                 arity = 1,
                 description = "The gzip compressed file containing Capture Proxy produced traffic streams.")
         public String inputFile;
+        @Parameter(required = false,
+                names = { "--stdin" },
+                description = "Read uncompressed records from stdin instead of a file.")
+        public boolean stdin = false;
         @Parameter(required = false,
                 names = { "--topicName", "topic-name" },
                 arity = 1,
@@ -41,6 +48,12 @@ public class KafkaUtils {
             if (p.kafkaParameters.kafkaConnection == null) {
                 throw new ParameterException("Missing required parameter: --kafkaConnection");
             }
+            if (!p.stdin && p.inputFile == null) {
+                throw new ParameterException("Must specify either --inputFile or --stdin");
+            }
+            if (p.stdin && p.inputFile != null) {
+                throw new ParameterException("Cannot specify both --inputFile and --stdin");
+            }
             return p;
         } catch (ParameterException e) {
             log.error(e.getMessage());
@@ -59,10 +72,18 @@ public class KafkaUtils {
                 params.kafkaParameters.kafkaClientId,
                 params.kafkaParameters.mskAuthEnabled
         );
-        kafkaLoader.loadRecordsToKafkaFromCompressedFile(
-                params.inputFile,
-                params.topicName,
-                params.batchSize
-        );
+        if (params.stdin) {
+            kafkaLoader.loadRecordsToKafkaFromReader(
+                    new BufferedReader(new InputStreamReader(System.in)),
+                    params.topicName,
+                    params.batchSize
+            );
+        } else {
+            kafkaLoader.loadRecordsToKafkaFromCompressedFile(
+                    params.inputFile,
+                    params.topicName,
+                    params.batchSize
+            );
+        }
     }
 }

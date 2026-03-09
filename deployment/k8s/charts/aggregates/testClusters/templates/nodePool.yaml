@@ -15,14 +15,21 @@ spec:
           operator: In
           # let's not do spot since we're pretty sloppy with these charts and don't configure durable persistence
           values: ["on-demand"]
+        {{- if .Values.nodePoolInstanceTypes }}
         - key: node.kubernetes.io/instance-type
           operator: In
           values:
-            - c6a.large
-            - c6i.large
-            - m6a.large
-            - c7a.large
-            - m7a.large
+            {{- range .Values.nodePoolInstanceTypes }}
+            - {{ . }}
+            {{- end }}
+        {{- else }}
+        - key: eks.amazonaws.com/instance-category
+          operator: In
+          values: ["c", "m", "r"]
+        - key: eks.amazonaws.com/instance-generation
+          operator: Gt
+          values: ["5"]
+        {{- end }}
       taints:
         - key: "dedicated-search"
           value: "true"

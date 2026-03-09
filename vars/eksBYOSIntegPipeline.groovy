@@ -345,7 +345,8 @@ def call(Map config = [:]) {
                                     echo "Creating buildx builder ecr-builder"
                                     sh "docker buildx create --name ecr-builder --driver docker-container --bootstrap"
                                     sh "docker buildx use ecr-builder"
-                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder"
+                                    def pullThroughCacheEndpoint = env.registryEndpoint.split('/')[0]
+                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}"
                                 }
                             }
                         }
