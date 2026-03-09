@@ -148,24 +148,24 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             } catch (InvalidResponse invalidResponse) {
                 handleInvalidResponse(invalidResponse, indexName, settings);
             } catch (Exception e) {
-                // Reactor's retryWhen may wrap the original exception at any depth
-                Throwable cause = e;
-                InvalidResponse found = null;
-                while (cause != null) {
-                    if (cause instanceof InvalidResponse ir) {
-                        found = ir;
-                        break;
-                    }
-                    cause = cause.getCause();
-                }
-                if (found != null) {
-                    handleInvalidResponse(found, indexName, settings);
-                } else {
-                    log.warn("Unexpected exception type during index creation: {} - {}", e.getClass().getName(), e.getMessage());
-                    throw e;
-                }
+                handleWrappedException(e, indexName, settings);
             }
         }
+    }
+
+    /**
+     * Handles exceptions that may wrap an InvalidResponse at any depth in the cause chain.
+     * Reactor's retryWhen may wrap the original exception, so we walk the chain to find it.
+     */
+    private void handleWrappedException(Exception e, String indexName, ObjectNode settings) throws IncompatibleReplicaCountException {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof InvalidResponse ir) {
+                handleInvalidResponse(ir, indexName, settings);
+                return;
+            }
+        }
+        log.warn("Unexpected exception type during index creation: {} - {}", e.getClass().getName(), e.getMessage());
+        throw new RuntimeException(e);
     }
 
     private void handleInvalidResponse(InvalidResponse invalidResponse, String indexName, ObjectNode settings) throws IncompatibleReplicaCountException {
