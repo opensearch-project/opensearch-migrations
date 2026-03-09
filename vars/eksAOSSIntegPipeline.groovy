@@ -213,9 +213,6 @@ def call(Map config = [:]) {
                         }
                     }
                 }
-                        }
-                    }
-                }
             }
         }
 
