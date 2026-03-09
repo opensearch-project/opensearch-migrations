@@ -175,6 +175,9 @@ def call(Map config = [:]) {
                                     env.MA_VPC_ID = exportsMap['VPC_ID']
 
                                     echo "MA VPC: ${env.MA_VPC_ID}"
+
+                                    // Set up kubectl context for later stages
+                                    sh "aws eks update-kubeconfig --region ${params.REGION} --name ${env.eksClusterName} --alias ${env.eksClusterName}"
                                 }
                             }
                         }
@@ -276,9 +279,9 @@ run_aoss_test_benchmarks(cluster, "${benchmarkType}")
                                     env.SNAPSHOT_NAME = "aoss-test-${maStageName}"
 
                                     def snapshotRole = sh(
-                                        script: """aws cloudformation list-exports --region ${params.REGION} \
-                                          --query "Exports[?starts_with(Name, 'MigrationsExportString')].Value" --output text | \
-                                          grep -o 'SNAPSHOT_ROLE=[^;]*' | cut -d= -f2""",
+                                        script: """aws cloudformation describe-stacks --stack-name "${env.STACK_NAME}" \
+                                          --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
+                                          --output text | grep -o 'SNAPSHOT_ROLE=[^;]*' | cut -d= -f2""",
                                         returnStdout: true
                                     ).trim()
 
