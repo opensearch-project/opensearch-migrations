@@ -20,8 +20,6 @@ def call(Map config = [:]) {
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
             choice(name: 'SOURCE_VERSION', choices: ['ES_7.10'], description: 'Version of the source cluster')
             string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill')
-            booleanParam(name: 'SKIP_DELETE', defaultValue: false, description: 'Skip deletion of all resources after test (for debugging)')
-            booleanParam(name: 'REUSE_EXISTING', defaultValue: false, description: 'Reuse existing source, target, and MA resources')
         }
 
         options {
@@ -66,8 +64,6 @@ def call(Map config = [:]) {
                             Test ID:          ${testId}
                             Source:           ${params.SOURCE_VERSION}
                             Workers:          ${params.RFS_WORKERS}
-                            Skip Delete:      ${params.SKIP_DELETE}
-                            Reuse Existing:   ${params.REUSE_EXISTING}
                             ================================================================
                         """
                     }
@@ -92,48 +88,7 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Discover Existing Resources') {
-                when { expression { params.REUSE_EXISTING } }
-                steps {
-                    timeout(time: 5, unit: 'MINUTES') {
-                        script {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    def stackOutputs = sh(
-                                        script: """aws cloudformation describe-stacks --stack-name "${env.CLUSTER_STACK}" \
-                                          --query 'Stacks[0].Outputs' --output json""",
-                                        returnStdout: true
-                                    ).trim()
-                                    writeFile file: '/tmp/stack-outputs.json', text: stackOutputs
-
-                                    env.SOURCE_ENDPOINT = "https://" + sh(
-                                        script: "jq -r '.[] | select(.OutputKey==\"ClusterEndpointExport${maStageName}source\") | .OutputValue' /tmp/stack-outputs.json",
-                                        returnStdout: true
-                                    ).trim()
-                                    env.AOSS_COLLECTION_ENDPOINT = sh(
-                                        script: "jq -r '.[] | select(.OutputKey==\"CollectionEndpointExport${maStageName}target\") | .OutputValue' /tmp/stack-outputs.json",
-                                        returnStdout: true
-                                    ).trim()
-                                    echo "Discovered source: ${env.SOURCE_ENDPOINT}"
-                                    echo "Discovered AOSS: ${env.AOSS_COLLECTION_ENDPOINT}"
-
-                                    sh "aws eks update-kubeconfig --region ${params.REGION} --name ${env.eksClusterName} --alias ${env.eksClusterName}"
-
-                                    env.SNAPSHOT_NAME = "aoss-test-${maStageName}"
-                                    def s3Bucket = sh(
-                                        script: "kubectl --context=${env.eksClusterName} get configmap migrations-default-s3-config -n ma -o jsonpath='{.data.BUCKET_NAME}'",
-                                        returnStdout: true
-                                    ).trim()
-                                    env.S3_REPO_URI = "s3://${s3Bucket}/aoss-snapshot-${maStageName}/"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             stage('Deploy & Bootstrap MA') {
-                when { expression { !params.REUSE_EXISTING } }
                 steps {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
@@ -186,7 +141,6 @@ def call(Map config = [:]) {
             }
 
             stage('Deploy Source + AOSS Target') {
-                when { expression { !params.REUSE_EXISTING } }
                 steps {
                     timeout(time: 60, unit: 'MINUTES') {
                         dir('test') {
@@ -238,7 +192,6 @@ def call(Map config = [:]) {
             }
 
             stage('Load Test Data on Source') {
-                when { expression { !params.REUSE_EXISTING } }
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
@@ -270,7 +223,6 @@ run_aoss_test_benchmarks(cluster, "${benchmarkType}")
             }
 
             stage('Create Snapshot') {
-                when { expression { !params.REUSE_EXISTING } }
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
@@ -373,14 +325,6 @@ ENVEOF
             always {
                 timeout(time: 60, unit: 'MINUTES') {
                     script {
-                        if (params.SKIP_DELETE) {
-                            echo "SKIP_DELETE=true — skipping all resource cleanup"
-                            echo "Resources left running:"
-                            echo "  Cluster Stack: ${env.CLUSTER_STACK}"
-                            echo "  MA Stack: ${env.STACK_NAME}"
-                            return
-                        }
-
                         def eksClusterName = env.eksClusterName
 
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
