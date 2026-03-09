@@ -60,7 +60,7 @@ class WorkflowConfigStore:
             ApiException: If Kubernetes API call fails
             Exception: For other errors during save operation
         """
-        config_yaml = config.to_yaml()
+        config_yaml = config.raw_yaml
 
         # Create ConfigMap body
         config_map_body = client.V1ConfigMap(
