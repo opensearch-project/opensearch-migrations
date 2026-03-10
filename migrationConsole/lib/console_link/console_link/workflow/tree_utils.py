@@ -74,15 +74,32 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
             tree_node['group_name'] = group_name
         tree_nodes[node_id] = tree_node
 
-    # Second pass: establish parent-child relationships
+    # Second pass: establish parent-child relationships via boundaryID
     for node_id, tree_node in tree_nodes.items():
         boundary_id = tree_node['boundary_id']
         if boundary_id and boundary_id in tree_nodes:
-            # This node is a child of boundary_id
             tree_nodes[boundary_id]['children'].append(tree_node)
         else:
-            # This is a root node
             root_nodes.append(tree_node)
+
+    # Third pass: reparent Retry node children.  Argo's boundaryID places retry
+    # attempt Pods as siblings of the Retry node; use the explicit children array
+    # to fix the nesting.
+    for node_id, node in nodes.items():
+        if node.get('type') != 'Retry':
+            continue
+        retry_tree_node = tree_nodes[node_id]
+        for child_id in node.get('children', []):
+            child_tree_node = tree_nodes.get(child_id)
+            if child_tree_node and child_tree_node not in retry_tree_node['children']:
+                current_parent_id = child_tree_node['boundary_id']
+                if current_parent_id and current_parent_id in tree_nodes:
+                    parent = tree_nodes[current_parent_id]
+                    if child_tree_node in parent['children']:
+                        parent['children'].remove(child_tree_node)
+                elif child_tree_node in root_nodes:
+                    root_nodes.remove(child_tree_node)
+                retry_tree_node['children'].append(child_tree_node)
 
     return root_nodes
 
@@ -96,26 +113,20 @@ def _normalize_attempt_suffix(name: str) -> str:
 
 
 def _is_leaf_only_retry(node: Dict[str, Any]) -> bool:
-    """Check if a Retry node wraps bare leaf Pods with no user-visible outputs.
+    """True if all children are bare leaf Pods (no statusOutput, groupName, or nested children).
 
-    Returns True when children lack statusOutput, groupName, and nested children
-    (i.e. infrastructure plumbing like resource template executor pods).
-    Currently collapses: RFS coordinator resource templates, and any other Retry
-    whose children are simple leaf Pods without meaningful outputs.
+    Currently affects: RFS coordinator resource templates and similar infrastructure retries.
     """
     children = node.get('children', [])
     if not children:
         return True
     for child in children:
-        # If any child has children, statusOutput, or groupName, it's not simple infra
         if child.get('children'):
             return False
-        for param in child.get('outputs', {}).get('parameters', []):
-            if param.get('name') == 'statusOutput':
-                return False
-        for param in child.get('inputs', {}).get('parameters', []):
-            if param.get('name') == 'groupName':
-                return False
+        if any(p.get('name') == 'statusOutput' for p in child.get('outputs', {}).get('parameters', [])):
+            return False
+        if any(p.get('name') == 'groupName' for p in child.get('inputs', {}).get('parameters', [])):
+            return False
     return True
 
 
@@ -126,12 +137,7 @@ def _get_attempt_number(name: str) -> int:
 
 
 def _collapse_retry(node: Dict[str, Any]) -> Dict[str, Any]:
-    """Collapse a Retry node to a single representative attempt.
-
-    Picks the highest-indexed succeeded attempt. If none succeeded, picks the
-    attempt with the highest retry suffix (or latest finished_at as tiebreaker),
-    since boundary_id reconstruction does not preserve Argo's original child order.
-    """
+    """Collapse a Retry node to its best attempt: highest-indexed succeeded, or highest-indexed overall."""
     children = node.get('children', [])
     if not children:
         collapsed = node.copy()
@@ -139,17 +145,11 @@ def _collapse_retry(node: Dict[str, Any]) -> Dict[str, Any]:
         collapsed['children'] = []
         return collapsed
 
-    succeeded = [c for c in children if c.get('phase') == 'Succeeded']
-    if succeeded:
-        best = max(succeeded, key=lambda c: (
-            _get_attempt_number(c.get('display_name', '')),
-            c.get('finished_at') or ''
-        ))
-    else:
-        best = max(children, key=lambda c: (
-            _get_attempt_number(c.get('display_name', '')),
-            c.get('finished_at') or ''
-        ))
+    candidates = [c for c in children if c.get('phase') == 'Succeeded'] or children
+    best = max(candidates, key=lambda c: (
+        _get_attempt_number(c.get('display_name', '')),
+        c.get('finished_at') or ''
+    ))
 
     collapsed = best.copy()
     collapsed['display_name'] = _normalize_attempt_suffix(collapsed.get('display_name', ''))
@@ -159,7 +159,9 @@ def _collapse_retry(node: Dict[str, Any]) -> Dict[str, Any]:
 
 def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Filter tree nodes: preserve Pod/Suspend/Skipped nodes and containers with groupName.
-    Collapse infrastructure retry nodes (bare leaf Pods) to a single logical step."""
+
+    Collapse infrastructure retry nodes (bare leaf Pods) to a single logical step.
+    """
 
     def should_keep_by_type(node):
         # Keep leaf nodes (actual work)
@@ -175,7 +177,6 @@ def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def filter_recursive(nodes):
         filtered = []
         for node in nodes:
-            # Collapse infrastructure retry nodes (bare leaf Pod children)
             if node.get('type') == 'Retry' and _is_leaf_only_retry(node):
                 filtered.append(_collapse_retry(node))
             elif should_keep_by_type(node) or has_group_name(node):

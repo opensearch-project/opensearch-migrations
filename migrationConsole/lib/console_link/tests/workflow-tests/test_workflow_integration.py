@@ -1192,6 +1192,138 @@ class TestArgoWorkflows:
         except ApiException as e:
             pytest.fail(f"Failed to submit workflow via Kubernetes API: {e}")
 
+    def test_workflow_status_retry_collapsed(self, argo_workflows):
+        """Integration test: verify retry-attempt details are collapsed in workflow status output.
+
+        Submits a workflow with a script template + retryStrategy that fails on the first
+        attempt ({{retries}} == 0) and succeeds on the second ({{retries}} > 0). This
+        produces real Argo Retry nodes with Pod children — the same structure that RFS
+        coordinator resource templates produce when retryStrategy fires.
+
+        Asserts that `workflow status` CLI output collapses the retry attempts: the
+        attempt suffixes (0)/(1) should NOT appear, only the base step name.
+        """
+        argo_namespace = argo_workflows["namespace"]
+        logger.info(f"\nTesting retry collapsing in workflow status (namespace: {argo_namespace})")
+
+        # Workflow with a script template that fails once then succeeds.
+        # {{retries}} is an Argo built-in: 0 on first attempt, 1 on second, etc.
+        workflow_spec = {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Workflow",
+            "metadata": {
+                "generateName": "test-retry-collapse-",
+                "namespace": argo_namespace,
+            },
+            "spec": {
+                "entrypoint": "main",
+                "templates": [
+                    {
+                        "name": "main",
+                        "steps": [[{
+                            "name": "createRfsCoordinatorStatefulSet",
+                            "template": "fail-then-succeed"
+                        }]]
+                    },
+                    {
+                        "name": "fail-then-succeed",
+                        "retryStrategy": {
+                            "limit": "2",
+                            "retryPolicy": "Always",
+                        },
+                        "script": {
+                            "image": "busybox",
+                            "command": ["sh"],
+                            "source": 'if [ "{{retries}}" -gt 0 ]; then exit 0; else exit 1; fi'
+                        }
+                    }
+                ]
+            }
+        }
+
+        custom_api = client.CustomObjectsApi()
+        workflow_name = None
+
+        try:
+            result = custom_api.create_namespaced_custom_object(
+                group="argoproj.io", version="v1alpha1",
+                namespace=argo_namespace, plural="workflows",
+                body=workflow_spec
+            )
+            workflow_name = result["metadata"]["name"]
+            logger.info(f"Submitted workflow: {workflow_name}")
+
+            # Wait for terminal phase
+            max_wait = 120
+            start_time = time.time()
+            workflow_phase = "Unknown"
+
+            while time.time() - start_time < max_wait:
+                wf = custom_api.get_namespaced_custom_object(
+                    group="argoproj.io", version="v1alpha1",
+                    namespace=argo_namespace, plural="workflows",
+                    name=workflow_name
+                )
+                workflow_phase = wf.get("status", {}).get("phase", "Unknown")
+                if workflow_phase in ("Succeeded", "Failed", "Error"):
+                    break
+                time.sleep(2)
+
+            assert workflow_phase == "Succeeded", (
+                f"Workflow did not succeed (phase: {workflow_phase}). "
+                f"Nodes: {wf.get('status', {}).get('nodes', {})}"
+            )
+            logger.info(f"✓ Workflow succeeded: {workflow_name}")
+
+            # Verify Argo actually created Retry nodes with multiple attempts
+            nodes = wf.get("status", {}).get("nodes", {})
+            retry_nodes = [n for n in nodes.values() if n.get("type") == "Retry"]
+            assert retry_nodes, "Expected at least one Retry node in the workflow"
+            logger.info(f"✓ Found {len(retry_nodes)} Retry node(s) with children")
+
+            # Run workflow status CLI — same pattern as _test_status_command_for_workflow
+            runner = CliRunner()
+            status_result = runner.invoke(
+                workflow_cli,
+                ['status', '--workflow-name', workflow_name, '--namespace', argo_namespace,
+                 '--argo-server', 'https://localhost:2746', '--insecure']
+            )
+            assert status_result.exit_code == 0, (
+                f"Status command failed (exit {status_result.exit_code}): {status_result.output}"
+            )
+
+            output = status_result.output
+            logger.info(f"Status output:\n{output}")
+
+            # Retry attempt suffixes should be collapsed (not visible)
+            assert "createRfsCoordinatorStatefulSet(0)" not in output, (
+                "Attempt (0) should be collapsed in status output"
+            )
+            assert "createRfsCoordinatorStatefulSet(1)" not in output, (
+                "Attempt (1) should be collapsed in status output"
+            )
+
+            # The base step name should still appear
+            assert "createRfsCoordinatorStatefulSet" in output, (
+                "Base step name should appear in status output"
+            )
+
+            logger.info("✓ Retry attempts correctly collapsed in status output")
+
+        except ApiException as e:
+            pytest.fail(f"Kubernetes API error: {e}")
+        finally:
+            # Cleanup workflow
+            if workflow_name:
+                try:
+                    custom_api.delete_namespaced_custom_object(
+                        group="argoproj.io", version="v1alpha1",
+                        namespace=argo_namespace, plural="workflows",
+                        name=workflow_name
+                    )
+                except ApiException:
+                    pass
+
 
 def test_k3s_container_support():
     """Test that k3s container support is available"""

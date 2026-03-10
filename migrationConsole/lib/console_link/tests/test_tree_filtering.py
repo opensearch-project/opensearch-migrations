@@ -47,16 +47,7 @@ class TestTreeFiltering:
         self._test_filtering('meaningful_vs_noise.json', input_dir, expected_dir)
 
     def test_rfs_coordinator_retry(self, input_dir, expected_dir):
-        """Test that infrastructure retry nodes (bare leaf Pods) are collapsed but retries
-        with richer children (statusOutput, nested steps) are preserved.
-
-        Input fixture has children in reverse order (attempt-1 before attempt-0) to verify
-        selection uses attempt index, not list position (boundary_id reconstruction is unordered).
-
-        Note: backfill retry children are modeled as bare Pods with statusOutput for
-        simplicity.  In real Argo they would be Steps nodes with nested hierarchies;
-        the structural detection works either way because statusOutput is present.
-        """
+        """Leaf-only retries are collapsed; retries with statusOutput/groupName children are preserved."""
         self._test_filtering('rfs_coordinator_retry.json', input_dir, expected_dir)
     
     def _test_filtering(self, filename, input_dir, expected_dir):
