@@ -52,6 +52,10 @@ class TestTreeFiltering:
 
         Input fixture has children in reverse order (attempt-1 before attempt-0) to verify
         selection uses attempt index, not list position (boundary_id reconstruction is unordered).
+
+        Note: backfill retry children are modeled as bare Pods with statusOutput for
+        simplicity.  In real Argo they would be Steps nodes with nested hierarchies;
+        the structural detection works either way because statusOutput is present.
         """
         self._test_filtering('rfs_coordinator_retry.json', input_dir, expected_dir)
     

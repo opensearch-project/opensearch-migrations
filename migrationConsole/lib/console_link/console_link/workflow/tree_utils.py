@@ -87,9 +87,12 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
     return root_nodes
 
 
+_ATTEMPT_SUFFIX_RE = re.compile(r'\((\d+)\)$')
+
+
 def _normalize_attempt_suffix(name: str) -> str:
     """Strip trailing attempt suffix like '(0)', '(1)' from display names."""
-    return re.sub(r'\(\d+\)$', '', name).strip()
+    return _ATTEMPT_SUFFIX_RE.sub('', name).strip()
 
 
 def _is_leaf_only_retry(node: Dict[str, Any]) -> bool:
@@ -97,6 +100,8 @@ def _is_leaf_only_retry(node: Dict[str, Any]) -> bool:
 
     Returns True when children lack statusOutput, groupName, and nested children
     (i.e. infrastructure plumbing like resource template executor pods).
+    Currently collapses: RFS coordinator resource templates, and any other Retry
+    whose children are simple leaf Pods without meaningful outputs.
     """
     children = node.get('children', [])
     if not children:
@@ -116,7 +121,7 @@ def _is_leaf_only_retry(node: Dict[str, Any]) -> bool:
 
 def _get_attempt_number(name: str) -> int:
     """Extract retry attempt index from display name like 'foo(2)'. Returns -1 if none."""
-    m = re.search(r'\((\d+)\)$', name)
+    m = _ATTEMPT_SUFFIX_RE.search(name)
     return int(m.group(1)) if m else -1
 
 
@@ -138,12 +143,12 @@ def _collapse_retry(node: Dict[str, Any]) -> Dict[str, Any]:
     if succeeded:
         best = max(succeeded, key=lambda c: (
             _get_attempt_number(c.get('display_name', '')),
-            c.get('finished_at', '')
+            c.get('finished_at') or ''
         ))
     else:
         best = max(children, key=lambda c: (
             _get_attempt_number(c.get('display_name', '')),
-            c.get('finished_at', '')
+            c.get('finished_at') or ''
         ))
 
     collapsed = best.copy()
