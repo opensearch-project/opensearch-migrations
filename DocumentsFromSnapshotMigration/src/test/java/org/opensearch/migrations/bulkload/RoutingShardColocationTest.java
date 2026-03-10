@@ -65,14 +65,29 @@ public class RoutingShardColocationTest extends SourceTestBase {
     @TempDir
     private File localDirectory;
 
+    private static final SearchClusterContainer.ContainerVersion[] SOURCE_VERSIONS = {
+        SearchClusterContainer.ES_V6_8_23,
+        SearchClusterContainer.ES_V7_10_2,
+        SearchClusterContainer.ES_V8_19,
+        SearchClusterContainer.OS_V1_3_20,
+        SearchClusterContainer.OS_V2_19_4
+    };
+
+    private static final SearchClusterContainer.ContainerVersion[] TARGET_VERSIONS = {
+        SearchClusterContainer.OS_V1_3_20,
+        SearchClusterContainer.OS_V2_19_4,
+        SearchClusterContainer.OS_V3_0_0
+    };
+
     private static Stream<Arguments> scenarios() {
-        return Stream.of(
-            Arguments.of("ES6_native", SearchClusterContainer.ES_V6_8_23, null),
-            Arguments.of("ES7_native", SearchClusterContainer.ES_V7_10_2, null),
-            Arguments.of("ES8_native", SearchClusterContainer.ES_V8_19, null),
-            Arguments.of("OS1_native", SearchClusterContainer.OS_V1_3_20, null),
-            Arguments.of("OS2_native", SearchClusterContainer.OS_V2_19_4, null)
-        );
+        var args = Stream.<Arguments>builder();
+        for (var source : SOURCE_VERSIONS) {
+            for (var target : TARGET_VERSIONS) {
+                var name = source.getVersion() + "_to_" + target.getVersion();
+                args.add(Arguments.of(name, source, target));
+            }
+        }
+        return args.build();
     }
 
     @ParameterizedTest(name = "{0}")
@@ -80,10 +95,10 @@ public class RoutingShardColocationTest extends SourceTestBase {
     void routingShardColocationBug(
         String scenarioName,
         SearchClusterContainer.ContainerVersion sourceVersion,
-        SearchClusterContainer.ContainerVersion originalVersion
+        SearchClusterContainer.ContainerVersion targetVersion
     ) {
         try (
-            var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4);
+            var targetCluster = new SearchClusterContainer(targetVersion);
             var sourceCluster = new SearchClusterContainer(sourceVersion)
         ) {
             CompletableFuture.allOf(
