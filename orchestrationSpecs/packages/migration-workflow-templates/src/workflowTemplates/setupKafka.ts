@@ -217,5 +217,77 @@ export const SetupKafka = WorkflowBuilder.create({
         )
     )
 
+    .addTemplate("deployKafkaClusterKraftWithRetry", t => t
+        .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("version", typeToken<string>())
+
+        .addSteps(b => b
+            .addStep("tryApply", INTERNAL, "deployKafkaClusterKraft", c =>
+                c.register({
+                    clusterName: b.inputs.clusterName,
+                    version: b.inputs.version,
+                }),
+                { continueOn: { failed: true } }
+            )
+            .addStep("waitForUserAction", INLINE, tb => tb.addSuspend())
+            .addStep("retryApply", INTERNAL, "deployKafkaClusterKraft", c =>
+                c.register({
+                    clusterName: b.inputs.clusterName,
+                    version: b.inputs.version,
+                })
+            )
+        )
+        .addExpressionOutput("brokers", c => c.steps.retryApply.outputs.brokers)
+    )
+
+    .addTemplate("createKafkaTopicWithRetry", t => t
+        .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("topicName", typeToken<string>())
+        .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+
+        .addSteps(b => b
+            .addStep("tryApply", INTERNAL, "createKafkaTopic", c =>
+                c.register({
+                    clusterName: b.inputs.clusterName,
+                    topicName: b.inputs.topicName,
+                    clusterConfig: b.inputs.clusterConfig,
+                }),
+                { continueOn: { failed: true } }
+            )
+            .addStep("waitForUserAction", INLINE, tb => tb.addSuspend())
+            .addStep("retryApply", INTERNAL, "createKafkaTopic", c =>
+                c.register({
+                    clusterName: b.inputs.clusterName,
+                    topicName: b.inputs.topicName,
+                    clusterConfig: b.inputs.clusterConfig,
+                })
+            )
+        )
+        .addExpressionOutput("topicName", c => c.steps.retryApply.outputs.topicName)
+    )
+
+    // Combined retry template for full Kafka cluster deployment
+    .addTemplate("deployKafkaClusterWithRetry", t => t
+        .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("version", typeToken<string>())
+        .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+
+        .addSteps(b => b
+            .addStep("deployPool", INTERNAL, "deployKafkaNodePoolWithRetry", c =>
+                c.register({
+                    clusterName: b.inputs.clusterName,
+                    clusterConfig: b.inputs.clusterConfig,
+                })
+            )
+            .addStep("deployCluster", INTERNAL, "deployKafkaClusterKraftWithRetry", c =>
+                c.register({
+                    clusterName: b.inputs.clusterName,
+                    version: b.inputs.version,
+                })
+            )
+        )
+        .addExpressionOutput("bootstrapServers", c => c.steps.deployCluster.outputs.brokers)
+    )
+
 
     .getFullScope();

@@ -240,6 +240,237 @@
         "outputs": {
           "parameters": []
         }
+      },
+      {
+        "name": "deploykafkaclusterkraftwithretry",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "version"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "deploykafkaclusterkraft",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "version",
+                    "value": "{{inputs.parameters.version}}"
+                  }
+                ]
+              },
+              "name": "tryApply",
+              "continueOn": {
+                "failed": true
+              }
+            }
+          ],
+          [
+            {
+              "inline": {
+                "inputs": {
+                  "parameters": []
+                },
+                "suspend": {}
+              },
+              "arguments": {
+                "parameters": []
+              },
+              "name": "waitForUserAction"
+            }
+          ],
+          [
+            {
+              "template": "deploykafkaclusterkraft",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "version",
+                    "value": "{{inputs.parameters.version}}"
+                  }
+                ]
+              },
+              "name": "retryApply"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": [
+            {
+              "name": "brokers",
+              "valueFrom": {
+                "expression": "steps.retryApply.outputs.parameters.brokers"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "createkafkatopicwithretry",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "topicName"
+            },
+            {
+              "name": "clusterConfig"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "createkafkatopic",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "topicName",
+                    "value": "{{inputs.parameters.topicName}}"
+                  },
+                  {
+                    "name": "clusterConfig",
+                    "value": "{{inputs.parameters.clusterConfig}}"
+                  }
+                ]
+              },
+              "name": "tryApply",
+              "continueOn": {
+                "failed": true
+              }
+            }
+          ],
+          [
+            {
+              "inline": {
+                "inputs": {
+                  "parameters": []
+                },
+                "suspend": {}
+              },
+              "arguments": {
+                "parameters": []
+              },
+              "name": "waitForUserAction"
+            }
+          ],
+          [
+            {
+              "template": "createkafkatopic",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "topicName",
+                    "value": "{{inputs.parameters.topicName}}"
+                  },
+                  {
+                    "name": "clusterConfig",
+                    "value": "{{inputs.parameters.clusterConfig}}"
+                  }
+                ]
+              },
+              "name": "retryApply"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": [
+            {
+              "name": "topicName",
+              "valueFrom": {
+                "expression": "steps.retryApply.outputs.parameters.topicName"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "deploykafkaclusterwithretry",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "version"
+            },
+            {
+              "name": "clusterConfig"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "deploykafkanodepoolwithretry",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "clusterConfig",
+                    "value": "{{inputs.parameters.clusterConfig}}"
+                  }
+                ]
+              },
+              "name": "deployPool"
+            }
+          ],
+          [
+            {
+              "template": "deploykafkaclusterkraftwithretry",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "version",
+                    "value": "{{inputs.parameters.version}}"
+                  }
+                ]
+              },
+              "name": "deployCluster"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": [
+            {
+              "name": "bootstrapServers",
+              "valueFrom": {
+                "expression": "steps.deployCluster.outputs.parameters.brokers"
+              }
+            }
+          ]
+        }
       }
     ]
   }
