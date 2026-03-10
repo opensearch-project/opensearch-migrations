@@ -178,9 +178,14 @@ public class RoutingShardColocationTest extends SourceTestBase {
             var sourceRoutingShards = getRoutingNumShards(sourceCluster);
             var targetRoutingShards = getRoutingNumShards(targetCluster);
             log.info("Source routing_num_shards={}, Target routing_num_shards={}", sourceRoutingShards, targetRoutingShards);
-            Assertions.assertEquals(sourceRoutingShards, targetRoutingShards,
-                "Fix verification: routing_num_shards should match between source and target");
+            // Some versions (e.g. ES6) don't expose routing_num_shards in the cluster state API,
+            // so only assert numeric equality when the source reports a non-zero value.
+            if (sourceRoutingShards > 0) {
+                Assertions.assertEquals(sourceRoutingShards, targetRoutingShards,
+                    "Fix verification: routing_num_shards should match between source and target");
+            }
 
+            // The definitive verification: shard assignments must match for all routing values
             for (var routing : ROUTING_VALUES) {
                 var sourceShard = getShardForRouting(sourceCluster, INDEX_NAME, routing);
                 var targetShard = getShardForRouting(targetCluster, INDEX_NAME, routing);
@@ -205,9 +210,9 @@ public class RoutingShardColocationTest extends SourceTestBase {
             targetOps.refresh(BUGGY_INDEX_NAME);
 
             var buggyRoutingShards = getRoutingNumShards(targetCluster, BUGGY_INDEX_NAME);
-            log.info("Buggy index routing_num_shards={} (source was {})", buggyRoutingShards, sourceRoutingShards);
-            Assertions.assertNotEquals(sourceRoutingShards, buggyRoutingShards,
-                "Bug simulation: buggy index should have DIFFERENT routing_num_shards than source");
+            log.info("Buggy index routing_num_shards={} (migrated target was {})", buggyRoutingShards, targetRoutingShards);
+            Assertions.assertNotEquals(targetRoutingShards, buggyRoutingShards,
+                "Bug simulation: buggy index should have DIFFERENT routing_num_shards than migrated target");
 
             // At least one routing value should map to a different shard
             boolean anyMismatch = false;
@@ -224,7 +229,7 @@ public class RoutingShardColocationTest extends SourceTestBase {
             Assertions.assertTrue(anyMismatch,
                 "Bug simulation: at least one routing value should map to a different shard " +
                 "when number_of_routing_shards is not preserved. " +
-                "Source routing_num_shards=" + sourceRoutingShards +
+                "Migrated target routing_num_shards=" + targetRoutingShards +
                 ", buggy target routing_num_shards=" + buggyRoutingShards);
 
             log.info("=== Test passed: bug demonstrated AND fix verified ===");
