@@ -87,41 +87,41 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
     return root_nodes
 
 
-RFS_COORDINATOR_RESOURCE_TEMPLATES = frozenset({
-    "createRfsCoordinatorSecret",
-    "createRfsCoordinatorService",
-    "createRfsCoordinatorStatefulSet",
-    "deleteRfsCoordinatorSecret",
-    "deleteRfsCoordinatorService",
-    "deleteRfsCoordinatorStatefulSet",
-})
-
-
 def _normalize_attempt_suffix(name: str) -> str:
     """Strip trailing attempt suffix like '(0)', '(1)' from display names."""
     return re.sub(r'\(\d+\)$', '', name).strip()
 
 
-def _is_rfs_coordinator_retry(node: Dict[str, Any]) -> bool:
-    """Check if a Retry node is for an RFS coordinator resource template."""
-    normalized = _normalize_attempt_suffix(node.get('display_name', ''))
-    if normalized in RFS_COORDINATOR_RESOURCE_TEMPLATES:
+def _is_leaf_only_retry(node: Dict[str, Any]) -> bool:
+    """Check if a Retry node wraps bare leaf Pods with no user-visible outputs.
+
+    Returns True when children lack statusOutput, groupName, and nested children
+    (i.e. infrastructure plumbing like resource template executor pods).
+    """
+    children = node.get('children', [])
+    if not children:
         return True
-    # Also check child attempt names
-    for child in node.get('children', []):
-        if _normalize_attempt_suffix(child.get('display_name', '')) in RFS_COORDINATOR_RESOURCE_TEMPLATES:
-            return True
-    return False
+    for child in children:
+        # If any child has children, statusOutput, or groupName, it's not simple infra
+        if child.get('children'):
+            return False
+        for param in child.get('outputs', {}).get('parameters', []):
+            if param.get('name') == 'statusOutput':
+                return False
+        for param in child.get('inputs', {}).get('parameters', []):
+            if param.get('name') == 'groupName':
+                return False
+    return True
 
 
-def _extract_attempt_index(name: str) -> int:
+def _get_attempt_number(name: str) -> int:
     """Extract retry attempt index from display name like 'foo(2)'. Returns -1 if none."""
     m = re.search(r'\((\d+)\)$', name)
     return int(m.group(1)) if m else -1
 
 
-def _collapse_rfs_retry(node: Dict[str, Any]) -> Dict[str, Any]:
-    """Collapse an RFS coordinator Retry node to its final attempt.
+def _collapse_retry(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Collapse a Retry node to a single representative attempt.
 
     Picks the highest-indexed succeeded attempt. If none succeeded, picks the
     attempt with the highest retry suffix (or latest finished_at as tiebreaker),
@@ -134,17 +134,15 @@ def _collapse_rfs_retry(node: Dict[str, Any]) -> Dict[str, Any]:
         collapsed['children'] = []
         return collapsed
 
-    # Prefer last succeeded attempt (highest index among succeeded)
     succeeded = [c for c in children if c.get('phase') == 'Succeeded']
     if succeeded:
         best = max(succeeded, key=lambda c: (
-            _extract_attempt_index(c.get('display_name', '')),
+            _get_attempt_number(c.get('display_name', '')),
             c.get('finished_at', '')
         ))
     else:
-        # No success — pick highest attempt index, break ties by finished_at
         best = max(children, key=lambda c: (
-            _extract_attempt_index(c.get('display_name', '')),
+            _get_attempt_number(c.get('display_name', '')),
             c.get('finished_at', '')
         ))
 
@@ -156,7 +154,7 @@ def _collapse_rfs_retry(node: Dict[str, Any]) -> Dict[str, Any]:
 
 def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Filter tree nodes: preserve Pod/Suspend/Skipped nodes and containers with groupName.
-    Collapse RFS coordinator retry nodes to a single logical step."""
+    Collapse infrastructure retry nodes (bare leaf Pods) to a single logical step."""
 
     def should_keep_by_type(node):
         # Keep leaf nodes (actual work)
@@ -172,9 +170,9 @@ def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def filter_recursive(nodes):
         filtered = []
         for node in nodes:
-            # Collapse RFS coordinator retry nodes
-            if node.get('type') == 'Retry' and _is_rfs_coordinator_retry(node):
-                filtered.append(_collapse_rfs_retry(node))
+            # Collapse infrastructure retry nodes (bare leaf Pod children)
+            if node.get('type') == 'Retry' and _is_leaf_only_retry(node):
+                filtered.append(_collapse_retry(node))
             elif should_keep_by_type(node) or has_group_name(node):
                 filtered_node = node.copy()
                 filtered_node['children'] = filter_recursive(node['children'])

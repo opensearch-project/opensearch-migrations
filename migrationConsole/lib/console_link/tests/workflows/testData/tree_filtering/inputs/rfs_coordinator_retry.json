@@ -49,7 +49,8 @@
             "type": "Pod",
             "boundary_id": "backfill-retry",
             "started_at": "2023-01-01T10:03:00Z",
-            "children": []
+            "children": [],
+            "outputs": {"parameters": [{"name": "statusOutput", "value": "checking..."}]}
           },
           {
             "id": "backfill-attempt-0",
@@ -59,7 +60,8 @@
             "boundary_id": "backfill-retry",
             "started_at": "2023-01-01T10:02:00Z",
             "finished_at": "2023-01-01T10:02:30Z",
-            "children": []
+            "children": [],
+            "outputs": {"parameters": [{"name": "statusOutput", "value": "checking..."}]}
           }
         ]
       }

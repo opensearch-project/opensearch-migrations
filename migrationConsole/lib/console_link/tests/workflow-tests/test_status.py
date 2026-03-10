@@ -298,7 +298,8 @@ class TestStatusCommand:
             handler.handle_status_command(None, 'http://argo', 'ma', False, False, False)
 
     def test_rfs_coordinator_retry_collapsed_in_status(self):
-        """RFS coordinator retry nodes are collapsed; backfill retries remain visible."""
+        """Infrastructure retry nodes (bare leaf Pods) are collapsed; retries with
+        richer children (statusOutput, nested steps) remain visible."""
         workflows = {
             'test-wf': {
                 'metadata': {'name': 'test-wf'},
@@ -335,12 +336,14 @@ class TestStatusCommand:
                         'bf-0': {
                             'id': 'bf-0', 'displayName': 'waitForCompletionInternal(0)',
                             'type': 'Pod', 'phase': 'Failed', 'boundaryID': 'backfill-retry',
-                            'startedAt': '2023-01-01T10:02:00Z'
+                            'startedAt': '2023-01-01T10:02:00Z',
+                            'outputs': {'parameters': [{'name': 'statusOutput', 'value': 'checking...'}]}
                         },
                         'bf-1': {
                             'id': 'bf-1', 'displayName': 'waitForCompletionInternal(1)',
                             'type': 'Pod', 'phase': 'Running', 'boundaryID': 'backfill-retry',
-                            'startedAt': '2023-01-01T10:03:00Z'
+                            'startedAt': '2023-01-01T10:03:00Z',
+                            'outputs': {'parameters': [{'name': 'statusOutput', 'value': 'checking...'}]}
                         }
                     }
                 }
