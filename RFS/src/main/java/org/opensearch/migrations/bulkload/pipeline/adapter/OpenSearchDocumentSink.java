@@ -11,8 +11,8 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.pipeline.ir.BatchResult;
+import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.ir.Document;
-import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -58,8 +58,26 @@ public class OpenSearchDocumentSink implements DocumentSink {
     }
 
     @Override
-    public Mono<Void> createCollection(IndexMetadataSnapshot metadata) {
-        return Mono.fromRunnable(() -> OpenSearchIndexCreator.createIndex(client, metadata, OBJECT_MAPPER, null))
+    public Mono<Void> createCollection(CollectionMetadata metadata) {
+        return Mono.fromRunnable(() -> {
+            var sourceConfig = metadata.sourceConfig();
+            if (sourceConfig.containsKey("es.numberOfShards")) {
+                // ES→ES path: reconstruct IndexMetadataSnapshot from sourceConfig
+                var esMetadata = new IndexMetadataSnapshot(
+                    metadata.name(),
+                    (int) sourceConfig.get("es.numberOfShards"),
+                    sourceConfig.containsKey("es.numberOfReplicas")
+                        ? (int) sourceConfig.get("es.numberOfReplicas") : 0,
+                    (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get("es.mappings"),
+                    (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get("es.settings"),
+                    (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get("es.aliases")
+                );
+                OpenSearchIndexCreator.createIndex(client, esMetadata, OBJECT_MAPPER, null);
+            } else {
+                // Non-ES source: create index with defaults
+                client.createIndex(metadata.name(), OBJECT_MAPPER.createObjectNode(), null);
+            }
+        })
             .subscribeOn(Schedulers.boundedElastic())
             .then();
     }

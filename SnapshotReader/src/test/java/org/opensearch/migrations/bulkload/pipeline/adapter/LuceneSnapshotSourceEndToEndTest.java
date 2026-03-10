@@ -127,8 +127,8 @@ public class LuceneSnapshotSourceEndToEndTest {
 
         var metadata = source.readCollectionMetadata(INDEX_NAME);
 
-        assertThat(metadata.indexName(), equalTo(INDEX_NAME));
-        assertThat(metadata.numberOfShards(), equalTo(1));
+        assertThat(metadata.name(), equalTo(INDEX_NAME));
+        assertThat(metadata.partitionCount(), equalTo(1));
     }
 
     @ParameterizedTest(name = "readDocuments from {0}")

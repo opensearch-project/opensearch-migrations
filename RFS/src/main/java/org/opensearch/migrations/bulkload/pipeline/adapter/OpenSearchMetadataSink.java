@@ -5,9 +5,6 @@ import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
-import org.opensearch.migrations.bulkload.pipeline.ir.GlobalMetadataSnapshot;
-import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
-import org.opensearch.migrations.bulkload.pipeline.sink.MetadataSink;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -15,11 +12,11 @@ import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
 /**
- * Real {@link MetadataSink} adapter that writes metadata to an OpenSearch cluster
- * via the existing {@link OpenSearchClient}.
+ * ES/OpenSearch adapter for {@link GlobalMetadataSink}. Writes global metadata (templates)
+ * and per-index metadata to an OpenSearch cluster.
  */
 @Slf4j
-public class OpenSearchMetadataSink implements MetadataSink {
+public class OpenSearchMetadataSink implements GlobalMetadataSink {
 
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
 

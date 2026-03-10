@@ -7,7 +7,6 @@ import java.util.Map;
 import java.util.Set;
 
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
-import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.parsing.ObjectNodeUtils;
 

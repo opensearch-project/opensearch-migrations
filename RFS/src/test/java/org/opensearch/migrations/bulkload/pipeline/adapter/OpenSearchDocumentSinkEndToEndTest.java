@@ -12,8 +12,8 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParam
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
+import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.ir.Document;
-import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -50,7 +50,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
             var client = createClient(cluster);
             var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
 
-            var metadata = new IndexMetadataSnapshot("sink_test_idx", 1, 0, null, null, null);
+            var metadata = new CollectionMetadata("sink_test_idx", 1, Map.of());
             sink.createCollection(metadata).block();
 
             var restClient = createRestClient(cluster);
@@ -68,7 +68,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
             var client = createClient(cluster);
             var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
 
-            sink.createCollection(new IndexMetadataSnapshot("sink_docs", 1, 0, null, null, null)).block();
+            sink.createCollection(new CollectionMetadata("sink_docs", 1, Map.of())).block();
 
             var docs = List.of(
                 new Document("d1", "{\"title\":\"First\"}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of()),
@@ -94,7 +94,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
             var client = createClient(cluster);
             var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
 
-            sink.createCollection(new IndexMetadataSnapshot("sink_deletes", 1, 0, null, null, null)).block();
+            sink.createCollection(new CollectionMetadata("sink_deletes", 1, Map.of())).block();
 
             var additions = List.of(
                 new Document("keep1", "{\"v\":1}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of()),
@@ -121,7 +121,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
             var client = createClient(cluster);
             var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
 
-            sink.createCollection(new IndexMetadataSnapshot("sink_routing", 1, 0, null, null, null)).block();
+            sink.createCollection(new CollectionMetadata("sink_routing", 1, Map.of())).block();
 
             var docs = List.of(
                 new Document("r1", "{\"score\":10}".getBytes(), Document.Operation.UPSERT,

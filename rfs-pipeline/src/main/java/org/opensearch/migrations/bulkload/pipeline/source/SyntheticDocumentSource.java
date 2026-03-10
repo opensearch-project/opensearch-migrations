@@ -5,23 +5,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
+import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.ir.Document;
-import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import reactor.core.publisher.Flux;
 
 /**
- * A synthetic {@link DocumentSource} for testing the writing side without any real snapshot.
- *
- * <p>Document IDs follow the pattern {@code {collectionName}-{partitionIndex}-{docNumber}}.
- * Document bodies are JSON: {@code {"field":"value-{docNumber}","partition":{partitionIndex}}}.
+ * In-memory document source for testing. Generates synthetic documents with predictable
+ * IDs and content, enabling deterministic pipeline tests without real snapshots.
  */
 public class SyntheticDocumentSource implements DocumentSource {
-
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final String collectionName;
     private final int partitionCount;
@@ -53,13 +47,8 @@ public class SyntheticDocumentSource implements DocumentSource {
     }
 
     @Override
-    public IndexMetadataSnapshot readCollectionMetadata(String collectionName) {
-        ObjectNode mappings = MAPPER.createObjectNode();
-        ObjectNode settings = MAPPER.createObjectNode();
-        settings.put("number_of_shards", partitionCount);
-        settings.put("number_of_replicas", 1);
-        ObjectNode aliases = MAPPER.createObjectNode();
-        return new IndexMetadataSnapshot(collectionName, partitionCount, 1, mappings, settings, aliases);
+    public CollectionMetadata readCollectionMetadata(String collectionName) {
+        return new CollectionMetadata(collectionName, partitionCount, Map.of());
     }
 
     @Override

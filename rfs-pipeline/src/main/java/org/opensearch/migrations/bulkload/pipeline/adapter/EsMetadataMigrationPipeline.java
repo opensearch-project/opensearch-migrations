@@ -1,32 +1,27 @@
-package org.opensearch.migrations.bulkload.pipeline;
+package org.opensearch.migrations.bulkload.pipeline.adapter;
 
-import java.util.Objects;
-
-import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
-import org.opensearch.migrations.bulkload.pipeline.sink.MetadataSink;
-import org.opensearch.migrations.bulkload.pipeline.source.MetadataSource;
+import org.opensearch.migrations.bulkload.pipeline.PipelineException;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.Objects;
+
 /**
- * Migrates metadata (global templates + index definitions) from a {@link MetadataSource}
- * to a {@link MetadataSink}.
+ * ES-specific metadata migration pipeline: global templates → per-index metadata.
  *
- * <p>This is the metadata counterpart to {@link MigrationPipeline}. It handles:
- * <ol>
- *   <li>Global metadata (legacy templates, composable templates, component templates)</li>
- *   <li>Per-index metadata (mappings, settings, aliases)</li>
- * </ol>
+ * <p>This pipeline is only used for ES→ES/OpenSearch migrations where global metadata
+ * (templates, component templates, index templates) needs to be migrated. Non-ES sources
+ * do not have global metadata and should not use this pipeline.
  */
 @Slf4j
-public class MetadataMigrationPipeline {
+public class EsMetadataMigrationPipeline {
 
-    private final MetadataSource source;
-    private final MetadataSink sink;
+    private final GlobalMetadataSource source;
+    private final GlobalMetadataSink sink;
 
-    public MetadataMigrationPipeline(MetadataSource source, MetadataSink sink) {
+    public EsMetadataMigrationPipeline(GlobalMetadataSource source, GlobalMetadataSink sink) {
         this.source = Objects.requireNonNull(source, "source must not be null");
         this.sink = Objects.requireNonNull(sink, "sink must not be null");
     }

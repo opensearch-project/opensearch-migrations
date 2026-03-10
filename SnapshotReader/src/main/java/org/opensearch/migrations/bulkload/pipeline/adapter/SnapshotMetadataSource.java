@@ -3,18 +3,15 @@ package org.opensearch.migrations.bulkload.pipeline.adapter;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
-import org.opensearch.migrations.bulkload.pipeline.ir.GlobalMetadataSnapshot;
-import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
-import org.opensearch.migrations.bulkload.pipeline.source.MetadataSource;
 
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Real {@link MetadataSource} adapter that reads metadata from a snapshot
- * via the existing {@link SnapshotExtractor}.
+ * ES snapshot adapter for {@link GlobalMetadataSource}. Reads global metadata and
+ * per-index metadata from an ES snapshot via {@link SnapshotExtractor}.
  */
 @Slf4j
-public class SnapshotMetadataSource implements MetadataSource {
+public class SnapshotMetadataSource implements GlobalMetadataSource {
 
     private final SnapshotExtractor extractor;
     private final String snapshotName;

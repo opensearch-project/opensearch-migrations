@@ -1,9 +1,11 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
-import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
+import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
 import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -62,6 +64,27 @@ final class IndexMetadataConverter {
             settings,
             safeGetObjectNode(meta::getAliases, "aliases", indexName)
         );
+    }
+
+    /**
+     * Convert an ES-specific IndexMetadataSnapshot to a source-agnostic CollectionMetadata.
+     * The ES-specific fields are stored in the opaque sourceConfig map so the ES sink
+     * adapter can reconstruct the full index creation request.
+     */
+    static CollectionMetadata toCollectionMetadata(IndexMetadataSnapshot snapshot) {
+        Map<String, Object> sourceConfig = new HashMap<>();
+        sourceConfig.put("es.numberOfShards", snapshot.numberOfShards());
+        sourceConfig.put("es.numberOfReplicas", snapshot.numberOfReplicas());
+        if (snapshot.mappings() != null) {
+            sourceConfig.put("es.mappings", snapshot.mappings());
+        }
+        if (snapshot.settings() != null) {
+            sourceConfig.put("es.settings", snapshot.settings());
+        }
+        if (snapshot.aliases() != null) {
+            sourceConfig.put("es.aliases", snapshot.aliases());
+        }
+        return new CollectionMetadata(snapshot.indexName(), snapshot.numberOfShards(), sourceConfig);
     }
 
     /**

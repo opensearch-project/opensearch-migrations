@@ -3,18 +3,17 @@ package org.opensearch.migrations.bulkload.pipeline.sink;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.pipeline.ir.BatchResult;
+import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.ir.Document;
-import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 
 import reactor.core.publisher.Mono;
 
 /**
- * Port for writing documents to any target — OpenSearch cluster, file, or test collector.
+ * Port for writing documents to any target — OpenSearch, Elasticsearch, S3, or test sink.
  *
- * <p>Consumes the clean IR types. Never sees source-specific details — the sink doesn't
- * need to know how the source is partitioned.
- *
- * <p>Implementations must be safe for concurrent batch writes.
+ * <p>The sink is decoupled from the source's partitioning strategy. It receives a target
+ * collection name and a batch of documents — it does not know or care how the source
+ * organized its data into partitions.
  */
 public interface DocumentSink extends AutoCloseable {
 
@@ -22,7 +21,7 @@ public interface DocumentSink extends AutoCloseable {
      * Create a collection on the target with the given metadata.
      * Idempotent — calling with the same metadata twice should not fail.
      */
-    Mono<Void> createCollection(IndexMetadataSnapshot metadata);
+    Mono<Void> createCollection(CollectionMetadata metadata);
 
     /**
      * Write a batch of documents to the target collection.

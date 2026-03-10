@@ -2,8 +2,8 @@ package org.opensearch.migrations.bulkload.pipeline.source;
 
 import java.util.List;
 
+import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.ir.Document;
-import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
 
 import reactor.core.publisher.Flux;
@@ -29,7 +29,7 @@ public interface DocumentSource extends AutoCloseable {
     List<Partition> listPartitions(String collectionName);
 
     /** Read metadata for the given collection. */
-    IndexMetadataSnapshot readCollectionMetadata(String collectionName);
+    CollectionMetadata readCollectionMetadata(String collectionName);
 
     /**
      * Stream documents for a partition, starting from the given offset.

@@ -1,14 +1,16 @@
-package org.opensearch.migrations.bulkload.pipeline.ir;
+package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.util.Objects;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
- * Lucene-agnostic metadata snapshot for a single index. Clean IR boundary.
+ * ES-specific metadata snapshot for a single index.
  *
- * <p>Unlike the existing {@code IndexMetadata} interface, this is a simple data carrier
- * with no factory methods, repo-access logic, or version-specific behavior.
+ * <p>This is an adapter-layer type, not part of the core IR. The core pipeline uses
+ * {@link org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata} instead.
+ * ES source adapters produce this, and ES sink adapters consume it via
+ * {@link CollectionMetadata#sourceConfig()}.
  *
  * @param indexName       the index name, must not be null
  * @param numberOfShards  the number of primary shards, must be positive

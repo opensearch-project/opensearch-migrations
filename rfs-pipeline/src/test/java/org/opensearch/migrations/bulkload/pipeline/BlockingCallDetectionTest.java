@@ -5,15 +5,13 @@ import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.bulkload.pipeline.ir.BatchResult;
+import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.ir.Document;
-import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.pipeline.source.SyntheticDocumentSource;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import reactor.blockhound.BlockHound;
@@ -29,7 +27,6 @@ import reactor.test.StepVerifier;
  */
 class BlockingCallDetectionTest {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Partition TEST_PARTITION = new SyntheticDocumentSource.SyntheticPartition("idx", 0);
 
     @BeforeAll
@@ -77,7 +74,7 @@ class BlockingCallDetectionTest {
     void sinkWithSlowNonBlockingWrite_noBlockingDetected() {
         DocumentSink delaySink = new DocumentSink() {
             @Override
-            public Mono<Void> createCollection(IndexMetadataSnapshot metadata) {
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
                 return Mono.delay(Duration.ofMillis(10)).then();
             }
 
@@ -101,7 +98,7 @@ class BlockingCallDetectionTest {
     void blockingSink_detectedByBlockHound() {
         DocumentSink blockingSink = new DocumentSink() {
             @Override
-            public Mono<Void> createCollection(IndexMetadataSnapshot metadata) {
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
                 return Mono.empty();
             }
 
@@ -150,9 +147,8 @@ class BlockingCallDetectionTest {
             }
 
             @Override
-            public IndexMetadataSnapshot readCollectionMetadata(String collectionName) {
-                ObjectNode empty = MAPPER.createObjectNode();
-                return new IndexMetadataSnapshot(collectionName, 1, 0, empty, empty, empty);
+            public CollectionMetadata readCollectionMetadata(String collectionName) {
+                return new CollectionMetadata(collectionName, 1, Map.of());
             }
 
             @Override
@@ -172,7 +168,7 @@ class BlockingCallDetectionTest {
     private static DocumentSink nonBlockingSink() {
         return new DocumentSink() {
             @Override
-            public Mono<Void> createCollection(IndexMetadataSnapshot metadata) {
+            public Mono<Void> createCollection(CollectionMetadata metadata) {
                 return Mono.empty();
             }
 

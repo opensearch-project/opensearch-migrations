@@ -20,7 +20,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.Conta
 import org.opensearch.migrations.bulkload.framework.SnapshotFixtureCache;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
-import org.opensearch.migrations.bulkload.pipeline.MetadataMigrationPipeline;
+import org.opensearch.migrations.bulkload.pipeline.adapter.EsMetadataMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
@@ -134,7 +134,7 @@ public class PipelineEndToEndTest {
 
             var source = new SnapshotMetadataSource(extractor, SNAPSHOT_NAME);
             var sink = new OpenSearchMetadataSink(targetClient);
-            var pipeline = new MetadataMigrationPipeline(source, sink);
+            var pipeline = new EsMetadataMigrationPipeline(source, sink);
 
             var migratedIndices = pipeline.migrateAll().collectList().block();
 

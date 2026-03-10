@@ -8,8 +8,8 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
+import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.ir.Document;
-import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
 import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -133,7 +133,15 @@ public class LuceneSnapshotSource implements DocumentSource {
     }
 
     @Override
-    public IndexMetadataSnapshot readCollectionMetadata(String collectionName) {
+    public CollectionMetadata readCollectionMetadata(String collectionName) {
+        var indexMeta = readEsIndexMetadata(collectionName);
+        return IndexMetadataConverter.toCollectionMetadata(indexMeta);
+    }
+
+    /**
+     * Read ES-specific index metadata. Used internally and by the ES metadata migration pipeline.
+     */
+    public IndexMetadataSnapshot readEsIndexMetadata(String collectionName) {
         var meta = extractor.getSnapshotReader().getIndexMetadata()
             .fromRepo(snapshotName, collectionName);
         return IndexMetadataConverter.convert(collectionName, meta);
