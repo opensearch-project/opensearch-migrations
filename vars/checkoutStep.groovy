@@ -9,7 +9,18 @@ def call(Map config = [:]) {
         } else {
             echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
         }
-        git branch: config.commit ?: config.branch ?: 'main',
-                url: config.repo ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
+        def repoUrl = config.repo ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
+        def commit = config.commit?.trim()
+        def branch = config.branch ?: 'main'
+        if (commit) {
+            // Jenkins git step cannot resolve raw commit SHAs as branch specs.
+            // Use git CLI to fetch the branch and checkout the exact commit.
+            sh "git init"
+            sh "git remote set-url origin '${repoUrl}' || git remote add origin '${repoUrl}'"
+            sh "git fetch origin '${branch}'"
+            sh "git checkout '${commit}'"
+        } else {
+            git branch: branch, url: repoUrl
+        }
     }
 }
