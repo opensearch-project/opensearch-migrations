@@ -6,6 +6,7 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', description: 'Deployment stage name in group to delete (e.g. rfs-integ1)')
         }
 
@@ -31,7 +32,7 @@ def call(Map config = [:]) {
                         } else {
                             echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
                         }
-                        git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
+                        git branch: "${params.GIT_COMMIT ?: params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
                     }
                 }
             }
