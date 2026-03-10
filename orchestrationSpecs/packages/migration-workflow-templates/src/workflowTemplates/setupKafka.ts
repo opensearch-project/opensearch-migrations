@@ -2,6 +2,7 @@ import {
     AllowLiteralOrExpression,
     BaseExpression,
     expr,
+    INLINE,
     INTERNAL,
     makeDirectTypeProxy,
     Serialized,
@@ -178,6 +179,42 @@ export const SetupKafka = WorkflowBuilder.create({
                 })
             }))
         .addJsonPathOutput("topicName", "{.status.topicName}", typeToken<string>())
+    )
+
+
+    // ── Reconciliation templates with VAP-aware suspend/retry ─────────────
+    // These templates handle VAP rejections by:
+    //   1. Attempting the apply (with continueOn.failed)
+    //   2. Always suspending for user to verify or fix issues
+    //   3. Retrying after the user clicks Resume
+    // If VAP blocked the change, user must either:
+    //   - Fix their config to match deployed state, OR
+    //   - Add approval annotation (e.g., approved-replicas=<value>)
+    // Then click Resume in Argo UI.
+
+    .addTemplate("deployKafkaNodePoolWithRetry", t => t
+        .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+
+        .addSteps(b => b
+            // Step 1: Try apply, continue on failure (VAP rejection)
+            .addStep("tryApply", INTERNAL, "deployKafkaNodePool", c =>
+                c.register({
+                    clusterName: b.inputs.clusterName,
+                    clusterConfig: b.inputs.clusterConfig,
+                }),
+                { continueOn: { failed: true } }
+            )
+            // Step 2: Suspend for user to verify success or fix issues
+            .addStep("waitForUserAction", INLINE, tb => tb.addSuspend())
+            // Step 3: After resume, retry the apply (idempotent if already succeeded)
+            .addStep("retryApply", INTERNAL, "deployKafkaNodePool", c =>
+                c.register({
+                    clusterName: b.inputs.clusterName,
+                    clusterConfig: b.inputs.clusterConfig,
+                })
+            )
+        )
     )
 
 

@@ -169,6 +169,77 @@
             }
           ]
         }
+      },
+      {
+        "name": "deploykafkanodepoolwithretry",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "clusterConfig"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "deploykafkanodepool",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "clusterConfig",
+                    "value": "{{inputs.parameters.clusterConfig}}"
+                  }
+                ]
+              },
+              "name": "tryApply",
+              "continueOn": {
+                "failed": true
+              }
+            }
+          ],
+          [
+            {
+              "inline": {
+                "inputs": {
+                  "parameters": []
+                },
+                "suspend": {}
+              },
+              "arguments": {
+                "parameters": []
+              },
+              "name": "waitForUserAction"
+            }
+          ],
+          [
+            {
+              "template": "deploykafkanodepool",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "clusterConfig",
+                    "value": "{{inputs.parameters.clusterConfig}}"
+                  }
+                ]
+              },
+              "name": "retryApply"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
       }
     ]
   }
