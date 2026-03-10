@@ -79,7 +79,10 @@ class RegistryImageBuildUtils {
 
                     def baseEndpoint = config.get("baseImageRegistryEndpoint", "").toString()
                     def baseImage
-                    if (baseEndpoint == intermediateRegistry.hostUrl) {
+                    if (config.containsKey("baseImageOverride")) {
+                        // Pre-resolved base image (e.g., from pull-through cache rewriting)
+                        baseImage = config.get("baseImageOverride").toString()
+                    } else if (baseEndpoint == intermediateRegistry.hostUrl) {
                         baseImage = resolveBaseImage(intermediateRegistry, config.get("baseImageGroup", "").toString(),
                                 config.baseImageName.toString(), config.baseImageTag.toString())
                     } else {
@@ -194,7 +197,26 @@ class RegistryImageBuildUtils {
         Registry targetReg = repoName ? finalRegistry : intermediateRegistry
         def registryEndpoint = targetReg.containerUrl
 
-        def builder = project.findProperty("builder") ?: "local-remote-builder"
+        def builder = project.findProperty("builder") ?: ""
+        def builderWasExplicit = true
+        if (!builder) {
+            try {
+                def context = "kubectl config current-context".execute().text.trim()
+                if (context) {
+                    // NOTE: This naming convention must match setupK8sBuilders.sh's BUILDER_NAME derivation
+                    builder = "builder-" + context.replaceAll("[^a-zA-Z0-9_-]", "-")
+                    project.logger.lifecycle("No -Pbuilder specified, derived '${builder}' from kube context '${context}'")
+                }
+            } catch (Exception ignored) {}
+            if (!builder) {
+                // Use a placeholder so Gradle configuration succeeds (task registration needs a value).
+                // The actual validation happens at task execution time via doFirst below.
+                builder = "UNSET"
+                builderWasExplicit = false
+            }
+        }
+        def resolvedBuilder = builder
+        def builderIsValid = builderWasExplicit
         def imageName = cfg.get("imageName").toString()
         def imageTag = cfg.get("imageTag", "latest").toString()
         def contextPath = project.file(cfg.get("contextDir", ".")).path
@@ -241,6 +263,12 @@ class RegistryImageBuildUtils {
                     group = "docker"
                     description = "Build and push ${platform} ${primaryDest}"
 
+                    doFirst {
+                        if (!builderIsValid) {
+                            throw new GradleException("No -Pbuilder specified and no kube context set. Use -Pbuilder=<name> or set a kube context.")
+                        }
+                    }
+
                     commonInputs(it, suffix)
                     inputs.property("platform", platform)
 
@@ -249,7 +277,7 @@ class RegistryImageBuildUtils {
                             "docker buildx build",
                             "--progress=plain",
                             "--platform ${platform}",
-                            "--builder ${builder}",
+                            *(builder ? ["--builder ${builder}"] : []),
                             // don't include the suffix - this is dangerous, but single-platform builds are supported
                             // as a convenience to developers that are purposefully ONLY supporting PART of the
                             // potential architectures
@@ -272,12 +300,17 @@ class RegistryImageBuildUtils {
         def multiArchTaskName = "buildKit_${cfg.serviceName}"
         if (!project.tasks.findByName(multiArchTaskName)) {
             project.tasks.register(multiArchTaskName, Exec) {
+                doFirst {
+                    if (!builderIsValid) {
+                        throw new GradleException("No -Pbuilder specified and no kube context set. Use -Pbuilder=<name> or set a kube context.")
+                    }
+                }
                 commonInputs(it, "")
                 def fullArgs = [
                         "docker buildx build",
                         "--progress=plain",
                         "--platform linux/amd64,linux/arm64",
-                        "--builder ${builder}",
+                        *(builder ? ["--builder ${builder}"] : []),
                         "-t ${primaryDest}",
                         *(versionTaggedDest ? ["-t", "${versionTaggedDest}"] : []),
                         "--push",

@@ -134,7 +134,7 @@ def test_msk_kafka_describe_topic(mocker):
     assert result.success
     mock.assert_called_once_with(
         ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'org.apache.kafka.tools.GetOffsetShell',
-         '--broker-list', f"{config['broker_endpoints']}",
+         '--bootstrap-server', f"{config['broker_endpoints']}",
          '--topic', 'new_topic',
          '--time', '-1',
          '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
@@ -153,7 +153,7 @@ def test_standard_kafka_describe_topic(mocker):
     assert result.success
     mock.assert_called_once_with(
         ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'org.apache.kafka.tools.GetOffsetShell',
-         '--broker-list', f"{config['broker_endpoints']}",
+         '--bootstrap-server', f"{config['broker_endpoints']}",
          '--topic', 'new_topic',
          '--time', '-1'
          ], capture_output=True, text=True, check=True)

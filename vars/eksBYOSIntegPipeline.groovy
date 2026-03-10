@@ -56,6 +56,7 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'jenkins-pipeline-eks-large-migration', description: 'Git branch to use for repository')
+            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill (podReplicas)')
             // Snapshot configuration
@@ -92,6 +93,7 @@ def call(Map config = [:]) {
                 genericVariables: [
                     [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
                     [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                    [key: 'GIT_COMMIT', value: '$.GIT_COMMIT'],
                     [key: 'job_name', value: '$.job_name']
                 ],
                 tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
@@ -103,7 +105,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout & Print params') {
                 steps {
-                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
+                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
                         echo """
                             ================================================================
@@ -345,7 +347,8 @@ def call(Map config = [:]) {
                                     echo "Creating buildx builder ecr-builder"
                                     sh "docker buildx create --name ecr-builder --driver docker-container --bootstrap"
                                     sh "docker buildx use ecr-builder"
-                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder"
+                                    def pullThroughCacheEndpoint = env.registryEndpoint.split('/')[0]
+                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}"
                                 }
                             }
                         }
