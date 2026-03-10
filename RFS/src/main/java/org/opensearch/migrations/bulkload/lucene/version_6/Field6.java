@@ -40,4 +40,15 @@ public class Field6 implements LuceneField {
         }
         return null;
     }
+
+    @Override
+    public byte[] binaryValue() {
+        var bytesRef = wrapped.binaryValue();
+        if (bytesRef != null && bytesRef.bytes != null && bytesRef.length > 0) {
+            byte[] result = new byte[bytesRef.length];
+            System.arraycopy(bytesRef.bytes, bytesRef.offset, result, 0, bytesRef.length);
+            return result;
+        }
+        return null;
+    }
 }
