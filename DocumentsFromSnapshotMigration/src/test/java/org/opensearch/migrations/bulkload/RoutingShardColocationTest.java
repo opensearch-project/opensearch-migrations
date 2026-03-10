@@ -67,7 +67,11 @@ public class RoutingShardColocationTest extends SourceTestBase {
 
     private static Stream<Arguments> scenarios() {
         return Stream.of(
-            Arguments.of("ES7_native", SearchClusterContainer.ES_V7_10_2, null)
+            Arguments.of("ES6_native", SearchClusterContainer.ES_V6_8_23, null),
+            Arguments.of("ES7_native", SearchClusterContainer.ES_V7_10_2, null),
+            Arguments.of("ES8_native", SearchClusterContainer.ES_V8_19, null),
+            Arguments.of("OS1_native", SearchClusterContainer.OS_V1_3_20, null),
+            Arguments.of("OS2_native", SearchClusterContainer.OS_V2_19_4, null)
         );
     }
 
