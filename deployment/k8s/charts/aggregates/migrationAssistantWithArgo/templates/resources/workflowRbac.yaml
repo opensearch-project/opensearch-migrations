@@ -92,4 +92,27 @@ roleRef:
   kind: ClusterRole
   name: {{ .Release.Namespace }}-cert-issuer-manager
   apiGroup: rbac.authorization.k8s.io
+---
+# ClusterRole for ValidatingAdmissionPolicies (cluster-scoped resources)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-vap-manager
+rules:
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingadmissionpolicies", "validatingadmissionpolicybindings"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-vap-manager-binding
+subjects:
+  - kind: ServiceAccount
+    name: argo-workflow-executor
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-vap-manager
+  apiGroup: rbac.authorization.k8s.io
 {{ end }}

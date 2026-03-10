@@ -22,13 +22,16 @@ export function typeToken<T>(): TypeToken<T> {
     return ({}) as TypeToken<T>;
 }
 
+export type ContinueOn = { failed?: boolean; error?: boolean };
+
 export type WorkflowTask<
     IN extends InputParametersRecord,
     OUT extends OutputParametersRecord,
     LoopT extends PlainObject = never
 > = {
     args?: { parameters?: Record<string, any> },
-    when?: SimpleExpression<boolean> | { templateExp: TemplateExpression<boolean> }
+    when?: SimpleExpression<boolean> | { templateExp: TemplateExpression<boolean> },
+    continueOn?: ContinueOn
 } & (
     | { templateRef: { name: string; template: string } }
     | { template: string }

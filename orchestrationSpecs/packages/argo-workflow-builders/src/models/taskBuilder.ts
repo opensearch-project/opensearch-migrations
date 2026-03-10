@@ -41,7 +41,8 @@ export type TaskOpts<
     LoopT extends PlainObject
 > = {
     loopWith?: LoopWithUnion<LoopT> | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => LoopWithUnion<LoopT>),
-    when?: WhenCondition | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => WhenCondition)
+    when?: WhenCondition | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => WhenCondition),
+    continueOn?: { failed?: boolean; error?: boolean }
 };
 
 function reduceWhen<
@@ -363,7 +364,8 @@ export abstract class TaskBuilder<
         const reducedWhen = reduceWhen(opts?.when, this.getTaskOutputsByTaskName());
         return {
             ...task,
-            ...(reducedWhen === undefined ? {} : {when: reducedWhen})
+            ...(reducedWhen === undefined ? {} : {when: reducedWhen}),
+            ...(opts?.continueOn === undefined ? {} : {continueOn: opts.continueOn})
         };
     }
 
