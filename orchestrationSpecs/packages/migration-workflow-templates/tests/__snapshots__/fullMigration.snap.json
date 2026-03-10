@@ -56,7 +56,7 @@
           [
             {
               "templateRef": {
-                "template": "deploykafkacluster",
+                "template": "deploykafkaclusterwithretry",
                 "name": "setup-kafka"
               },
               "arguments": {

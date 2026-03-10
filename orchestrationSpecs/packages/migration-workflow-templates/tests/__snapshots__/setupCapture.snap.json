@@ -210,7 +210,7 @@
           [
             {
               "templateRef": {
-                "template": "createkafkatopic",
+                "template": "createkafkatopicwithretry",
                 "name": "setup-kafka"
               },
               "arguments": {

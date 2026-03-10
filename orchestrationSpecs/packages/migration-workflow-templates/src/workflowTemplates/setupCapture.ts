@@ -278,7 +278,7 @@ export const SetupCapture = WorkflowBuilder.create({
             const issuerRef = expr.get(tlsBlock, "issuerRef") as any;
 
             return b
-            .addStep("createKafkaTopic", SetupKafka, "createKafkaTopic", c =>
+            .addStep("createKafkaTopic", SetupKafka, "createKafkaTopicWithRetry", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     clusterName:   b.inputs.kafkaClusterName,

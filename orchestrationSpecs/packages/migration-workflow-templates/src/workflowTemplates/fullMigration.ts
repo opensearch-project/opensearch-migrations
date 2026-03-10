@@ -103,7 +103,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("version",            typeToken<string>())
 
         .addSteps(b => b
-            .addStep("deployCluster", SetupKafka, "deployKafkaCluster", c =>
+            .addStep("deployCluster", SetupKafka, "deployKafkaClusterWithRetry", c =>
                 c.register({
                     clusterName:   b.inputs.clusterName,
                     version:       b.inputs.version,
