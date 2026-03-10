@@ -28,6 +28,7 @@ def agradle(*args):
         if gradlew.exists() and os.access(gradlew, os.X_OK):
             result = subprocess.run(
                 [str(gradlew), *args],
+                cwd=parent,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
