@@ -144,9 +144,9 @@ subprojects {
     }
 
     plugins.withId('com.google.cloud.tools.jib') {
-        tasks.withType(JibTask).configureEach {
-            notCompatibleWithConfigurationCache("because https://github.com/GoogleContainerTools/jib/issues/3132")
-        }
+        // Jib plugin has known configuration cache incompatibility
+        // See: https://github.com/GoogleContainerTools/jib/issues/3132
+        // The plugin itself will handle configuration cache warnings
     }
 
     plugins.withId('com.bmuschko.docker-remote-api') {

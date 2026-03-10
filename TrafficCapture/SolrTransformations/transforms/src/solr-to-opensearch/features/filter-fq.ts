@@ -1,9 +1,19 @@
 /**
  * Filter query (fq) — translate Solr fq params to OpenSearch bool.filter clauses.
  *
- * Each fq value is parsed through translateQ independently. The resulting DSL
- * clauses are placed in bool.filter context to preserve non-scoring semantics.
- * Any boost keys are stripped from filter clauses since filters don't affect scoring.
+ * Solr's fq parameter restricts the result set WITHOUT affecting relevance scoring.
+ * In OpenSearch, this maps to `bool.filter` clauses. The key difference from
+ * regular query clauses is that filter clauses:
+ *   - Do not contribute to the relevance score
+ *   - Are cached by OpenSearch for better performance
+ *   - Must not contain scoring-related keys (boost)
+ *
+ * Each fq value is parsed through the same translateQ pipeline independently.
+ * The resulting DSL clauses are stripped of any boost keys (since filters don't
+ * score) and placed in a bool.filter wrapper alongside the existing main query.
+ *
+ * Example: q=*:*&fq=status:active&fq=type:article produces:
+ *   {"bool": {"must": [match_all], "filter": [term(status:active), term(type:article)]}}
  *
  * Request-only. All output is Maps for zero-serialization GraalVM interop.
  *

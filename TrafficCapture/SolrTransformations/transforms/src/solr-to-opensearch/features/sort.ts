@@ -1,8 +1,14 @@
 /**
  * Sort — translate Solr sort parameter to OpenSearch sort array.
  *
- * Parses comma-separated field/direction pairs from the `sort` parameter.
- * Maps Solr `score` field to OpenSearch `_score`.
+ * Solr sort syntax: comma-separated "field direction" pairs.
+ *   Example: "price asc, score desc"
+ *
+ * OpenSearch sort syntax: array of Maps, each mapping field → {order: direction}.
+ *   Example: [Map{"price" → Map{"order" → "asc"}}, Map{"_score" → Map{"order" → "desc"}}]
+ *
+ * Key mapping: Solr's `score` field maps to OpenSearch's `_score`.
+ * Default direction is `asc` if not specified.
  *
  * Request-only. All output is Maps for zero-serialization GraalVM interop.
  *

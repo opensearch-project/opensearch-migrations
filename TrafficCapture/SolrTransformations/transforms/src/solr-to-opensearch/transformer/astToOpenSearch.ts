@@ -2,8 +2,18 @@
  * AST-to-OpenSearch transformer.
  *
  * Visitor-based switch on node.type that converts AST nodes into
- * OpenSearch Query DSL as nested Maps. ALL output uses `new Map()` —
- * never plain objects — for GraalVM JavaMap interop.
+ * OpenSearch Query DSL as nested Maps. This is the final stage of the
+ * Lexer → Parser → AST → Transformer pipeline.
+ *
+ * CRITICAL CONSTRAINT: ALL output uses `new Map()` — never plain objects.
+ * This is required for GraalVM JavaMap interop. The Java-side Jackson
+ * serializer works directly with LinkedHashMap instances, and GraalVM's
+ * `allowMapAccess(true)` bridges JS Maps to Java Maps transparently.
+ * Using plain objects would break this bridge and cause serialization failures.
+ *
+ * The transformer is intentionally simple — a single function with a switch
+ * statement. No class hierarchy, no visitor interface. This keeps the code
+ * minimal and avoids class-based patterns that complicate GraalVM interop.
  *
  * Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9
  */
@@ -32,12 +42,20 @@ export function transformNode(node: ASTNode, df: string): Map<string, any> {
     }
 
     case 'bool': {
+      // Recursively transform all children in each clause array
       const must = node.must.map((c) => transformNode(c, df));
       const should = node.should.map((c) => transformNode(c, df));
       const mustNot = node.must_not.map((c) => transformNode(c, df));
 
-      // Bool unwrapping (Req 5.9): if exactly one clause in one array
-      // and the other two are empty, return the child directly.
+      // Bool unwrapping optimization (Req 5.9):
+      // If there's exactly one clause total and it's in must or should,
+      // return the child directly without wrapping in a bool query.
+      // Example: BoolNode(must: [FieldNode]) → just the term query.
+      // This avoids unnecessary nesting like {"bool":{"must":[{"term":...}]}}
+      // when a simple {"term":...} would suffice.
+      //
+      // Exception: single must_not CANNOT be unwrapped because OpenSearch
+      // has no standalone "not" query — negation requires a bool wrapper.
       const totalClauses = must.length + should.length + mustNot.length;
       if (totalClauses === 1) {
         if (must.length === 1) return must[0];

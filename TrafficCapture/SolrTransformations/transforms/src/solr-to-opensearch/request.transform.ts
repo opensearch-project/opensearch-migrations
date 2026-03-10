@@ -1,9 +1,16 @@
 /**
- * Solr → OpenSearch request transform.
+ * Solr → OpenSearch request transform — the GraalVM entry point.
  *
- * Thin entry point — parses context once, runs the pipeline, writes the body
- * Map back as inlinedJsonBody. Zero serialization in JavaScript — Jackson
- * handles JSON on the Java side.
+ * This is the function that the Java-side JavascriptTransformer calls for
+ * every incoming HTTP request. It's intentionally thin:
+ *   1. Parse the raw Java Map into a typed RequestContext (once)
+ *   2. Guard against non-JSON wt parameter (skip transformation)
+ *   3. Run the micro-transform pipeline (select-uri, query-q, filter-fq, etc.)
+ *   4. Write the transformed body back as inlinedJsonBody for Jackson serialization
+ *
+ * The `msg` parameter is a Java LinkedHashMap passed through GraalVM's
+ * `allowMapAccess(true)`. We use .get()/.set() — never bracket notation —
+ * because GraalVM bridges these to Java Map methods with zero serialization.
  */
 import { buildRequestContext } from './context';
 import type { JavaMap } from './context';

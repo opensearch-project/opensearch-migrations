@@ -1,8 +1,26 @@
 /**
  * Translator — orchestrates the full Lexer → Parser → Transformer pipeline.
  *
- * Entry point for translating a Solr `q` parameter into OpenSearch Query DSL.
- * Falls back to `query_string` passthrough on any error at any stage.
+ * This is the single entry point for translating a Solr `q` parameter into
+ * OpenSearch Query DSL. The micro-transforms (query-q, filter-fq) call this
+ * function rather than invoking the lexer/parser/transformer directly.
+ *
+ * Pipeline stages:
+ *   1. Check defType → unsupported types fall back immediately
+ *   2. Tokenize the query string via the lexer
+ *   3. Parse tokens into an AST (Lucene or eDisMax based on defType)
+ *   4. Transform the AST into OpenSearch DSL Maps
+ *
+ * Error handling strategy: fail-safe with passthrough.
+ * Any error at ANY stage produces a `query_string` passthrough:
+ *   Map{"query_string" → Map{"query" → rawQ}}
+ * This lets OpenSearch attempt to parse the raw query itself — a safe
+ * degradation that preserves the existing behavior. Errors are never thrown
+ * to the caller; they're captured as structured warnings.
+ *
+ * Two modes are supported:
+ *   - best-effort (default): translate what we can, warn about the rest
+ *   - strict: fail on the first unsupported construct
  *
  * Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 9.3, 15.1, 15.2, 15.3, 15.4, 15.5
  */

@@ -492,10 +492,17 @@ flowchart TD
 
 Transforms convert between Solr and OpenSearch HTTP formats. They're written in TypeScript, bundled to JavaScript, and executed in GraalVM at runtime.
 
+The request transform uses a structured Lexer → Parser → AST → Transformer pipeline for query translation:
+
 ```mermaid
 graph LR
     subgraph Dev["Development"]
         TS["request.transform.ts<br/>response.transform.ts"]
+        Lexer["lexer/lexer.ts"]
+        Parser["parser/luceneParser.ts<br/>parser/edismaxParser.ts"]
+        AST["ast/nodes.ts"]
+        XForm["transformer/astToOpenSearch.ts"]
+        Trans["translator/translateQ.ts"]
     end
 
     subgraph Build["Build (esbuild)"]
@@ -509,9 +516,29 @@ graph LR
         IJson["IJsonTransformer<br/>.transformJson(Map)"]
     end
 
+    Lexer --> Trans
+    Parser --> Trans
+    AST --> Parser
+    AST --> XForm
+    XForm --> Trans
+    Trans --> TS
     TS --> Bundle --> Wrap
     Wrap -->|".js file"| Load --> Graal --> IJson
 ```
+
+### Query Translation Pipeline
+
+The `query-q` micro-transform delegates to `translateQ`, which orchestrates:
+
+1. **Lexer** (`lexer/lexer.ts`) — tokenizes the raw Solr query string into typed tokens (FIELD, VALUE, AND, OR, NOT, PHRASE, RANGE, BOOST, etc.)
+2. **Parser Selector** (`parser/parserSelector.ts`) — selects Lucene or eDisMax parser based on `defType`
+3. **Parser** — recursive-descent parser producing a typed AST:
+   - Lucene parser: handles field queries, boolean operators, phrases, ranges, grouping, boost, match-all
+   - eDisMax parser: extends Lucene with multi-field distribution (`qf`) and phrase boosting (`pf`)
+4. **Transformer** (`transformer/astToOpenSearch.ts`) — walks the AST and produces OpenSearch Query DSL as nested `Map` instances
+5. **Fallback** — any error at any stage produces a `query_string` passthrough containing the raw query
+
+All output uses `new Map()` for GraalVM JavaMap interop — no plain objects.
 
 ### Hot-Reload (`--watchTransforms`)
 
@@ -547,9 +574,13 @@ Input (response): Java Map { request: {...}, response: { statusCode, headers, pa
                   Access via: msg.get('request'), msg.get('response'), etc.
 ```
 
-The Solr→OpenSearch request transform rewrites:
-- `/solr/{collection}/select?q=...` → `POST /{collection}/_search`
-- Adds `{"query":{"match_all":{}}}` body
+The Solr→OpenSearch request transform pipeline:
+- Detects endpoint from URI (`/solr/{collection}/select`)
+- Guards against non-JSON `wt` parameter (skips transformation)
+- Runs micro-transforms in order: URI rewrite → query translation → filter queries → sort → pagination → field list
+- The `query-q` transform uses the Lexer → Parser → AST → Transformer pipeline to produce structured OpenSearch Query DSL
+- Supports Lucene (default) and eDisMax query parsers via the `defType` parameter
+- Falls back to `query_string` passthrough on any parsing error
 
 The OpenSearch→Solr response transform converts:
 - `hits.hits[]._source` → `response.docs[]`

@@ -74,6 +74,11 @@ class RegistryImageBuildUtils {
                 }
 
                 project.plugins.withId('com.google.cloud.tools.jib') {
+                    // Ensure jib tasks depend on version file sync
+                    project.tasks.withType(com.google.cloud.tools.jib.gradle.JibTask).configureEach {
+                        dependsOn("syncVersionFile_${imageName}")
+                    }
+                    
                     Registry targetReg = config.get("repoName", null) ? finalRegistry : intermediateRegistry
                     def targetFormatter = ImageRegistryFormatterFactory.getFormatter(targetReg.hostUrl)
 

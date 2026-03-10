@@ -2,8 +2,20 @@
  * Lexer for Solr query strings.
  *
  * Converts a raw Solr query string into a typed token stream
- * for consumption by the parser. Cursor-based tokenizer with
- * one-character lookahead for FIELD vs VALUE distinction.
+ * for consumption by the parser. This is the first stage of the
+ * Lexer → Parser → AST → Transformer pipeline.
+ *
+ * Key design decisions:
+ *   - Cursor-based: maintains a `pos` index that advances through the string
+ *   - One-token lookahead: after consuming an unquoted word, peeks at the next
+ *     character to distinguish FIELD tokens (followed by `:`) from VALUE tokens
+ *   - Whitespace is consumed but never emitted as tokens (Solr treats whitespace
+ *     as a delimiter, not a syntactic element)
+ *   - Keywords (AND, OR, NOT, TO) are only recognized when followed by a
+ *     delimiter (whitespace, `:`, `(`, or EOF) — this prevents "ANDROID" from
+ *     being split into "AND" + "ROID"
+ *   - Errors are collected (not thrown) so the lexer can report multiple issues
+ *     and the translator can fall back to query_string passthrough
  *
  * Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 9.1
  */

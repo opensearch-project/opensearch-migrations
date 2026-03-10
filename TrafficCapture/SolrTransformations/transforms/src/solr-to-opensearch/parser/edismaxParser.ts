@@ -1,9 +1,27 @@
 /**
  * eDisMax parser for Solr Extended DisMax query syntax.
  *
- * Reuses the Lucene parser for structural parsing, then walks the AST
- * to distribute unfielded terms across qf (query fields) with boost weights.
- * Optionally appends phrase boost nodes from pf (phrase fields).
+ * eDisMax extends Lucene syntax by distributing unfielded search terms across
+ * multiple fields specified in the `qf` (query fields) parameter, each with
+ * optional boost weights. This is how Solr's eDisMax achieves "search across
+ * all fields" behavior.
+ *
+ * Algorithm:
+ *   1. Parse the qf string into WeightedField[] (e.g., "title^2 content" →
+ *      [{field:"title", boost:2}, {field:"content", boost:1}])
+ *   2. Parse the query using the Lucene parser with a placeholder default field
+ *   3. Walk the AST and replace every unfielded term (FieldNode where
+ *      field === placeholderDf) with a BoolNode(should) containing one
+ *      FieldNode per qf field, each wrapped in BoostNode if boost ≠ 1.0
+ *   4. Explicitly fielded terms (e.g., "title:java") are left unchanged
+ *   5. If pf (phrase fields) is specified, append PhraseNode entries for
+ *      phrase boosting across those fields
+ *
+ * Example: query "java" with qf="title^2 content" produces:
+ *   BoolNode(should: [
+ *     BoostNode(FieldNode(title, java), 2),
+ *     FieldNode(content, java)
+ *   ])
  *
  * Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7
  */

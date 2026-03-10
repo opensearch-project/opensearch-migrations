@@ -1,10 +1,18 @@
 /**
  * Transform registry — single source of truth for all feature registrations.
  *
+ * Transforms are grouped by Solr endpoint (select, update, admin, etc.) for
+ * O(1) dispatch. A /select request only runs select transforms.
+ *
+ * ORDERING MATTERS: transforms run sequentially in array order.
+ * - select-uri must be first (rewrites URI for downstream transforms)
+ * - query-q must run before filter-fq (filter-fq wraps the existing query)
+ * - sort, pagination, field-list are independent of each other
+ *
  * To add a new feature:
  *   1. Create features/my-feature.ts exporting { request?, response? }
  *   2. Import it here
- *   3. Add to the appropriate endpoint group
+ *   3. Add to the appropriate endpoint group in the correct position
  */
 import type { TransformRegistry } from './pipeline';
 import type { RequestContext, ResponseContext } from './context';

@@ -331,11 +331,21 @@ TrafficCapture/
     │   │       ├── pipeline.ts             # Micro-transform runner
     │   │       ├── registry.ts             # Feature registration
     │   │       ├── cases.testcase.ts       # E2E test case definitions
-    │   │       └── features/               # 4 micro-transforms
-    │   │           ├── select-uri.ts       # /solr/{col}/select → /{col}/_search
-    │   │           ├── query-q.ts          # q=... → query DSL
-    │   │           ├── hits-to-docs.ts     # hits.hits → response.docs
-    │   │           └── response-header.ts  # synthesize responseHeader
+    │   │       ├── ast/nodes.ts            # AST node types + prettyPrint
+    │   │       ├── lexer/lexer.ts          # Solr query tokenizer
+    │   │       ├── parser/                 # Lucene + eDisMax parsers
+    │   │       ├── transformer/            # AST → OpenSearch DSL Maps
+    │   │       ├── translator/translateQ.ts # Pipeline orchestrator
+    │   │       ├── features/               # 6 request + 2 response micro-transforms
+    │   │       │   ├── select-uri.ts       # /solr/{col}/select → /{col}/_search
+    │   │       │   ├── query-q.ts          # q=... → query DSL (via translator)
+    │   │       │   ├── filter-fq.ts        # fq=... → bool.filter clauses
+    │   │       │   ├── sort.ts             # sort=... → sort array
+    │   │       │   ├── pagination.ts       # start/rows → from/size
+    │   │       │   ├── field-list.ts       # fl=... → _source
+    │   │       │   ├── hits-to-docs.ts     # hits.hits → response.docs
+    │   │       │   └── response-header.ts  # synthesize responseHeader
+    │   │       └── __tests__/              # 143 tests (unit + property-based)
     │   └── build.mjs                       # esbuild: TS → GraalVM closures
     ├── src/test/java/
     │   └── TransformationShimE2ETest.java  # Data-driven E2E runner
@@ -346,23 +356,31 @@ TrafficCapture/
 
 ### How a Request Transform Works
 
-Each feature is a small, focused **micro-transform**. Here's `select-uri.ts`:
+Each feature is a small, focused **micro-transform**. The `query-q` transform delegates to a structured Lexer → Parser → AST → Transformer pipeline:
 
 ```typescript
-// features/select-uri.ts — rewrites /solr/{collection}/select → /{collection}/_search
-// Uses Java Map .get()/.set() for zero-serialization GraalVM interop.
+// features/query-q.ts — translates Solr q param to OpenSearch query DSL
+// Delegates to the translateQ pipeline internally.
 export const request: MicroTransform<RequestContext> = {
-  name: 'select-uri',
+  name: 'query-q',
   apply: (ctx) => {
-    ctx.msg.set('URI', `/${ctx.collection}/_search`);
-    ctx.msg.set('method', 'POST');
-    const headers = ctx.msg.get('headers');
-    if (headers) {
-      headers.set('content-type', 'application/json');
+    const q = ctx.params.get('q') || '*:*';
+    const defType = ctx.params.get('defType') ?? undefined;
+    const qf = ctx.params.get('qf') ?? undefined;
+    const pf = ctx.params.get('pf') ?? undefined;
+    const df = ctx.params.get('df') ?? undefined;
+
+    const result = translateQ({ q, defType, qf, pf, df });
+    ctx.body.set('query', result.dsl);
+
+    if (result.warnings.length > 0) {
+      ctx.body.set('_solr_warnings', result.warnings);
     }
   },
 };
 ```
+
+The `translateQ` pipeline handles: tokenization → parsing (Lucene or eDisMax based on `defType`) → AST construction → OpenSearch DSL transformation. Any error at any stage falls back to a `query_string` passthrough.
 
 Features are registered in `registry.ts` and run in order by the pipeline:
 
@@ -373,7 +391,11 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
   byEndpoint: {
     select: [
       selectUri.request,       // URI rewrite — must be first
-      queryQ.request,          // q=... → query DSL
+      queryQ.request,          // q=... → query DSL (Lexer → Parser → AST → Transformer)
+      filterFq.request,        // fq=... → bool.filter clauses
+      sort.request,            // sort=... → sort array
+      pagination.request,      // start/rows → from/size
+      fieldList.request,       // fl=... → _source
     ],
   },
 };
@@ -385,26 +407,9 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
 2. Import it in `registry.ts`
 3. Add to the appropriate endpoint group
 4. Add a test case in `cases.testcase.ts`
+5. Add unit/property tests in `__tests__/`
 
-Example — adding a `defType` handler:
-
-```typescript
-// features/def-type.ts
-import type { MicroTransform } from '../pipeline';
-import type { RequestContext } from '../context';
-
-export const request: MicroTransform<RequestContext> = {
-  name: 'def-type',
-  match: (ctx) => ctx.params.has('defType'),
-  apply: (ctx) => {
-    const defType = ctx.params.get('defType');
-    if (defType === 'edismax') {
-      // Convert edismax params to OpenSearch multi_match
-      // ...
-    }
-  },
-};
-```
+The query translation pipeline (lexer, parser, AST, transformer) can be extended by adding new AST node types in `ast/nodes.ts` and handling them in the transformer and pretty-printer.
 
 ### The Build Pipeline
 

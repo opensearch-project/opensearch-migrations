@@ -105,13 +105,17 @@ export function parseLucene(tokens: Token[], df: string): ParseResult {
   function parseOrExpr(): ASTNode {
     let left = parseAndExpr();
 
+    // Explicit OR: consume OR tokens between sub-expressions
     while (peek().type === 'OR') {
       advance(); // consume OR
       const right = parseAndExpr();
       left = mergeBool('should', left, right);
     }
 
-    // Implicit OR: adjacent terms without explicit operator
+    // Implicit OR (Solr default behavior): when two terms appear adjacent
+    // without an explicit operator, they are joined with OR.
+    // Example: "java python" → BoolNode(should: [java, python])
+    // This matches Solr's default q.op=OR behavior.
     while (!isAtEnd() && peek().type !== 'RPAREN' && peek().type !== 'OR' && peek().type !== 'AND' && canStartPrimary()) {
       const right = parseAndExpr();
       left = mergeBool('should', left, right);
@@ -338,7 +342,14 @@ export function parseLucene(tokens: Token[], df: string): ParseResult {
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
 
-  /** Merge two nodes into a BoolNode under the given clause. */
+  /**
+   * Merge two nodes into a BoolNode under the given clause.
+   *
+   * Flattening optimization: if the left node is already a BoolNode with only
+   * the same clause populated (e.g., a chain of ORs), we extend it rather than
+   * nesting. This produces `should: [A, B, C]` instead of
+   * `should: [should: [A, B], C]` for "A OR B OR C".
+   */
   function mergeBool(clause: 'must' | 'should' | 'must_not', left: ASTNode, right: ASTNode): BoolNode {
     // If left is already a BoolNode with only the same clause populated, extend it
     if (

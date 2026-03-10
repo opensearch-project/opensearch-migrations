@@ -23,7 +23,12 @@ graph LR
             Context["context.ts<br/><i>parse once</i>"]
             Pipeline["pipeline.ts<br/><i>MicroTransform runner</i>"]
             Registry["registry.ts<br/><i>feature registration</i>"]
-            Features["features/<br/>select-uri.ts, query-q.ts,<br/>hits-to-docs.ts, response-header.ts"]
+            Features["features/<br/>select-uri, query-q, filter-fq,<br/>sort, pagination, field-list,<br/>hits-to-docs, response-header"]
+            Lexer["lexer/lexer.ts<br/><i>tokenizer</i>"]
+            AST["ast/nodes.ts<br/><i>AST types + prettyPrint</i>"]
+            Parsers["parser/<br/>luceneParser, edismaxParser,<br/>parserSelector"]
+            Transformer["transformer/astToOpenSearch.ts<br/><i>AST → OpenSearch DSL Maps</i>"]
+            Translator["translator/translateQ.ts<br/><i>pipeline orchestrator</i>"]
             ReqTS["request.transform.ts<br/><i>thin entry point</i>"]
             RespTS["response.transform.ts<br/><i>thin entry point</i>"]
             Cases["cases.testcase.ts"]
@@ -44,6 +49,12 @@ graph LR
     end
 
     Features --> Registry
+    Lexer --> Translator
+    AST --> Parsers
+    AST --> Transformer
+    Parsers --> Translator
+    Transformer --> Translator
+    Translator --> Features
     Context --> ReqTS
     Pipeline --> ReqTS
     Registry --> ReqTS
@@ -119,41 +130,90 @@ sequenceDiagram
 
 ## Request Transform
 
-Converts Solr select queries into OpenSearch `_search` requests.
+Converts Solr select queries into OpenSearch `_search` requests using a structured Lexer → Parser → AST → Transformer pipeline.
 
 ```mermaid
 graph LR
     subgraph Input["Solr Request"]
-        A["GET /solr/mycore/select?q=*:*"]
+        A["GET /solr/mycore/select?q=title:java AND price:[10 TO 100]"]
     end
 
     subgraph Transform["request.transform.ts"]
-        B["Regex: /solr/{collection}/select"]
-        C["Rewrite URI → /{collection}/_search"]
-        D["Set method → POST"]
-        E["Set body → {query:{match_all:{}}}"]
+        B["Endpoint detection + wt guard"]
+        C["select-uri: Rewrite URI → /{collection}/_search"]
+        D["query-q: Lex → Parse → AST → Transform"]
+        E["filter-fq: fq params → bool.filter"]
+        F["sort: sort param → sort array"]
+        G["pagination: start/rows → from/size"]
+        H["field-list: fl → _source"]
     end
 
     subgraph Output["OpenSearch Request"]
-        F["POST /mycore/_search<br/>{query:{match_all:{}}}"]
+        I["POST /mycore/_search<br/>{query:{bool:{must:[...]}}, sort:[...], from:0, size:10}"]
     end
 
-    A --> B --> C --> D --> E --> F
+    A --> B --> C --> D --> E --> F --> G --> H --> I
 ```
+
+### Query Translation Pipeline
+
+The `query-q` micro-transform delegates to a structured pipeline that replaces the previous regex-based approach:
+
+```mermaid
+flowchart LR
+    A["Solr query string<br/>(q param)"] --> B[Lexer]
+    B -->|Token stream| C[Parser<br/>Lucene / eDisMax]
+    C -->|AST| D[Transformer]
+    D -->|"Map&lt;string,any&gt;"| E["ctx.body.set('query', ...)"]
+
+    subgraph "parserSelector"
+        F["defType param"] --> C
+    end
+
+    subgraph "translator/translateQ.ts"
+        B
+        C
+        D
+    end
+```
+
+The pipeline supports:
+- Lucene query syntax (default): field queries, boolean operators (AND/OR/NOT), phrases, ranges, grouping, boost, match-all
+- eDisMax query syntax: multi-field distribution via `qf`, phrase boosting via `pf`
+- Graceful fallback: any error at any stage falls back to `query_string` passthrough
+
+### AST Node Types
+
+The parser produces a typed AST with discriminated unions:
+
+| Node Type | Solr Syntax | OpenSearch DSL |
+|-----------|-------------|----------------|
+| `FieldNode` | `title:java` | `{"term": {"title": "java"}}` |
+| `PhraseNode` | `"hello world"` | `{"match_phrase": {"field": "hello world"}}` |
+| `BoolNode` | `A AND B`, `A OR B`, `NOT A` | `{"bool": {"must": [...], "should": [...], "must_not": [...]}}` |
+| `RangeNode` | `price:[10 TO 100]` | `{"range": {"price": {"gte": "10", "lte": "100"}}}` |
+| `BoostNode` | `title:java^2` | `{"term": {"title": "java", "boost": 2}}` |
+| `MatchAllNode` | `*:*` | `{"match_all": {}}` |
+| `GroupNode` | `(A OR B)` | Transparent — recurses into child |
+
+### Additional Micro-Transforms
+
+Beyond query translation, the pipeline includes:
+
+| Transform | Solr Parameter | OpenSearch Output |
+|-----------|---------------|-------------------|
+| `filter-fq` | `fq=status:active` | `bool.filter` clauses (no scoring) |
+| `sort` | `sort=price asc` | `sort` array (`score` → `_score`) |
+| `pagination` | `start=10&rows=20` | `from: 10, size: 20` |
+| `field-list` | `fl=id,title` | `_source: ["id", "title"]` |
+
+### wt Parameter Guard
+
+If the `wt` parameter is set to a non-JSON value (e.g., `xml`, `csv`), the request transform skips all transformations and passes the request through unchanged, since only JSON response format is supported.
 
 ### Logic
 
-Java Maps are passed directly to GraalVM JS via `allowMapAccess(true)`. Transforms use `.get()`/`.set()` for zero-serialization interop:
-
-```
-IF URI matches /solr/{collection}/select:
-  1. msg.set('URI', '/{collection}/_search')
-  2. msg.set('method', 'POST')
-  3. payload.set('inlinedTextBody', '{"query":{"match_all":{}}}')
-  4. headers.set('content-type', 'application/json')
-ELSE:
-  passthrough (no modification)
-```
+Java Maps are passed directly to GraalVM JS via `allowMapAccess(true)`. Transforms use `.get()`/`.set()` for zero-serialization interop. All output uses `new Map()` for GraalVM JavaMap compatibility.
 
 ---
 
@@ -226,6 +286,31 @@ The types also define the tuple schema (`SourceTargetTuple`) used by the replaye
 ---
 
 ## Testing
+
+### Unit & Property-Based Tests
+
+The transform modules are tested with Vitest and fast-check for property-based testing. Tests live in `src/solr-to-opensearch/__tests__/`:
+
+| Test File | Tests | What It Covers |
+|-----------|-------|----------------|
+| `lexer.test.ts` | 16 | Tokenization, whitespace handling, phrases, errors |
+| `luceneParser.test.ts` | 29 | Boolean operators, default field, ranges, boost, precedence |
+| `edismaxParser.test.ts` | 24 | qf field distribution, explicit field preservation, Lucene compatibility |
+| `transformer.test.ts` | 20 | DSL generation, bool recursion/unwrapping, Map-only output |
+| `translateQ.test.ts` | 17 | Pipeline orchestration, fallback on error, deterministic output |
+| `queryQ.test.ts` | 8 | Micro-transform integration, body.query is always a Map |
+| `filterFq.test.ts` | 7 | Filter clauses, no scoring keys in filters |
+| `sort.test.ts` | 6 | Sort parsing, score → _score mapping |
+| `pagination.test.ts` | 7 | start/rows → from/size |
+| `wtGuard.test.ts` | 8 | Non-JSON wt passthrough |
+| `roundtrip.test.ts` | 1 | Parse → prettyPrint → parse round-trip (100 iterations) |
+
+Run with:
+```bash
+cd transforms && npx vitest --run
+```
+
+25 correctness properties are validated via fast-check with 100 iterations each, covering lexer invariants, parser operator mapping, transformer output structure, translator determinism, and round-trip consistency.
 
 ### E2E Test Architecture
 
