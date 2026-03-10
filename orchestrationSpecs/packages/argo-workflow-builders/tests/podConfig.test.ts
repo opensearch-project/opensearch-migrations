@@ -733,7 +733,7 @@ describe('Pod Config - RetryStrategy', () => {
                 .addImageInfo('nginx:latest', 'IfNotPresent')
                 .addCommand(['echo'])
                 .addResources(EXAMPLE_RESOURCES)
-                .addRetryParameters({ limit: 3, retryPolicy: 'OnFailure' })
+                .addRetryParameters({ limit: "3", retryPolicy: 'OnFailure' })
             )
         )
         .getFullScope();
@@ -741,7 +741,7 @@ describe('Pod Config - RetryStrategy', () => {
         const rendered = renderWorkflowTemplate(wf);
         const template = rendered.spec.templates.find((t: any) => t.name === 'test');
 
-        expect(template.retryStrategy).toEqual({ limit: 3, retryPolicy: 'OnFailure' });
+        expect(template.retryStrategy).toEqual({ limit: "3", retryPolicy: 'OnFailure' });
     });
 
     it('should reject duplicate addRetryParameters calls at compile time', () => {
@@ -755,8 +755,8 @@ describe('Pod Config - RetryStrategy', () => {
                 .addImageInfo('nginx:latest', 'IfNotPresent')
                 .addCommand(['echo'])
                 .addResources(EXAMPLE_RESOURCES)
-                .addRetryParameters({ limit: 3 })
-                .addRetryParameters({ limit: 5 })
+                .addRetryParameters({ limit: "3" })
+                .addRetryParameters({ limit: "5" })
             )
         );
         expect(true).toBe(true);
