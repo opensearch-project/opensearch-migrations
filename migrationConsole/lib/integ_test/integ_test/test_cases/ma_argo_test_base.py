@@ -77,11 +77,15 @@ class MATestBase:
         self.workflow_template = "full-migration-with-clusters"
         self.workflow_snapshot_and_migration_config = None
         self.source_operations = get_operations_library_by_version(self.source_version)
-        self.target_operations = get_operations_library_by_version(self.target_version)
+        self.target_operations = (
+            None if self.target_type == "AOSS"
+            else get_operations_library_by_version(self.target_version)
+        )
         self.unique_id = user_args.unique_id
 
     def __repr__(self):
-        return f"<{self.__class__.__name__}(source={self.source_version},target={self.target_version})>"
+        target_str = self.target_type if self.target_type == "AOSS" else str(self.target_version)
+        return f"<{self.__class__.__name__}(source={self.source_version},target={target_str})>"
 
     def test_before(self):
         #check_ma_system_health()

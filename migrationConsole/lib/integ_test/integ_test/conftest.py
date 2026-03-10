@@ -73,7 +73,7 @@ def pytest_generate_tests(metafunc):
                              "(or use '--target_type=AOSS' for serverless targets)")
         unique_id = metafunc.config.getoption("unique_id")
         metafunc.config.test_summary["source_version"] = source_version
-        metafunc.config.test_summary["target_version"] = target_version
+        metafunc.config.test_summary["target_version"] = target_version if target_type != "AOSS" else "AOSS"
         test_ids_list = metafunc.config.getoption("test_ids")
         user_args = MATestUserArguments(source_version=source_version, target_version=target_version,
                                         target_type=target_type, unique_id=unique_id, reuse_clusters=reuse_clusters)
