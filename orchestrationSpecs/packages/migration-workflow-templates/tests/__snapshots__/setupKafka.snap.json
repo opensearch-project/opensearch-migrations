@@ -39,7 +39,7 @@
         "resource": {
           "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec:\n  replicas: {{=sprig.dig('replicas', 1, fromJSON(inputs.parameters.clusterConfig))}}\n  roles:\n    - controller\n    - broker\n  storage:\n    type: ephemeral\n",
           "action": "apply",
-          "setOwnerReference": true
+          "setOwnerReference": false
         },
         "outputs": {
           "parameters": []
@@ -60,7 +60,7 @@
         "resource": {
           "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka:\n    version: \"{{inputs.parameters.version}}\"\n    metadataVersion: 4.0-IV3\n    readinessProbe:\n      initialDelaySeconds: 1\n      periodSeconds: 2\n      timeoutSeconds: 2\n      failureThreshold: 1\n    livenessProbe:\n      initialDelaySeconds: 1\n      periodSeconds: 2\n      timeoutSeconds: 2\n      failureThreshold: 2\n    listeners:\n      - name: plain\n        port: 9092\n        type: internal\n        tls: false\n      - name: tls\n        port: 9093\n        type: internal\n        tls: true\n    config:\n      auto.create.topics.enable: false\n      offsets.topic.replication.factor: 1\n      transaction.state.log.replication.factor: 1\n      transaction.state.log.min.isr: 1\n      default.replication.factor: 1\n      min.insync.replicas: 1\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
           "action": "apply",
-          "setOwnerReference": true,
+          "setOwnerReference": false,
           "successCondition": "status.listeners"
         },
         "outputs": {
@@ -156,7 +156,7 @@
         "resource": {
           "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec:\n  partitions: {{=sprig.dig('partitions', 1, fromJSON(inputs.parameters.clusterConfig))}}\n  replicas: {{=sprig.dig('topicReplicas', 1, fromJSON(inputs.parameters.clusterConfig))}}\n  config:\n    retention.ms: 604800000\n    segment.bytes: 1073741824\n",
           "action": "apply",
-          "setOwnerReference": true,
+          "setOwnerReference": false,
           "successCondition": "status.topicName"
         },
         "outputs": {
@@ -168,6 +168,20 @@
               }
             }
           ]
+        }
+      },
+      {
+        "name": "suspendforretry",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        "suspend": {},
+        "outputs": {
+          "parameters": []
         }
       },
       {
@@ -206,21 +220,23 @@
           ],
           [
             {
-              "inline": {
-                "inputs": {
-                  "parameters": []
-                },
-                "suspend": {}
-              },
+              "template": "suspendforretry",
+              "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
-                "parameters": []
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "KafkaNodePool"
+                  }
+                ]
               },
-              "name": "waitForUserAction"
+              "name": "waitForFix"
             }
           ],
           [
             {
-              "template": "deploykafkanodepool",
+              "template": "deploykafkanodepoolwithretry",
+              "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -233,7 +249,7 @@
                   }
                 ]
               },
-              "name": "retryApply"
+              "name": "retryLoop"
             }
           ]
         ],
@@ -277,21 +293,23 @@
           ],
           [
             {
-              "inline": {
-                "inputs": {
-                  "parameters": []
-                },
-                "suspend": {}
-              },
+              "template": "suspendforretry",
+              "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
-                "parameters": []
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "KafkaCluster"
+                  }
+                ]
               },
-              "name": "waitForUserAction"
+              "name": "waitForFix"
             }
           ],
           [
             {
-              "template": "deploykafkaclusterkraft",
+              "template": "deploykafkaclusterkraftwithretry",
+              "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -304,7 +322,7 @@
                   }
                 ]
               },
-              "name": "retryApply"
+              "name": "retryLoop"
             }
           ]
         ],
@@ -313,7 +331,7 @@
             {
               "name": "brokers",
               "valueFrom": {
-                "expression": "steps.retryApply.outputs.parameters.brokers"
+                "expression": "steps.tryApply.outputs.parameters.brokers"
               }
             }
           ]
@@ -362,21 +380,23 @@
           ],
           [
             {
-              "inline": {
-                "inputs": {
-                  "parameters": []
-                },
-                "suspend": {}
-              },
+              "template": "suspendforretry",
+              "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
-                "parameters": []
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "KafkaTopic"
+                  }
+                ]
               },
-              "name": "waitForUserAction"
+              "name": "waitForFix"
             }
           ],
           [
             {
-              "template": "createkafkatopic",
+              "template": "createkafkatopicwithretry",
+              "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -393,7 +413,7 @@
                   }
                 ]
               },
-              "name": "retryApply"
+              "name": "retryLoop"
             }
           ]
         ],
@@ -402,7 +422,7 @@
             {
               "name": "topicName",
               "valueFrom": {
-                "expression": "steps.retryApply.outputs.parameters.topicName"
+                "expression": "steps.tryApply.outputs.parameters.topicName"
               }
             }
           ]

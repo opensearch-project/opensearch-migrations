@@ -30,6 +30,8 @@ import {
     KeyFor,
     OutputsFrom,
     ParamsTuple,
+    ApplyRebinder,
+    unpackParams,
     TaskBuilder,
     TaskOpts,
     TaskRebinder
@@ -54,9 +56,20 @@ function isDagTaskOpts<TaskScope extends TasksOutputsScope, LoopT extends PlainO
 
 class DagTaskBuilder<
     ParentWorkflowScope extends WorkflowAndTemplatesScope,
+    InputParamsScope extends InputParametersRecord,
     TaskScope extends TasksOutputsScope
 > extends TaskBuilder<ParentWorkflowScope, TaskScope, "tasks", TaskRebinder<ParentWorkflowScope>> {
     protected readonly label = "tasks";
+
+    constructor(
+        parentWorkflowScope: ParentWorkflowScope,
+        private readonly currentTemplateInputs: InputParamsScope,
+        tasksScope: TaskScope,
+        orderedTasks: NamedTask[],
+        rebind: TaskRebinder<ParentWorkflowScope>
+    ) {
+        super(parentWorkflowScope, tasksScope, orderedTasks, rebind);
+    }
 
     protected onTaskPushed<
         LoopT extends PlainObject,
@@ -69,6 +82,50 @@ class DagTaskBuilder<
             ...((isDagTaskOpts<TaskScope, LoopT>(opts) && opts.dependencies?.length)
                 ? {dependencies: opts.dependencies} : {})
         };
+    }
+
+    public addTaskToSelf<
+        Name extends string,
+        LoopT extends PlainObject = never
+    >(
+        name: UniqueNameConstraintAtDeclaration<Name, TaskScope>,
+        ...args: ParamsTuple<
+            InputParamsScope,
+            Name,
+            TaskScope,
+            "tasks",
+            LoopT,
+            DagTaskOpts<TaskScope, LoopT>
+        >
+    ): ApplyRebinder<
+        TaskRebinder<ParentWorkflowScope>,
+        ParentWorkflowScope,
+        ExtendScope<TaskScope, { [P in Name]: TasksWithOutputs<Name, {}> }>
+    > {
+        const currentTemplateName = this.parentWorkflowScope.currentTemplateName;
+        if (!currentTemplateName) {
+            throw new Error("Self-referential task registration requires a current template name");
+        }
+
+        const {paramsFn, opts} = unpackParams<InputParamsScope, TaskScope, "tasks", LoopT>(args);
+        const loopWith = (opts?.loopWith === undefined)
+            ? undefined
+            : (typeof opts.loopWith === "function"
+                ? opts.loopWith(this.getTaskOutputsByTaskName())
+                : opts.loopWith);
+        const params = this.getParamsFromCallback<InputParamsScope, LoopT>(
+            this.currentTemplateInputs,
+            paramsFn,
+            loopWith
+        );
+        const templateCall: NamedTask<InputParamsScope, {}, LoopT> = {
+            name: String(name),
+            template: currentTemplateName,
+            args: params,
+            ...(loopWith === undefined ? {} : {withLoop: loopWith})
+        };
+
+        return this.addTaskHelper(name, templateCall, {}, opts);
     }
 }
 
@@ -94,7 +151,7 @@ export class DagBuilder<
     TasksOutputsScope, // BodyBound
     DagExpressionContext<InputParamsScope, TaskScope>
 > {
-    private readonly taskBuilder: DagTaskBuilder<ParentWorkflowScope, TaskScope>;
+    private readonly taskBuilder: DagTaskBuilder<ParentWorkflowScope, InputParamsScope, TaskScope>;
 
     constructor(
         parentWorkflowScope: ParentWorkflowScope,
@@ -128,7 +185,7 @@ export class DagBuilder<
                     ctx, this.inputsScope, scope, tasks, this.outputsScope, this.retryParameters, this.synchronization
                 );
 
-        this.taskBuilder = new DagTaskBuilder(parentWorkflowScope, bodyScope, orderedTasks, tasksRebind);
+        this.taskBuilder = new DagTaskBuilder(parentWorkflowScope, inputs, bodyScope, orderedTasks, tasksRebind);
 
         // finalize selfRef after fields are initialized
         selfRef = this;
@@ -192,6 +249,28 @@ export class DagBuilder<
     >;
     public addTask(name: any, source: any, keyOrFn?: any, ...restArgs: any[]): any {
         return (this.taskBuilder as any).addTask(name, source, keyOrFn, ...restArgs);
+    }
+
+    public addTaskToSelf<
+        Name extends string,
+        LoopT extends PlainObject = never
+    >(
+        name: UniqueNameConstraintAtDeclaration<Name, TaskScope>,
+        ...args: ParamsTuple<
+            InputParamsScope,
+            Name,
+            TaskScope,
+            "tasks",
+            LoopT,
+            DagTaskOpts<TaskScope, LoopT>
+        >
+    ): DagBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        ExtendScope<TaskScope, { [P in Name]: TasksWithOutputs<Name, {}> }>,
+        OutputParamsScope
+    > {
+        return this.taskBuilder.addTaskToSelf<Name, LoopT>(name, ...args);
     }
 
     protected getBody() {

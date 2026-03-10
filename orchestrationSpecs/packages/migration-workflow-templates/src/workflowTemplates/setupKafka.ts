@@ -111,7 +111,7 @@ export const SetupKafka = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
-                setOwnerReference: true,
+                setOwnerReference: false,
                 manifest: makeDeployKafkaNodePool({
                     clusterName: b.inputs.clusterName,
                     replicas:    expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["replicas"], 1),
@@ -126,7 +126,7 @@ export const SetupKafka = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
-                setOwnerReference: true,
+                setOwnerReference: false,
                 successCondition: "status.listeners",
                 manifest: makeDeployKafkaClusterKraftManifest({
                     clusterName: b.inputs.clusterName,
@@ -169,7 +169,7 @@ export const SetupKafka = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
-                setOwnerReference: true,
+                setOwnerReference: false,
                 successCondition: "status.topicName",
                 manifest: makeKafkaTopicManifest({
                     clusterName:     b.inputs.clusterName,
@@ -182,88 +182,110 @@ export const SetupKafka = WorkflowBuilder.create({
     )
 
 
-    // ── Reconciliation templates with VAP-aware suspend/retry ─────────────
+    // ── Suspend template for VAP retry loops ─────────────────────────────
+    .addTemplate("suspendForRetry", t => t
+        .addRequiredInput("name", typeToken<string>())
+        .addSuspend()
+    )
+
+
+    // ── Reconciliation templates with VAP-aware recursive retry ──────────
     // These templates handle VAP rejections by:
     //   1. Attempting the apply (with continueOn.failed)
-    //   2. Always suspending for user to verify or fix issues
-    //   3. Retrying after the user clicks Resume
+    //   2. If failed, suspend for user to fix issues
+    //   3. After resume, recursively call self until success
     // If VAP blocked the change, user must either:
     //   - Fix their config to match deployed state, OR
     //   - Add approval annotation (e.g., approved-replicas=<value>)
     // Then click Resume in Argo UI.
 
     .addTemplate("deployKafkaNodePoolWithRetry", t => t
-        .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("clusterName",   typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
 
         .addSteps(b => b
-            // Step 1: Try apply, continue on failure (VAP rejection)
             .addStep("tryApply", INTERNAL, "deployKafkaNodePool", c =>
                 c.register({
-                    clusterName: b.inputs.clusterName,
+                    clusterName:   b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
                 }),
                 { continueOn: { failed: true } }
             )
-            // Step 2: Suspend for user to verify success or fix issues
-            .addStep("waitForUserAction", INLINE, tb => tb.addSuspend())
-            // Step 3: After resume, retry the apply (idempotent if already succeeded)
-            .addStep("retryApply", INTERNAL, "deployKafkaNodePool", c =>
+            .addStep("waitForFix", INTERNAL, "suspendForRetry", c =>
                 c.register({
-                    clusterName: b.inputs.clusterName,
+                    name: expr.literal("KafkaNodePool")
+                }),
+                { when: c => ({ templateExp: expr.equals(c.tryApply.status, "Failed") }) }
+            )
+            .addStepToSelf("retryLoop", c =>
+                c.register({
+                    clusterName:   b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
-                })
+                }),
+                { when: c => ({ templateExp: expr.equals(c.waitForFix.status, "Succeeded") }) }
             )
         )
     )
 
     .addTemplate("deployKafkaClusterKraftWithRetry", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("version", typeToken<string>())
+        .addRequiredInput("version",     typeToken<string>())
 
         .addSteps(b => b
             .addStep("tryApply", INTERNAL, "deployKafkaClusterKraft", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
-                    version: b.inputs.version,
+                    version:     b.inputs.version,
                 }),
                 { continueOn: { failed: true } }
             )
-            .addStep("waitForUserAction", INLINE, tb => tb.addSuspend())
-            .addStep("retryApply", INTERNAL, "deployKafkaClusterKraft", c =>
+            .addStep("waitForFix", INTERNAL, "suspendForRetry", c =>
+                c.register({
+                    name: expr.literal("KafkaCluster")
+                }),
+                { when: c => ({ templateExp: expr.equals(c.tryApply.status, "Failed") }) }
+            )
+            .addStepToSelf("retryLoop", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
-                    version: b.inputs.version,
-                })
+                    version:     b.inputs.version,
+                }),
+                { when: c => ({ templateExp: expr.equals(c.waitForFix.status, "Succeeded") }) }
             )
         )
-        .addExpressionOutput("brokers", c => c.steps.retryApply.outputs.brokers)
+        .addExpressionOutput("brokers", c => c.steps.tryApply.outputs.brokers)
     )
 
     .addTemplate("createKafkaTopicWithRetry", t => t
-        .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("topicName", typeToken<string>())
+        .addRequiredInput("clusterName",   typeToken<string>())
+        .addRequiredInput("topicName",     typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
 
         .addSteps(b => b
             .addStep("tryApply", INTERNAL, "createKafkaTopic", c =>
                 c.register({
-                    clusterName: b.inputs.clusterName,
-                    topicName: b.inputs.topicName,
+                    clusterName:   b.inputs.clusterName,
+                    topicName:     b.inputs.topicName,
                     clusterConfig: b.inputs.clusterConfig,
                 }),
                 { continueOn: { failed: true } }
             )
-            .addStep("waitForUserAction", INLINE, tb => tb.addSuspend())
-            .addStep("retryApply", INTERNAL, "createKafkaTopic", c =>
+            .addStep("waitForFix", INTERNAL, "suspendForRetry", c =>
                 c.register({
-                    clusterName: b.inputs.clusterName,
-                    topicName: b.inputs.topicName,
+                    name: expr.literal("KafkaTopic")
+                }),
+                { when: c => ({ templateExp: expr.equals(c.tryApply.status, "Failed") }) }
+            )
+            .addStepToSelf("retryLoop", c =>
+                c.register({
+                    clusterName:   b.inputs.clusterName,
+                    topicName:     b.inputs.topicName,
                     clusterConfig: b.inputs.clusterConfig,
-                })
+                }),
+                { when: c => ({ templateExp: expr.equals(c.waitForFix.status, "Succeeded") }) }
             )
         )
-        .addExpressionOutput("topicName", c => c.steps.retryApply.outputs.topicName)
+        .addExpressionOutput("topicName", c => c.steps.tryApply.outputs.topicName)
     )
 
     // Combined retry template for full Kafka cluster deployment

@@ -55,7 +55,8 @@ export type WorkflowAndTemplatesScope<
         TemplateSignaturesScopeTyped<Record<string, { inputs: any; outputs?: any }>>> =
     {
         workflowParameters?: InputParametersRecord,
-        templates?: TemplateSignatures
+        templates?: TemplateSignatures,
+        currentTemplateName?: string
     };
 export type DataScope = Record<string, AllowLiteralOrExpression<PlainObject>>;
 export type DataOrConfigMapScope = Record<string, ExpressionOrConfigMapValue<PlainObject>>;
