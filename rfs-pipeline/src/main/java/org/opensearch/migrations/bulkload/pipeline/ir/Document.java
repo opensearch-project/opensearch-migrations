@@ -31,6 +31,9 @@ public record Document(
     public static final String HINT_TYPE = "_type";
     public static final String HINT_ROUTING = "routing";
 
+    /** Well-known sourceMetadata keys for Lucene-based sources. */
+    public static final String SOURCE_META_LUCENE_DOC_NUMBER = "luceneDocNumber";
+
     /** The type of document operation. */
     public enum Operation {
         /** Create or replace a document. */

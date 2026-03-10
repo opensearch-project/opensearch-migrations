@@ -61,16 +61,16 @@ public class OpenSearchDocumentSink implements DocumentSink {
     public Mono<Void> createCollection(CollectionMetadata metadata) {
         return Mono.fromRunnable(() -> {
             var sourceConfig = metadata.sourceConfig();
-            if (sourceConfig.containsKey("es.numberOfShards")) {
+            if (sourceConfig.containsKey(CollectionMetadata.ES_NUMBER_OF_SHARDS)) {
                 // ES→ES path: reconstruct IndexMetadataSnapshot from sourceConfig
                 var esMetadata = new IndexMetadataSnapshot(
                     metadata.name(),
-                    (int) sourceConfig.get("es.numberOfShards"),
-                    sourceConfig.containsKey("es.numberOfReplicas")
-                        ? (int) sourceConfig.get("es.numberOfReplicas") : 0,
-                    (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get("es.mappings"),
-                    (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get("es.settings"),
-                    (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get("es.aliases")
+                    (int) sourceConfig.get(CollectionMetadata.ES_NUMBER_OF_SHARDS),
+                    sourceConfig.containsKey(CollectionMetadata.ES_NUMBER_OF_REPLICAS)
+                        ? (int) sourceConfig.get(CollectionMetadata.ES_NUMBER_OF_REPLICAS) : 0,
+                    (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get(CollectionMetadata.ES_MAPPINGS),
+                    (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get(CollectionMetadata.ES_SETTINGS),
+                    (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get(CollectionMetadata.ES_ALIASES)
                 );
                 OpenSearchIndexCreator.createIndex(client, esMetadata, OBJECT_MAPPER, null);
             } else {

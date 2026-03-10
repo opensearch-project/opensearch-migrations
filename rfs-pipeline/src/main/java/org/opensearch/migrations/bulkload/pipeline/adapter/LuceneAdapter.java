@@ -40,7 +40,7 @@ public final class LuceneAdapter {
             luceneDoc.getSource(),
             mapOperation(luceneDoc.getOperation()),
             hints,
-            Map.of("luceneDocNumber", luceneDoc.getLuceneDocNumber())
+            Map.of(Document.SOURCE_META_LUCENE_DOC_NUMBER, luceneDoc.getLuceneDocNumber())
         );
     }
 

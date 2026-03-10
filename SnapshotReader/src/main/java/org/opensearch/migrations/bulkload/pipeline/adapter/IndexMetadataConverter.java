@@ -73,16 +73,16 @@ final class IndexMetadataConverter {
      */
     static CollectionMetadata toCollectionMetadata(IndexMetadataSnapshot snapshot) {
         Map<String, Object> sourceConfig = new HashMap<>();
-        sourceConfig.put("es.numberOfShards", snapshot.numberOfShards());
-        sourceConfig.put("es.numberOfReplicas", snapshot.numberOfReplicas());
+        sourceConfig.put(CollectionMetadata.ES_NUMBER_OF_SHARDS, snapshot.numberOfShards());
+        sourceConfig.put(CollectionMetadata.ES_NUMBER_OF_REPLICAS, snapshot.numberOfReplicas());
         if (snapshot.mappings() != null) {
-            sourceConfig.put("es.mappings", snapshot.mappings());
+            sourceConfig.put(CollectionMetadata.ES_MAPPINGS, snapshot.mappings());
         }
         if (snapshot.settings() != null) {
-            sourceConfig.put("es.settings", snapshot.settings());
+            sourceConfig.put(CollectionMetadata.ES_SETTINGS, snapshot.settings());
         }
         if (snapshot.aliases() != null) {
-            sourceConfig.put("es.aliases", snapshot.aliases());
+            sourceConfig.put(CollectionMetadata.ES_ALIASES, snapshot.aliases());
         }
         return new CollectionMetadata(snapshot.indexName(), snapshot.numberOfShards(), sourceConfig);
     }

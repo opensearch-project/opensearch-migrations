@@ -20,6 +20,13 @@ public record CollectionMetadata(
     int partitionCount,
     Map<String, Object> sourceConfig
 ) {
+    /** Well-known sourceConfig keys for ES-compatible sources. */
+    public static final String ES_NUMBER_OF_SHARDS = "es.numberOfShards";
+    public static final String ES_NUMBER_OF_REPLICAS = "es.numberOfReplicas";
+    public static final String ES_MAPPINGS = "es.mappings";
+    public static final String ES_SETTINGS = "es.settings";
+    public static final String ES_ALIASES = "es.aliases";
+
     public CollectionMetadata {
         Objects.requireNonNull(name, "name must not be null");
         if (partitionCount < 0) {
