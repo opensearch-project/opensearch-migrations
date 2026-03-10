@@ -7,6 +7,7 @@ import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.IncompatibleReplicaCountException;
 import org.opensearch.migrations.bulkload.common.InvalidResponse;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
@@ -165,7 +166,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             }
         }
         log.warn("Unexpected exception type during index creation: {} - {}", e.getClass().getName(), e.getMessage());
-        throw new RuntimeException(e);
+        throw new RfsException("Unexpected exception during index creation", e);
     }
 
     private void handleInvalidResponse(InvalidResponse invalidResponse, String indexName, ObjectNode settings) throws IncompatibleReplicaCountException {
