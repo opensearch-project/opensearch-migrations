@@ -1,11 +1,11 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
-import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
-import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
+import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import org.junit.jupiter.api.Test;
@@ -32,8 +32,6 @@ class OpenSearchDocumentSinkTest {
     @Mock
     OpenSearchClient client;
 
-    private static final ShardId SHARD = new ShardId("snap", "idx", 0);
-
     private static final Mono<OpenSearchClient.BulkResponse> OK =
         Mono.just(new OpenSearchClient.BulkResponse(200, "", null, "{}"));
 
@@ -43,7 +41,7 @@ class OpenSearchDocumentSinkTest {
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
         var docs = List.of(doc("d1", "{\"a\":1}"), doc("d2", "{\"b\":2}"));
 
-        var result = sink.writeBatch(SHARD, "idx", docs).block();
+        var result = sink.writeBatch("idx", docs).block();
 
         assertNotNull(result);
         assertEquals(2, result.docsInBatch());
@@ -59,7 +57,7 @@ class OpenSearchDocumentSinkTest {
         var sink = new OpenSearchDocumentSink(client, () -> identity, false, DocumentExceptionAllowlist.empty(), null);
         var docs = List.of(doc("d1", "{\"a\":1}"));
 
-        sink.writeBatch(SHARD, "idx", docs).block();
+        sink.writeBatch("idx", docs).block();
 
         verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any());
         verify(client, never()).sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any());
@@ -72,11 +70,11 @@ class OpenSearchDocumentSinkTest {
         byte[] src1 = "{\"x\":1}".getBytes();
         byte[] src2 = "{\"y\":2}".getBytes();
         var docs = List.of(
-            new DocumentChange("d1", null, src1, null, DocumentChange.ChangeType.INDEX),
-            new DocumentChange("d2", null, src2, null, DocumentChange.ChangeType.INDEX)
+            new Document("d1", src1, Document.Operation.UPSERT, Map.of(), Map.of()),
+            new Document("d2", src2, Document.Operation.UPSERT, Map.of(), Map.of())
         );
 
-        var result = sink.writeBatch(SHARD, "idx", docs).block();
+        var result = sink.writeBatch("idx", docs).block();
 
         assertNotNull(result);
         assertEquals(2, result.docsInBatch());
@@ -88,10 +86,10 @@ class OpenSearchDocumentSinkTest {
         when(client.sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
         var docs = List.of(
-            new DocumentChange("d1", null, null, null, DocumentChange.ChangeType.DELETE)
+            new Document("d1", null, Document.Operation.DELETE, Map.of(), Map.of())
         );
 
-        var result = sink.writeBatch(SHARD, "idx", docs).block();
+        var result = sink.writeBatch("idx", docs).block();
 
         assertNotNull(result);
         assertEquals(1, result.docsInBatch());
@@ -106,11 +104,10 @@ class OpenSearchDocumentSinkTest {
         var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
         var docs = List.of(doc("d1", "{\"a\":1}"));
 
-        var error = sink.writeBatch(SHARD, "idx", docs)
+        var error = sink.writeBatch("idx", docs)
             .onErrorResume(e -> Mono.empty())
             .block();
 
-        // Error consumed by onErrorResume — cursor is null
         assertEquals(null, error);
     }
 
@@ -119,18 +116,17 @@ class OpenSearchDocumentSinkTest {
     void writeBatch_transformerModifiesDocs_sendsTransformed() {
         when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
 
-        // Identity transformer — passes docs through unchanged
         IJsonTransformer identity = input -> input;
         var sink = new OpenSearchDocumentSink(client, () -> identity, false, DocumentExceptionAllowlist.empty(), null);
         var docs = List.of(doc("d1", "{\"a\":1}"));
 
-        sink.writeBatch(SHARD, "idx", docs).block();
+        sink.writeBatch("idx", docs).block();
 
         verify(client).sendBulkRequest(eq("idx"), anyList(), isNull(), eq(false), any());
         verify(client, never()).sendBulkRequestRaw(anyString(), anyList(), any(), anyBoolean(), any());
     }
 
-    private static DocumentChange doc(String id, String json) {
-        return new DocumentChange(id, null, json.getBytes(), null, DocumentChange.ChangeType.INDEX);
+    private static Document doc(String id, String json) {
+        return new Document(id, json.getBytes(), Document.Operation.UPSERT, Map.of(), Map.of());
     }
 }

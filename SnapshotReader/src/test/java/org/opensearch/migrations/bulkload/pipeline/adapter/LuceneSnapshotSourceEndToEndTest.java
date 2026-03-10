@@ -15,7 +15,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.framework.SnapshotFixtureCache;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
-import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
+import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
@@ -36,8 +36,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 /**
  * Source-side e2e tests for the pipeline adapters: {@link LuceneSnapshotSource} and
  * {@link SnapshotMetadataSource} against real snapshots from Docker containers.
- *
- * <p>No target cluster needed — validates the N side of the N+M testing strategy.
  */
 @Slf4j
 @Tag("isolatedTest")
@@ -54,8 +52,6 @@ public class LuceneSnapshotSourceEndToEndTest {
     static Stream<Arguments> supportedSources() {
         return SupportedClusters.supportedSources(false).stream().map(Arguments::of);
     }
-
-    // --- Helpers ---
 
     private SnapshotExtractor createSnapshot(ContainerVersion sourceVersion) throws Exception {
         String cacheKey = sourceVersion.getVersion() + "-pipeline-source";
@@ -96,45 +92,43 @@ public class LuceneSnapshotSourceEndToEndTest {
         return SnapshotExtractor.forLocalSnapshot(snapshotDir, sourceVersion.getVersion());
     }
 
-    // --- Source adapter tests ---
-
-    @ParameterizedTest(name = "listIndices from {0}")
+    @ParameterizedTest(name = "listCollections from {0}")
     @MethodSource("supportedSources")
-    void listIndicesFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
+    void listCollectionsFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
         var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, localDirectory.toPath()).build();
 
-        var indices = source.listIndices();
+        var collections = source.listCollections();
 
-        assertThat("Should contain our test index", indices.contains(INDEX_NAME), equalTo(true));
-        log.info("Listed {} indices from {} snapshot", indices.size(), sourceVersion);
+        assertThat("Should contain our test index", collections.contains(INDEX_NAME), equalTo(true));
+        log.info("Listed {} collections from {} snapshot", collections.size(), sourceVersion);
     }
 
-    @ParameterizedTest(name = "listShards from {0}")
+    @ParameterizedTest(name = "listPartitions from {0}")
     @MethodSource("supportedSources")
-    void listShardsFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
+    void listPartitionsFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
         var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, localDirectory.toPath()).build();
 
-        var shards = source.listShards(INDEX_NAME);
+        var partitions = source.listPartitions(INDEX_NAME);
 
-        assertThat("Should have 1 shard", shards, hasSize(1));
-        assertThat(shards.get(0).snapshotName(), equalTo(SNAPSHOT_NAME));
-        assertThat(shards.get(0).indexName(), equalTo(INDEX_NAME));
-        assertThat(shards.get(0).shardNumber(), equalTo(0));
+        assertThat("Should have 1 partition", partitions, hasSize(1));
+        var esShard = (EsShardPartition) partitions.get(0);
+        assertThat(esShard.snapshotName(), equalTo(SNAPSHOT_NAME));
+        assertThat(esShard.indexName(), equalTo(INDEX_NAME));
+        assertThat(esShard.shardNumber(), equalTo(0));
     }
 
-    @ParameterizedTest(name = "readIndexMetadata from {0}")
+    @ParameterizedTest(name = "readCollectionMetadata from {0}")
     @MethodSource("supportedSources")
-    void readIndexMetadataFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
+    void readCollectionMetadataFromRealSnapshot(ContainerVersion sourceVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
         var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, localDirectory.toPath()).build();
 
-        var metadata = source.readIndexMetadata(INDEX_NAME);
+        var metadata = source.readCollectionMetadata(INDEX_NAME);
 
         assertThat(metadata.indexName(), equalTo(INDEX_NAME));
         assertThat(metadata.numberOfShards(), equalTo(1));
-        // Settings/mappings may be null for versions where the underlying reader returns non-ObjectNode types
     }
 
     @ParameterizedTest(name = "readDocuments from {0}")
@@ -144,19 +138,19 @@ public class LuceneSnapshotSourceEndToEndTest {
         Path workDir = Files.createTempDirectory("pipeline_source_e2e");
         try {
             var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
-            source.listShards(INDEX_NAME); // populate cache
+            source.listPartitions(INDEX_NAME); // populate cache
 
-            var shardId = source.listShards(INDEX_NAME).get(0);
-            var docs = source.readDocuments(shardId, 0).collectList().block();
+            var partition = source.listPartitions(INDEX_NAME).get(0);
+            var docs = source.readDocuments(partition, 0).collectList().block();
 
             assertThat("Should read 3 documents", docs, hasSize(3));
-            var ids = docs.stream().map(DocumentChange::id).sorted().toList();
+            var ids = docs.stream().map(Document::id).sorted().toList();
             assertThat(ids, equalTo(List.of("doc1", "doc2", "doc3")));
 
             for (var doc : docs) {
                 assertThat(doc.source(), notNullValue());
                 assertThat(doc.source().length, greaterThan(0));
-                assertThat(doc.operation(), equalTo(DocumentChange.ChangeType.INDEX));
+                assertThat(doc.operation(), equalTo(Document.Operation.UPSERT));
             }
             log.info("Read {} documents from {} snapshot via LuceneSnapshotSource", docs.size(), sourceVersion);
         } finally {
@@ -171,18 +165,16 @@ public class LuceneSnapshotSourceEndToEndTest {
         Path workDir = Files.createTempDirectory("pipeline_source_resume");
         try {
             var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
-            var shardId = source.listShards(INDEX_NAME).get(0);
+            var partition = source.listPartitions(INDEX_NAME).get(0);
 
-            // Read all 3 docs
-            var allDocs = source.readDocuments(shardId, 0).collectList().block();
+            var allDocs = source.readDocuments(partition, 0).collectList().block();
             assertThat(allDocs, hasSize(3));
 
-            // Resume from offset 2 — should get only the last doc (use fresh source to avoid unpack conflict)
             Path workDir2 = Files.createTempDirectory("pipeline_source_resume2");
             try {
                 var source2 = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir2).build();
-                source2.listShards(INDEX_NAME);
-                var resumed = source2.readDocuments(shardId, 2).collectList().block();
+                source2.listPartitions(INDEX_NAME);
+                var resumed = source2.readDocuments(partition, 2).collectList().block();
                 assertThat("Resuming from offset 2 should yield 1 doc", resumed, hasSize(1));
                 assertThat(resumed.get(0).id(), equalTo(allDocs.get(2).id()));
             } finally {
@@ -192,8 +184,6 @@ public class LuceneSnapshotSourceEndToEndTest {
             deleteDir(workDir);
         }
     }
-
-    // --- Metadata source adapter tests ---
 
     @ParameterizedTest(name = "readGlobalMetadata from {0}")
     @MethodSource("supportedSources")

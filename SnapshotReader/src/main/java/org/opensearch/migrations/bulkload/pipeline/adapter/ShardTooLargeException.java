@@ -1,6 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
-import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
+import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
 
 /**
  * Thrown when a shard exceeds the configured maximum size, preventing disk overflow
@@ -8,10 +8,10 @@ import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
  */
 public class ShardTooLargeException extends RuntimeException {
 
-    public ShardTooLargeException(ShardId shardId, long actualBytes, long maxBytes) {
+    public ShardTooLargeException(Partition partition, long actualBytes, long maxBytes) {
         super(String.format(
-            "Shard %s is %,d bytes which exceeds the maximum of %,d bytes. " +
-            "Increase --max-shard-size-bytes or skip this shard.",
-            shardId, actualBytes, maxBytes));
+            "Partition %s is %,d bytes which exceeds the maximum of %,d bytes. " +
+            "Increase --max-shard-size-bytes or skip this partition.",
+            partition, actualBytes, maxBytes));
     }
 }

@@ -14,7 +14,7 @@ import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.bulk.operations.BaseOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
-import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
+import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -69,7 +69,7 @@ public final class BulkNdjson {
     }
 
     /**
-     * Write a list of {@link DocumentChange} records as raw NDJSON bytes, skipping the
+     * Write a list of {@link Document} records as raw NDJSON bytes, skipping the
      * byte[]→Map→byte[] round-trip for document bodies.
      *
      * @param docs       the documents to write
@@ -79,16 +79,17 @@ public final class BulkNdjson {
      * @return the raw NDJSON bytes
      */
     public static byte[] toRawNdjsonBytes(
-        List<? extends DocumentChange> docs,
+        List<? extends Document> docs,
         String indexName, boolean stripIds, ObjectMapper mapper
     ) {
         try (var baos = new ByteArrayOutputStream()) {
             for (var doc : docs) {
-                String opType = doc.operation() == DocumentChange.ChangeType.DELETE ? "delete" : "index";
+                String opType = doc.operation() == Document.Operation.DELETE ? "delete" : "index";
                 String docId = stripIds ? null : doc.id();
-                var meta = doc.operation() == DocumentChange.ChangeType.DELETE
-                    ? DeleteOperationMeta.builder().id(docId).index(indexName).routing(doc.routing()).build()
-                    : IndexOperationMeta.builder().id(docId).index(indexName).routing(doc.routing()).build();
+                String routing = doc.hints().get(Document.HINT_ROUTING);
+                var meta = doc.operation() == Document.Operation.DELETE
+                    ? DeleteOperationMeta.builder().id(docId).index(indexName).routing(routing).build()
+                    : IndexOperationMeta.builder().id(docId).index(indexName).routing(routing).build();
                 writeRawOperation(opType, meta, doc.source(), baos, mapper);
                 baos.write(NEWLINE_BYTES);
             }

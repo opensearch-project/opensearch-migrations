@@ -2,14 +2,14 @@ package org.opensearch.migrations.bulkload.pipeline.source;
 
 import java.util.List;
 
-import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
+import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
-import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
+import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
 
 import reactor.core.publisher.Flux;
 
 /**
- * Port for reading documents from any source — snapshot, remote cluster, or synthetic test data.
+ * Port for reading documents from any source — snapshot, remote cluster, S3, Solr, or synthetic test data.
  *
  * <p>This is the key abstraction enabling N+M testing:
  * <ul>
@@ -17,29 +17,29 @@ import reactor.core.publisher.Flux;
  *   <li>Sink-side tests: {@code SyntheticDocumentSource} → real target → assert cluster state</li>
  * </ul>
  *
- * <p>Implementations must be safe for sequential shard-by-shard access. Concurrent access
- * across shards is handled by the pipeline, not the source.
+ * <p>Implementations must be safe for sequential partition-by-partition access. Concurrent access
+ * across partitions is handled by the pipeline, not the source.
  */
 public interface DocumentSource extends AutoCloseable {
 
-    /** List all available index names. */
-    List<String> listIndices();
+    /** List all available collection names. */
+    List<String> listCollections();
 
-    /** List all shards for the given index. */
-    List<ShardId> listShards(String indexName);
+    /** List all partitions for the given collection. */
+    List<Partition> listPartitions(String collectionName);
 
-    /** Read metadata for the given index. */
-    IndexMetadataSnapshot readIndexMetadata(String indexName);
+    /** Read metadata for the given collection. */
+    IndexMetadataSnapshot readCollectionMetadata(String collectionName);
 
     /**
-     * Stream document changes for a shard, starting from the given offset.
+     * Stream documents for a partition, starting from the given offset.
      * Returns a cold {@link Flux} — subscription triggers the read.
      *
-     * @param shardId           the shard to read
+     * @param partition         the partition to read
      * @param startingDocOffset the document offset to resume from (0 for start)
-     * @return a cold Flux of document changes
+     * @return a cold Flux of documents
      */
-    Flux<DocumentChange> readDocuments(ShardId shardId, long startingDocOffset);
+    Flux<Document> readDocuments(Partition partition, long startingDocOffset);
 
     @Override
     default void close() throws Exception {

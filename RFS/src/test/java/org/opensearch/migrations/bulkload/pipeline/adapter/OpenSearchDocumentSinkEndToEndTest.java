@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.SupportedClusters;
@@ -11,9 +12,8 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParam
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
-import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
+import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
-import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,8 +31,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 /**
  * Sink-side e2e tests for {@link OpenSearchDocumentSink} and {@link OpenSearchMetadataSink}
  * against real OpenSearch/Elasticsearch clusters via Docker containers.
- *
- * <p>No source snapshot needed — validates the M side of the N+M testing strategy.
  */
 @Slf4j
 @Tag("isolatedTest")
@@ -44,9 +42,7 @@ public class OpenSearchDocumentSinkEndToEndTest {
         return SupportedClusters.targets().stream().map(Arguments::of);
     }
 
-    // --- Document sink tests ---
-
-    @ParameterizedTest(name = "createIndex on {0}")
+    @ParameterizedTest(name = "createCollection on {0}")
     @MethodSource("targetVersions")
     void createsIndexOnRealCluster(ContainerVersion targetVersion) {
         try (var cluster = new SearchClusterContainer(targetVersion)) {
@@ -55,9 +51,8 @@ public class OpenSearchDocumentSinkEndToEndTest {
             var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
 
             var metadata = new IndexMetadataSnapshot("sink_test_idx", 1, 0, null, null, null);
-            sink.createIndex(metadata).block();
+            sink.createCollection(metadata).block();
 
-            // Verify index exists
             var restClient = createRestClient(cluster);
             var context = DocumentMigrationTestContext.factory().noOtelTracking();
             var resp = restClient.get("sink_test_idx", context.createUnboundRequestContext());
@@ -65,31 +60,27 @@ public class OpenSearchDocumentSinkEndToEndTest {
         }
     }
 
-    @ParameterizedTest(name = "writeBatch INDEX ops on {0}")
+    @ParameterizedTest(name = "writeBatch UPSERT ops on {0}")
     @MethodSource("targetVersions")
     void writesDocumentsToRealCluster(ContainerVersion targetVersion) {
         try (var cluster = new SearchClusterContainer(targetVersion)) {
             cluster.start();
             var client = createClient(cluster);
             var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
-            var shardId = new ShardId("snap", "sink_docs", 0);
 
-            // Create index first
-            sink.createIndex(new IndexMetadataSnapshot("sink_docs", 1, 0, null, null, null)).block();
+            sink.createCollection(new IndexMetadataSnapshot("sink_docs", 1, 0, null, null, null)).block();
 
-            // Write batch of INDEX operations
             var docs = List.of(
-                new DocumentChange("d1", null, "{\"title\":\"First\"}".getBytes(), null, DocumentChange.ChangeType.INDEX),
-                new DocumentChange("d2", null, "{\"title\":\"Second\"}".getBytes(), null, DocumentChange.ChangeType.INDEX),
-                new DocumentChange("d3", null, "{\"title\":\"Third\"}".getBytes(), null, DocumentChange.ChangeType.INDEX)
+                new Document("d1", "{\"title\":\"First\"}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of()),
+                new Document("d2", "{\"title\":\"Second\"}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of()),
+                new Document("d3", "{\"title\":\"Third\"}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of())
             );
 
-            var cursor = sink.writeBatch(shardId, "sink_docs", docs).block();
+            var cursor = sink.writeBatch("sink_docs", docs).block();
 
             assertNotNull(cursor);
             assertEquals(3, cursor.docsInBatch());
 
-            // Verify docs on cluster
             verifyDocCount(cluster, "sink_docs", 3);
             log.info("Successfully wrote 3 docs to {} via OpenSearchDocumentSink", targetVersion);
         }
@@ -102,26 +93,23 @@ public class OpenSearchDocumentSinkEndToEndTest {
             cluster.start();
             var client = createClient(cluster);
             var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
-            var shardId = new ShardId("snap", "sink_deletes", 0);
 
-            sink.createIndex(new IndexMetadataSnapshot("sink_deletes", 1, 0, null, null, null)).block();
+            sink.createCollection(new IndexMetadataSnapshot("sink_deletes", 1, 0, null, null, null)).block();
 
-            // Write 3 docs
             var additions = List.of(
-                new DocumentChange("keep1", null, "{\"v\":1}".getBytes(), null, DocumentChange.ChangeType.INDEX),
-                new DocumentChange("keep2", null, "{\"v\":2}".getBytes(), null, DocumentChange.ChangeType.INDEX),
-                new DocumentChange("to_delete", null, "{\"v\":3}".getBytes(), null, DocumentChange.ChangeType.INDEX)
+                new Document("keep1", "{\"v\":1}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of()),
+                new Document("keep2", "{\"v\":2}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of()),
+                new Document("to_delete", "{\"v\":3}".getBytes(), Document.Operation.UPSERT, Map.of(), Map.of())
             );
-            sink.writeBatch(shardId, "sink_deletes", additions).block();
+            sink.writeBatch("sink_deletes", additions).block();
 
-            // Delete one
             var deletions = List.of(
-                new DocumentChange("to_delete", null, null, null, DocumentChange.ChangeType.DELETE)
+                new Document("to_delete", null, Document.Operation.DELETE, Map.of(), Map.of())
             );
-            sink.writeBatch(shardId, "sink_deletes", deletions).block();
+            sink.writeBatch("sink_deletes", deletions).block();
 
             verifyDocCount(cluster, "sink_deletes", 2);
-            log.info("Successfully wrote INDEX + DELETE ops to {} via OpenSearchDocumentSink", targetVersion);
+            log.info("Successfully wrote UPSERT + DELETE ops to {} via OpenSearchDocumentSink", targetVersion);
         }
     }
 
@@ -132,17 +120,17 @@ public class OpenSearchDocumentSinkEndToEndTest {
             cluster.start();
             var client = createClient(cluster);
             var sink = new OpenSearchDocumentSink(client, null, false, DocumentExceptionAllowlist.empty(), null);
-            var shardId = new ShardId("snap", "sink_routing", 0);
 
-            sink.createIndex(new IndexMetadataSnapshot("sink_routing", 1, 0, null, null, null)).block();
+            sink.createCollection(new IndexMetadataSnapshot("sink_routing", 1, 0, null, null, null)).block();
 
             var docs = List.of(
-                new DocumentChange("r1", null, "{\"score\":10}".getBytes(), "shard_a", DocumentChange.ChangeType.INDEX),
-                new DocumentChange("r2", null, "{\"score\":20}".getBytes(), "shard_b", DocumentChange.ChangeType.INDEX)
+                new Document("r1", "{\"score\":10}".getBytes(), Document.Operation.UPSERT,
+                    Map.of(Document.HINT_ROUTING, "shard_a"), Map.of()),
+                new Document("r2", "{\"score\":20}".getBytes(), Document.Operation.UPSERT,
+                    Map.of(Document.HINT_ROUTING, "shard_b"), Map.of())
             );
-            sink.writeBatch(shardId, "sink_routing", docs).block();
+            sink.writeBatch("sink_routing", docs).block();
 
-            // Verify routing preserved
             var restClient = createRestClient(cluster);
             var context = DocumentMigrationTestContext.factory().noOtelTracking();
             restClient.get("_refresh", context.createUnboundRequestContext());
@@ -155,8 +143,6 @@ public class OpenSearchDocumentSinkEndToEndTest {
             throw new RuntimeException(e);
         }
     }
-
-    // --- Metadata sink tests ---
 
     @ParameterizedTest(name = "createIndex via metadata sink on {0}")
     @MethodSource("targetVersions")
@@ -175,8 +161,6 @@ public class OpenSearchDocumentSinkEndToEndTest {
             assertThat("Index should exist", resp.statusCode, equalTo(200));
         }
     }
-
-    // --- Helpers ---
 
     private static org.opensearch.migrations.bulkload.common.OpenSearchClient createClient(
         SearchClusterContainer cluster

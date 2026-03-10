@@ -1,20 +1,23 @@
-package org.opensearch.migrations.bulkload.pipeline.ir;
+package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.util.Objects;
 
+import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
+
 /**
- * Identifies a shard within a snapshot. Clean IR — no Lucene or repo-access details.
+ * ES-specific partition implementation — identifies a shard within a snapshot.
  *
  * @param snapshotName the snapshot name, must not be null
  * @param indexName    the index name, must not be null
  * @param shardNumber  the shard number, must be non-negative
  */
-public record ShardId(
+public record EsShardPartition(
     String snapshotName,
     String indexName,
     int shardNumber
-) {
-    public ShardId {
+) implements Partition {
+
+    public EsShardPartition {
         Objects.requireNonNull(snapshotName, "snapshotName must not be null");
         Objects.requireNonNull(indexName, "indexName must not be null");
         if (shardNumber < 0) {
@@ -23,7 +26,17 @@ public record ShardId(
     }
 
     @Override
-    public String toString() {
+    public String name() {
         return snapshotName + "/" + indexName + "/" + shardNumber;
+    }
+
+    @Override
+    public String collectionName() {
+        return indexName;
+    }
+
+    @Override
+    public String toString() {
+        return name();
     }
 }

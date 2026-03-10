@@ -21,7 +21,7 @@ import org.opensearch.migrations.bulkload.framework.SnapshotFixtureCache;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.pipeline.MetadataMigrationPipeline;
-import org.opensearch.migrations.bulkload.pipeline.MigrationPipeline;
+import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchMetadataSink;
@@ -44,7 +44,7 @@ import static org.hamcrest.Matchers.greaterThan;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Full pipeline e2e tests: real snapshot → {@link MigrationPipeline} → real cluster.
+ * Full pipeline e2e tests: real snapshot → {@link DocumentMigrationPipeline} → real cluster.
  *
  * <p>Uses representative source→target pairs from {@link SupportedClusters#smokePairs()}
  * to validate the complete pipeline wiring end-to-end.
@@ -82,7 +82,7 @@ public class PipelineEndToEndTest {
 
             var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
             var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
-            var pipeline = new MigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
+            var pipeline = new DocumentMigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
 
             var cursors = pipeline.migrateAll().collectList().block();
 
@@ -111,7 +111,7 @@ public class PipelineEndToEndTest {
             var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
             var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
             // Batch size of 2 → should produce 3 batches for 5 docs
-            var pipeline = new MigrationPipeline(source, sink, 2, Long.MAX_VALUE);
+            var pipeline = new DocumentMigrationPipeline(source, sink, 2, Long.MAX_VALUE);
 
             var cursors = pipeline.migrateAll().collectList().block();
 
@@ -164,7 +164,7 @@ public class PipelineEndToEndTest {
 
             var source = LuceneSnapshotSource.builder(extractor, SNAPSHOT_NAME, workDir).build();
             var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
-            var pipeline = new MigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
+            var pipeline = new DocumentMigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
 
             var cursors = pipeline.migrateAll().collectList().block();
             assertThat("Should have progress cursors", cursors.size(), greaterThan(0));

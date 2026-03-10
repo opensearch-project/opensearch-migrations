@@ -1,8 +1,11 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
-import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
+import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 
 /**
  * Converts between existing Lucene-specific types and the clean pipeline IR.
@@ -10,33 +13,41 @@ import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
  * <p>This adapter is the bridge between the existing codebase and the clean pipeline.
  * It lives in the adapter package — the pipeline core never imports Lucene types directly.
  *
- * <p>The conversion intentionally drops {@code luceneDocNumber} — progress tracking
- * is handled by {@link org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor} instead.
+ * <p>Populates {@link Document#hints()} with ES-specific fields ({@code _type}, {@code routing})
+ * and {@link Document#sourceMetadata()} with diagnostic info ({@code luceneDocNumber}).
  */
 public final class LuceneAdapter {
 
     private LuceneAdapter() {}
 
     /**
-     * Convert a {@link LuceneDocumentChange} to a clean {@link DocumentChange}.
+     * Convert a {@link LuceneDocumentChange} to a clean {@link Document}.
      *
      * @param luceneDoc the Lucene-specific document change
-     * @return a clean IR document change (luceneDocNumber is dropped)
+     * @return a clean IR document with hints and sourceMetadata populated
      */
-    public static DocumentChange fromLucene(LuceneDocumentChange luceneDoc) {
-        return new DocumentChange(
+    public static Document fromLucene(LuceneDocumentChange luceneDoc) {
+        var hints = new HashMap<String, String>();
+        if (luceneDoc.getType() != null) {
+            hints.put(Document.HINT_TYPE, luceneDoc.getType());
+        }
+        if (luceneDoc.getRouting() != null) {
+            hints.put(Document.HINT_ROUTING, luceneDoc.getRouting());
+        }
+
+        return new Document(
             luceneDoc.getId(),
-            luceneDoc.getType(),
             luceneDoc.getSource(),
-            luceneDoc.getRouting(),
-            mapChangeType(luceneDoc.getOperation())
+            mapOperation(luceneDoc.getOperation()),
+            hints,
+            Map.of("luceneDocNumber", luceneDoc.getLuceneDocNumber())
         );
     }
 
-    private static DocumentChange.ChangeType mapChangeType(DocumentChangeType luceneType) {
+    private static Document.Operation mapOperation(DocumentChangeType luceneType) {
         return switch (luceneType) {
-            case INDEX -> DocumentChange.ChangeType.INDEX;
-            case DELETE -> DocumentChange.ChangeType.DELETE;
+            case INDEX -> Document.Operation.UPSERT;
+            case DELETE -> Document.Operation.DELETE;
         };
     }
 }

@@ -11,9 +11,8 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationConverter;
 import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.pipeline.ir.BatchResult;
-import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
+import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
-import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -27,7 +26,7 @@ import reactor.core.scheduler.Schedulers;
  * Real {@link DocumentSink} adapter that writes documents to an OpenSearch cluster
  * via the existing {@link OpenSearchClient}.
  *
- * <p>Converts clean pipeline IR ({@link DocumentChange}) to bulk API operations
+ * <p>Converts clean pipeline IR ({@link Document}) to bulk API operations
  * ({@link BulkOperationSpec}) and sends them via {@link OpenSearchClient#sendBulkRequest}.
  *
  * <p>Supports optional document transformation via {@link IJsonTransformer} and
@@ -44,15 +43,6 @@ public class OpenSearchDocumentSink implements DocumentSink {
     private final DocumentExceptionAllowlist allowlist;
     private final Supplier<IRfsContexts.IRequestContext> requestContextSupplier;
 
-    /**
-     * Full constructor with all options.
-     *
-     * @param client                    the OpenSearch client
-     * @param transformerSupplier       supplier for document transformers, null for no transformation
-     * @param allowServerGeneratedIds   whether to strip document IDs for server-generated IDs
-     * @param allowlist                 exception types to treat as success during bulk writes
-     * @param requestContextSupplier    supplier for request contexts (enables HTTP metering), null to skip
-     */
     public OpenSearchDocumentSink(
         OpenSearchClient client,
         Supplier<IJsonTransformer> transformerSupplier,
@@ -68,30 +58,30 @@ public class OpenSearchDocumentSink implements DocumentSink {
     }
 
     @Override
-    public Mono<Void> createIndex(IndexMetadataSnapshot metadata) {
+    public Mono<Void> createCollection(IndexMetadataSnapshot metadata) {
         return Mono.fromRunnable(() -> OpenSearchIndexCreator.createIndex(client, metadata, OBJECT_MAPPER, null))
             .subscribeOn(Schedulers.boundedElastic())
             .then();
     }
 
     @Override
-    public Mono<BatchResult> writeBatch(ShardId shardId, String indexName, List<DocumentChange> batch) {
+    public Mono<BatchResult> writeBatch(String collectionName, List<Document> batch) {
         long bytesInBatch = batch.stream()
-            .mapToLong(DocumentChange::sourceLength)
+            .mapToLong(Document::sourceLength)
             .sum();
         var requestContext = requestContextSupplier != null ? requestContextSupplier.get() : null;
 
         Mono<OpenSearchClient.BulkResponse> bulkMono;
         if (transformer == null) {
             // Fast path: skip byte[]→Map→byte[] round-trip, write raw source bytes directly
-            bulkMono = client.sendBulkRequestRaw(indexName, batch,
+            bulkMono = client.sendBulkRequestRaw(collectionName, batch,
                 requestContext, allowServerGeneratedIds, allowlist);
         } else {
             var bulkOps = batch.stream()
-                .map(doc -> toBulkOp(doc, indexName))
+                .map(doc -> BulkOperationConverter.fromDocument(doc, collectionName))
                 .collect(Collectors.toList());
             List<BulkOperationSpec> opsToSend = applyTransformation(bulkOps);
-            bulkMono = client.sendBulkRequest(indexName, opsToSend,
+            bulkMono = client.sendBulkRequest(collectionName, opsToSend,
                 requestContext, allowServerGeneratedIds, allowlist);
         }
 
@@ -113,9 +103,5 @@ public class OpenSearchDocumentSink implements DocumentSink {
                 .collect(Collectors.toList());
         }
         return ops;
-    }
-
-    private static BulkOperationSpec toBulkOp(DocumentChange doc, String indexName) {
-        return BulkOperationConverter.fromDocumentChange(doc, indexName);
     }
 }

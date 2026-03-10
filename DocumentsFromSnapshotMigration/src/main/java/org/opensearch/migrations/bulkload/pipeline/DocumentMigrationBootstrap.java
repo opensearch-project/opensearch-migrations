@@ -28,7 +28,7 @@ import lombok.extern.slf4j.Slf4j;
  * work-coordinated execution for horizontal scaling.
  *
  * <pre>
- * var runner = PipelineRunner.builder()
+ * var runner = DocumentMigrationBootstrap.builder()
  *     .extractor(snapshotExtractor)
  *     .targetClient(openSearchClient)
  *     .snapshotName("my-snapshot")
@@ -44,7 +44,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @Builder
 @SuppressWarnings("java:S1170") // Builder.Default fields are instance-level, not static
-public class PipelineRunner {
+public class DocumentMigrationBootstrap {
 
     private final SnapshotExtractor extractor;
     private final OpenSearchClient targetClient;

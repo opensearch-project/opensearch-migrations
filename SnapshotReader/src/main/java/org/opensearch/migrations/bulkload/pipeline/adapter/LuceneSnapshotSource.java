@@ -8,9 +8,9 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
-import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
+import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 import org.opensearch.migrations.bulkload.pipeline.ir.IndexMetadataSnapshot;
-import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
+import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
@@ -21,11 +21,11 @@ import reactor.core.publisher.Flux;
  * Real {@link DocumentSource} adapter that reads documents from a Lucene snapshot
  * via the existing {@link SnapshotExtractor}.
  *
- * <p>Converts Lucene-specific types to the clean pipeline IR, dropping
- * {@code luceneDocNumber} in favor of offset-based progress tracking.
+ * <p>Converts Lucene-specific types to the clean pipeline IR, populating
+ * {@link Document#hints()} and {@link Document#sourceMetadata()} via {@link LuceneAdapter}.
  *
  * <p>Supports optional delta mode: when {@code previousSnapshotName} and {@code deltaMode}
- * are set, reads delta changes (deletions first, then additions) between two snapshots.
+ * are set, reads delta changes between two snapshots.
  *
  * <p>Use {@link #builder(SnapshotExtractor, String, Path)} to construct instances.
  */
@@ -42,8 +42,8 @@ public class LuceneSnapshotSource implements DocumentSource {
     private final Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory;
 
     /** Cache ShardEntry lookups to avoid repeated metadata reads */
-    private final Map<ShardId, SnapshotExtractor.ShardEntry> shardEntryCache = new HashMap<>();
-    private final Map<ShardId, SnapshotExtractor.ShardEntry> previousShardEntryCache = new HashMap<>();
+    private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> shardEntryCache = new HashMap<>();
+    private final Map<EsShardPartition, SnapshotExtractor.ShardEntry> previousShardEntryCache = new HashMap<>();
 
     // Max shard size enforcement (0 = no limit)
     private final long maxShardSizeBytes;
@@ -100,32 +100,32 @@ public class LuceneSnapshotSource implements DocumentSource {
     }
 
     @Override
-    public List<String> listIndices() {
+    public List<String> listCollections() {
         return extractor.listIndices(snapshotName);
     }
 
     @Override
-    public List<ShardId> listShards(String indexName) {
-        var entries = extractor.listShards(snapshotName, indexName);
+    public List<Partition> listPartitions(String collectionName) {
+        var entries = extractor.listShards(snapshotName, collectionName);
         var result = entries.stream()
             .map(entry -> {
-                var shardId = new ShardId(snapshotName, indexName, entry.shardId());
-                shardEntryCache.put(shardId, entry);
-                return shardId;
+                var partition = new EsShardPartition(snapshotName, collectionName, entry.shardId());
+                shardEntryCache.put(partition, entry);
+                return (Partition) partition;
             })
             .toList();
 
         // Pre-cache previous snapshot shard entries for delta mode
         if (isDeltaMode()) {
             try {
-                var previousEntries = extractor.listShards(previousSnapshotName, indexName);
+                var previousEntries = extractor.listShards(previousSnapshotName, collectionName);
                 for (var entry : previousEntries) {
-                    var shardId = new ShardId(snapshotName, indexName, entry.shardId());
-                    previousShardEntryCache.put(shardId, entry);
+                    var partition = new EsShardPartition(snapshotName, collectionName, entry.shardId());
+                    previousShardEntryCache.put(partition, entry);
                 }
             } catch (Exception e) {
-                log.warn("Could not list shards for previous snapshot {} index {}: {}",
-                    previousSnapshotName, indexName, e.getMessage());
+                log.warn("Could not list shards for previous snapshot {} collection {}: {}",
+                    previousSnapshotName, collectionName, e.getMessage());
             }
         }
 
@@ -133,57 +133,58 @@ public class LuceneSnapshotSource implements DocumentSource {
     }
 
     @Override
-    public IndexMetadataSnapshot readIndexMetadata(String indexName) {
+    public IndexMetadataSnapshot readCollectionMetadata(String collectionName) {
         var meta = extractor.getSnapshotReader().getIndexMetadata()
-            .fromRepo(snapshotName, indexName);
-        return IndexMetadataConverter.convert(indexName, meta);
+            .fromRepo(snapshotName, collectionName);
+        return IndexMetadataConverter.convert(collectionName, meta);
     }
 
     @Override
-    public Flux<DocumentChange> readDocuments(ShardId shardId, long startingDocOffset) {
-        var entry = resolveShardEntry(shardId, shardEntryCache);
+    public Flux<Document> readDocuments(Partition partition, long startingDocOffset) {
+        var esPartition = (EsShardPartition) partition;
+        var entry = resolveShardEntry(esPartition, shardEntryCache);
         if (entry == null) {
-            return Flux.error(new IllegalArgumentException("Shard not found: " + shardId));
+            return Flux.error(new IllegalArgumentException("Partition not found: " + partition));
         }
 
         // Enforce shard size limit to prevent disk overflow
         if (maxShardSizeBytes > 0) {
             long shardSize = entry.metadata().getTotalSizeBytes();
             if (shardSize > maxShardSizeBytes) {
-                return Flux.error(new ShardTooLargeException(shardId, shardSize, maxShardSizeBytes));
+                return Flux.error(new ShardTooLargeException(partition, shardSize, maxShardSizeBytes));
             }
         }
 
         if (isDeltaMode()) {
-            var previousEntry = resolveShardEntry(shardId, previousShardEntryCache);
+            var previousEntry = resolveShardEntry(esPartition, previousShardEntryCache);
             if (previousEntry == null) {
-                log.info("No previous shard for {} — treating as full read (all additions)", shardId);
-                return readRegularDocuments(entry, shardId, startingDocOffset);
+                log.info("No previous partition for {} — treating as full read (all additions)", partition);
+                return readRegularDocuments(entry, partition, startingDocOffset);
             }
-            log.info("Reading delta documents from {} (mode={}, offset={})", shardId, deltaMode, startingDocOffset);
+            log.info("Reading delta documents from {} (mode={}, offset={})", partition, deltaMode, startingDocOffset);
             return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
                 .skip(startingDocOffset)
                 .map(LuceneAdapter::fromLucene);
         }
 
-        return readRegularDocuments(entry, shardId, startingDocOffset);
+        return readRegularDocuments(entry, partition, startingDocOffset);
     }
 
-    private Flux<DocumentChange> readRegularDocuments(
-        SnapshotExtractor.ShardEntry entry, ShardId shardId, long startingDocOffset
+    private Flux<Document> readRegularDocuments(
+        SnapshotExtractor.ShardEntry entry, Partition partition, long startingDocOffset
     ) {
-        log.info("Reading documents from {} starting at docIdx {}", shardId, startingDocOffset);
+        log.info("Reading documents from {} starting at docIdx {}", partition, startingDocOffset);
         return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset))
             .map(LuceneAdapter::fromLucene);
     }
 
     private SnapshotExtractor.ShardEntry resolveShardEntry(
-        ShardId shardId, Map<ShardId, SnapshotExtractor.ShardEntry> cache
+        EsShardPartition partition, Map<EsShardPartition, SnapshotExtractor.ShardEntry> cache
     ) {
-        var entry = cache.get(shardId);
+        var entry = cache.get(partition);
         if (entry == null) {
-            listShards(shardId.indexName());
-            entry = cache.get(shardId);
+            listPartitions(partition.indexName());
+            entry = cache.get(partition);
         }
         return entry;
     }

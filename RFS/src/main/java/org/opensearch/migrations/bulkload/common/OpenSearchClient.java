@@ -25,7 +25,7 @@ import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationM
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
-import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
+import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.parsing.BulkResponseParser;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
@@ -482,9 +482,9 @@ public abstract class OpenSearchClient {
 
     /**
      * Send a bulk request using raw document bytes, skipping the BulkOperationSpec deserialization.
-     * Builds NDJSON directly from DocumentChange raw source bytes — avoids byte[]→Map→byte[] round-trip.
+     * Builds NDJSON directly from Document raw source bytes — avoids byte[]→Map→byte[] round-trip.
      */
-    public Mono<BulkResponse> sendBulkRequestRaw(String indexName, List<DocumentChange> docs,
+    public Mono<BulkResponse> sendBulkRequestRaw(String indexName, List<Document> docs,
                                                   IRfsContexts.IRequestContext context,
                                                   boolean allowServerGeneratedIds,
                                                   DocumentExceptionAllowlist allowlist) {
@@ -598,12 +598,12 @@ public abstract class OpenSearchClient {
         return client.postAsyncBytes(getBulkRequestPath(indexName), bodyBytes, additionalHeaders, context);
     }
 
-    private byte[] buildRawNdjsonBytes(List<DocumentChange> docs, String indexName, boolean stripIds) {
+    private byte[] buildRawNdjsonBytes(List<Document> docs, String indexName, boolean stripIds) {
         return BulkNdjson.toRawNdjsonBytes(docs, indexName, stripIds, OBJECT_MAPPER);
     }
 
-    private static BulkOperationSpec docToBulkOp(DocumentChange doc, String indexName) {
-        return BulkOperationConverter.fromDocumentChange(doc, indexName);
+    private static BulkOperationSpec docToBulkOp(Document doc, String indexName) {
+        return BulkOperationConverter.fromDocument(doc, indexName);
     }
     
     /**

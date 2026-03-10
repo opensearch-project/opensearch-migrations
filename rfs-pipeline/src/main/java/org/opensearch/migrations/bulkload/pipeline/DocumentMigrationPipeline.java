@@ -3,9 +3,9 @@ package org.opensearch.migrations.bulkload.pipeline;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
+import org.opensearch.migrations.bulkload.pipeline.ir.Document;
+import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
 import org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor;
-import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
 import org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
@@ -15,24 +15,24 @@ import reactor.core.scheduler.Schedulers;
 
 /**
  * Wires a {@link DocumentSource} to a {@link DocumentSink} with batching and optional
- * parallel shard processing.
+ * parallel partition processing.
  *
  * <p>This is the core pipeline — it knows nothing about Lucene, snapshots, OpenSearch,
- * or any specific source/target. It moves {@link DocumentChange} records from source to sink
+ * or any specific source/target. It moves {@link Document} records from source to sink
  * in batches, emitting {@link ProgressCursor} records for tracking.
  *
  * <h3>Concurrency model</h3>
  * <ul>
- *   <li>{@code shardConcurrency = 1}: shards are processed sequentially (default, safest)</li>
- *   <li>{@code shardConcurrency > 1}: up to N shards are processed in parallel</li>
- *   <li>{@code batchConcurrency}: max bulk write requests in flight per shard (default 10).
+ *   <li>{@code partitionConcurrency = 1}: partitions are processed sequentially (default, safest)</li>
+ *   <li>{@code partitionConcurrency > 1}: up to N partitions are processed in parallel</li>
+ *   <li>{@code batchConcurrency}: max bulk write requests in flight per partition (default 10).
  *       Higher values improve throughput by overlapping network I/O with batch preparation.</li>
  * </ul>
- * Within a single shard, batch results are emitted in order (via {@code flatMapSequential})
+ * Within a single partition, batch results are emitted in order (via {@code flatMapSequential})
  * even when multiple writes are in flight.
  */
 @Slf4j
-public class MigrationPipeline {
+public class DocumentMigrationPipeline {
 
     private static final long PROGRESS_LOG_INTERVAL_MS = 30_000;
 
@@ -40,32 +40,32 @@ public class MigrationPipeline {
     private final DocumentSink sink;
     private final int maxDocsPerBatch;
     private final long maxBytesPerBatch;
-    private final int shardConcurrency;
+    private final int partitionConcurrency;
     private final int batchConcurrency;
 
     /**
-     * Create a pipeline with sequential shard processing and default batch concurrency.
+     * Create a pipeline with sequential partition processing and default batch concurrency.
      */
-    public MigrationPipeline(DocumentSource source, DocumentSink sink, int maxDocsPerBatch, long maxBytesPerBatch) {
+    public DocumentMigrationPipeline(DocumentSource source, DocumentSink sink, int maxDocsPerBatch, long maxBytesPerBatch) {
         this(source, sink, maxDocsPerBatch, maxBytesPerBatch, 1, 10);
     }
 
     /**
      * Create a pipeline with configurable concurrency.
      *
-     * @param source            the document source
-     * @param sink              the document sink
-     * @param maxDocsPerBatch   max documents per batch (must be >= 1)
-     * @param maxBytesPerBatch  max bytes per batch (must be >= 1)
-     * @param shardConcurrency  max shards to process in parallel (must be >= 1)
-     * @param batchConcurrency  max bulk write requests in flight per shard (must be >= 1)
+     * @param source               the document source
+     * @param sink                 the document sink
+     * @param maxDocsPerBatch      max documents per batch (must be >= 1)
+     * @param maxBytesPerBatch     max bytes per batch (must be >= 1)
+     * @param partitionConcurrency max partitions to process in parallel (must be >= 1)
+     * @param batchConcurrency     max bulk write requests in flight per partition (must be >= 1)
      */
-    public MigrationPipeline(
+    public DocumentMigrationPipeline(
         DocumentSource source,
         DocumentSink sink,
         int maxDocsPerBatch,
         long maxBytesPerBatch,
-        int shardConcurrency,
+        int partitionConcurrency,
         int batchConcurrency
     ) {
         this.source = Objects.requireNonNull(source, "source must not be null");
@@ -76,53 +76,46 @@ public class MigrationPipeline {
         if (maxBytesPerBatch < 1) {
             throw new IllegalArgumentException("maxBytesPerBatch must be >= 1, got " + maxBytesPerBatch);
         }
-        if (shardConcurrency < 1) {
-            throw new IllegalArgumentException("shardConcurrency must be >= 1, got " + shardConcurrency);
+        if (partitionConcurrency < 1) {
+            throw new IllegalArgumentException("partitionConcurrency must be >= 1, got " + partitionConcurrency);
         }
         if (batchConcurrency < 1) {
             throw new IllegalArgumentException("batchConcurrency must be >= 1, got " + batchConcurrency);
         }
         this.maxDocsPerBatch = maxDocsPerBatch;
         this.maxBytesPerBatch = maxBytesPerBatch;
-        this.shardConcurrency = shardConcurrency;
+        this.partitionConcurrency = partitionConcurrency;
         this.batchConcurrency = batchConcurrency;
     }
 
     /**
-     * Migrate all documents for a single shard from source to sink.
-     * Batches are processed sequentially to preserve document ordering.
+     * Migrate all documents for a single partition from source to sink.
      *
-     * <p>The emitted {@link ProgressCursor} tracks cumulative document offset from
-     * {@code startingDocOffset}, enabling resumability — a pipeline can restart from
-     * the last cursor's {@code lastDocProcessed} value.
-     *
-     * @param shardId           the shard to migrate
-     * @param indexName         the target index name
+     * @param partition         the partition to migrate
+     * @param collectionName    the target collection name
      * @param startingDocOffset the document offset to resume from (0 for start)
      * @return a Flux of progress cursors, one per batch written
      */
-    public Flux<ProgressCursor> migrateShard(ShardId shardId, String indexName, long startingDocOffset) {
-        log.info("Starting shard migration: {} from offset {} (batchConcurrency={})", shardId, startingDocOffset, batchConcurrency);
-        // Mutable state for cumulative tracking. Safe because flatMapSequential processes
-        // results in order on a single thread — do NOT change to flatMap without switching to AtomicLong.
+    public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingDocOffset) {
+        log.info("Starting partition migration: {} from offset {} (batchConcurrency={})", partition, startingDocOffset, batchConcurrency);
         final long[] cumulativeOffset = { startingDocOffset };
         final long[] cumulativeBytes = { 0 };
         final long[] lastLogTime = { System.currentTimeMillis() };
         final AtomicInteger activeBatches = new AtomicInteger(0);
-        return source.readDocuments(shardId, startingDocOffset)
+        return source.readDocuments(partition, startingDocOffset)
             .subscribeOn(Schedulers.boundedElastic())
             .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
             .flatMapSequential(batch -> {
                 long batchStart = System.nanoTime();
                 int batchDocs = batch.size();
-                long batchBytes = batch.stream().mapToLong(DocumentChange::sourceLength).sum();
+                long batchBytes = batch.stream().mapToLong(Document::sourceLength).sum();
                 int inflight = activeBatches.incrementAndGet();
-                return sink.writeBatch(shardId, indexName, batch)
+                return sink.writeBatch(collectionName, batch)
                     .map(result -> {
                         cumulativeOffset[0] += result.docsInBatch();
                         cumulativeBytes[0] += result.bytesInBatch();
                         return new ProgressCursor(
-                            shardId,
+                            partition,
                             cumulativeOffset[0],
                             result.docsInBatch(),
                             result.bytesInBatch()
@@ -135,7 +128,7 @@ public class MigrationPipeline {
                         if (now - lastLogTime[0] >= PROGRESS_LOG_INTERVAL_MS) {
                             lastLogTime[0] = now;
                             log.info("{} batch: {}ms, {} docs, {} KB, active {}/{} | progress: {} docs, {} MB total",
-                                shardId, totalMs, batchDocs, batchBytes / 1024,
+                                partition, totalMs, batchDocs, batchBytes / 1024,
                                 remaining + 1, batchConcurrency,
                                 cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024));
                         }
@@ -143,59 +136,52 @@ public class MigrationPipeline {
                     .doOnError(e -> activeBatches.decrementAndGet());
             }, batchConcurrency)
             .onErrorMap(e -> !(e instanceof PipelineException),
-                e -> new PipelineException("Failed migrating shard " + shardId, e))
-            .doOnComplete(() -> log.info("Completed shard migration: {} — {} docs, {} MB total",
-                shardId, cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024)));
+                e -> new PipelineException("Failed migrating partition " + partition, e))
+            .doOnComplete(() -> log.info("Completed partition migration: {} — {} docs, {} MB total",
+                partition, cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024)));
     }
 
     /**
-     * Migrate all shards for an index. Creates the index first, then migrates shards
-     * with the configured concurrency.
+     * Migrate all partitions for a collection. Creates the collection first, then migrates
+     * partitions with the configured concurrency.
      *
-     * @param indexName the index to migrate
-     * @return a Flux of progress cursors across all shards
+     * @param collectionName the collection to migrate
+     * @return a Flux of progress cursors across all partitions
      */
-    public Flux<ProgressCursor> migrateIndex(String indexName) {
-        log.info("Starting index migration: {} (concurrency={})", indexName, shardConcurrency);
-        var metadata = source.readIndexMetadata(indexName);
-        var shards = source.listShards(indexName);
-        log.info("Index {} has {} shards", indexName, shards.size());
+    public Flux<ProgressCursor> migrateCollection(String collectionName) {
+        log.info("Starting collection migration: {} (concurrency={})", collectionName, partitionConcurrency);
+        var metadata = source.readCollectionMetadata(collectionName);
+        var partitions = source.listPartitions(collectionName);
+        log.info("Collection {} has {} partitions", collectionName, partitions.size());
 
-        return Flux.from(sink.createIndex(metadata))
+        return Flux.from(sink.createCollection(metadata))
             .thenMany(
-                Flux.fromIterable(shards)
+                Flux.fromIterable(partitions)
                     .flatMap(
-                        shardId -> migrateShard(shardId, indexName, 0),
-                        shardConcurrency
+                        partition -> migratePartition(partition, collectionName, 0),
+                        partitionConcurrency
                     )
             )
-            .doOnComplete(() -> log.info("Completed index migration: {}", indexName));
+            .doOnComplete(() -> log.info("Completed collection migration: {}", collectionName));
     }
 
     /**
-     * Migrate all indices from source to sink.
+     * Migrate all collections from source to sink.
      *
-     * @return a Flux of progress cursors across all indices and shards
+     * @return a Flux of progress cursors across all collections and partitions
      */
     public Flux<ProgressCursor> migrateAll() {
-        var indices = source.listIndices();
-        log.info("Starting full migration: {} indices", indices.size());
-        return Flux.fromIterable(indices)
-            .concatMap(this::migrateIndex)
+        var collections = source.listCollections();
+        log.info("Starting full migration: {} collections", collections.size());
+        return Flux.fromIterable(collections)
+            .concatMap(this::migrateCollection)
             .doOnComplete(() -> log.info("Full migration complete"));
     }
 
     /**
      * Batching predicate that groups documents by count and byte size.
-     * Stateful — tracks current batch metrics and resets on batch boundary.
-     *
-     * <p>Not thread-safe — relies on {@code bufferUntil} invoking the predicate
-     * sequentially before handing batches to {@code flatMapSequential}.
-     *
-     * <p>Used with {@link Flux#bufferUntil} to create batches that respect both
-     * document count and byte size limits.
      */
-    static class BatchPredicate implements java.util.function.Predicate<DocumentChange> {
+    static class BatchPredicate implements java.util.function.Predicate<Document> {
         private final int maxDocs;
         private final long maxBytes;
         private int currentCount;
@@ -207,14 +193,14 @@ public class MigrationPipeline {
         }
 
         @Override
-        public boolean test(DocumentChange doc) {
+        public boolean test(Document doc) {
             currentCount++;
             currentBytes += doc.sourceLength();
 
             if (currentCount >= maxDocs || currentBytes >= maxBytes) {
                 currentCount = 0;
                 currentBytes = 0;
-                return true; // End of batch
+                return true;
             }
             return false;
         }

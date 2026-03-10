@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
@@ -16,10 +18,9 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParam
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
-import org.opensearch.migrations.bulkload.pipeline.MigrationPipeline;
+import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
-import org.opensearch.migrations.bulkload.pipeline.ir.DocumentChange;
-import org.opensearch.migrations.bulkload.pipeline.ir.ShardId;
+import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 import org.opensearch.migrations.bulkload.pipeline.source.SyntheticDocumentSource;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
@@ -35,9 +36,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 /**
  * Target-only tests: validates the writing pipeline against each target version
  * using pre-generated golden IR fixtures. No source cluster needed.
- *
- * Combined with SnapshotReaderEndToEndTest (source-only), this achieves O(M+N)
- * test coverage instead of O(M*N).
  */
 @Tag("isolatedTest")
 public class TargetWriteEndToEndTest {
@@ -118,7 +116,6 @@ public class TargetWriteEndToEndTest {
         var targetClient = createRestClient(targetCluster);
         targetClient.get("_refresh", context.createUnboundRequestContext());
 
-        // Verify routing is preserved on individual documents
         var mapper = new ObjectMapper();
         for (var doc : docs) {
             var resp = targetClient.get(indexName + "/_doc/" + doc.id + "?routing=" + doc.routing,
@@ -135,7 +132,6 @@ public class TargetWriteEndToEndTest {
         var context = DocumentMigrationTestContext.factory().noOtelTracking();
         var indexName = "delete_test";
 
-        // Index 3 docs, then delete one
         var additions = List.<LuceneDocumentChange>of(
             new LuceneDocumentChange(0, "keep1", null, "{\"val\": 1}".getBytes(java.nio.charset.StandardCharsets.UTF_8), null, DocumentChangeType.INDEX),
             new LuceneDocumentChange(1, "keep2", null, "{\"val\": 2}".getBytes(java.nio.charset.StandardCharsets.UTF_8), null, DocumentChangeType.INDEX),
@@ -146,10 +142,7 @@ public class TargetWriteEndToEndTest {
         );
 
         createIndex(targetCluster, indexName, 1);
-
-        // Write additions first
         reindexDocs(targetCluster, indexName, additions, context);
-        // Then apply deletions
         reindexChangeset(targetCluster, indexName, deletions, List.of(), context);
 
         refreshAndVerifyDocCount(targetCluster, indexName, 2, context);
@@ -159,23 +152,23 @@ public class TargetWriteEndToEndTest {
     private void writeAndVerifyViaPipelineSink(
         SearchClusterContainer targetCluster,
         String indexName,
-        int shardCount,
-        int docsPerShard
+        int partitionCount,
+        int docsPerPartition
     ) {
         var connectionContext = ConnectionContextTestParams.builder()
             .host(targetCluster.getUrl()).build().toConnectionContext();
         var targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
 
-        var source = new SyntheticDocumentSource(indexName, shardCount, docsPerShard);
+        var source = new SyntheticDocumentSource(indexName, partitionCount, docsPerPartition);
         var sink = new OpenSearchDocumentSink(targetClient, null, false, DocumentExceptionAllowlist.empty(), null);
-        var pipeline = new MigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
+        var pipeline = new DocumentMigrationPipeline(source, sink, 1000, Long.MAX_VALUE);
 
         var cursors = pipeline.migrateAll().collectList().block();
 
         Assertions.assertNotNull(cursors);
         Assertions.assertFalse(cursors.isEmpty(), "Should have progress cursors");
 
-        int expectedTotal = shardCount * docsPerShard;
+        int expectedTotal = partitionCount * docsPerPartition;
         var context = DocumentMigrationTestContext.factory().noOtelTracking();
         refreshAndVerifyDocCount(targetCluster, indexName, expectedTotal, context);
     }
@@ -197,7 +190,6 @@ public class TargetWriteEndToEndTest {
             "{\"settings\":{\"number_of_shards\":%d,\"number_of_replicas\":0}}", shards));
     }
 
-    /** Reindex a list of docs (all treated as additions) */
     @SneakyThrows
     private void reindexDocs(
         SearchClusterContainer cluster,
@@ -208,7 +200,6 @@ public class TargetWriteEndToEndTest {
         reindexChangeset(cluster, indexName, List.of(), docs, context);
     }
 
-    /** Write a changeset (deletions then additions) via OpenSearchDocumentSink */
     @SneakyThrows
     private void reindexChangeset(
         SearchClusterContainer cluster,
@@ -223,24 +214,30 @@ public class TargetWriteEndToEndTest {
             new OpenSearchClientFactory(connectionContext).determineVersionAndCreate(),
             null, false, DocumentExceptionAllowlist.empty(), null
         );
-        var shardId = new ShardId("test", indexName, 0);
 
         if (!deletions.isEmpty()) {
-            sink.writeBatch(shardId, indexName, toIrDocs(deletions)).block();
+            sink.writeBatch(indexName, toIrDocs(deletions)).block();
         }
         if (!additions.isEmpty()) {
-            sink.writeBatch(shardId, indexName, toIrDocs(additions)).block();
+            sink.writeBatch(indexName, toIrDocs(additions)).block();
         }
     }
 
-    private static List<DocumentChange> toIrDocs(List<LuceneDocumentChange> docs) {
+    private static List<Document> toIrDocs(List<LuceneDocumentChange> docs) {
         return docs.stream()
-            .map(d -> new DocumentChange(
-                d.getId(), d.getType(), d.getSource(), d.getRouting(),
-                d.getOperation() == DocumentChangeType.DELETE
-                    ? DocumentChange.ChangeType.DELETE
-                    : DocumentChange.ChangeType.INDEX
-            ))
+            .map(d -> {
+                var hints = new HashMap<String, String>();
+                if (d.getType() != null) hints.put(Document.HINT_TYPE, d.getType());
+                if (d.getRouting() != null) hints.put(Document.HINT_ROUTING, d.getRouting());
+                return new Document(
+                    d.getId(), d.getSource(),
+                    d.getOperation() == DocumentChangeType.DELETE
+                        ? Document.Operation.DELETE
+                        : Document.Operation.UPSERT,
+                    hints,
+                    Map.of()
+                );
+            })
             .toList();
     }
 
@@ -265,7 +262,6 @@ public class TargetWriteEndToEndTest {
             "Expected " + expectedCount + " docs in " + indexName);
     }
 
-    /** Simple POJO for deserializing golden fixture JSON */
     private static class GoldenDoc {
         public String id;
         public String type;

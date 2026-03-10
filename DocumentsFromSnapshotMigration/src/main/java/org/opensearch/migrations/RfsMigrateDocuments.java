@@ -30,7 +30,7 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.pipeline.PipelineDefaults;
-import org.opensearch.migrations.bulkload.pipeline.PipelineRunner;
+import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
@@ -834,7 +834,7 @@ public class RfsMigrateDocuments {
             snapshotName, indexAllowlist, rootDocumentContext
         );
 
-        var runner = PipelineRunner.builder()
+        var runner = DocumentMigrationBootstrap.builder()
             .extractor(extractor)
             .targetClient(targetClient)
             .snapshotName(snapshotName)
