@@ -1,6 +1,7 @@
 """Workflow tree processing and display utilities."""
 
 import logging
+import re
 from typing import Dict, List, Any, Optional
 from rich.console import Console
 from rich.tree import Tree
@@ -73,21 +74,94 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
             tree_node['group_name'] = group_name
         tree_nodes[node_id] = tree_node
 
-    # Second pass: establish parent-child relationships
+    # Second pass: establish parent-child relationships via boundaryID
     for node_id, tree_node in tree_nodes.items():
         boundary_id = tree_node['boundary_id']
         if boundary_id and boundary_id in tree_nodes:
-            # This node is a child of boundary_id
             tree_nodes[boundary_id]['children'].append(tree_node)
         else:
-            # This is a root node
             root_nodes.append(tree_node)
+
+    # Third pass: reparent Retry node children.  Argo's boundaryID places retry
+    # attempt Pods as siblings of the Retry node; use the explicit children array
+    # to fix the nesting.
+    for node_id, node in nodes.items():
+        if node.get('type') != 'Retry':
+            continue
+        retry_tree_node = tree_nodes[node_id]
+        for child_id in node.get('children', []):
+            child_tree_node = tree_nodes.get(child_id)
+            if child_tree_node and child_tree_node not in retry_tree_node['children']:
+                current_parent_id = child_tree_node['boundary_id']
+                if current_parent_id and current_parent_id in tree_nodes:
+                    parent = tree_nodes[current_parent_id]
+                    if child_tree_node in parent['children']:
+                        parent['children'].remove(child_tree_node)
+                elif child_tree_node in root_nodes:
+                    root_nodes.remove(child_tree_node)
+                retry_tree_node['children'].append(child_tree_node)
 
     return root_nodes
 
 
+_ATTEMPT_SUFFIX_REGEX_PATTERN = re.compile(r'\((\d+)\)$')
+
+
+def _normalize_attempt_suffix(name: str) -> str:
+    """Strip trailing attempt suffix like '(0)', '(1)' from display names."""
+    return _ATTEMPT_SUFFIX_REGEX_PATTERN.sub('', name).strip()
+
+
+def _is_leaf_only_retry(node: Dict[str, Any]) -> bool:
+    """True if all children are bare leaf Pods (no statusOutput, groupName, or nested children).
+
+    Currently affects: RFS coordinator resource templates and similar infrastructure retries.
+    """
+    children = node.get('children', [])
+    if not children:
+        return True
+    for child in children:
+        if child.get('children'):
+            return False
+        if any(p.get('name') == 'statusOutput' for p in child.get('outputs', {}).get('parameters', [])):
+            return False
+        if any(p.get('name') == 'groupName' for p in child.get('inputs', {}).get('parameters', [])):
+            return False
+    return True
+
+
+def _get_attempt_number(name: str) -> int:
+    """Extract retry attempt index from display name like 'foo(2)'. Returns -1 if none."""
+    m = _ATTEMPT_SUFFIX_REGEX_PATTERN.search(name)
+    return int(m.group(1)) if m else -1
+
+
+def _collapse_retry(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Collapse a Retry node to its best attempt: highest-indexed succeeded, or highest-indexed overall."""
+    children = node.get('children', [])
+    if not children:
+        collapsed = node.copy()
+        collapsed['display_name'] = _normalize_attempt_suffix(collapsed.get('display_name', ''))
+        collapsed['children'] = []
+        return collapsed
+
+    candidates = [c for c in children if c.get('phase') == 'Succeeded'] or children
+    best = max(candidates, key=lambda c: (
+        _get_attempt_number(c.get('display_name', '')),
+        c.get('finished_at') or ''
+    ))
+
+    collapsed = best.copy()
+    collapsed['display_name'] = _normalize_attempt_suffix(collapsed.get('display_name', ''))
+    collapsed['children'] = []
+    return collapsed
+
+
 def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Filter tree nodes: preserve Pod/Suspend/Skipped nodes and containers with groupName."""
+    """Filter tree nodes: preserve Pod/Suspend/Skipped nodes and containers with groupName.
+
+    Collapse infrastructure retry nodes (bare leaf Pods) to a single logical step.
+    """
 
     def should_keep_by_type(node):
         # Keep leaf nodes (actual work)
@@ -103,8 +177,9 @@ def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def filter_recursive(nodes):
         filtered = []
         for node in nodes:
-            if should_keep_by_type(node) or has_group_name(node):
-                # Keep leaf nodes (Pod, Suspend, Skipped) or containers with a meaningful groupName
+            if node.get('type') == 'Retry' and _is_leaf_only_retry(node):
+                filtered.append(_collapse_retry(node))
+            elif should_keep_by_type(node) or has_group_name(node):
                 filtered_node = node.copy()
                 filtered_node['children'] = filter_recursive(node['children'])
                 filtered.append(filtered_node)
@@ -174,7 +249,6 @@ def clean_display_name(display_name: str) -> str:
 
     # Convert camelCase to Title Case
     # Insert space before uppercase letters that follow lowercase letters
-    import re
     spaced_name = re.sub(r'([a-z])([A-Z])', r'\1 \2', base_name)
 
     # Capitalize each word

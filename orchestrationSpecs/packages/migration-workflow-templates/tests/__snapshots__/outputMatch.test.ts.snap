@@ -4327,10 +4327,11 @@ stringData:
         },
         "retryStrategy": {
           "backoff": {
+            "cap": "60",
             "duration": "10",
             "factor": "2",
           },
-          "limit": 3,
+          "limit": "3",
           "retryPolicy": "Always",
         },
       },
@@ -4367,10 +4368,11 @@ spec:
         },
         "retryStrategy": {
           "backoff": {
+            "cap": "60",
             "duration": "10",
             "factor": "2",
           },
-          "limit": 3,
+          "limit": "3",
           "retryPolicy": "Always",
         },
       },
@@ -4476,10 +4478,11 @@ spec:
         },
         "retryStrategy": {
           "backoff": {
+            "cap": "60",
             "duration": "10",
             "factor": "2",
           },
-          "limit": 3,
+          "limit": "3",
           "retryPolicy": "Always",
         },
       },
@@ -4574,10 +4577,11 @@ metadata:
         },
         "retryStrategy": {
           "backoff": {
+            "cap": "60",
             "duration": "10",
             "factor": "2",
           },
-          "limit": 3,
+          "limit": "3",
           "retryPolicy": "Always",
         },
       },
@@ -4606,10 +4610,11 @@ metadata:
         },
         "retryStrategy": {
           "backoff": {
+            "cap": "60",
             "duration": "10",
             "factor": "2",
           },
-          "limit": 3,
+          "limit": "3",
           "retryPolicy": "Always",
         },
       },
@@ -4638,10 +4643,11 @@ metadata:
         },
         "retryStrategy": {
           "backoff": {
+            "cap": "60",
             "duration": "10",
             "factor": "2",
           },
-          "limit": 3,
+          "limit": "3",
           "retryPolicy": "Always",
         },
       },
