@@ -104,12 +104,12 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
     return root_nodes
 
 
-_ATTEMPT_SUFFIX_RE = re.compile(r'\((\d+)\)$')
+_ATTEMPT_SUFFIX_REGEX_PATTERN = re.compile(r'\((\d+)\)$')
 
 
 def _normalize_attempt_suffix(name: str) -> str:
     """Strip trailing attempt suffix like '(0)', '(1)' from display names."""
-    return _ATTEMPT_SUFFIX_RE.sub('', name).strip()
+    return _ATTEMPT_SUFFIX_REGEX_PATTERN.sub('', name).strip()
 
 
 def _is_leaf_only_retry(node: Dict[str, Any]) -> bool:
@@ -132,7 +132,7 @@ def _is_leaf_only_retry(node: Dict[str, Any]) -> bool:
 
 def _get_attempt_number(name: str) -> int:
     """Extract retry attempt index from display name like 'foo(2)'. Returns -1 if none."""
-    m = _ATTEMPT_SUFFIX_RE.search(name)
+    m = _ATTEMPT_SUFFIX_REGEX_PATTERN.search(name)
     return int(m.group(1)) if m else -1
 
 
