@@ -195,9 +195,11 @@ def call(Map config = [:]) {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    // Inject AOSS endpoint env var into migration-console pod
+                                    // Inject AOSS endpoint as container env var (visible to all processes)
                                     sh """
-                                        kubectl --context=${env.eksKubeContext} exec migration-console-0 -n ma -- bash -c 'echo "export ${endpointEnvVar}=${env.AOSS_COLLECTION_ENDPOINT}" >> /etc/profile.d/aoss-env.sh'
+                                        kubectl --context=${env.eksKubeContext} set env statefulset/migration-console \
+                                          -n ma ${endpointEnvVar}=${env.AOSS_COLLECTION_ENDPOINT}
+                                        kubectl --context=${env.eksKubeContext} rollout status statefulset/migration-console -n ma --timeout=120s
                                     """
                                 }
                             }

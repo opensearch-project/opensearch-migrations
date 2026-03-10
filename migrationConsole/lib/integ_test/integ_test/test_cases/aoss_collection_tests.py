@@ -40,7 +40,10 @@ class AOSSTestBase(MATestBase):
     def import_existing_clusters(self):
         endpoint = os.environ.get(self.aoss_endpoint_env_var)
         if not endpoint:
-            raise ValueError(f"{self.aoss_endpoint_env_var} environment variable is required")
+            raise ValueError(
+                f"{self.aoss_endpoint_env_var} environment variable is required. "
+                f"Ensure the pipeline injects it via 'kubectl set env' on the migration-console statefulset."
+            )
         region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
         self.target_cluster = Cluster(config={
             "endpoint": endpoint,
