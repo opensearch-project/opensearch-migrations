@@ -9,16 +9,19 @@ import java.util.Arrays;
 
 import lombok.extern.slf4j.Slf4j;
 import org.graalvm.polyglot.Context;
-import org.graalvm.polyglot.Engine;
 import org.graalvm.polyglot.HostAccess;
 import org.graalvm.polyglot.Source;
 import org.graalvm.polyglot.Value;
+import org.graalvm.python.embedding.GraalPyResources;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
 
 /**
  * Executes Python transformations on JSON-like objects using the GraalVM Polyglot API (GraalPy).
+ *
+ * <p>Uses {@link GraalPyResources} to create the context, which enables access to pip packages
+ * that were pre-installed at build time via the GraalPy Gradle plugin.
  *
  * <p><strong>Not thread-safe.</strong> Each thread should use its own instance.
  */
@@ -34,11 +37,10 @@ public class PythonTransformer implements IJsonTransformer {
 
     public PythonTransformer(String script, Object context) {
         var sourceCode = Source.create(LANGUAGE_ID, script);
-        var engine = Engine.newBuilder(LANGUAGE_ID)
-            .option("engine.WarnInterpreterOnly", "false")
-            .build();
-        var builder = Context.newBuilder(LANGUAGE_ID)
-            .engine(engine)
+        var pyLogger = LoggerFactory.getLogger(PYTHON_TRANSFORM_LOGGER_NAME);
+        this.infoStream = new LoggingOutputStream(pyLogger, Level.INFO);
+        this.errorStream = new LoggingOutputStream(pyLogger, Level.ERROR);
+        this.polyglotContext = GraalPyResources.contextBuilder()
             .allowHostAccess(HostAccess.newBuilder()
                 .allowAccessAnnotatedBy(HostAccess.Export.class)
                 .allowArrayAccess(true)
@@ -46,13 +48,10 @@ public class PythonTransformer implements IJsonTransformer {
                 .allowListAccess(true)
                 .allowIterableAccess(true)
                 .allowBufferAccess(true)
-                .build());
-        var pyLogger = LoggerFactory.getLogger(PYTHON_TRANSFORM_LOGGER_NAME);
-        this.infoStream = new LoggingOutputStream(pyLogger, Level.INFO);
-        this.errorStream = new LoggingOutputStream(pyLogger, Level.ERROR);
-        this.polyglotContext = builder
+                .build())
             .out(infoStream)
             .err(errorStream)
+            .option("engine.WarnInterpreterOnly", "false")
             .build();
         var sourceCodeValue = this.polyglotContext.eval(sourceCode);
         if (context != null) {
@@ -73,7 +72,7 @@ public class PythonTransformer implements IJsonTransformer {
 
     @Override
     public Object transformJson(Object incomingJson) {
-        var convertedArgs = Arrays.stream(new Object[]{incomingJson})
+        var convertedArgs = Arrays.stream(new Object[] { incomingJson })
             .map(o -> this.polyglotContext.asValue(o)).toArray();
         var result = mainPythonTransformFunction.execute(convertedArgs);
         log.atTrace().setMessage("result={}").addArgument(result).log();
