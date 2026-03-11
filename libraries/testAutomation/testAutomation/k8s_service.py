@@ -80,7 +80,7 @@ class K8sService:
                 logger.info("All non-workflow pods are healthy.")
                 return True
             logger.info(f"The following pods are not healthy yet: [{', '.join(unhealthy_pods)}]")
-            time.sleep(3)
+            time.sleep(2)
 
         raise TimeoutError(
             f"Timeout reached: Not all pods became healthy within {timeout} seconds. "
