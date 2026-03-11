@@ -13,6 +13,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.data.WorkloadGenerator;
 import org.opensearch.migrations.data.WorkloadOptions;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
@@ -45,6 +46,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
     public static final String TARGET_DOCKER_HOSTNAME = "target";
     public static final int OPENSEARCH_PORT = 9200;
     public static final int RECEIVED_SIGTERM_EXIT_CODE = 143;
+    /** Expected doc count from default WorkloadOptions (1000 docs, geonames workload). */
+    public static final int EXPECTED_GEONAMES_DOC_COUNT = new WorkloadOptions().getTotalDocs();
 
     enum FailHow {
         NEVER,
@@ -139,6 +142,12 @@ public class ProcessLifecycleTest extends SourceTestBase {
             var generator = new WorkloadGenerator(client);
             generator.generate(new WorkloadOptions());
 
+            // Validate expected doc count before snapshot creation
+            var sourceOps = new ClusterOperations(esSourceContainer);
+            var actualDocCount = sourceOps.getDocCount("geonames");
+            Assertions.assertEquals(EXPECTED_GEONAMES_DOC_COUNT, actualDocCount,
+                "Geonames doc count should match WorkloadOptions default");
+
             // Create the snapshot from the source cluster
             var args = new CreateSnapshot.Args();
             args.snapshotName = SNAPSHOT_NAME;
@@ -214,8 +223,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
     @Test
     void exitCleanlyFromSigtermAfterUpdatingWorkItem() {
         testProcess(RECEIVED_SIGTERM_EXIT_CODE, d -> {
-            // The geonames shards are each 195 documents, and we need to guarantee that we're in the middle
-            // of a shard when the sigterm is sent.
+            // The geonames index has EXPECTED_GEONAMES_DOC_COUNT documents, and we need to guarantee
+            // that we're in the middle of processing when the sigterm is sent.
             // The slow proxy adds 1000ms downstream latency with 4 docs/batch and 1 connection,
             // giving ~4 docs/sec throughput. Work coordination + index creation overhead takes
             // several seconds, so we wait 20 seconds to ensure batches have been processed.

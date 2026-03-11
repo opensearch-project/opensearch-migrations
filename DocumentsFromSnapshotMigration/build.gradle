@@ -41,6 +41,7 @@ dependencies {
 
 
     testImplementation testFixtures(project(":RFS"))
+    testImplementation testFixtures(project(":rfs-pipeline"))
     testImplementation testFixtures(project(":coreUtilities"))
     testImplementation testFixtures(project(":testHelperFixtures"))
     testImplementation project(":SearchSnapshotExtractor")

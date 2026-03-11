@@ -1,6 +1,7 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
+    id 'java-test-fixtures'
 }
 
 dependencies {
@@ -13,12 +14,15 @@ dependencies {
     implementation libs.reactor.core
     implementation libs.slf4j.api
 
+    testFixturesImplementation libs.reactor.core
+
     testImplementation project(':rfs-common')
     testImplementation libs.reactor.test
     testImplementation libs.blockhound
     testImplementation libs.junit.jupiter.api
     testImplementation libs.junit.jupiter.params
     testImplementation libs.mockito.core
+    testImplementation(testFixtures(project(':rfs-pipeline')))
     testRuntimeOnly libs.junit.jupiter.engine
     testRuntimeOnly libs.log4j.slf4j2.impl
     testRuntimeOnly libs.log4j.core

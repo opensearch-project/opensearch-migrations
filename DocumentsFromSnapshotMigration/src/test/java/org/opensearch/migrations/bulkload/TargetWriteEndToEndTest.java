@@ -3,12 +3,12 @@ package org.opensearch.migrations.bulkload;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.bulkload.common.TestResources;
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
@@ -35,14 +35,13 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * Target-only tests: validates the writing pipeline against each target version
- * using pre-generated golden IR fixtures. No source cluster needed.
+ * using pre-generated test sample IR fixtures. No source cluster needed.
  */
 @Tag("isolatedTest")
 public class TargetWriteEndToEndTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final Path GOLDEN_DIR = Paths.get(System.getProperty("user.dir"))
-        .resolve("../RFS/test-resources/golden");
+    private static final Path TEST_SAMPLES_DIR = TestResources.TEST_SAMPLES_DIR;
 
     private static Stream<Arguments> targetVersions() {
         return SupportedClusters.targets().stream().map(Arguments::of);
@@ -50,10 +49,10 @@ public class TargetWriteEndToEndTest {
 
     @ParameterizedTest(name = "Target {0}")
     @MethodSource("targetVersions")
-    void writeGoldenDocumentsToTarget(SearchClusterContainer.ContainerVersion targetVersion) {
+    void writeSampleDocumentsToTarget(SearchClusterContainer.ContainerVersion targetVersion) {
         try (var targetCluster = new SearchClusterContainer(targetVersion)) {
             targetCluster.start();
-            writeAndVerifyGoldenDocs(targetCluster, "es710-wsoft-docs.json", "golden_test", 3);
+            writeAndVerifyTestSampleDocs(targetCluster, "es710-wsoft-docs.json", "sample_test", 3);
         }
     }
 
@@ -85,14 +84,14 @@ public class TargetWriteEndToEndTest {
     }
 
     @SneakyThrows
-    private void writeAndVerifyGoldenDocs(
+    private void writeAndVerifyTestSampleDocs(
         SearchClusterContainer targetCluster,
-        String goldenFile,
+        String sampleFile,
         String indexName,
         int expectedDocCount
     ) {
         var context = DocumentMigrationTestContext.factory().noOtelTracking();
-        var docs = loadGoldenDocs(goldenFile);
+        var docs = loadTestSampleDocs(sampleFile);
 
         createIndex(targetCluster, indexName, 1);
         reindexDocs(targetCluster, indexName, docs, context);
@@ -173,9 +172,9 @@ public class TargetWriteEndToEndTest {
         refreshAndVerifyDocCount(targetCluster, indexName, expectedTotal, context);
     }
 
-    private List<LuceneDocumentChange> loadGoldenDocs(String filename) throws IOException {
-        var path = GOLDEN_DIR.resolve(filename);
-        var nodes = MAPPER.readValue(Files.readString(path), new TypeReference<List<GoldenDoc>>() {});
+    private List<LuceneDocumentChange> loadTestSampleDocs(String filename) throws IOException {
+        var path = TEST_SAMPLES_DIR.resolve(filename);
+        var nodes = MAPPER.readValue(Files.readString(path), new TypeReference<List<SampleDoc>>() {});
         return nodes.stream()
             .map(g -> new LuceneDocumentChange(
                 0, g.id, g.type, g.source.getBytes(java.nio.charset.StandardCharsets.UTF_8), g.routing,
@@ -262,7 +261,7 @@ public class TargetWriteEndToEndTest {
             "Expected " + expectedCount + " docs in " + indexName);
     }
 
-    private static class GoldenDoc {
+    private static class SampleDoc {
         public String id;
         public String type;
         public String source;

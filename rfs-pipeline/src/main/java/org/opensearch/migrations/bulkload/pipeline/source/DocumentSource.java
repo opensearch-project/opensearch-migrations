@@ -14,7 +14,7 @@ import reactor.core.publisher.Flux;
  * <p>This is the key abstraction enabling N+M testing:
  * <ul>
  *   <li>Source-side tests: real snapshot → assert IR correctness</li>
- *   <li>Sink-side tests: {@code SyntheticDocumentSource} → real target → assert cluster state</li>
+ *   <li>Sink-side tests: {@code SyntheticDocumentSource} (in testFixtures) → real target → assert cluster state</li>
  * </ul>
  *
  * <p>Implementations must be safe for sequential partition-by-partition access. Concurrent access

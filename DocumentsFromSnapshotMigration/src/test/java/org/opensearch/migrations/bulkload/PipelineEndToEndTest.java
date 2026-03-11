@@ -46,7 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * Full pipeline e2e tests: real snapshot → {@link DocumentMigrationPipeline} → real cluster.
  *
- * <p>Uses representative source→target pairs from {@link SupportedClusters#smokePairs()}
+ * <p>Uses representative source→target pairs from {@link SupportedClusters#representativeMigrationPairs()}
  * to validate the complete pipeline wiring end-to-end.
  */
 @Slf4j
@@ -63,15 +63,15 @@ public class PipelineEndToEndTest {
 
     private static final SnapshotFixtureCache fixtureCache = new SnapshotFixtureCache();
 
-    static Stream<Arguments> smokePairs() {
-        return SupportedClusters.smokePairs().stream()
+    static Stream<Arguments> representativeMigrationPairs() {
+        return SupportedClusters.representativeMigrationPairs().stream()
             .map(pair -> Arguments.of(pair.source(), pair.target()));
     }
 
     // --- Full pipeline tests ---
 
     @ParameterizedTest(name = "{0} → {1}")
-    @MethodSource("smokePairs")
+    @MethodSource("representativeMigrationPairs")
     void fullPipelineMigration(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
         Path workDir = Files.createTempDirectory("pipeline_e2e_full");
@@ -99,7 +99,7 @@ public class PipelineEndToEndTest {
     }
 
     @ParameterizedTest(name = "batching: {0} → {1}")
-    @MethodSource("smokePairs")
+    @MethodSource("representativeMigrationPairs")
     void pipelineWithSmallBatches(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
         Path workDir = Files.createTempDirectory("pipeline_e2e_batch");
@@ -124,7 +124,7 @@ public class PipelineEndToEndTest {
     }
 
     @ParameterizedTest(name = "metadata: {0} → {1}")
-    @MethodSource("smokePairs")
+    @MethodSource("representativeMigrationPairs")
     void metadataPipelineMigration(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
         var extractor = createSnapshot(sourceVersion);
 
@@ -153,7 +153,7 @@ public class PipelineEndToEndTest {
     // --- Complex scenario tests ---
 
     @ParameterizedTest(name = "complex: {0} → {1}")
-    @MethodSource("smokePairs")
+    @MethodSource("representativeMigrationPairs")
     void pipelineWithComplexData(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
         var extractor = createComplexSnapshot(sourceVersion);
         Path workDir = Files.createTempDirectory("pipeline_e2e_complex");

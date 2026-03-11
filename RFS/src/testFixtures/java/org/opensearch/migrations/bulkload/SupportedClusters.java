@@ -164,7 +164,7 @@ public class SupportedClusters {
      * Target-only coverage is in TargetWriteEndToEndTest (O(N)).
      * These smoke pairs validate the wiring between reading and writing for key migration paths.
      */
-    public static List<MigrationPair> smokePairs() {
+    public static List<MigrationPair> representativeMigrationPairs() {
         return List.of(
             // Oldest supported → latest target
             new MigrationPair(SearchClusterContainer.ES_V1_7_6, SearchClusterContainer.OS_V2_19_4),

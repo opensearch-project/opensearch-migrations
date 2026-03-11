@@ -23,8 +23,8 @@ public class TestResources {
     public static final Snapshot SNAPSHOT_ES_7_10_W_SOFT;
     public static final Snapshot SNAPSHOT_ES_7_10_WO_SOFT;
 
-    /** Golden files directory for document/metadata extraction tests */
-    public static final Path GOLDEN_DIR;
+    /** Test sample files directory for document/metadata extraction tests */
+    public static final Path TEST_SAMPLES_DIR;
 
     private static Path findRfsDir() {
         Path cwd = Paths.get(System.getProperty("user.dir"));
@@ -39,7 +39,7 @@ public class TestResources {
     static {
         Path rfsBaseDir = findRfsDir();
 
-        GOLDEN_DIR = rfsBaseDir.resolve("test-resources/golden");
+        TEST_SAMPLES_DIR = rfsBaseDir.resolve("test-resources/test-samples");
 
         SNAPSHOT_ES_5_6 = new Snapshot(
             rfsBaseDir.resolve(Paths.get("test-resources", "snapshots", "ES_5_6_Updates_Deletes")),

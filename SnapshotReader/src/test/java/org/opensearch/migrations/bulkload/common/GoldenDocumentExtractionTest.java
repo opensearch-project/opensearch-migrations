@@ -28,24 +28,24 @@ import org.junit.jupiter.params.provider.MethodSource;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Golden file tests for document extraction. Validates that reading documents from
+ * Test sample file tests for document extraction. Validates that reading documents from
  * pre-built snapshot fixtures produces stable, expected output.
  *
- * Golden files are stored in RFS/test-resources/golden/ as pretty-printed JSON.
- * To regenerate: delete the golden file and run the test — it will write the current output.
+ * Test sample files are stored in RFS/test-resources/test-samples/ as pretty-printed JSON.
+ * To regenerate: delete the sample file and run the test — it will write the current output.
  */
 @Slf4j
 public class GoldenDocumentExtractionTest {
     private static final ObjectMapper MAPPER = new ObjectMapper()
         .enable(SerializationFeature.INDENT_OUTPUT);
 
-    private static final Path GOLDEN_DIR = TestResources.GOLDEN_DIR;
+    private static final Path TEST_SAMPLES_DIR = TestResources.TEST_SAMPLES_DIR;
 
     private Path tempDirectory;
 
     @BeforeEach
     void setUp() throws IOException {
-        tempDirectory = Files.createTempDirectory("golden-doc-test");
+        tempDirectory = Files.createTempDirectory("sample-doc-test");
     }
 
     @AfterEach
@@ -71,8 +71,8 @@ public class GoldenDocumentExtractionTest {
 
     @ParameterizedTest(name = "{0} documents from {3}")
     @MethodSource("documentExtractionTestCases")
-    void extractedDocumentsMatchGolden(
-        String label, String versionStr, TestResources.Snapshot snapshot, String indexName, String goldenFile
+    void extractedDocumentsMatchSample(
+        String label, String versionStr, TestResources.Snapshot snapshot, String indexName, String sampleFile
     ) throws Exception {
         var version = Version.fromString(versionStr);
         var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(version, true);
@@ -94,7 +94,7 @@ public class GoldenDocumentExtractionTest {
             .collectList().block();
 
         String actualJson = serializeDocuments(docs);
-        assertMatchesGolden(goldenFile, actualJson);
+        assertMatchesSample(sampleFile, actualJson);
     }
 
     private String serializeDocuments(List<LuceneDocumentChange> docs) throws Exception {
@@ -115,19 +115,19 @@ public class GoldenDocumentExtractionTest {
         return MAPPER.writeValueAsString(array);
     }
 
-    private void assertMatchesGolden(String goldenFile, String actualJson) throws IOException {
-        Path goldenPath = GOLDEN_DIR.resolve(goldenFile);
+    private void assertMatchesSample(String sampleFile, String actualJson) throws IOException {
+        Path samplePath = TEST_SAMPLES_DIR.resolve(sampleFile);
 
-        if (!Files.exists(goldenPath)) {
-            Files.createDirectories(goldenPath.getParent());
-            Files.writeString(goldenPath, actualJson + "\n");
-            log.info("Generated golden file: {}", goldenPath);
+        if (!Files.exists(samplePath)) {
+            Files.createDirectories(samplePath.getParent());
+            Files.writeString(samplePath, actualJson + "\n");
+            log.info("Generated test sample file: {}", samplePath);
             return;
         }
 
-        String expectedJson = Files.readString(goldenPath).strip();
+        String expectedJson = Files.readString(samplePath).strip();
         assertEquals(expectedJson, actualJson,
-            "Document extraction for " + goldenFile + " does not match golden file. " +
-            "If the change is intentional, delete the golden file and re-run to regenerate.");
+            "Document extraction for " + sampleFile + " does not match test sample file. " +
+            "If the change is intentional, delete the sample file and re-run to regenerate.");
     }
 }
