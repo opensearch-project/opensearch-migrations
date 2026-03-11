@@ -5,6 +5,7 @@ import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.Arrays;
 
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +14,7 @@ import org.graalvm.polyglot.HostAccess;
 import org.graalvm.polyglot.Source;
 import org.graalvm.polyglot.Value;
 import org.graalvm.python.embedding.GraalPyResources;
+import org.graalvm.python.embedding.VirtualFileSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
@@ -21,7 +23,9 @@ import org.slf4j.event.Level;
  * Executes Python transformations on JSON-like objects using the GraalVM Polyglot API (GraalPy).
  *
  * <p>Uses {@link GraalPyResources} to create the context, which enables access to pip packages
- * that were pre-installed at build time via the GraalPy Gradle plugin.
+ * that were pre-installed at build time via the GraalPy Gradle plugin. When a {@code venvPath}
+ * is provided, uses that external venv instead, allowing users to supply arbitrary pip packages
+ * at runtime.
  *
  * <p><strong>Not thread-safe.</strong> Each thread should use its own instance.
  */
@@ -36,11 +40,34 @@ public class PythonTransformer implements IJsonTransformer {
     private final OutputStream errorStream;
 
     public PythonTransformer(String script, Object context) {
+        this(script, context, null);
+    }
+
+    /**
+     * @param script  Python source code
+     * @param context Bindings object passed to the script's main function (or null)
+     * @param venvPath Path to a directory containing a Python venv with pip packages,
+     *                 or null to use the build-time bundled packages
+     */
+    public PythonTransformer(String script, Object context, Path venvPath) {
         var sourceCode = Source.create(LANGUAGE_ID, script);
         var pyLogger = LoggerFactory.getLogger(PYTHON_TRANSFORM_LOGGER_NAME);
         this.infoStream = new LoggingOutputStream(pyLogger, Level.INFO);
         this.errorStream = new LoggingOutputStream(pyLogger, Level.ERROR);
-        this.polyglotContext = GraalPyResources.contextBuilder()
+
+        Context.Builder builder;
+        if (venvPath != null) {
+            log.atInfo().setMessage("Using external Python venv: {}").addArgument(venvPath).log();
+            builder = GraalPyResources.contextBuilder(venvPath);
+        } else {
+            builder = GraalPyResources.contextBuilder(
+                VirtualFileSystem.newBuilder()
+                    .allowHostIO(VirtualFileSystem.HostIO.READ)
+                    .build()
+            );
+        }
+
+        this.polyglotContext = builder
             .allowHostAccess(HostAccess.newBuilder()
                 .allowAccessAnnotatedBy(HostAccess.Export.class)
                 .allowArrayAccess(true)

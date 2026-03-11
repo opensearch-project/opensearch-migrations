@@ -20,6 +20,7 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
     public static final String RESOURCE_PATH_KEY = "initializationResourcePath";
     public static final String INLINE_SCRIPT_KEY = "initializationScript";
     public static final String BINDINGS_OBJECT = "bindingsObject";
+    public static final String PYTHON_MODULE_PATH_KEY = "pythonModulePath";
 
     @SneakyThrows
     @Override
@@ -27,7 +28,8 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
         var config = validateAndExtractConfig(jsonConfig);
         var script = resolveScript(config);
         var bindingsObject = parseBindingsObject(config);
-        return new PythonTransformer(script, bindingsObject);
+        var venvPath = resolveVenvPath(config);
+        return new PythonTransformer(script, bindingsObject, venvPath);
     }
 
     @SuppressWarnings("unchecked")
@@ -110,6 +112,20 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
         }
     }
 
+    private Path resolveVenvPath(Map<String, Object> config) {
+        var modulePath = (String) config.getOrDefault(PYTHON_MODULE_PATH_KEY, null);
+        if (modulePath == null) {
+            return null;
+        }
+        var path = Path.of(modulePath);
+        if (!Files.isDirectory(path)) {
+            throw new IllegalArgumentException(
+                "pythonModulePath '" + modulePath + "' does not exist or is not a directory."
+            );
+        }
+        return path;
+    }
+
     private String getConfigUsageStr() {
         return this.getClass().getName() + " expects the incoming configuration to be a Map<String, Object>, "
             + "with keys: " + INLINE_SCRIPT_KEY + " or " + SCRIPT_FILE_KEY + ", " + BINDINGS_OBJECT + ".\n"
@@ -122,6 +138,8 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
             + " and returns a transform function which takes in a json object and returns the transformed object.\n"
             + BINDINGS_OBJECT
             + " is a value which can be deserialized with Jackson ObjectMapper into a Map, List, Array,"
-            + " or primitive type/wrapper.";
+            + " or primitive type/wrapper.\n"
+            + PYTHON_MODULE_PATH_KEY
+            + " (optional) is a path to a directory containing a Python venv with pip packages.";
     }
 }
