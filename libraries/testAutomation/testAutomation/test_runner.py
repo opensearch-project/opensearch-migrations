@@ -193,6 +193,16 @@ class TestRunner:
         except Exception as e:
             logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
 
+    def cleanup_between_versions(self) -> None:
+        """Lightweight cleanup between version combinations.
+
+        Only removes test clusters and argo workflows, keeping the MA
+        infrastructure (argo, kyverno, etcd, migration-console) intact.
+        This avoids the expensive helm uninstall/install cycle (~3min).
+        """
+        self.cleanup_clusters()
+        self.k8s_service.delete_all_argo_templates()
+
     def cleanup_deployment(self) -> None:
         helm_uninstall_error = None
         try:
@@ -305,7 +315,10 @@ class TestRunner:
                 self.copy_logs()
 
             if not skip_delete:
-                self.cleanup_deployment()
+                if is_last:
+                    self.cleanup_deployment()
+                else:
+                    self.cleanup_between_versions()
 
         self._print_summary_table(reports=test_reports)
         if combos_with_failures:
