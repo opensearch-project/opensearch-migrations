@@ -5,8 +5,6 @@ import java.util.Map;
 
 import org.opensearch.migrations.transform.TransformationLoader;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -15,7 +13,6 @@ import org.junit.jupiter.api.Test;
  * TransformationLoader SPI discovery pipeline.
  */
 public class PythonTransformationE2ETest {
-    private static final ObjectMapper mapper = new ObjectMapper();
 
     @Test
     public void testPythonTransformationViaSPI() throws Exception {

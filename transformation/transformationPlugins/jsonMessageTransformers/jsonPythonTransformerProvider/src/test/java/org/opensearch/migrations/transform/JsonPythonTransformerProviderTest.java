@@ -67,7 +67,19 @@ public class JsonPythonTransformerProviderTest {
     }
 
     @Test
-    public void testCreateTransformer_missingBindings() throws Exception {
+    public void testCreateTransformer_nullConfig() {
+        var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(null));
+        assertThat(exception.getMessage(), containsString("Configuration must not be null or empty."));
+    }
+
+    @Test
+    public void testCreateTransformer_nonMapConfig() {
+        var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer("not-a-map"));
+        assertThat(exception.getMessage(), containsString("expects the incoming configuration to be a Map"));
+    }
+
+    @Test
+    public void testCreateTransformer_missingBindings() {
         var config = Map.of(
             "initializationScript", "");
         var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
@@ -75,11 +87,72 @@ public class JsonPythonTransformerProviderTest {
     }
 
     @Test
-    public void testCreateTransformer_missingScript() throws Exception {
+    public void testCreateTransformer_invalidBindings() {
+        var config = Map.of(
+            "bindingsObject", Map.of(),
+            "initializationScript", "");
+        var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
+        assertThat(exception.getMessage(), containsString("Failed to parse the bindingsObject."));
+    }
+
+    @Test
+    public void testCreateTransformer_missingScript() {
         var config = Map.of(
             "bindingsObject", "{}");
         var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
         assertThat(exception.getMessage(),
             containsString("One of {\"initializationScriptFile\",\"initializationScript\",\"initializationResourcePath\"} must be provided."));
+    }
+
+    @Test
+    public void testCreateTransformer_tooManyScriptSources() throws Exception {
+        Files.writeString(tempScriptFile.toPath(), SIMPLE_PYTHON_TRANSFORM);
+        var config = Map.of(
+            "bindingsObject", "{}",
+            "initializationScript", SIMPLE_PYTHON_TRANSFORM,
+            "initializationScriptFile", tempScriptFile.getAbsolutePath());
+        var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
+        assertThat(exception.getMessage(), containsString(
+            "Unable to use both parameters at the same time"));
+    }
+
+    @Test
+    public void testCreateTransformer_invalidFilePath() {
+        var config = Map.of(
+            "bindingsObject", "{}",
+            "initializationScriptFile", "/nonexistent/path/script.py");
+        var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
+        assertThat(exception.getMessage(), containsString("Failed to load script file"));
+    }
+
+    @Test
+    public void testCreateTransformer_resourceNotFound() {
+        var config = Map.of(
+            "bindingsObject", "{}",
+            "initializationResourcePath", "nonexistent-resource.py");
+        var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
+        assertThat(exception.getMessage(), containsString("Resource not found: nonexistent-resource.py"));
+    }
+
+    @Test
+    public void testCreateTransformer_resourcePath() throws Exception {
+        var config = Map.of(
+            "bindingsObject", "{}",
+            "initializationResourcePath", "test-transform.py");
+        var transformer = provider.createTransformer(config);
+        var result = (Map) transformer.transformJson(new HashMap<>(TEST_DOC));
+
+        assertThat(result.getOrDefault("transformed_by", null), equalTo("resource_script"));
+    }
+
+    @Test
+    public void testCreateTransformer_resourceAndFileConflict() throws Exception {
+        Files.writeString(tempScriptFile.toPath(), SIMPLE_PYTHON_TRANSFORM);
+        var config = Map.of(
+            "bindingsObject", "{}",
+            "initializationScriptFile", tempScriptFile.getAbsolutePath(),
+            "initializationResourcePath", "test-transform.py");
+        var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
+        assertThat(exception.getMessage(), containsString("Unable to use both parameters at the same time"));
     }
 }
