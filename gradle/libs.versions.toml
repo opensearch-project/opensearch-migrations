@@ -147,6 +147,7 @@ opentelemetry-semconv = { module = "io.opentelemetry.semconv:opentelemetry-semco
 
 polyglot = { module = "org.graalvm.polyglot:polyglot", version.ref = "graalvm" }
 polyglot-js-community = { module = "org.graalvm.polyglot:js-community", version.ref = "graalvm" }
+polyglot-python-community = { module = "org.graalvm.polyglot:python-community", version.ref = "graalvm" }
 
 protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
 protobuf-protoc = { module = "com.google.protobuf:protoc", version.ref = "protobuf" }
