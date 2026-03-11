@@ -452,7 +452,7 @@ spec:
             protocol: "http"
             replicas: 1
             createCert: false
-            clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
+            clusterHealthCheckParams: "wait_for_status=yellow&timeout=1s"
             resources:
               requests:
                 cpu: "2"
@@ -685,7 +685,7 @@ spec:
             protocol: "http"
             replicas: 1
             createCert: false
-            clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
+            clusterHealthCheckParams: "wait_for_status=yellow&timeout=1s"
             resources:
               requests:
                 cpu: "2"
@@ -817,6 +817,11 @@ spec:
                 memory: "4Gi"
             persistence:
               enabled: false
+            startupProbe:
+              initialDelaySeconds: 5
+              periodSeconds: 5
+              timeoutSeconds: 3
+              failureThreshold: 30
             opensearchJavaOpts: "-Xms2g -Xmx2g"
             plugins:
               enabled: true
@@ -908,6 +913,11 @@ spec:
                 memory: "4Gi"
             persistence:
               enabled: false
+            startupProbe:
+              initialDelaySeconds: 5
+              periodSeconds: 5
+              timeoutSeconds: 3
+              failureThreshold: 30
             opensearchJavaOpts: "-Xms2g -Xmx2g"
             plugins:
               enabled: true
