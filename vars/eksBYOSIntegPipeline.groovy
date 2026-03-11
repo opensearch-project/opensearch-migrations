@@ -328,24 +328,51 @@ ENVEOF
                 timeout(time: 75, unit: 'MINUTES') {
                     script {
                         def region = params.REGION
-                        def maStackName = "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
+                        def maStackName = env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
 
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: region, duration: 4500, roleSessionName: 'jenkins-session') {
+                                // EKS/k8s cleanup (only if EKS was deployed)
+                                if (env.eksClusterName) {
+                                    dir('libraries/testAutomation') {
+                                        sh "pipenv install --deploy"
+                                        sh "kubectl --context=${env.eksKubeContext} -n ma get pods || true"
+                                        sh "pipenv run app --delete-only --kube-context=${env.eksKubeContext}"
+                                        sh "kubectl --context=${env.eksKubeContext} delete namespace ma --ignore-not-found --timeout=60s || true"
+                                    }
+
+                                    // Revoke security group rule added during setup
+                                    if (env.clusterDetailsJson && env.clusterSecurityGroup) {
+                                        def clusterDetails = readJSON text: env.clusterDetailsJson
+                                        def targetCluster = clusterDetails.target
+                                        sh """
+                                          if aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
+                                            exists=\$(aws ec2 describe-security-groups \
+                                              --group-ids $targetCluster.securityGroupId \
+                                              --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
+                                              --output json)
+                                            if [ "\$exists" != "[]" ]; then
+                                              echo "CLEANUP: Revoking EKS SG ingress rule"
+                                              aws ec2 revoke-security-group-ingress \
+                                                --group-id $targetCluster.securityGroupId \
+                                                --protocol -1 --port -1 \
+                                                --source-group $env.clusterSecurityGroup || true
+                                            fi
+                                          fi
+                                        """
+                                    }
+                                }
+
                                 // Destroy domain stacks via CDK (uses same context file from deploy)
                                 dir('test') {
                                     echo "CLEANUP: Destroying domain stacks via CDK"
                                     sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath} --destroy || true"
                                 }
 
+                                // Delete MA CloudFormation stack directly
                                 echo "CLEANUP: Deleting MA stack ${maStackName}"
-                                sh """
-                                    ./deployment/k8s/aws/aws-bootstrap.sh \
-                                      --stack-name "${maStackName}" \
-                                      --region ${region} \
-                                      --destroy \
-                                      || true
-                                """
+                                sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
+                                sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
                             }
                         }
                     }
