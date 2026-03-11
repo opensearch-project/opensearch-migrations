@@ -148,6 +148,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "resources": {
                       "type": "object",
+                      "nullable": true,
                       "properties": {
                         "limits": {
                           "type": "object",
@@ -1009,6 +1010,24 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             "items": {
               "type": "object",
               "properties": {
+                "dependsOnSnapshotMigrations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "source": {
+                        "type": "string"
+                      },
+                      "snapshot": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "source",
+                      "snapshot"
+                    ]
+                  }
+                },
                 "fromProxy": {
                   "type": "string"
                 },
@@ -1039,6 +1058,160 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "kafkaConnection",
                     "label"
                   ]
+                },
+                "replayerConfig": {
+                  "type": "object",
+                  "properties": {
+                    "jvmArgs": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "loggingConfigurationOverrideConfigMap": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "podReplicas": {
+                      "type": "number",
+                      "default": 1
+                    },
+                    "resources": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "limits": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                            },
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                            }
+                          },
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Resource upper bound for a container"
+                        },
+                        "requests": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                            },
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                            }
+                          },
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Resource lower bound for a container"
+                        }
+                      },
+                      "required": [
+                        "limits",
+                        "requests"
+                      ],
+                      "description": "Resource limits and requests for replayer container."
+                    },
+                    "authHeaderValue": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "kafkaTrafficEnableMSKAuth": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "kafkaTrafficPropertyFile": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "lookaheadTimeSeconds": {
+                      "type": "number",
+                      "default": 400
+                    },
+                    "maxConcurrentRequests": {
+                      "type": "number",
+                      "default": 10000
+                    },
+                    "numClientThreads": {
+                      "type": "number",
+                      "default": 0
+                    },
+                    "observedPacketConnectionTimeout": {
+                      "type": "number",
+                      "default": 360
+                    },
+                    "otelCollectorEndpoint": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "quiescentPeriodMs": {
+                      "type": "number",
+                      "default": 5000
+                    },
+                    "removeAuthHeader": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "speedupFactor": {
+                      "type": "number",
+                      "default": 1.1
+                    },
+                    "targetServerResponseTimeoutSeconds": {
+                      "type": "number",
+                      "default": 150
+                    },
+                    "transformerConfig": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "transformerConfigEncoded": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "transformerConfigFile": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "tupleTransformerConfig": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "tupleTransformerConfigBase64": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "tupleTransformerConfigFile": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "userAgent": {
+                      "type": "string",
+                      "default": ""
+                    }
+                  }
                 },
                 "toTarget": {
                   "type": "object",
@@ -1130,131 +1303,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "endpoint",
                     "label"
                   ]
-                },
-                "dependsOnSnapshotMigrations": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "source": {
-                        "type": "string"
-                      },
-                      "snapshot": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "source",
-                      "snapshot"
-                    ]
-                  }
-                },
-                "replayerConfig": {
-                  "type": "object",
-                  "properties": {
-                    "podReplicas": {
-                      "type": "number",
-                      "default": 1
-                    },
-                    "jvmArgs": {
-                      "type": "string",
-                      "default": ""
-                    },
-                    "loggingConfigurationOverrideConfigMap": {
-                      "type": "string",
-                      "default": ""
-                    },
-                    "resources": {
-                      "type": "object",
-                      "properties": {
-                        "limits": {
-                          "type": "object",
-                          "properties": {
-                            "cpu": {
-                              "type": "string",
-                              "pattern": "^[0-9]+m$",
-                              "description": "CPU quantity in millicores (e.g., '100m', '500m')"
-                            },
-                            "memory": {
-                              "type": "string",
-                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
-                            },
-                            "ephemeral-storage": {
-                              "type": "string",
-                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
-                            }
-                          },
-                          "required": [
-                            "cpu",
-                            "memory"
-                          ],
-                          "description": "Resource upper bound for a container"
-                        },
-                        "requests": {
-                          "type": "object",
-                          "properties": {
-                            "cpu": {
-                              "type": "string",
-                              "pattern": "^[0-9]+m$",
-                              "description": "CPU quantity in millicores (e.g., '100m', '500m')"
-                            },
-                            "memory": {
-                              "type": "string",
-                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
-                            },
-                            "ephemeral-storage": {
-                              "type": "string",
-                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
-                            }
-                          },
-                          "required": [
-                            "cpu",
-                            "memory"
-                          ],
-                          "description": "Resource lower bound for a container"
-                        }
-                      },
-                      "default": {
-                        "limits": {
-                          "cpu": "3500m",
-                          "memory": "3500Mi"
-                        },
-                        "requests": {
-                          "cpu": "3500m",
-                          "memory": "3500Mi"
-                        }
-                      },
-                      "required": [
-                        "limits",
-                        "requests"
-                      ],
-                      "description": "Resource limits and requests for replayer container."
-                    },
-                    "speedupFactor": {
-                      "type": "number",
-                      "default": 1.1
-                    },
-                    "authHeaderValue": {
-                      "type": "string",
-                      "default": ""
-                    },
-                    "otelCollectorEndpoint": {
-                      "type": "string",
-                      "default": ""
-                    }
-                  }
                 }
               },
               "required": [
+                "dependsOnSnapshotMigrations",
                 "fromProxy",
                 "kafkaClusterName",
                 "kafkaConfig",
-                "toTarget",
-                "dependsOnSnapshotMigrations"
+                "replayerConfig",
+                "toTarget"
               ]
             },
             "default": []
@@ -1996,6 +2053,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "resources": {
                     "type": "object",
+                    "nullable": true,
                     "properties": {
                       "limits": {
                         "type": "object",
@@ -2267,10 +2325,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "replayerConfig": {
                 "type": "object",
                 "properties": {
-                  "podReplicas": {
-                    "type": "number",
-                    "default": 1
-                  },
                   "jvmArgs": {
                     "type": "string",
                     "default": ""
@@ -2279,8 +2333,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "default": ""
                   },
+                  "podReplicas": {
+                    "type": "number",
+                    "default": 1
+                  },
                   "resources": {
                     "type": "object",
+                    "nullable": true,
                     "properties": {
                       "limits": {
                         "type": "object",
@@ -2333,33 +2392,106 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "description": "Resource lower bound for a container"
                       }
                     },
-                    "default": {
-                      "limits": {
-                        "cpu": "3500m",
-                        "memory": "3500Mi"
-                      },
-                      "requests": {
-                        "cpu": "3500m",
-                        "memory": "3500Mi"
-                      }
-                    },
                     "required": [
                       "limits",
                       "requests"
                     ],
                     "description": "Resource limits and requests for replayer container."
                   },
-                  "speedupFactor": {
-                    "type": "number",
-                    "default": 1.1
-                  },
                   "authHeaderValue": {
                     "type": "string",
-                    "default": ""
+                    "default": "",
+                    "description": "Static value for the authorization header of each request."
+                  },
+                  "kafkaTrafficEnableMSKAuth": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enables SASL properties required for connecting to MSK with IAM auth."
+                  },
+                  "kafkaTrafficPropertyFile": {
+                    "type": "string",
+                    "default": "",
+                    "description": "File path for Kafka properties file for additional or overridden Kafka properties."
+                  },
+                  "lookaheadTimeSeconds": {
+                    "type": "number",
+                    "default": 400,
+                    "description": "Number of seconds of data that will be buffered."
+                  },
+                  "maxConcurrentRequests": {
+                    "type": "number",
+                    "default": 10000,
+                    "description": "Maximum number of requests that can be outstanding at a time."
+                  },
+                  "numClientThreads": {
+                    "type": "number",
+                    "default": 0,
+                    "description": "Number of threads to use to send requests from."
+                  },
+                  "observedPacketConnectionTimeout": {
+                    "type": "number",
+                    "default": 360,
+                    "description": "Seconds of inactivity before assuming connections were terminated in the captured stream."
                   },
                   "otelCollectorEndpoint": {
                     "type": "string",
-                    "default": ""
+                    "default": "",
+                    "description": "Endpoint (host:port) for the OpenTelemetry Collector for metrics forwarding."
+                  },
+                  "quiescentPeriodMs": {
+                    "type": "number",
+                    "default": 5000,
+                    "description": "Milliseconds to delay the first request on a resumed connection after Kafka partition reassignment."
+                  },
+                  "removeAuthHeader": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Remove the authorization header if present without replacing it."
+                  },
+                  "speedupFactor": {
+                    "type": "number",
+                    "default": 1.1,
+                    "description": "Factor to accelerate replayed communications relative to original timing."
+                  },
+                  "targetServerResponseTimeoutSeconds": {
+                    "type": "number",
+                    "default": 150,
+                    "description": "Seconds to wait before timing out a replayed request to the target."
+                  },
+                  "transformerConfig": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Request transformer configuration as a string or JSON."
+                  },
+                  "transformerConfigEncoded": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Base64-encoded request transformer configuration."
+                  },
+                  "transformerConfigFile": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to the JSON configuration file for request transformers."
+                  },
+                  "tupleTransformerConfig": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Tuple transformer configuration as a string or JSON."
+                  },
+                  "tupleTransformerConfigBase64": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Base64-encoded tuple transformer configuration."
+                  },
+                  "tupleTransformerConfigFile": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Path to the JSON configuration file for tuple transformers."
+                  },
+                  "userAgent": {
+                    "type": "string",
+                    "default": "",
+                    "description": "String appended to the user-agent header for requests to the target cluster."
                   }
                 }
               }

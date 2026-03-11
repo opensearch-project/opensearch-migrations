@@ -1,12 +1,11 @@
-
 import {z} from "zod";
 import {
     NAMED_TARGET_CLUSTER_CONFIG,
-    REPLAYER_OPTIONS,
-    ResourceRequirementsType,
+    USER_REPLAYER_OPTIONS,
+    ResourceRequirementsType, ARGO_REPLAYER_OPTIONS, KAFKA_CLIENT_CONFIG,
 } from "@opensearch-migrations/schemas";
 import {
-    BaseExpression,
+    BaseExpression, Deployment,
     expr,
     IMAGE_PULL_POLICY,
     INTERNAL, makeDirectTypeProxy, makeStringTypeProxy,
@@ -46,11 +45,10 @@ function makeReplayerTargetParamDict(
     );
 }
 
-function makeParamsDict(
+function makeReplayerParamsDict(
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
-    options: BaseExpression<Serialized<z.infer<typeof REPLAYER_OPTIONS>>>,
-    kafkaBrokers: BaseExpression<string>,
-    kafkaTopic: BaseExpression<string>,
+    options: BaseExpression<Serialized<z.infer<typeof USER_REPLAYER_OPTIONS>>>,
+    kafkaConfig: BaseExpression<Serialized<z.infer<typeof KAFKA_CLIENT_CONFIG>>>,
     kafkaGroupId: BaseExpression<string>,
 ) {
     return expr.mergeDicts(
@@ -59,8 +57,8 @@ function makeParamsDict(
             expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources", "jvmArgs")
         ),
         expr.makeDict({
-            kafkaTrafficBrokers: kafkaBrokers,
-            kafkaTrafficTopic: kafkaTopic,
+            kafkaTrafficBrokers: expr.get(expr.deserializeRecord(kafkaConfig), "kafkaConnection"),
+            kafkaTrafficTopic: expr.get(expr.deserializeRecord(kafkaConfig), "kafkaTopic"),
             kafkaTrafficGroupId: kafkaGroupId,
         })
     );
@@ -71,7 +69,7 @@ function getReplayerDeploymentManifest
 (args: {
     workflowName: BaseExpression<string>,
     jsonConfig: BaseExpression<string>,
-    sessionName: BaseExpression<string>,
+    name: BaseExpression<string>,
 
     useCustomLogging: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
@@ -81,7 +79,7 @@ function getReplayerDeploymentManifest
     replayerImageName: BaseExpression<string>,
     replayerImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     resources: BaseExpression<ResourceRequirementsType>
-}) {
+}): Deployment {
     const baseContainerDefinition = {
         name: "replayer",
         image: makeStringTypeProxy(args.replayerImageName),
@@ -102,14 +100,14 @@ function getReplayerDeploymentManifest
         apiVersion: "apps/v1",
         kind: "Deployment",
         metadata: {
-            name: expr.concat(args.sessionName, expr.literal("-replayer")),
+            name: makeDirectTypeProxy(args.name),
             labels: {
                 app: "replayer",
-                "workflows.argoproj.io/workflow": args.workflowName
+                "workflows.argoproj.io/workflow": makeDirectTypeProxy(args.workflowName)
             },
         },
         spec: {
-            replicas: args.podReplicas,
+            replicas: makeDirectTypeProxy(args.podReplicas),
             selector: {
                 matchLabels: {
                     app: "replayer",
@@ -119,7 +117,7 @@ function getReplayerDeploymentManifest
                 metadata: {
                     labels: {
                         app: "replayer",
-                        "workflows.argoproj.io/workflow": args.workflowName,
+                        "workflows.argoproj.io/workflow": makeDirectTypeProxy(args.workflowName),
                     },
                 },
                 spec: {
@@ -142,7 +140,7 @@ export const Replayer = WorkflowBuilder.create({
 
 
     .addTemplate("createDeployment", t => t
-        .addRequiredInput("sessionName", typeToken<string>())
+        .addRequiredInput("name", typeToken<string>())
         .addRequiredInput("jsonConfig", typeToken<string>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("jvmArgs", typeToken<string>())
@@ -159,7 +157,7 @@ export const Replayer = WorkflowBuilder.create({
                     useCustomLogging: expr.equals(expr.literal(""), b.inputs.loggingConfigurationOverrideConfigMap),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     jvmArgs: b.inputs.jvmArgs,
-                    sessionName: b.inputs.sessionName,
+                    name: b.inputs.name,
                     replayerImageName: b.inputs.imageTrafficReplayerLocation,
                     replayerImagePullPolicy: b.inputs.imageTrafficReplayerPullPolicy,
                     workflowName: expr.getWorkflowValue("name"),
@@ -170,15 +168,12 @@ export const Replayer = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("createDeploymentFromConfig", t => t
-        .addRequiredInput("kafkaTrafficBrokers", typeToken<string>())
-        .addRequiredInput("kafkaTopicName", typeToken<string>())
+    .addTemplate("setupReplayer", t => t
+        .addRequiredInput("kafkaConfig", typeToken<z.infer<typeof KAFKA_CLIENT_CONFIG>>())
         .addRequiredInput("kafkaGroupId", typeToken<string>())
-
+        .addRequiredInput("name", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("replayerConfig", typeToken<z.infer<typeof REPLAYER_OPTIONS>>())
-
-        .addOptionalInput("podReplicas", c => 1)
+        .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
 
@@ -186,20 +181,19 @@ export const Replayer = WorkflowBuilder.create({
             .addStep("deployReplayer", INTERNAL, "createDeployment", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    sessionName: "",
-                    podReplicas: expr.dig(expr.deserializeRecord(b.inputs.replayerConfig), ["podReplicas"], 1),
-                    jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.replayerConfig), ["jvmArgs"], ""),
-                    loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.replayerConfig), ["loggingConfigurationOverrideConfigMap"], ""),
+                    podReplicas: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["podReplicas"], 1),
+                    jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["jvmArgs"], ""),
+                    loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["loggingConfigurationOverrideConfigMap"], ""),
                     jsonConfig: expr.asString(expr.serialize(
-                        makeParamsDict(
+                        makeReplayerParamsDict(
                             b.inputs.targetConfig,
-                            b.inputs.replayerConfig,
-                            b.inputs.kafkaTrafficBrokers,
-                            b.inputs.kafkaTopicName,
-                            b.inputs.kafkaGroupId,
+                            b.inputs.replayerOptions,
+                            b.inputs.kafkaConfig,
+                            b.inputs.kafkaGroupId
                         ) as any
                     )),
-                    resources: expr.serialize(expr.getLoose(expr.deserializeRecord(b.inputs.replayerConfig), "resources"))
+                    resources: expr.serialize(expr.jsonPathStrict(b.inputs.replayerOptions, "resources"))
+
                 })))
     )
 

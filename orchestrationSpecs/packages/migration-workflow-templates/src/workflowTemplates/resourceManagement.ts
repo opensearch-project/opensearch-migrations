@@ -8,8 +8,8 @@ import {
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 
-const SECONDS_IN_DAYS = 24*3600;
-const LONGEST_POSSIBLE_MIGRATION = 365*SECONDS_IN_DAYS;
+const SECONDS_IN_DAYS = 24 * 3600;
+const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
 const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
 
 export const ResourceManagement = WorkflowBuilder.create({
@@ -48,7 +48,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     kind: "Kafka",
                     name: b.inputs.resourceName
                 },
-                conditions: { successCondition: "status.listeners" }
+                conditions: {successCondition: "status.listeners"}
             })
         )
     )
@@ -59,10 +59,10 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
             .addStep("waitForCreation", INTERNAL, "waitForKafkaClusterCreated", c =>
-                c.register({ ...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName })
+                c.register({...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName})
             )
             .addStep("waitForReady", INTERNAL, "waitForKafkaClusterReady", c =>
-                c.register({ ...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName })
+                c.register({...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName})
             )
         )
     )
@@ -71,7 +71,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("waitForKafkaTopic", b => b
         .addRequiredInput("resourceName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addWaitForNewResource(b=>b
+        .addWaitForNewResource(b => b
             .setDefinition({
                 resourceKindAndName: expr.concat(expr.literal(""), b.inputs.resourceName),
                 waitForCreation: {
@@ -87,7 +87,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("waitForCapturedTraffic", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addWaitForExistingResource(b=>b
+        .addWaitForExistingResource(b => b
             .setDefinition({
                 resource: {
                     apiVersion: CRD_API_VERSION,
@@ -103,11 +103,11 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("waitForDataSnapshot", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addWaitForExistingResource(b=>b
+        .addWaitForExistingResource(b => b
             .setDefinition({
                 resource: {
                     apiVersion: CRD_API_VERSION,
-                    kind:"DataSnapshot",
+                    kind: "DataSnapshot",
                     name: b.inputs.resourceName
                 },
                 conditions: {successCondition: "status.phase == Ready"}
@@ -119,7 +119,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("waitForSnapshotMigration", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addWaitForExistingResource(b=>b
+        .addWaitForExistingResource(b => b
             .setDefinition({
                 resource: {
                     apiVersion: CRD_API_VERSION,
@@ -143,8 +143,8 @@ export const ResourceManagement = WorkflowBuilder.create({
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "CapturedTraffic",
-                    metadata: { name: b.inputs.resourceName },
-                    status: { phase: "Ready" }
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Ready"}
                 }
             }))
     )
@@ -160,8 +160,8 @@ export const ResourceManagement = WorkflowBuilder.create({
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "DataSnapshot",
-                    metadata: { name: b.inputs.resourceName },
-                    status: { phase: "Ready", snapshotName: b.inputs.snapshotName }
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Ready", snapshotName: b.inputs.snapshotName}
                 }
             }))
     )
@@ -176,8 +176,8 @@ export const ResourceManagement = WorkflowBuilder.create({
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "SnapshotMigration",
-                    metadata: { name: b.inputs.resourceName },
-                    status: { phase: "Ready" }
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Ready"}
                 }
             }))
     )
@@ -191,7 +191,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "DataSnapshot",
-                    metadata: { name: b.inputs.resourceName }
+                    metadata: {name: b.inputs.resourceName}
                 }
             })
             .addJsonPathOutput("snapshotName", "{.status.snapshotName}", typeToken<string>()))

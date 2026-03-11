@@ -24,12 +24,12 @@ function makeDeployKafkaNodePool(args: {
         kind: "KafkaNodePool",
         metadata: {
             name: "dual-role", // TODO - make this a user setting!
-            labels: { "strimzi.io/cluster": args.clusterName }
+            labels: {"strimzi.io/cluster": args.clusterName}
         },
         spec: {
             replicas: makeDirectTypeProxy(args.replicas),
             roles: ["controller", "broker"],
-            storage: { type: "ephemeral" }
+            storage: {type: "ephemeral"}
         }
     };
 }
@@ -52,11 +52,11 @@ function makeDeployKafkaClusterKraftManifest(args: {
             kafka: {
                 version: args.version,
                 metadataVersion: "4.0-IV3",
-                readinessProbe: { initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 1 },
-                livenessProbe:  { initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 2 },
+                readinessProbe: {initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 1},
+                livenessProbe: {initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 2},
                 listeners: [
-                    { name: "plain", port: 9092, type: "internal", tls: false },
-                    { name: "tls",   port: 9093, type: "internal", tls: true  }
+                    {name: "plain", port: 9092, type: "internal", tls: false},
+                    {name: "tls", port: 9093, type: "internal", tls: true}
                 ],
                 config: {
                     "auto.create.topics.enable": false,
@@ -67,7 +67,7 @@ function makeDeployKafkaClusterKraftManifest(args: {
                     "min.insync.replicas": 1
                 }
             },
-            entityOperator: { topicOperator: {}, userOperator: {} }
+            entityOperator: {topicOperator: {}, userOperator: {}}
         }
     };
 }
@@ -83,12 +83,12 @@ function makeKafkaTopicManifest(args: {
         kind: "KafkaTopic",
         metadata: {
             name: args.topicName,
-            labels: { "strimzi.io/cluster": args.clusterName }
+            labels: {"strimzi.io/cluster": args.clusterName}
         },
         spec: {
             partitions: makeDirectTypeProxy(args.topicPartitions),
-            replicas:   makeDirectTypeProxy(args.topicReplicas),
-            config: { "retention.ms": 604800000, "segment.bytes": 1073741824 }
+            replicas: makeDirectTypeProxy(args.topicReplicas),
+            config: {"retention.ms": 604800000, "segment.bytes": 1073741824}
         }
     };
 }
@@ -106,7 +106,7 @@ export const SetupKafka = WorkflowBuilder.create({
     // Leaf templates defined first so deployKafkaCluster can reference them via INTERNAL
 
     .addTemplate("deployKafkaNodePool", t => t
-        .addRequiredInput("clusterName",   typeToken<string>())
+        .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
         .addResourceTask(b => b
             .setDefinition({
@@ -114,7 +114,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 setOwnerReference: false,
                 manifest: makeDeployKafkaNodePool({
                     clusterName: b.inputs.clusterName,
-                    replicas:    expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["replicas"], 1),
+                    replicas: expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["replicas"], 1),
                 })
             }))
     )
@@ -122,7 +122,7 @@ export const SetupKafka = WorkflowBuilder.create({
 
     .addTemplate("deployKafkaClusterKraft", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("version",     typeToken<string>())
+        .addRequiredInput("version", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -130,7 +130,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 successCondition: "status.listeners",
                 manifest: makeDeployKafkaClusterKraftManifest({
                     clusterName: b.inputs.clusterName,
-                    version:     b.inputs.version,
+                    version: b.inputs.version,
                 })
             }))
         .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
@@ -139,21 +139,21 @@ export const SetupKafka = WorkflowBuilder.create({
 
 
     .addTemplate("deployKafkaCluster", t => t
-        .addRequiredInput("clusterName",   typeToken<string>())
-        .addRequiredInput("version",       typeToken<string>())
+        .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("version", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
 
         .addSteps(b => b
             .addStep("deployPool", INTERNAL, "deployKafkaNodePool", c =>
                 c.register({
-                    clusterName:   b.inputs.clusterName,
+                    clusterName: b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
                 })
             )
             .addStep("deployCluster", INTERNAL, "deployKafkaClusterKraft", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
-                    version:     b.inputs.version,
+                    version: b.inputs.version,
                 })
             )
         )
@@ -162,8 +162,8 @@ export const SetupKafka = WorkflowBuilder.create({
 
 
     .addTemplate("createKafkaTopic", t => t
-        .addRequiredInput("clusterName",   typeToken<string>())
-        .addRequiredInput("topicName",     typeToken<string>())
+        .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("topicName", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
 
         .addResourceTask(b => b
@@ -172,10 +172,10 @@ export const SetupKafka = WorkflowBuilder.create({
                 setOwnerReference: false,
                 successCondition: "status.topicName",
                 manifest: makeKafkaTopicManifest({
-                    clusterName:     b.inputs.clusterName,
-                    topicName:       b.inputs.topicName,
-                    topicPartitions: expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["partitions"],    1),
-                    topicReplicas:   expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["topicReplicas"], 1),
+                    clusterName: b.inputs.clusterName,
+                    topicName: b.inputs.topicName,
+                    topicPartitions: expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["partitions"], 1),
+                    topicReplicas: expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["topicReplicas"], 1),
                 })
             }))
         .addJsonPathOutput("topicName", "{.status.topicName}", typeToken<string>())
@@ -200,89 +200,89 @@ export const SetupKafka = WorkflowBuilder.create({
     // Then click Resume in Argo UI.
 
     .addTemplate("deployKafkaNodePoolWithRetry", t => t
-        .addRequiredInput("clusterName",   typeToken<string>())
+        .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
 
         .addSteps(b => b
             .addStep("tryApply", INTERNAL, "deployKafkaNodePool", c =>
                 c.register({
-                    clusterName:   b.inputs.clusterName,
+                    clusterName: b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
                 }),
-                { continueOn: { failed: true } }
+                {continueOn: {failed: true}}
             )
             .addStep("waitForFix", INTERNAL, "suspendForRetry", c =>
                 c.register({
                     name: expr.literal("KafkaNodePool")
                 }),
-                { when: c => ({ templateExp: expr.equals(c.tryApply.status, "Failed") }) }
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
             )
             .addStepToSelf("retryLoop", c =>
                 c.register({
-                    clusterName:   b.inputs.clusterName,
+                    clusterName: b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
                 }),
-                { when: c => ({ templateExp: expr.equals(c.waitForFix.status, "Succeeded") }) }
+                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
             )
         )
     )
 
     .addTemplate("deployKafkaClusterKraftWithRetry", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("version",     typeToken<string>())
+        .addRequiredInput("version", typeToken<string>())
 
         .addSteps(b => b
             .addStep("tryApply", INTERNAL, "deployKafkaClusterKraft", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
-                    version:     b.inputs.version,
+                    version: b.inputs.version,
                 }),
-                { continueOn: { failed: true } }
+                {continueOn: {failed: true}}
             )
             .addStep("waitForFix", INTERNAL, "suspendForRetry", c =>
                 c.register({
                     name: expr.literal("KafkaCluster")
                 }),
-                { when: c => ({ templateExp: expr.equals(c.tryApply.status, "Failed") }) }
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
             )
             .addStepToSelf("retryLoop", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
-                    version:     b.inputs.version,
+                    version: b.inputs.version,
                 }),
-                { when: c => ({ templateExp: expr.equals(c.waitForFix.status, "Succeeded") }) }
+                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
             )
         )
         .addExpressionOutput("brokers", c => c.steps.tryApply.outputs.brokers)
     )
 
     .addTemplate("createKafkaTopicWithRetry", t => t
-        .addRequiredInput("clusterName",   typeToken<string>())
-        .addRequiredInput("topicName",     typeToken<string>())
+        .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("topicName", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
 
         .addSteps(b => b
             .addStep("tryApply", INTERNAL, "createKafkaTopic", c =>
                 c.register({
-                    clusterName:   b.inputs.clusterName,
-                    topicName:     b.inputs.topicName,
+                    clusterName: b.inputs.clusterName,
+                    topicName: b.inputs.topicName,
                     clusterConfig: b.inputs.clusterConfig,
                 }),
-                { continueOn: { failed: true } }
+                {continueOn: {failed: true}}
             )
             .addStep("waitForFix", INTERNAL, "suspendForRetry", c =>
                 c.register({
                     name: expr.literal("KafkaTopic")
                 }),
-                { when: c => ({ templateExp: expr.equals(c.tryApply.status, "Failed") }) }
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
             )
             .addStepToSelf("retryLoop", c =>
                 c.register({
-                    clusterName:   b.inputs.clusterName,
-                    topicName:     b.inputs.topicName,
+                    clusterName: b.inputs.clusterName,
+                    topicName: b.inputs.topicName,
                     clusterConfig: b.inputs.clusterConfig,
                 }),
-                { when: c => ({ templateExp: expr.equals(c.waitForFix.status, "Succeeded") }) }
+                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
             )
         )
         .addExpressionOutput("topicName", c => c.steps.tryApply.outputs.topicName)

@@ -168,13 +168,13 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
     }).describe("Use a pre-existing K8s TLS secret."),
 ]);
 
-export const PROXY_OPTIONS = z.object({
+export const USER_PROXY_OPTIONS = z.object({
     // -- deployment-level fields (not passed to the proxy CLI) --
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
     podReplicas: z.number().default(1).optional(),
-    resources: RESOURCE_REQUIREMENTS
+    resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.PROXY, (v ?? {})), RESOURCE_REQUIREMENTS)
         .describe("Resource limits and requests for proxy container.")
-        .default(DEFAULT_RESOURCES.REPLAYER).optional(),
+        .default(DEFAULT_RESOURCES.PROXY),
 
     // -- proxy CLI params (passed via ---INLINE-JSON) --
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
@@ -199,24 +199,58 @@ export const PROXY_OPTIONS = z.object({
     suppressMethodAndPath: z.string().default("").optional(),
 });
 
-export const REPLAYER_OPTIONS = z.object({
+export const USER_REPLAYER_OPTIONS = z.object({
     // -- deployment-level fields (not passed to the replayer CLI) --
-    podReplicas: z.number().default(1).optional(),
     jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
-    resources: RESOURCE_REQUIREMENTS
-        .describe("Resource limits and requests for replayer container.")
-        .default(DEFAULT_RESOURCES.REPLAYER).optional(),
+    podReplicas: z.number().default(1).optional(),
+    resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.REPLAYER, (v ?? {})), RESOURCE_REQUIREMENTS)
+        .describe("Resource limits and requests for replayer container."),
 
     // -- replayer CLI params (passed via ---INLINE-JSON) --
-    speedupFactor: z.number().default(1.1).optional(),
-    authHeaderValue: z.string().default("").optional(),
-    otelCollectorEndpoint: z.string().default("").optional(),
+    authHeaderValue: z.string().default("").optional()
+        .describe("Static value for the authorization header of each request."),
+    kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
+        .describe("Enables SASL properties required for connecting to MSK with IAM auth."),
+    kafkaTrafficPropertyFile: z.string().default("").optional()
+        .describe("File path for Kafka properties file for additional or overridden Kafka properties."),
+    lookaheadTimeSeconds: z.number().default(400).optional()
+        .describe("Number of seconds of data that will be buffered."),
+    maxConcurrentRequests: z.number().default(10000).optional()
+        .describe("Maximum number of requests that can be outstanding at a time."),
+    numClientThreads: z.number().default(0).optional()
+        .describe("Number of threads to use to send requests from."),
+    observedPacketConnectionTimeout: z.number().default(360).optional()
+        .describe("Seconds of inactivity before assuming connections were terminated in the captured stream."),
+    otelCollectorEndpoint: z.string().default("").optional()
+        .describe("Endpoint (host:port) for the OpenTelemetry Collector for metrics forwarding."),
+    quiescentPeriodMs: z.number().default(5000).optional()
+        .describe("Milliseconds to delay the first request on a resumed connection after Kafka partition reassignment."),
+    removeAuthHeader: z.boolean().default(false).optional()
+        .describe("Remove the authorization header if present without replacing it."),
+    speedupFactor: z.number().default(1.1).optional()
+        .describe("Factor to accelerate replayed communications relative to original timing."),
+    targetServerResponseTimeoutSeconds: z.number().default(150).optional()
+        .describe("Seconds to wait before timing out a replayed request to the target."),
+    transformerConfig: z.string().default("").optional()
+        .describe("Request transformer configuration as a string or JSON."),
+    transformerConfigEncoded: z.string().default("").optional()
+        .describe("Base64-encoded request transformer configuration."),
+    transformerConfigFile: z.string().default("").optional()
+        .describe("Path to the JSON configuration file for request transformers."),
+    tupleTransformerConfig: z.string().default("").optional()
+        .describe("Tuple transformer configuration as a string or JSON."),
+    tupleTransformerConfigBase64: z.string().default("").optional()
+        .describe("Base64-encoded tuple transformer configuration."),
+    tupleTransformerConfigFile: z.string().default("").optional()
+        .describe("Path to the JSON configuration file for tuple transformers."),
+    userAgent: z.string().default("").optional()
+        .describe("String appended to the user-agent header for requests to the target cluster."),
 });
 
 // Note: noWait is not included here as it is hardcoded to true in the workflow.
 // The workflow manages snapshot completion polling separately via checkSnapshotStatus.
-export const CREATE_SNAPSHOT_OPTIONS = z.object({
+export const USER_CREATE_SNAPSHOT_OPTIONS = z.object({
     snapshotPrefix: z.string().default("").optional(),
     indexAllowlist: z.array(z.string()).default([]).optional(),
     maxSnapshotRateMbPerNode: z.number().default(0).optional(),
@@ -258,10 +292,7 @@ export const USER_RFS_OPTIONS = z.object({
 
     skipApproval: z.boolean().default(false).optional(),  // TODO - fullmigration
     useTargetClusterForWorkCoordination: z.boolean().default(true),
-    resources: z.preprocess((v) =>
-            deepmerge(DEFAULT_RESOURCES.RFS, (v ?? {})),
-        RESOURCE_REQUIREMENTS
-    )
+    resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.RFS, (v ?? {})), RESOURCE_REQUIREMENTS)
         .pipe(RESOURCE_REQUIREMENTS.extend({
             requests: RESOURCE_REQUIREMENTS.shape.requests.extend({
                 "ephemeral-storage":
@@ -368,7 +399,7 @@ export const CAPTURE_CONFIG = z.object({
     kafkaTopic: z.string().regex(K8S_NAMING_PATTERN).default("").optional()
         .describe("Kafka topic for captured traffic. Empty defaults to the proxy name."),
     source: z.string(),
-    proxyConfig: PROXY_OPTIONS
+    proxyConfig: USER_PROXY_OPTIONS
 });
 
 export const SNAPSHOT_MIGRATION_FILTER = z.object({
@@ -381,7 +412,7 @@ export const REPLAYER_CONFIG = z.object({
     fromProxy: z.string(),
     toTarget: z.string(),
     dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).default([]).optional(),
-    replayerConfig: REPLAYER_OPTIONS.optional()
+    replayerConfig: USER_REPLAYER_OPTIONS.optional()
 });
 
 export const TRAFFIC_CONFIG = z.object({
@@ -404,7 +435,7 @@ export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({
 });
 
 export const GENERATE_SNAPSHOT = z.object({
-    createSnapshotConfig: CREATE_SNAPSHOT_OPTIONS,
+    createSnapshotConfig: USER_CREATE_SNAPSHOT_OPTIONS,
     requiredForCompleteMigration: z.union([
         z.object({toTargets: z.array(z.string())}),
         z.boolean().default(true).optional()

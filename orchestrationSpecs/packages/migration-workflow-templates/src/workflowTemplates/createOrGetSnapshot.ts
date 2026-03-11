@@ -3,7 +3,7 @@ import {CreateSnapshot} from "./createSnapshot";
 import {ARGO_CREATE_SNAPSHOT_OPTIONS, SNAPSHOT_NAME_CONFIG} from "@opensearch-migrations/schemas";
 import {
     COMPLETE_SNAPSHOT_CONFIG,
-    CREATE_SNAPSHOT_OPTIONS,
+    USER_CREATE_SNAPSHOT_OPTIONS,
     DYNAMIC_SNAPSHOT_CONFIG, NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO
 } from "@opensearch-migrations/schemas";
 import {
@@ -28,7 +28,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
 
-    .addTemplate("getSnapshotName", t=>t
+    .addTemplate("getSnapshotName", t => t
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("snapshotNameConfig", typeToken<z.infer<typeof SNAPSHOT_NAME_CONFIG>>())
         .addRequiredInput("snapshotPrefix", typeToken<string>())
@@ -36,7 +36,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
 
         .addSteps(b => b
             .addStepGroup(c => c))
-        .addExpressionOutput("snapshotName", b=>
+        .addExpressionOutput("snapshotName", b =>
             expr.ternary(
                 expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "createSnapshotConfig"),
                 expr.concatWith("_",
@@ -46,7 +46,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                 ),
                 expr.getLoose(expr.deserializeRecord(b.inputs.snapshotNameConfig), "externallyManagedSnapshotName"))
         )
-        .addExpressionOutput("autoCreate", b=>
+        .addExpressionOutput("autoCreate", b =>
             expr.hasKey(expr.deserializeRecord(b.inputs.snapshotNameConfig), "createSnapshotConfig")
         )
     )
@@ -64,7 +64,7 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
-            .addStep("getSnapshotName", INTERNAL, "getSnapshotName", c=>c.register({
+            .addStep("getSnapshotName", INTERNAL, "getSnapshotName", c => c.register({
                     ...selectInputsForRegister(b, c),
                     sourceLabel: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label"),
                     snapshotNameConfig: expr.serialize(

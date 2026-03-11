@@ -74,17 +74,17 @@ function getConsoleDeploymentResource(
 }
 
 /**
-  * This doesn't yet work because the services yaml that's encoded and emitted isn't formatted
-  * for the console to understand it.  See the MigrationConsole template's helper
-  * SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE to see the transformation.  We should either
-  * 1) have the python code directly handle these new schema types
-  * 2) move the helper (jq script) to the console image to invoke it as argo configs are added
-  * 3) and(if 2)/or - directly run the jq contents from here too
-  *
-  * In the meantime, this is here only for posterity.  It's probably a bad idea to spin up new
-  * deployments for specifically focused consoles anyway.  We have a `focus` command that would
-  * completely obviate this need: https://opensearch.atlassian.net/browse/MIGRATIONS-2704
-  */
+ * This doesn't yet work because the services yaml that's encoded and emitted isn't formatted
+ * for the console to understand it.  See the MigrationConsole template's helper
+ * SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE to see the transformation.  We should either
+ * 1) have the python code directly handle these new schema types
+ * 2) move the helper (jq script) to the console image to invoke it as argo configs are added
+ * 3) and(if 2)/or - directly run the jq contents from here too
+ *
+ * In the meantime, this is here only for posterity.  It's probably a bad idea to spin up new
+ * deployments for specifically focused consoles anyway.  We have a `focus` command that would
+ * completely obviate this need: https://opensearch.atlassian.net/browse/MIGRATIONS-2704
+ */
 export const MigrationConsoleDeployment = WorkflowBuilder.create({
     k8sResourceName: "migration-console",
     serviceAccountName: "argo-workflow-executor"

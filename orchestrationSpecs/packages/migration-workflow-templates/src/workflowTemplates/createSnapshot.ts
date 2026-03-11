@@ -1,4 +1,3 @@
-
 import {z} from "zod";
 import {
     ARGO_CREATE_SNAPSHOT_OPTIONS,
@@ -124,7 +123,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
-        .addContainer(b=>b
+        .addContainer(b => b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/root/createSnapshot/bin/CreateSnapshot"])
             .addEnvVarsFromRecord(getSourceHttpAuthCreds(getHttpAuthSecretName(b.inputs.sourceConfig)))
@@ -138,7 +137,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     makeParamsDict(b.inputs.sourceConfig, b.inputs.snapshotConfig, b.inputs.createSnapshotConfig)
                 ))
             ])
-            .addPodMetadata(({ inputs }) => ({
+            .addPodMetadata(({inputs}) => ({
                 labels: {
                     'migrations.opensearch.org/source': inputs.sourceK8sLabel,
                     'migrations.opensearch.org/target': inputs.targetK8sLabel,
@@ -147,7 +146,6 @@ export const CreateSnapshot = WorkflowBuilder.create({
                 }
             }))
         )
-
     )
 
     .addTemplate("checkSnapshotStatusInternal", t => t

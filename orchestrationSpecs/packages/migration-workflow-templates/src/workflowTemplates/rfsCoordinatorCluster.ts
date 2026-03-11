@@ -249,12 +249,12 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addOptionalInput("groupName", c => "Start RFS OpenSearch cluster for worker coordination")
         .addSteps(b => b
             .addStep("createSecret", INTERNAL, "createRfsCoordinatorSecret", c =>
-                c.register({ clusterName: b.inputs.clusterName }))
+                c.register({clusterName: b.inputs.clusterName}))
             .addStepGroup(g => g
                 .addStep("createService", INTERNAL, "createRfsCoordinatorService", c =>
-                    c.register({ clusterName: b.inputs.clusterName }))
+                    c.register({clusterName: b.inputs.clusterName}))
                 .addStep("createStatefulSet", INTERNAL, "createRfsCoordinatorStatefulSet", c =>
-                    c.register({ clusterName: b.inputs.clusterName, coordinatorImage: b.inputs.coordinatorImage }))
+                    c.register({clusterName: b.inputs.clusterName, coordinatorImage: b.inputs.coordinatorImage}))
             )
         )
     )
@@ -313,13 +313,13 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addSteps(b => b
             .addStepGroup(g => g
                 .addStep("deleteStatefulSet", INTERNAL, "deleteRfsCoordinatorStatefulSet", c =>
-                    c.register({ clusterName: b.inputs.clusterName }))
+                    c.register({clusterName: b.inputs.clusterName}))
                 .addStep("deleteService", INTERNAL, "deleteRfsCoordinatorService", c =>
-                    c.register({ clusterName: b.inputs.clusterName }))
+                    c.register({clusterName: b.inputs.clusterName}))
             )
             .addStepGroup(g => g
                 .addStep("deleteSecret", INTERNAL, "deleteRfsCoordinatorSecret", c =>
-                    c.register({ clusterName: b.inputs.clusterName }))
+                    c.register({clusterName: b.inputs.clusterName}))
             )
         )
     )

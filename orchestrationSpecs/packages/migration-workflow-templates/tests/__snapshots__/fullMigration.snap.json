@@ -862,13 +862,34 @@
         "inputs": {
           "parameters": [
             {
-              "name": "replayConfig"
+              "name": "kafkaConfig"
+            },
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "fromProxy"
+            },
+            {
+              "name": "targetConfig"
+            },
+            {
+              "name": "replayerOptions"
+            },
+            {
+              "name": "dependsOnSnapshotMigrations"
             },
             {
               "name": "imageMigrationConsoleLocation"
             },
             {
               "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageTrafficReplayerLocation"
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy"
             }
           ]
         },
@@ -879,8 +900,8 @@
                 "template": "waitforsnapshotmigration",
                 "name": "resource-management"
               },
-              "withParam": "{{=fromJSON(inputs.parameters.replayConfig)['dependsOnSnapshotMigrations']}}",
-              "when": "{{=!(0 == len(fromJSON(inputs.parameters.replayConfig)['dependsOnSnapshotMigrations']))}}",
+              "withParam": "{{inputs.parameters.dependsOnSnapshotMigrations}}",
+              "when": "{{=!(0 == len(inputs.parameters.dependsOnSnapshotMigrations))}}",
               "arguments": {
                 "parameters": [
                   {
@@ -918,7 +939,7 @@
                   },
                   {
                     "name": "resourceName",
-                    "value": "{{=jsonpath(inputs.parameters.replayConfig, '$.fromProxy')}}"
+                    "value": "{{inputs.parameters.fromProxy}}"
                   }
                 ]
               },
@@ -943,7 +964,7 @@
                   },
                   {
                     "name": "resourceName",
-                    "value": "{{=jsonpath(inputs.parameters.replayConfig, '$.kafkaClusterName')}}"
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
                   }
                 ]
               },
@@ -952,11 +973,43 @@
           ],
           [
             {
-              "template": "donothing",
-              "arguments": {
-                "parameters": []
+              "templateRef": {
+                "template": "setupreplayer",
+                "name": "replayer"
               },
-              "name": "placeholderReplay"
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "kafkaConfig",
+                    "value": "{{inputs.parameters.kafkaConfig}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}"
+                  },
+                  {
+                    "name": "replayerOptions",
+                    "value": "{{inputs.parameters.replayerOptions}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "kafkaGroupId",
+                    "value": "{{='replayer-'+fromJSON(inputs.parameters.targetConfig)['label']}}"
+                  },
+                  {
+                    "name": "name",
+                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                  }
+                ]
+              },
+              "name": "deployReplayer"
             }
           ]
         ],
@@ -1272,8 +1325,44 @@
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
-                    "name": "replayConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.dict(\"fromProxy\", item['fromProxy'], \"kafkaClusterName\", item['kafkaClusterName'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"toTarget\", fromJSON(item['toTarget']), \"dependsOnSnapshotMigrations\", fromJSON(toJSON(item))['dependsOnSnapshotMigrations']), (('replayerConfig' in fromJSON(toJSON(item))) ? (sprig.dict(\"replayerConfig\", fromJSON(toJSON(item))['replayerConfig'])) : (sprig.dict()))))}}"
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "dependsOnSnapshotMigrations",
+                    "value": "{{=jsonpath(toJSON(item), '$.dependsOnSnapshotMigrations')}}"
+                  },
+                  {
+                    "name": "fromProxy",
+                    "value": "{{=jsonpath(toJSON(item), '$.fromProxy')}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{=jsonpath(toJSON(item), '$.kafkaClusterName')}}"
+                  },
+                  {
+                    "name": "kafkaConfig",
+                    "value": "{{=jsonpath(toJSON(item), '$.kafkaConfig')}}"
+                  },
+                  {
+                    "name": "replayerConfig",
+                    "value": "{{=jsonpath(toJSON(item), '$.replayerConfig')}}"
+                  },
+                  {
+                    "name": "toTarget",
+                    "value": "{{=jsonpath(toJSON(item), '$.toTarget')}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{=item['toTarget']}}"
+                  },
+                  {
+                    "name": "replayerOptions",
+                    "value": "{{=item['replayerConfig']}}"
                   }
                 ]
               },

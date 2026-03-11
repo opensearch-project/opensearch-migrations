@@ -29,7 +29,7 @@
         "inputs": {
           "parameters": [
             {
-              "name": "sessionName"
+              "name": "name"
             },
             {
               "name": "jsonConfig"
@@ -55,7 +55,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-replayer'}}\"\n  labels:\n    app: replayer\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\nspec:\n  replicas: \"{{inputs.parameters.podReplicas}}\"\n  selector:\n    matchLabels:\n      app: replayer\n  template:\n    metadata:\n      labels:\n        app: replayer\n        workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: replayer\n          image: \"{{inputs.parameters.imageTrafficReplayerLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageTrafficReplayerPullPolicy}}\"\n          command:\n            - /runJavaWithClasspath.sh\n          args:\n            - org.opensearch.migrations.replay.TrafficReplayer\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: JDK_JAVA_OPTIONS\n              value: \"{{=inputs.parameters.jvmArgs + ' ' + (('' == inputs.parameters.loggingConfigurationOverrideConfigMap) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}\"\n          volumeMounts:\n            - name: log4j-configuration\n              mountPath: /config/logConfiguration\n              readOnly: true\n      volumes:\n        - name: log4j-configuration\n          configMap:\n            name: \"{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}\"\n            optional: {{=!('' == inputs.parameters.loggingConfigurationOverrideConfigMap)}}\n",
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{inputs.parameters.name}}\n  labels:\n    app: replayer\n    workflows.argoproj.io/workflow: {{workflow.name}}\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      app: replayer\n  template:\n    metadata:\n      labels:\n        app: replayer\n        workflows.argoproj.io/workflow: {{workflow.name}}\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: replayer\n          image: \"{{inputs.parameters.imageTrafficReplayerLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageTrafficReplayerPullPolicy}}\"\n          command:\n            - /runJavaWithClasspath.sh\n          args:\n            - org.opensearch.migrations.replay.TrafficReplayer\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: JDK_JAVA_OPTIONS\n              value: \"{{=inputs.parameters.jvmArgs + ' ' + (('' == inputs.parameters.loggingConfigurationOverrideConfigMap) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}\"\n          volumeMounts:\n            - name: log4j-configuration\n              mountPath: /config/logConfiguration\n              readOnly: true\n      volumes:\n        - name: log4j-configuration\n          configMap:\n            name: \"{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}\"\n            optional: {{=!('' == inputs.parameters.loggingConfigurationOverrideConfigMap)}}\n",
           "action": "create",
           "setOwnerReference": true
         },
@@ -64,27 +64,23 @@
         }
       },
       {
-        "name": "createdeploymentfromconfig",
+        "name": "setupreplayer",
         "inputs": {
           "parameters": [
             {
-              "name": "kafkaTrafficBrokers"
-            },
-            {
-              "name": "kafkaTopicName"
+              "name": "kafkaConfig"
             },
             {
               "name": "kafkaGroupId"
             },
             {
+              "name": "name"
+            },
+            {
               "name": "targetConfig"
             },
             {
-              "name": "replayerConfig"
-            },
-            {
-              "name": "podReplicas",
-              "value": "1"
+              "name": "replayerOptions"
             },
             {
               "name": "imageTrafficReplayerLocation"
@@ -101,8 +97,8 @@
               "arguments": {
                 "parameters": [
                   {
-                    "name": "podReplicas",
-                    "value": "{{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.replayerConfig))}}"
+                    "name": "name",
+                    "value": "{{inputs.parameters.name}}"
                   },
                   {
                     "name": "imageTrafficReplayerLocation",
@@ -113,24 +109,24 @@
                     "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
                   },
                   {
-                    "name": "sessionName",
-                    "value": ""
+                    "name": "podReplicas",
+                    "value": "{{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.replayerOptions))}}"
                   },
                   {
                     "name": "jvmArgs",
-                    "value": "{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.replayerConfig))}}"
+                    "value": "{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.replayerOptions))}}"
                   },
                   {
                     "name": "loggingConfigurationOverrideConfigMap",
-                    "value": "{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.replayerConfig))}}"
+                    "value": "{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.replayerOptions))}}"
                   },
                   {
                     "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.dict(\"targetUri\", fromJSON(inputs.parameters.targetConfig)['endpoint'], \"insecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig))), (('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"sigv4AuthHeaderServiceRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service']+','+fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ({}))) : ({}))), sprig.omit(fromJSON(inputs.parameters.replayerConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources', 'jvmArgs')), sprig.dict(\"kafkaTrafficBrokers\", inputs.parameters.kafkaTrafficBrokers, \"kafkaTrafficTopic\", inputs.parameters.kafkaTopicName, \"kafkaTrafficGroupId\", inputs.parameters.kafkaGroupId)))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.dict(\"targetUri\", fromJSON(inputs.parameters.targetConfig)['endpoint'], \"insecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig))), (('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"sigv4AuthHeaderServiceRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service']+','+fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ({}))) : ({}))), sprig.omit(fromJSON(inputs.parameters.replayerOptions), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources', 'jvmArgs')), sprig.dict(\"kafkaTrafficBrokers\", fromJSON(inputs.parameters.kafkaConfig)['kafkaConnection'], \"kafkaTrafficTopic\", fromJSON(inputs.parameters.kafkaConfig)['kafkaTopic'], \"kafkaTrafficGroupId\", inputs.parameters.kafkaGroupId)))}}"
                   },
                   {
                     "name": "resources",
-                    "value": "{{=toJSON(fromJSON(inputs.parameters.replayerConfig)['resources'])}}"
+                    "value": "{{=toJSON(jsonpath(inputs.parameters.replayerOptions, '$.resources'))}}"
                   }
                 ]
               },

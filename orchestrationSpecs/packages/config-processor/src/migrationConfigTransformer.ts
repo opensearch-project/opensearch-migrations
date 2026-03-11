@@ -1,4 +1,5 @@
 import {
+    ARGO_REPLAYER_OPTIONS,
     DENORMALIZED_S3_REPO_CONFIG,
     OVERALL_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
@@ -410,14 +411,15 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
             const topic = proxy.kafkaTopic || replayer.fromProxy;
             const { enabled: _e3, ...restOfTarget } = targetCluster;
+            const replayerConfig = ARGO_REPLAYER_OPTIONS.parse(replayer.replayerConfig ?? {});
 
             return {
                 fromProxy: replayer.fromProxy,
                 kafkaClusterName: proxy.kafka ?? "default",
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
                 toTarget: { ...restOfTarget, label: replayer.toTarget },
+                replayerConfig,
                 ...(replayer.dependsOnSnapshotMigrations ? { dependsOnSnapshotMigrations: replayer.dependsOnSnapshotMigrations } : {}),
-                ...(replayer.replayerConfig ? { replayerConfig: replayer.replayerConfig } : {})
             };
         });
     }

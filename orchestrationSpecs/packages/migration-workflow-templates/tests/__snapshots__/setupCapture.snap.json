@@ -62,6 +62,9 @@
               "name": "podReplicas"
             },
             {
+              "name": "resources"
+            },
+            {
               "name": "tlsSecretName",
               "value": ""
             },
@@ -74,7 +77,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          command:\n            - /runJavaWithClasspath.sh\n          args:\n            - org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n",
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          command:\n            - /runJavaWithClasspath.sh\n          args:\n            - org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -99,6 +102,9 @@
               "name": "podReplicas"
             },
             {
+              "name": "resources"
+            },
+            {
               "name": "tlsSecretName"
             },
             {
@@ -110,7 +116,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          command:\n            - /runJavaWithClasspath.sh\n          args:\n            - org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n          volumeMounts:\n            - name: tls-certs\n              mountPath: /etc/proxy-tls\n              readOnly: true\n      volumes:\n        - name: tls-certs\n          secret:\n            secretName: \"{{inputs.parameters.tlsSecretName}}\"\n",
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          command:\n            - /runJavaWithClasspath.sh\n          args:\n            - org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          volumeMounts:\n            - name: tls-certs\n              mountPath: /etc/proxy-tls\n              readOnly: true\n      volumes:\n        - name: tls-certs\n          secret:\n            secretName: \"{{inputs.parameters.tlsSecretName}}\"\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -251,7 +257,7 @@
             },
             {
               "template": "provisionproxycert",
-              "when": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'certManager'}}",
+              "when": "{{=sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -294,7 +300,7 @@
           [
             {
               "template": "waitforcertready",
-              "when": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'certManager'}}",
+              "when": "{{=sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -309,7 +315,7 @@
           [
             {
               "template": "deployproxydeployment",
-              "when": "{{=!(fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'certManager' || fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'existingSecret')}}",
+              "when": "{{=!(sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager' || sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'existingSecret')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -331,6 +337,10 @@
                   {
                     "name": "imageCaptureProxyPullPolicy",
                     "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "resources",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources'])}}"
                   },
                   {
                     "name": "jsonConfig",
@@ -342,7 +352,7 @@
             },
             {
               "template": "deployproxydeploymentwithtls",
-              "when": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'certManager' || fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'existingSecret'}}",
+              "when": "{{=sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager' || sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'existingSecret'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -366,8 +376,12 @@
                     "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
                   },
                   {
+                    "name": "resources",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources'])}}"
+                  },
+                  {
                     "name": "tlsSecretName",
-                    "value": "{{=((fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'certManager') ? (inputs.parameters.proxyName+'-tls') : (((fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['mode'] == 'existingSecret') ? (fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['secretName']) : (''))))}}"
+                    "value": "{{=((sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager') ? (inputs.parameters.proxyName+'-tls') : (((sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'existingSecret') ? (fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['secretName']) : (''))))}}"
                   },
                   {
                     "name": "jsonConfig",

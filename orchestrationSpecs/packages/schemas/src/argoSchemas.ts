@@ -1,16 +1,20 @@
 import {
-    CAPTURE_CONFIG,
     CLUSTER_CONFIG,
-    CREATE_SNAPSHOT_OPTIONS, KAFKA_CLIENT_CONFIG, KAFKA_CLUSTER_CONFIG,
+    KAFKA_CLIENT_CONFIG, KAFKA_CLUSTER_CONFIG,
     KAFKA_CLUSTER_CREATION_CONFIG, KAFKA_CLUSTERS_MAP,
     NORMALIZED_COMPLETE_SNAPSHOT_CONFIG,
-    NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG, PROXY_OPTIONS,
-    REPLAYER_OPTIONS,
-    S3_REPO_CONFIG, SNAPSHOT_MIGRATION_FILTER,
+    NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
+   USER_CREATE_SNAPSHOT_OPTIONS,
+   USER_REPLAYER_OPTIONS,
+   USER_METADATA_OPTIONS,
+   USER_PROXY_OPTIONS,
+   USER_RFS_OPTIONS,
+    SNAPSHOT_MIGRATION_FILTER,
     SOURCE_CLUSTER_CONFIG,
-    TARGET_CLUSTER_CONFIG, USER_METADATA_OPTIONS, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG, USER_RFS_OPTIONS
+    TARGET_CLUSTER_CONFIG, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG
 } from "./userSchemas";
 import {z} from "zod";
+import {S3_REPO_CONFIG} from "./userSchemas";
 
 // DO NOT CHANGE FROM SNAKE CASE - used to create services.yaml files for the console
 export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
@@ -108,24 +112,32 @@ export const DYNAMIC_SNAPSHOT_CONFIG =
             label: z.string()
     }));
 
-export const METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_METADATA_OPTIONS.omit({skipEvaluateApproval: true, skipMigrateApproval: true})
+export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
+   USER_METADATA_OPTIONS.omit({skipEvaluateApproval: true, skipMigrateApproval: true})
 );
 
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true})
+    USER_CREATE_SNAPSHOT_OPTIONS.omit({snapshotPrefix: true})
 );
 
-export const RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_RFS_OPTIONS.in.omit({skipApproval: true})
+export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
+   USER_RFS_OPTIONS.in.omit({skipApproval: true})
+);
+
+export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
+   USER_PROXY_OPTIONS
+);
+
+export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
+   USER_REPLAYER_OPTIONS
 );
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
         // override label because when not specified, we'll use an integer,
         // which purposefully conflicts with the user schema to prevent collision
         label: z.string(),
-        metadataMigrationConfig: METADATA_OPTIONS.optional(),
-        documentBackfillConfig: RFS_OPTIONS.optional()
+        metadataMigrationConfig: ARGO_METADATA_OPTIONS.optional(),
+        documentBackfillConfig: ARGO_RFS_OPTIONS.optional()
     }).refine(data =>
             data.metadataMigrationConfig !== undefined ||
             data.documentBackfillConfig !== undefined,
@@ -161,7 +173,7 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     sourceEndpoint: z.string(),
     sourceAllowInsecure: z.boolean().default(false),
-    proxyConfig: PROXY_OPTIONS
+    proxyConfig: ARGO_PROXY_OPTIONS
 })
 
 export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
@@ -180,12 +192,12 @@ export const DENORMALIZED_CREATE_SNAPSHOTS_CONFIG = z.object({
 });
 
 export const DENORMALIZED_REPLAY_CONFIG = z.object({
+    dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER),
     fromProxy: z.string(),
     kafkaClusterName: z.string(),
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
-    toTarget: NAMED_TARGET_CLUSTER_CONFIG,
-    dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER),
-    replayerConfig: REPLAYER_OPTIONS.optional()
+    replayerConfig: ARGO_REPLAYER_OPTIONS,
+    toTarget: NAMED_TARGET_CLUSTER_CONFIG
 })
 
 export const ARGO_MIGRATION_CONFIG = z.object({
