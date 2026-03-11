@@ -265,7 +265,7 @@ class K8sService:
             if not result or not result.stdout.strip():
                 logger.info(f"Namespace '{namespace}' deleted successfully")
                 return
-            time.sleep(3)
+            time.sleep(1)
         raise TimeoutError(f"Namespace '{namespace}' still exists after {timeout_seconds}s")
 
     def delete_namespace(self) -> None:
