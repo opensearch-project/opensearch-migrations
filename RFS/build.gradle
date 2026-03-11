@@ -13,9 +13,9 @@ ext {
 }
 
 dependencies {
-    api project(':rfs-common')
-    api project(':rfs-http')
-    api project(':rfs-pipeline')
+    api project(':RfsCommon')
+    api project(':RfsHttp')
+    api project(':RfsPipeline')
     api project(':SearchSnapshotExtractor')
     implementation project(':awsUtilities')
     implementation project(':coreUtilities')

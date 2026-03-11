@@ -6,9 +6,9 @@ plugins {
 evaluationDependsOn ':SearchSnapshotExtractor'
 
 dependencies {
-    implementation project(':rfs-common')
-    implementation project(':rfs-http')
-    implementation project(':rfs-pipeline')
+    implementation project(':RfsCommon')
+    implementation project(':RfsHttp')
+    implementation project(':RfsPipeline')
     implementation project(':SearchSnapshotExtractor')
 
     implementation libs.jackson.databind

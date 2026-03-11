@@ -5,10 +5,10 @@ plugins {
 }
 
 dependencies {
-    // The adapter package bridges existing rfs-common types to the clean pipeline IR.
-    // Core IR types have ZERO dependency on rfs-common.
+    // The adapter package bridges existing RfsCommon types to the clean pipeline IR.
+    // Core IR types have ZERO dependency on RfsCommon.
     // Port interfaces and pipeline orchestration depend on Reactor (Flux/Mono).
-    compileOnly project(':rfs-common')
+    compileOnly project(':RfsCommon')
 
     implementation libs.jackson.databind
     implementation libs.reactor.core
@@ -16,13 +16,13 @@ dependencies {
 
     testFixturesImplementation libs.reactor.core
 
-    testImplementation project(':rfs-common')
+    testImplementation project(':RfsCommon')
     testImplementation libs.reactor.test
     testImplementation libs.blockhound
     testImplementation libs.junit.jupiter.api
     testImplementation libs.junit.jupiter.params
     testImplementation libs.mockito.core
-    testImplementation(testFixtures(project(':rfs-pipeline')))
+    testImplementation(testFixtures(project(':RfsPipeline')))
     testRuntimeOnly libs.junit.jupiter.engine
     testRuntimeOnly libs.log4j.slf4j2.impl
     testRuntimeOnly libs.log4j.core

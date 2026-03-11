@@ -66,7 +66,7 @@ These types are ES-specific and live outside the core IR:
 | Interface | Implementation | Module |
 |---|---|---|
 | `DocumentSource` | `LuceneSnapshotSource` | SnapshotReader |
-| `DocumentSource` | `SyntheticDocumentSource` (test fixture) | rfs-pipeline testFixtures |
+| `DocumentSource` | `SyntheticDocumentSource` (test fixture) | RfsPipeline testFixtures |
 | `DocumentSink` | `OpenSearchDocumentSink` | RFS |
 | `GlobalMetadataSource` | `SnapshotMetadataSource` | SnapshotReader |
 | `GlobalMetadataSink` | `OpenSearchMetadataSink` | RFS |

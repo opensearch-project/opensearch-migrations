@@ -240,7 +240,7 @@ The pending work items are the remaining docs for each Elasticsearch Shard. The 
 
 ## Pipeline Integration — How Work Coordination Drives the Migration Pipeline
 
-The document migration pipeline (`rfs-pipeline` module) is driven by work coordination through `PipelineDocumentsRunner`. This section describes how the two systems connect.
+The document migration pipeline (`RfsPipeline` module) is driven by work coordination through `PipelineDocumentsRunner`. This section describes how the two systems connect.
 
 ### Coordinated Mode (Production)
 

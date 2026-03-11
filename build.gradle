@@ -373,7 +373,7 @@ subprojects {
             executionData.from testsWithJacoco*.jacoco.destinationFile
 
             // Include source and class dirs from project dependencies so coverage
-            // for code in rfs-common/SearchSnapshotExtractor is reported by downstream modules
+            // for code in RfsCommon/SearchSnapshotExtractor is reported by downstream modules
             afterEvaluate {
                 def depProjects = configurations.findAll { it.canBeResolved }.collectMany { config ->
                     config.dependencies.withType(ProjectDependency).collect { it.dependencyProject }

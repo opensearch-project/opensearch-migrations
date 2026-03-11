@@ -1,8 +1,8 @@
 # Pipeline Architecture
 
-The pipeline uses a **ports-and-adapters** (hexagonal) architecture. The core module (`rfs-pipeline`) defines source-agnostic IR types and port interfaces with zero dependencies on Lucene or OpenSearch. Adapters in separate modules implement the ports.
+The pipeline uses a **ports-and-adapters** (hexagonal) architecture. The core module (`RfsPipeline`) defines source-agnostic IR types and port interfaces with zero dependencies on Lucene or OpenSearch. Adapters in separate modules implement the ports.
 
-## Source-Agnostic Core (`rfs-pipeline`)
+## Source-Agnostic Core (`RfsPipeline`)
 
 The core defines three layers:
 
@@ -49,9 +49,9 @@ ES-specific types and optional capabilities live in the `adapter/` package:
 
 | Module | Responsibility | Dependencies |
 |---|---|---|
-| `rfs-pipeline` | IR types, port interfaces, pipeline orchestration, ES adapter types | Reactor Core |
-| `SnapshotReader` | Source adapters (`LuceneSnapshotSource`, `SnapshotMetadataSource`) | `rfs-pipeline`, Lucene |
-| `RFS` | Sink adapters (`OpenSearchDocumentSink`, `OpenSearchMetadataSink`), work coordination | `rfs-pipeline`, OpenSearch client |
+| `RfsPipeline` | IR types, port interfaces, pipeline orchestration, ES adapter types | Reactor Core |
+| `SnapshotReader` | Source adapters (`LuceneSnapshotSource`, `SnapshotMetadataSource`) | `RfsPipeline`, Lucene |
+| `RFS` | Sink adapters (`OpenSearchDocumentSink`, `OpenSearchMetadataSink`), work coordination | `RfsPipeline`, OpenSearch client |
 | `DocumentsFromSnapshotMigration` | Top-level wiring (`DocumentMigrationBootstrap`, CLI entry point) | All of the above |
 
-Key constraint: **RFS does not depend on SnapshotReader** and vice versa. They only share `rfs-pipeline`.
+Key constraint: **RFS does not depend on SnapshotReader** and vice versa. They only share `RfsPipeline`.

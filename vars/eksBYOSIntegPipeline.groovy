@@ -49,7 +49,7 @@ def call(Map config = [:]) {
             dataNodeCount: 24,
             dedicatedManagerNodeCount: 4,
             ebsVolumeSize: 2048,
-            ebsThroughput: 1000
+            ebsThroughput: 1000  // gp3 max: 1000 MiB/s; r6g.8xlarge supports up to ~1250 MB/s EBS bandwidth
         ]
     ]
     pipeline {
@@ -64,7 +64,7 @@ def call(Map config = [:]) {
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment and snapshot bucket')
             string(name: 'SNAPSHOT_NAME', defaultValue: 'large-snapshot', description: 'Name of the snapshot')
             string(name: 'TEST_IDS', defaultValue: '0010', description: 'Test IDs to execute (comma separated, e.g., "0010" or "0010,0011")')
-            string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '900', description: 'Max retries for workflow monitoring (~1/min). 33=~30min, 900=~15hrs')
+            string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '1000000', description: 'Max retries for workflow monitoring (~1/min). Default effectively infinite — Argo handles retries.')
             choice(
                 name: 'SOURCE_VERSION',
                 choices: ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10', 'ES_8.19', 'OS_1.3', 'OS_2.19'],
