@@ -47,7 +47,7 @@ spec:
       - name: migration-image-configmap
         value: "migration-image-config"
       - name: monitor-retry-limit
-        value: "33"
+        value: "132"
       - name: otel-collector-endpoint
         value: "http://otel-collector:4317"
 
