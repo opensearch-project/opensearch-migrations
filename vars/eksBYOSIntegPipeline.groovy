@@ -37,19 +37,19 @@ def call(Map config = [:]) {
     def targetClusterSize = config.targetClusterSize ?: ""
     def targetClusterSizes = [
         'default': [
-            dataNodeType: "r6g.large.search",
+            dataNodeType: "r8g.large.search",
             dedicatedManagerNodeType: "m6g.large.search",
             dataNodeCount: 2,
             dedicatedManagerNodeCount: 0,
             ebsVolumeSize: 100
         ],
         'large': [
-            dataNodeType: "r6g.8xlarge.search",
+            dataNodeType: "r8g.8xlarge.search",
             dedicatedManagerNodeType: "m6g.2xlarge.search",
             dataNodeCount: 24,
             dedicatedManagerNodeCount: 4,
             ebsVolumeSize: 2048,
-            ebsThroughput: 1000  // gp3 max: 1000 MiB/s; r6g.8xlarge supports up to ~1250 MB/s EBS bandwidth
+            ebsThroughput: 1250  // r8g.8xlarge.search EBS bandwidth cap ~1250 MB/s
         ]
     ]
     pipeline {
@@ -79,7 +79,7 @@ def call(Map config = [:]) {
             choice(
                 name: 'TARGET_CLUSTER_SIZE',
                 choices: ['default', 'large'],
-                description: 'Target cluster size (default: 2x r6g.large, large: 6x r6g.4xlarge with dedicated masters)'
+                description: 'Target cluster size (default: 2x r8g.large, large: 24x r8g.8xlarge with dedicated masters)'
             )
         }
         options {
