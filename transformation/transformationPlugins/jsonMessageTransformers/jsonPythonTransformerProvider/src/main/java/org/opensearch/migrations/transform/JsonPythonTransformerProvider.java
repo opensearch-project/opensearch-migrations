@@ -24,22 +24,33 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
     @SneakyThrows
     @Override
     public IJsonTransformer createTransformer(Object jsonConfig) {
-        var exclusiveScriptParameters = List.of(SCRIPT_FILE_KEY, INLINE_SCRIPT_KEY, RESOURCE_PATH_KEY)
-            .stream()
-            .map(key -> "\"" + key + "\"")
-            .collect(Collectors.joining(","));
+        var config = validateAndExtractConfig(jsonConfig);
+        var script = resolveScript(config);
+        var bindingsObject = parseBindingsObject(config);
+        return new PythonTransformer(script, bindingsObject);
+    }
 
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> validateAndExtractConfig(Object jsonConfig) {
         if (jsonConfig == null || (jsonConfig instanceof String && ((String) jsonConfig).isEmpty())) {
             throw new IllegalArgumentException("Configuration must not be null or empty.");
         } else if (!(jsonConfig instanceof Map)) {
             throw new IllegalArgumentException(getConfigUsageStr());
         }
-
         var config = (Map<String, Object>) jsonConfig;
         if (!config.containsKey(BINDINGS_OBJECT)) {
-            throw new IllegalArgumentException("Configuration missing required key: " + BINDINGS_OBJECT + ". "
-                + getConfigUsageStr());
+            throw new IllegalArgumentException(
+                "Configuration missing required key: " + BINDINGS_OBJECT + ". " + getConfigUsageStr()
+            );
         }
+        return config;
+    }
+
+    private String resolveScript(Map<String, Object> config) throws IOException {
+        var exclusiveScriptParameters = List.of(SCRIPT_FILE_KEY, INLINE_SCRIPT_KEY, RESOURCE_PATH_KEY)
+            .stream()
+            .map(key -> "\"" + key + "\"")
+            .collect(Collectors.joining(","));
 
         String script = null;
 
@@ -48,57 +59,69 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
             try {
                 script = Files.readString(Path.of(scriptFile));
             } catch (IOException ioe) {
-                throw new IllegalArgumentException("Failed to load script file '" + scriptFile + "'. " + getConfigUsageStr(), ioe);
+                throw new IllegalArgumentException(
+                    "Failed to load script file '" + scriptFile + "'. " + getConfigUsageStr(), ioe
+                );
             }
         }
 
         String resourceFile = (String) config.getOrDefault(RESOURCE_PATH_KEY, null);
         if (resourceFile != null) {
             if (script != null) {
-                throw new IllegalArgumentException("Unable to use both parameters at the same time, {" + exclusiveScriptParameters + "}. " + getConfigUsageStr());
+                throw new IllegalArgumentException(
+                    "Unable to use both parameters at the same time, {" + exclusiveScriptParameters + "}. "
+                        + getConfigUsageStr()
+                );
             }
             try (InputStream is = getClass().getClassLoader().getResourceAsStream(resourceFile)) {
                 if (is == null) {
                     throw new IllegalArgumentException("Resource not found: " + resourceFile);
                 }
                 script = new String(is.readAllBytes(), StandardCharsets.UTF_8);
-            } catch (IOException ioe) {
-                throw new IllegalArgumentException("Failed to load script resource '" + resourceFile + "'. " + getConfigUsageStr(), ioe);
             }
         }
 
         var inlineScript = (String) config.getOrDefault(INLINE_SCRIPT_KEY, null);
         if (inlineScript != null) {
             if (script != null) {
-                throw new IllegalArgumentException("Unable to use both parameters at the same time, {" + exclusiveScriptParameters + "}. " + getConfigUsageStr());
+                throw new IllegalArgumentException(
+                    "Unable to use both parameters at the same time, {" + exclusiveScriptParameters + "}. "
+                        + getConfigUsageStr()
+                );
             }
             script = inlineScript;
         }
 
-        Object bindingsObject;
+        if (script == null) {
+            throw new IllegalArgumentException(
+                "One of {" + exclusiveScriptParameters + "} must be provided. " + getConfigUsageStr()
+            );
+        }
+        return script;
+    }
+
+    private Object parseBindingsObject(Map<String, Object> config) {
         var objectMapper = new ObjectMapper();
         try {
             String bindingsObjectString = (String) config.get(BINDINGS_OBJECT);
-            bindingsObject = objectMapper.readValue(bindingsObjectString, new TypeReference<>() {});
+            return objectMapper.readValue(bindingsObjectString, new TypeReference<>() {});
         } catch (ClassCastException | JsonProcessingException e) {
             throw new IllegalArgumentException("Failed to parse the bindingsObject. " + getConfigUsageStr(), e);
         }
-
-        if (script == null) {
-            throw new IllegalArgumentException("One of {" + exclusiveScriptParameters + "} must be provided. " + getConfigUsageStr());
-        }
-
-        return new PythonTransformer(script, bindingsObject);
     }
 
     private String getConfigUsageStr() {
-        return this.getClass().getName() + " expects the incoming configuration to be a Map<String, Object>, " +
-            "with keys: " + INLINE_SCRIPT_KEY + " or " + SCRIPT_FILE_KEY + ", " + BINDINGS_OBJECT + ".\n" +
-            SCRIPT_FILE_KEY + " is a string pointing to a full file path to a Python file to load. \n" +
-            RESOURCE_PATH_KEY + " is a string pointing to a resource path to a Python file in a jar on the classpath. \n" +
-            INLINE_SCRIPT_KEY + " is a string consisting of Python which defines a main function that takes in the " +
-            BINDINGS_OBJECT + " and returns a transform function which takes in a json object and returns the transformed object.\n" +
-            BINDINGS_OBJECT + " is a value which can be deserialized with Jackson ObjectMapper into a Map, List, Array," +
-            " or primitive type/wrapper.";
+        return this.getClass().getName() + " expects the incoming configuration to be a Map<String, Object>, "
+            + "with keys: " + INLINE_SCRIPT_KEY + " or " + SCRIPT_FILE_KEY + ", " + BINDINGS_OBJECT + ".\n"
+            + SCRIPT_FILE_KEY + " is a string pointing to a full file path to a Python file to load. \n"
+            + RESOURCE_PATH_KEY
+            + " is a string pointing to a resource path to a Python file in a jar on the classpath. \n"
+            + INLINE_SCRIPT_KEY
+            + " is a string consisting of Python which defines a main function that takes in the "
+            + BINDINGS_OBJECT
+            + " and returns a transform function which takes in a json object and returns the transformed object.\n"
+            + BINDINGS_OBJECT
+            + " is a value which can be deserialized with Jackson ObjectMapper into a Map, List, Array,"
+            + " or primitive type/wrapper.";
     }
 }

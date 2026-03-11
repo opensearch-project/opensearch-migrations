@@ -3,4 +3,6 @@ def main(context):
         document['transformed_by'] = 'resource_script'
         return document
     return transform
+
+
 main

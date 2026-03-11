@@ -24,6 +24,7 @@ import org.slf4j.event.Level;
  */
 @Slf4j
 public class PythonTransformer implements IJsonTransformer {
+    private static final String LANGUAGE_ID = "python";
     private static final String PYTHON_TRANSFORM_LOGGER_NAME = "PythonTransformer";
     private Value mainPythonTransformFunction;
 
@@ -32,11 +33,11 @@ public class PythonTransformer implements IJsonTransformer {
     private final OutputStream errorStream;
 
     public PythonTransformer(String script, Object context) {
-        var sourceCode = Source.create("python", script);
-        var engine = Engine.newBuilder("python")
+        var sourceCode = Source.create(LANGUAGE_ID, script);
+        var engine = Engine.newBuilder(LANGUAGE_ID)
             .option("engine.WarnInterpreterOnly", "false")
             .build();
-        var builder = Context.newBuilder("python")
+        var builder = Context.newBuilder(LANGUAGE_ID)
             .engine(engine)
             .allowHostAccess(HostAccess.newBuilder()
                 .allowAccessAnnotatedBy(HostAccess.Export.class)
