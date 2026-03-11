@@ -1,59 +1,50 @@
 # Document Migration Data Flow
 
-Documents flow from a snapshot through the pipeline core to OpenSearch. The IR (`DocumentChange`) is the boundary — source adapters produce it, sink adapters consume it.
+Documents flow from a source through the pipeline core to a target. The IR types (`Document`, `CollectionMetadata`) are the boundary — source adapters produce them, sink adapters consume them.
 
-```mermaid
-flowchart LR
-    subgraph Source["Source Side"]
-        SNAP[(Snapshot)]
-        SE[SnapshotExtractor]
-        LSS[LuceneSnapshotSource]
-        LA[LuceneAdapter]
-    end
+## Data Flow
 
-    subgraph Core["Pipeline Core"]
-        IR{{DocumentChange<br/><i>id, type, source,<br/>routing, operation</i>}}
-        MP[MigrationPipeline<br/><i>batching + concurrency</i>]
-        PC{{ProgressCursor<br/><i>shard, offset,<br/>docs, bytes</i>}}
-    end
-
-    subgraph Sink["Sink Side"]
-        TX[IJsonTransformer]
-        ODS[OpenSearchDocumentSink]
-        BULK[Bulk API]
-        OS[(OpenSearch)]
-    end
-
-    SNAP --> SE --> LSS
-    LSS --> LA -->|"Flux<DocumentChange>"| IR
-    IR --> MP
-    MP -->|"writeBatch()"| TX --> ODS --> BULK --> OS
-    MP -->|"Flux<ProgressCursor>"| PC
-
-    style IR fill:#fff9c4,stroke:#f9a825
-    style PC fill:#fff9c4,stroke:#f9a825
-    style MP fill:#e1f5fe,stroke:#0288d1
 ```
+Source Side                    Pipeline Core                     Sink Side
+──────────                     ─────────────                     ─────────
+
+Snapshot                       CollectionMetadata ──────────►    createCollection()
+  │                            (name, partitionCount,                │
+  ▼                             sourceConfig)                        ▼
+SnapshotExtractor                                                OpenSearchIndexCreator
+  │                                                                  │
+  ▼                                                                  ▼
+LuceneSnapshotSource           Document ────────────────────►    OpenSearchDocumentSink
+  │                            (id, source, operation,               │
+  ▼                             hints, sourceMetadata)               ▼
+LuceneAdapter                                                    IJsonTransformer (optional)
+  │                                                                  │
+  ▼                            ProgressCursor ◄──────────────    Bulk API → OpenSearch
+Flux<Document>  ──────►  DocumentMigrationPipeline  ──────►  Flux<ProgressCursor>
+                         (batching + concurrency)
+```
+
+### Types at the Edges
+
+| Edge | IR Type | Source Produces | Sink Consumes |
+|---|---|---|---|
+| Collection setup | `CollectionMetadata` | `readCollectionMetadata()` → name, partitionCount, opaque `sourceConfig` | `createCollection()` — reads `sourceConfig` for ES-specific fields if present |
+| Document stream | `Document` | `readDocuments()` → id, source bytes, operation, `hints` (ES routing/type), `sourceMetadata` (luceneDocNumber) | `writeBatch()` — reads `hints` for routing, ignores `sourceMetadata` |
+| Progress tracking | `ProgressCursor` | — | Pipeline emits one per batch: partition, cumulative offset, batch stats |
 
 ## How It Works
 
 1. `LuceneSnapshotSource` wraps `SnapshotExtractor` to read Lucene segments from a snapshot
-2. `LuceneAdapter` converts `LuceneDocumentChange` → `DocumentChange` (stripping Lucene-specific fields)
-3. `MigrationPipeline` batches documents by count and byte size, then calls `writeBatch()` on the sink
+2. `LuceneAdapter` converts `LuceneDocumentChange` → `Document`, populating `hints` with `_type`/`routing` and `sourceMetadata` with `luceneDocNumber`
+3. `DocumentMigrationPipeline` batches documents by count and byte size, then calls `writeBatch()` on the sink
 4. `OpenSearchDocumentSink` optionally applies `IJsonTransformer`, then sends a bulk request to OpenSearch
 5. Each batch returns a `ProgressCursor` for resumability tracking
+6. `PipelineProgressMonitor` logs progress on a fixed 30s timer, independent of pipeline throughput
+
+### Key Decoupling
+
+The sink never sees the source's partitioning. `writeBatch(collectionName, batch)` takes a collection name and documents — no `Partition` or shard information leaks to the target side. This enables non-shard-based sources (S3, Solr) to use the same sink.
 
 ## Delta Snapshot Support
 
-When configured with a previous snapshot, `LuceneSnapshotSource` uses `DeltaLuceneReader` to diff two snapshots and emit only the changes (additions and deletions).
-
-```mermaid
-flowchart LR
-    SNAP1[(Previous<br/>Snapshot)] --> LSS[LuceneSnapshotSource<br/><i>delta mode</i>]
-    SNAP2[(Current<br/>Snapshot)] --> LSS
-    LSS -->|"deletions first,<br/>then additions"| IR{{DocumentChange}}
-    IR --> MP[MigrationPipeline]
-
-    style IR fill:#fff9c4,stroke:#f9a825
-    style LSS fill:#fff3e0,stroke:#f57c00
-```
+When configured with a previous snapshot, `LuceneSnapshotSource` uses `DeltaLuceneReader` to diff two snapshots and emit only the changes (deletions first, then additions) as `Document` records with `UPSERT` or `DELETE` operations.

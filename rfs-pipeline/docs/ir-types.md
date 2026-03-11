@@ -1,107 +1,72 @@
 # IR Types and Port Interfaces
 
-The pipeline defines a clean intermediate representation (IR) that is completely Lucene-agnostic. All types are Java `record`s with compact constructor validation and zero runtime dependencies. Port interfaces use Reactor's `Flux` and `Mono` for reactive streaming.
+The pipeline defines a source-agnostic intermediate representation (IR). All types are Java `record`s or interfaces with compact constructor validation and zero runtime dependencies beyond Reactor. Port interfaces use `Flux` and `Mono` for reactive streaming.
 
-## IR Types
+## IR Types (`ir/` package)
 
-```mermaid
-classDiagram
-    class DocumentChange {
-        <<record>>
-        +String id
-        +String type
-        +byte[] source
-        +String routing
-        +ChangeType operation
-    }
+All types in this package are source-agnostic — no ES, Lucene, or OpenSearch concepts.
 
-    class ChangeType {
-        <<enum>>
-        INDEX
-        DELETE
-    }
+**`Document`** — A single document flowing through the pipeline.
+- `id` (String) — document identifier, required
+- `source` (byte[]) — document body, null for DELETE operations
+- `operation` (Operation) — `UPSERT` or `DELETE`
+- `hints` (Map<String, String>) — opaque sink-specific routing hints. ES sources populate `HINT_TYPE` (`_type`) and `HINT_ROUTING` (`routing`). Non-ES sources pass an empty map. The pipeline core never reads these.
+- `sourceMetadata` (Map<String, Object>) — opaque source-specific diagnostics. Lucene sources populate `SOURCE_META_LUCENE_DOC_NUMBER`. Flows through for logging/debugging.
 
-    class IndexMetadataSnapshot {
-        <<record>>
-        +String indexName
-        +int numberOfShards
-        +int numberOfReplicas
-        +ObjectNode mappings
-        +ObjectNode settings
-        +ObjectNode aliases
-    }
+**`Partition`** — Interface for any source partitioning scheme.
+- `name()` — human-readable identifier for logging
+- `collectionName()` — the collection this partition belongs to
+- Implementations: `EsShardPartition` (in `adapter/`), future: `S3PrefixPartition`, `SolrShardPartition`
 
-    class GlobalMetadataSnapshot {
-        <<record>>
-        +ObjectNode templates
-        +ObjectNode indexTemplates
-        +ObjectNode componentTemplates
-        +List~String~ indices
-    }
+**`CollectionMetadata`** — Metadata for creating a target collection.
+- `name` (String) — collection name, required
+- `partitionCount` (int) — hint for target, 0 means "use target default"
+- `sourceConfig` (Map<String, Object>) — opaque source-specific config. ES sources populate `ES_MAPPINGS`, `ES_SETTINGS`, `ES_ALIASES`, `ES_NUMBER_OF_SHARDS`, `ES_NUMBER_OF_REPLICAS`. Non-ES sources pass an empty map.
 
-    class ShardId {
-        <<record>>
-        +String snapshotName
-        +String indexName
-        +int shardNumber
-        +toString() "snap/index/0"
-    }
+**`ProgressCursor`** — Resumability tracking per partition.
+- `partition` (Partition) — which partition this progress is for
+- `lastDocProcessed` (long) — cumulative document offset
+- `docsInBatch` (long) — documents in the most recent batch
+- `bytesInBatch` (long) — bytes in the most recent batch
 
-    class ProgressCursor {
-        <<record>>
-        +ShardId shardId
-        +long lastDocProcessed
-        +long docsInBatch
-        +long bytesInBatch
-    }
+**`BatchResult`** — Batch-local stats returned by the sink.
+- `docsInBatch` (long)
+- `bytesInBatch` (long)
 
-    DocumentChange --> ChangeType
-    ProgressCursor --> ShardId
-```
+## ES-Specific Types (`adapter/` package)
+
+These types are ES-specific and live outside the core IR:
+
+- `EsShardPartition` — `Partition` implementation: `snapshotName`, `indexName`, `shardNumber`
+- `IndexMetadataSnapshot` — ES index metadata: `indexName`, `numberOfShards`, `numberOfReplicas`, `mappings`, `settings`, `aliases`
+- `GlobalMetadataSnapshot` — ES global metadata: `templates`, `indexTemplates`, `componentTemplates`, `indices`
 
 ## Port Interfaces
 
-Four port interfaces define the boundary between the pipeline core and external systems.
+**`DocumentSource`** (`source/`) — generic document source contract.
+- `listCollections()` → `List<String>`
+- `listPartitions(collectionName)` → `List<Partition>`
+- `readCollectionMetadata(collectionName)` → `CollectionMetadata`
+- `readDocuments(partition, startingDocOffset)` → `Flux<Document>`
 
-```mermaid
-classDiagram
-    class DocumentSource {
-        <<interface>>
-        +listIndices() List~String~
-        +listShards(indexName) List~ShardId~
-        +readIndexMetadata(indexName) IndexMetadataSnapshot
-        +readDocuments(shardId, offset) Flux~DocumentChange~
-    }
+**`DocumentSink`** (`sink/`) — generic document sink contract. The sink never sees source partitioning.
+- `createCollection(metadata)` → `Mono<Void>`
+- `writeBatch(collectionName, batch)` → `Mono<BatchResult>`
 
-    class DocumentSink {
-        <<interface>>
-        +createIndex(metadata) Mono~Void~
-        +writeBatch(shardId, indexName, batch) Mono~ProgressCursor~
-    }
+**`GlobalMetadataSource`** (`adapter/`) — optional, ES-specific.
+- `readGlobalMetadata()` → `GlobalMetadataSnapshot`
+- `readIndexMetadata(indexName)` → `IndexMetadataSnapshot`
 
-    class MetadataSource {
-        <<interface>>
-        +readGlobalMetadata() GlobalMetadataSnapshot
-        +readIndexMetadata(indexName) IndexMetadataSnapshot
-    }
+**`GlobalMetadataSink`** (`adapter/`) — optional, ES-specific.
+- `writeGlobalMetadata(metadata)` → `Mono<Void>`
+- `createIndex(metadata)` → `Mono<Void>`
 
-    class MetadataSink {
-        <<interface>>
-        +writeGlobalMetadata(metadata) Mono~Void~
-        +createIndex(metadata) Mono~Void~
-    }
+## Implementations
 
-    DocumentSource <|.. LuceneSnapshotSource : implements
-    DocumentSource <|.. SyntheticDocumentSource : test double
-    DocumentSink <|.. OpenSearchDocumentSink : implements
-    DocumentSink <|.. CollectingDocumentSink : test double
-    MetadataSource <|.. SnapshotMetadataSource : implements
-    MetadataSource <|.. SyntheticMetadataSource : test double
-    MetadataSink <|.. OpenSearchMetadataSink : implements
-    MetadataSink <|.. CollectingMetadataSink : test double
-
-    style DocumentSource fill:#fff3e0,stroke:#f57c00
-    style DocumentSink fill:#e8f5e9,stroke:#388e3c
-    style MetadataSource fill:#fff3e0,stroke:#f57c00
-    style MetadataSink fill:#e8f5e9,stroke:#388e3c
-```
+| Interface | Implementation | Module |
+|---|---|---|
+| `DocumentSource` | `LuceneSnapshotSource` | SnapshotReader |
+| `DocumentSource` | `SyntheticDocumentSource` (test fixture) | rfs-pipeline testFixtures |
+| `DocumentSink` | `OpenSearchDocumentSink` | RFS |
+| `GlobalMetadataSource` | `SnapshotMetadataSource` | SnapshotReader |
+| `GlobalMetadataSink` | `OpenSearchMetadataSink` | RFS |
