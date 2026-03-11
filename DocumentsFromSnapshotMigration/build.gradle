@@ -58,6 +58,7 @@ dependencies {
     testImplementation libs.mockito.core
     testImplementation libs.mockito.junit.jupiter
     testImplementation libs.json
+    testImplementation libs.blockhound
 
     testRuntimeOnly libs.junit.jupiter.engine
 
@@ -125,6 +126,10 @@ tasks.register('buildDockerImages') {
 
 tasks.named('composeUp') {
     dependsOn(tasks.named('buildDockerImages'))
+}
+
+tasks.withType(Test).configureEach {
+    jvmArgs '-XX:+AllowRedefinitionToAddDeleteMethods'
 }
 
 tasks.named('slowTest') {

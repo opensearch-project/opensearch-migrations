@@ -20,8 +20,8 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.Conta
 import org.opensearch.migrations.bulkload.framework.SnapshotFixtureCache;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
-import org.opensearch.migrations.bulkload.pipeline.adapter.EsMetadataMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
+import org.opensearch.migrations.bulkload.pipeline.adapter.EsMetadataMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchMetadataSink;
@@ -31,12 +31,14 @@ import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import reactor.blockhound.BlockHound;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -53,6 +55,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @Tag("isolatedTest")
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
 public class PipelineEndToEndTest {
+
+    @BeforeAll
+    static void installBlockHound() {
+        BlockHound.install(builder -> builder
+            .allowBlockingCallsInside(
+                "org.opensearch.migrations.bulkload.SnapshotExtractor", "readDocuments")
+        );
+    }
 
     private static final String SNAPSHOT_NAME = "test_snapshot";
     private static final String REPO_NAME = "test_repo";
