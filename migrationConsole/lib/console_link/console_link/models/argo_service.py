@@ -184,7 +184,7 @@ class ArgoService:
             value=status_info
         )
 
-    def wait_for_suspend(self, workflow_name: str, timeout_seconds: int = 120, interval: int = 5) -> CommandResult:
+    def wait_for_suspend(self, workflow_name: str, timeout_seconds: int = 120, interval: int = 2) -> CommandResult:
         start_time = time.time()
 
         while time.time() - start_time < timeout_seconds:
@@ -217,7 +217,7 @@ class ArgoService:
             return CommandResult(success=True, value=f"Workflow {workflow_name} has reached an ending phase of {phase}")
         return CommandResult(success=False, value=f"Workflow {workflow_name} has not completed and is in {phase} phase")
 
-    def wait_for_ending_phase(self, workflow_name: str, timeout_seconds: int = 120, interval: int = 5) -> CommandResult:
+    def wait_for_ending_phase(self, workflow_name: str, timeout_seconds: int = 120, interval: int = 2) -> CommandResult:
         start_time = time.time()
 
         while time.time() - start_time < timeout_seconds:
