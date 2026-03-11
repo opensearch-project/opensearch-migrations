@@ -222,7 +222,7 @@ export const USER_REPLAYER_OPTIONS = z.object({
         .describe("Number of threads to use to send requests from."),
     observedPacketConnectionTimeout: z.number().default(360).optional()
         .describe("Seconds of inactivity before assuming connections were terminated in the captured stream."),
-    otelCollectorEndpoint: z.string().default("").optional()
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
         .describe("Endpoint (host:port) for the OpenTelemetry Collector for metrics forwarding."),
     quiescentPeriodMs: z.number().default(5000).optional()
         .describe("Milliseconds to delay the first request on a resumed connection after Kafka partition reassignment."),

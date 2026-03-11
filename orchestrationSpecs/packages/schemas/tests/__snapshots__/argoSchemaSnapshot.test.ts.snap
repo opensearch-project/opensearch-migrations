@@ -1165,7 +1165,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "otelCollectorEndpoint": {
                       "type": "string",
-                      "default": ""
+                      "default": "http://otel-collector:4317"
                     },
                     "quiescentPeriodMs": {
                       "type": "number",
@@ -2435,7 +2435,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "otelCollectorEndpoint": {
                     "type": "string",
-                    "default": "",
+                    "default": "http://otel-collector:4317",
                     "description": "Endpoint (host:port) for the OpenTelemetry Collector for metrics forwarding."
                   },
                   "quiescentPeriodMs": {
