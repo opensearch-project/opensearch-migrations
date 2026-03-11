@@ -42,10 +42,6 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         }
 
         ObjectNode mappings = indexMetadata.getMappings();
-        String[] problemMappingFields = { "_all" };
-        for (var field : problemMappingFields) {
-            ObjectNodeUtils.removeFieldsByPath(mappings, field);
-        }
 
         // Assemble the request body
         ObjectNode body = mapper.createObjectNode();
@@ -54,7 +50,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         body.set("settings", settings);
 
         try {
-            createInner(index, mode, context, result, settings, body, awarenessAttributeSettings);
+            createInner(index, mode, context, result, settings, mappings, body, awarenessAttributeSettings);
         } catch (IncompatibleReplicaCountException e) {
             result.failureType(CreationFailureType.INCOMPATIBLE_REPLICA_COUNT_FAILURE);
             result.exception(e);
@@ -90,6 +86,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                              ICreateIndexContext context,
                              CreationResultBuilder result,
                              ObjectNode settings,
+                             ObjectNode mappings,
                              ObjectNode body,
                              AwarenessAttributeSettings awarenessAttributeSettings) throws IncompatibleReplicaCountException {
         // Create the index; it's fine if it already exists
@@ -117,24 +114,38 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
             var illegalArguments = invalidResponse.getIllegalArguments();
 
-            if (illegalArguments.isEmpty()) {
-                log.debug("Cannot retry invalid response, there are no illegal arguments to remove.");
-                throw invalidResponse;
-            }
+            if (!illegalArguments.isEmpty()) {
+                for (var illegalArgument : illegalArguments) {
+                    if (!illegalArgument.startsWith("index.")) {
+                        log.warn("Expecting all retryable errors to start with 'index.', instead saw " + illegalArgument);
+                        throw invalidResponse;
+                    }
 
-            for (var illegalArgument : illegalArguments) {
-                if (!illegalArgument.startsWith("index.")) {
-                    log.warn("Expecting all retryable errors to start with 'index.', instead saw " + illegalArgument);
-                    throw invalidResponse;
+                    var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
+                    log.debug("Removing setting '{}' from index '{}' settings", shortenedIllegalArgument, index.getName());
+                    ObjectNodeUtils.removeFieldsByPath(settings, shortenedIllegalArgument);
                 }
 
-                var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
-                log.debug("Removing setting '{}' from index '{}' settings", shortenedIllegalArgument, index.getName());
-                ObjectNodeUtils.removeFieldsByPath(settings, shortenedIllegalArgument);
+                log.info("Reattempting creation of index '{}' after removing illegal arguments: {}", index.getName(), illegalArguments);
+                client.createIndex(index.getName(), body, context);
+                return;
             }
 
-            log.info("Reattempting creation of index '{}' after removing illegal arguments: {}", index.getName(), illegalArguments);
-            client.createIndex(index.getName(), body, context);
+            var unsupportedMappingParams = invalidResponse.getUnsupportedMappingParameters();
+
+            if (!unsupportedMappingParams.isEmpty()) {
+                for (var param : unsupportedMappingParams) {
+                    log.debug("Removing unsupported mapping parameter '{}' from index '{}'", param, index.getName());
+                    ObjectNodeUtils.removeFieldsByPath(mappings, param);
+                }
+
+                log.info("Reattempting creation of index '{}' after removing unsupported mapping parameters: {}", index.getName(), unsupportedMappingParams);
+                client.createIndex(index.getName(), body, context);
+                return;
+            }
+
+            log.debug("Cannot retry invalid response, there are no illegal arguments or unsupported mapping parameters to remove.");
+            throw invalidResponse;
         }
     }
 }

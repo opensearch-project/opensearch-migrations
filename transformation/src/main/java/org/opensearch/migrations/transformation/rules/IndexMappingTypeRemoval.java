@@ -51,6 +51,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
     public static final String PROPERTIES_KEY = "properties";
     public static final String MAPPINGS_KEY = "mappings";
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
     public final MultiTypeResolutionBehavior multiTypeResolutionBehavior;
 
     // Default with NONE
@@ -104,22 +105,36 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
             var mappingsArray = (ArrayNode) mappingsNode;
             if (mappingsArray.size() < 2) {
                 final var mappingsInnerNode = (ObjectNode) mappingsArray.get(0);
-                var properties = mappingsInnerNode.properties().iterator().next().getValue().get(PROPERTIES_KEY);
-                resolvedMappingsNode.set(PROPERTIES_KEY, properties);
+                var typeNode = (ObjectNode) mappingsInnerNode.properties().iterator().next().getValue();
+                copyTypeLevelSettings(typeNode, resolvedMappingsNode);
+                if (typeNode.has(PROPERTIES_KEY)) {
+                    resolvedMappingsNode.set(PROPERTIES_KEY, typeNode.get(PROPERTIES_KEY));
+                }
             } else if (MultiTypeResolutionBehavior.UNION.equals(multiTypeResolutionBehavior)) {
-                mergePropertiesFromMappings(mappingsArray, index, resolvedProperties);
+                mergeFromMappings(mappingsArray, index, resolvedMappingsNode, resolvedProperties);
             }
             index.getRawJson().set(MAPPINGS_KEY, resolvedMappingsNode);
         } else if (mappingsNode.isObject()) {
-            mergePropertiesFromMappings((ObjectNode) mappingsNode, index, resolvedProperties);
+            mergeFromMappings((ObjectNode) mappingsNode, index, resolvedMappingsNode, resolvedProperties);
         }
         index.getRawJson().set(MAPPINGS_KEY, resolvedMappingsNode);
         return true;
     }
 
-    private void mergePropertiesFromMappings(ObjectNode mappingsNode, Index index, ObjectNode resolvedProperties) {
+    /** Copy type-level settings from typeNode into resolvedNode, skipping 'properties' */
+    private void copyTypeLevelSettings(ObjectNode typeNode, ObjectNode resolvedNode) {
+        typeNode.properties().forEach(entry -> {
+            var key = entry.getKey();
+            if (!PROPERTIES_KEY.equals(key)) {
+                resolvedNode.set(key, entry.getValue());
+            }
+        });
+    }
+
+    private void mergeFromMappings(ObjectNode mappingsNode, Index index, ObjectNode resolvedMappingsNode, ObjectNode resolvedProperties) {
         mappingsNode.properties().forEach(typeEntry -> {
             var typeNode = typeEntry.getValue();
+            copyTypeLevelSettings((ObjectNode) typeNode, resolvedMappingsNode);
             if (typeNode.has(PROPERTIES_KEY)) {
                 var propertiesNode = typeNode.get(PROPERTIES_KEY);
                 mergePropertiesCheckingConflicts(index, resolvedProperties, typeEntry.getKey(), propertiesNode);
@@ -127,9 +142,10 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
         });
     }
 
-    private void mergePropertiesFromMappings(ArrayNode mappingsArray, Index index, ObjectNode resolvedProperties) {
+    private void mergeFromMappings(ArrayNode mappingsArray, Index index, ObjectNode resolvedMappingsNode, ObjectNode resolvedProperties) {
         mappingsArray.forEach(typeNodeEntry -> {
-            var typeNode = typeNodeEntry.properties().iterator().next().getValue();
+            var typeNode = (ObjectNode) typeNodeEntry.properties().iterator().next().getValue();
+            copyTypeLevelSettings(typeNode, resolvedMappingsNode);
             if (typeNode.has(PROPERTIES_KEY)) {
                 var propertiesNode = typeNode.get(PROPERTIES_KEY);
                 mergePropertiesCheckingConflicts(index, resolvedProperties, typeNode.textValue(), propertiesNode);
