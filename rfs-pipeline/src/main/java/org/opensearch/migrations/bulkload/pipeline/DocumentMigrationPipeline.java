@@ -2,6 +2,8 @@ package org.opensearch.migrations.bulkload.pipeline;
 
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
@@ -21,6 +23,9 @@ import reactor.core.scheduler.Schedulers;
  * or any specific source/target. It moves {@link Document} records from source to sink
  * in batches, emitting {@link ProgressCursor} records for tracking.
  *
+ * <p>Progress logging is handled externally by {@link PipelineProgressMonitor}, which polls
+ * {@link #getProgressSnapshot()} on a fixed timer. The reactive chain contains no logging operators.
+ *
  * <h3>Concurrency model</h3>
  * <ul>
  *   <li>{@code partitionConcurrency = 1}: partitions are processed sequentially (default, safest)</li>
@@ -34,14 +39,18 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 public class DocumentMigrationPipeline {
 
-    private static final long PROGRESS_LOG_INTERVAL_MS = 30_000;
-
     private final DocumentSource source;
     private final DocumentSink sink;
     private final int maxDocsPerBatch;
     private final long maxBytesPerBatch;
     private final int partitionConcurrency;
     private final int batchConcurrency;
+
+    // Observable state — polled by PipelineProgressMonitor
+    private final AtomicLong totalDocs = new AtomicLong();
+    private final AtomicLong totalBytes = new AtomicLong();
+    private final AtomicInteger activeBatches = new AtomicInteger();
+    private final AtomicReference<Partition> currentPartition = new AtomicReference<>();
 
     /**
      * Create a pipeline with sequential partition processing and default batch concurrency.
@@ -88,6 +97,26 @@ public class DocumentMigrationPipeline {
         this.batchConcurrency = batchConcurrency;
     }
 
+    /** Snapshot of pipeline progress, safe to read from any thread. */
+    public record ProgressSnapshot(
+        Partition currentPartition,
+        long totalDocs,
+        long totalBytes,
+        int activeBatches,
+        int batchConcurrency
+    ) {}
+
+    /** Returns a point-in-time snapshot of pipeline progress for external monitoring. */
+    public ProgressSnapshot getProgressSnapshot() {
+        return new ProgressSnapshot(
+            currentPartition.get(),
+            totalDocs.get(),
+            totalBytes.get(),
+            activeBatches.get(),
+            batchConcurrency
+        );
+    }
+
     /**
      * Migrate all documents for a single partition from source to sink.
      *
@@ -97,48 +126,31 @@ public class DocumentMigrationPipeline {
      * @return a Flux of progress cursors, one per batch written
      */
     public Flux<ProgressCursor> migratePartition(Partition partition, String collectionName, long startingDocOffset) {
-        log.info("Starting partition migration: {} from offset {} (batchConcurrency={})", partition, startingDocOffset, batchConcurrency);
         final long[] cumulativeOffset = { startingDocOffset };
-        final long[] cumulativeBytes = { 0 };
-        final long[] lastLogTime = { System.currentTimeMillis() };
-        final AtomicInteger activeBatches = new AtomicInteger(0);
-        return source.readDocuments(partition, startingDocOffset)
-            .subscribeOn(Schedulers.boundedElastic())
-            .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
-            .flatMapSequential(batch -> {
-                long batchStart = System.nanoTime();
-                int batchDocs = batch.size();
-                long batchBytes = batch.stream().mapToLong(Document::sourceLength).sum();
-                int inflight = activeBatches.incrementAndGet();
-                return sink.writeBatch(collectionName, batch)
-                    .map(result -> {
-                        cumulativeOffset[0] += result.docsInBatch();
-                        cumulativeBytes[0] += result.bytesInBatch();
-                        return new ProgressCursor(
-                            partition,
-                            cumulativeOffset[0],
-                            result.docsInBatch(),
-                            result.bytesInBatch()
-                        );
-                    })
-                    .doOnNext(cursor -> {
-                        int remaining = activeBatches.decrementAndGet();
-                        long totalMs = (System.nanoTime() - batchStart) / 1_000_000;
-                        long now = System.currentTimeMillis();
-                        if (now - lastLogTime[0] >= PROGRESS_LOG_INTERVAL_MS) {
-                            lastLogTime[0] = now;
-                            log.info("{} batch: {}ms, {} docs, {} KB, active {}/{} | progress: {} docs, {} MB total",
-                                partition, totalMs, batchDocs, batchBytes / 1024,
-                                remaining + 1, batchConcurrency,
-                                cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024));
-                        }
-                    })
-                    .doOnError(e -> activeBatches.decrementAndGet());
-            }, batchConcurrency)
-            .onErrorMap(e -> !(e instanceof PipelineException),
-                e -> new PipelineException("Failed migrating partition " + partition, e))
-            .doOnComplete(() -> log.info("Completed partition migration: {} — {} docs, {} MB total",
-                partition, cumulativeOffset[0], cumulativeBytes[0] / (1024 * 1024)));
+        return Flux.defer(() -> {
+            currentPartition.set(partition);
+            return source.readDocuments(partition, startingDocOffset)
+                .subscribeOn(Schedulers.boundedElastic())
+                .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
+                .flatMapSequential(batch -> {
+                    activeBatches.incrementAndGet();
+                    return sink.writeBatch(collectionName, batch)
+                        .map(result -> {
+                            cumulativeOffset[0] += result.docsInBatch();
+                            totalDocs.addAndGet(result.docsInBatch());
+                            totalBytes.addAndGet(result.bytesInBatch());
+                            return new ProgressCursor(
+                                partition,
+                                cumulativeOffset[0],
+                                result.docsInBatch(),
+                                result.bytesInBatch()
+                            );
+                        })
+                        .doFinally(s -> activeBatches.decrementAndGet());
+                }, batchConcurrency)
+                .onErrorMap(e -> !(e instanceof PipelineException),
+                    e -> new PipelineException("Failed migrating partition " + partition, e));
+        });
     }
 
     /**
@@ -149,10 +161,8 @@ public class DocumentMigrationPipeline {
      * @return a Flux of progress cursors across all partitions
      */
     public Flux<ProgressCursor> migrateCollection(String collectionName) {
-        log.info("Starting collection migration: {} (concurrency={})", collectionName, partitionConcurrency);
         var metadata = source.readCollectionMetadata(collectionName);
         var partitions = source.listPartitions(collectionName);
-        log.info("Collection {} has {} partitions", collectionName, partitions.size());
 
         return Flux.from(sink.createCollection(metadata))
             .thenMany(
@@ -161,8 +171,7 @@ public class DocumentMigrationPipeline {
                         partition -> migratePartition(partition, collectionName, 0),
                         partitionConcurrency
                     )
-            )
-            .doOnComplete(() -> log.info("Completed collection migration: {}", collectionName));
+            );
     }
 
     /**
@@ -171,11 +180,8 @@ public class DocumentMigrationPipeline {
      * @return a Flux of progress cursors across all collections and partitions
      */
     public Flux<ProgressCursor> migrateAll() {
-        var collections = source.listCollections();
-        log.info("Starting full migration: {} collections", collections.size());
-        return Flux.fromIterable(collections)
-            .concatMap(this::migrateCollection)
-            .doOnComplete(() -> log.info("Full migration complete"));
+        return Flux.fromIterable(source.listCollections())
+            .concatMap(this::migrateCollection);
     }
 
     /**

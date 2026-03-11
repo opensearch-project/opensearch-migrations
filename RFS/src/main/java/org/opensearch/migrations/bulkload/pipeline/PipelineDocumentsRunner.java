@@ -99,6 +99,8 @@ public class PipelineDocumentsRunner {
                         pipelineConfig.maxDocsPerBatch(), pipelineConfig.maxBytesPerBatch(),
                         1, pipelineConfig.batchConcurrency()
                     );
+                    var progressMonitor = new PipelineProgressMonitor(pipeline);
+                    progressMonitor.start();
                     var latch = new CountDownLatch(1);
                     var lastCursor = new AtomicReference<ProgressCursor>();
                     var batchCount = new AtomicInteger();
@@ -166,6 +168,8 @@ public class PipelineDocumentsRunner {
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         throw new RuntimeException(e);
+                    } finally {
+                        progressMonitor.close();
                     }
                 }
 
