@@ -51,12 +51,9 @@ public class DocumentMigrationBootstrap {
     private final String snapshotName;
     private final Path workDir;
 
-    @Builder.Default
-    private final int maxDocsPerBatch = PipelineDefaults.MAX_DOCS_PER_BATCH;
-    @Builder.Default
-    private final long maxBytesPerBatch = PipelineDefaults.MAX_BYTES_PER_BATCH;
-    @Builder.Default
-    private final int batchConcurrency = PipelineDefaults.BATCH_CONCURRENCY;
+    private final int maxDocsPerBatch;
+    private final long maxBytesPerBatch;
+    private final int batchConcurrency;
 
     // Optional: document transformation
     @Builder.Default

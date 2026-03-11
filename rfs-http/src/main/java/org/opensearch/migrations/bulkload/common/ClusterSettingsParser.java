@@ -15,26 +15,34 @@ import lombok.experimental.UtilityClass;
 public class ClusterSettingsParser {
 
     /**
-     * Checks whether a two-level boolean setting is enabled in any scope
-     * (persistent, transient, or defaults) of a parsed cluster settings response.
+     * Checks whether a two-level boolean setting is enabled, respecting ES/OS precedence:
+     * transient > persistent > defaults. A scope that explicitly sets the value to {@code false}
+     * takes precedence over a lower-priority scope that sets it to {@code true}.
      *
      * @param settingsRoot the root JSON node from the cluster settings response
      * @param primaryKey   first-level key (e.g. "compatibility", "http_compression")
      * @param secondaryKey second-level key (e.g. "override_main_response_version", "enabled")
-     * @return true if the setting is enabled in any scope
+     * @return true if the setting is enabled after applying precedence
      */
     public boolean isSettingEnabled(JsonNode settingsRoot, String primaryKey, String secondaryKey) {
         var body = Optional.of(settingsRoot);
-        var persistentEnabled = isNodeEnabled(body.map(n -> n.get("persistent")), primaryKey, secondaryKey);
-        var transientEnabled = isNodeEnabled(body.map(n -> n.get("transient")), primaryKey, secondaryKey);
-        var defaultsEnabled = isNodeEnabled(body.map(n -> n.get("defaults")), primaryKey, secondaryKey);
-        return persistentEnabled || transientEnabled || defaultsEnabled;
+        var transientValue = getNodeValue(body.map(n -> n.get("transient")), primaryKey, secondaryKey);
+        if (transientValue.isPresent()) {
+            return transientValue.get();
+        }
+        var persistentValue = getNodeValue(body.map(n -> n.get("persistent")), primaryKey, secondaryKey);
+        if (persistentValue.isPresent()) {
+            return persistentValue.get();
+        }
+        var defaultsValue = getNodeValue(body.map(n -> n.get("defaults")), primaryKey, secondaryKey);
+        return defaultsValue.orElse(false);
     }
 
     /**
-     * Checks whether a two-level boolean setting is enabled within a single scope node.
+     * Reads a two-level boolean setting from a single scope node.
+     * Returns empty if the setting is not present in this scope.
      */
-    public boolean isNodeEnabled(Optional<JsonNode> node, String primaryKey, String secondaryKey) {
+    public Optional<Boolean> getNodeValue(Optional<JsonNode> node, String primaryKey, String secondaryKey) {
         return node.filter(n -> !n.isNull())
             .map(n -> n.get(primaryKey))
             .filter(n -> !n.isNull())
@@ -48,7 +56,6 @@ public class ClusterSettingsParser {
                 } else {
                     return false;
                 }
-            })
-            .orElse(false);
+            });
     }
 }

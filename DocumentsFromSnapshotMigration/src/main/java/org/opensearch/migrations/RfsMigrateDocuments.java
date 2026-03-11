@@ -29,7 +29,6 @@ import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
-import org.opensearch.migrations.bulkload.pipeline.PipelineDefaults;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
@@ -119,6 +118,13 @@ public class RfsMigrateDocuments {
     }
 
     public static class Args {
+        /** Default maximum documents per bulk batch. */
+        static final int DEFAULT_MAX_DOCS_PER_BATCH = 1000;
+        /** Default maximum bytes per bulk batch (10 MiB). */
+        static final long DEFAULT_MAX_BYTES_PER_BATCH = 10L * 1024 * 1024;
+        /** Default number of concurrent batches in flight. */
+        static final int DEFAULT_BATCH_CONCURRENCY = 10;
+
         @Parameter(
             names = {"--help", "-h"},
             help = true,
@@ -210,20 +216,20 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
         names =  {"--documents-per-bulk-request", "--documentsPerBulkRequest"},
         description = "Optional.  The number of documents to be included within each bulk request sent. " +
-            "Default " + PipelineDefaults.MAX_DOCS_PER_BATCH)
-        int numDocsPerBulkRequest = PipelineDefaults.MAX_DOCS_PER_BATCH;
+            "Default " + DEFAULT_MAX_DOCS_PER_BATCH)
+        int numDocsPerBulkRequest = DEFAULT_MAX_DOCS_PER_BATCH;
 
         @Parameter(required = false,
             names = { "--documents-size-per-bulk-request", "--documentsSizePerBulkRequest" },
             description = "Optional. The maximum aggregate document size to be used in bulk requests in bytes. " +
                 "Note does not apply to single document requests. Default 10 MiB")
-        long numBytesPerBulkRequest = PipelineDefaults.MAX_BYTES_PER_BATCH;
+        long numBytesPerBulkRequest = DEFAULT_MAX_BYTES_PER_BATCH;
 
         @Parameter(required = false,
             names = {"--max-connections", "--maxConnections" },
             description = "Optional.  The maximum number of connections to simultaneously " +
-                "used to communicate to the target, default " + PipelineDefaults.BATCH_CONCURRENCY)
-        int maxConnections = PipelineDefaults.BATCH_CONCURRENCY;
+                "used to communicate to the target, default " + DEFAULT_BATCH_CONCURRENCY)
+        int maxConnections = DEFAULT_BATCH_CONCURRENCY;
 
         @Parameter(required = false,
             names = { "--server-generated-ids" },
