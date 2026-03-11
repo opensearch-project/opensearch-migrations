@@ -200,7 +200,8 @@ export const USER_RFS_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
 
     skipApproval: z.boolean().default(false).optional(),  // TODO - fullmigration
-    useTargetClusterForWorkCoordination: z.boolean().default(true),
+    useTargetClusterForWorkCoordination: z.boolean().default(false)
+        .describe("When true, uses the target OpenSearch cluster for RFS work coordination. When false, a dedicated single-node OpenSearch coordinator cluster is deployed and managed for the lifetime of the migration, then torn down on completion."),
     resources: z.preprocess((v) =>
             deepmerge(DEFAULT_RESOURCES.RFS, (v ?? {})),
         RESOURCE_REQUIREMENTS
