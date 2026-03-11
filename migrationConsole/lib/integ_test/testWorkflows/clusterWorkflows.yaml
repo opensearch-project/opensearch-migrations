@@ -462,7 +462,8 @@ spec:
                 memory: "4Gi"
             readinessProbe:
               failureThreshold: 5
-              successThreshold: 2
+              successThreshold: 1
+              periodSeconds: 5
             extraEnvs:
               - name: "cluster.initial_master_nodes"
                 value: ""
@@ -694,7 +695,8 @@ spec:
                 memory: "4Gi"
             readinessProbe:
               failureThreshold: 5
-              successThreshold: 2
+              successThreshold: 1
+              periodSeconds: 5
             extraEnvs:
               - name: node.roles
                 value: "master,data,ingest"
