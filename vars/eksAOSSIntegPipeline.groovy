@@ -1,3 +1,17 @@
+static def expandVersionString(String input) {
+    def trimmed = input.trim()
+    def pattern = ~/^(ES|OS)_(\d+)\.(\d+)$/
+    def matcher = trimmed =~ pattern
+    if (!matcher.matches()) {
+        error("Invalid version string format: '${input}'. Expected something like ES_7.10 or OS_1.3")
+    }
+    def prefix = matcher[0][1]
+    def major  = matcher[0][2]
+    def minor  = matcher[0][3]
+    def name   = (prefix == 'ES') ? 'elasticsearch' : 'opensearch'
+    return "${name}-${major}-${minor}"
+}
+
 def call(Map config = [:]) {
     def collectionType = config.collectionType ?: 'SEARCH'
     def testIdMap = ['SEARCH': '0021', 'TIMESERIES': '0022', 'VECTORSEARCH': '0023']
@@ -200,6 +214,25 @@ def call(Map config = [:]) {
                                         kubectl --context=${env.eksKubeContext} set env statefulset/migration-console \
                                           -n ma ${endpointEnvVar}=${env.AOSS_COLLECTION_ENDPOINT}
                                         kubectl --context=${env.eksKubeContext} rollout status statefulset/migration-console -n ma --timeout=120s
+                                    """
+
+                                    // Source cluster configmap (needed by test's import_existing_clusters)
+                                    def sourceVersionExpanded = expandVersionString("${params.SOURCE_VERSION}")
+                                    writeJSON file: '/tmp/source-cluster-config.json', json: [
+                                            endpoint: env.SOURCE_ENDPOINT,
+                                            allow_insecure: true,
+                                            sigv4: [
+                                                    region: params.REGION,
+                                                    service: "es"
+                                            ],
+                                            version: params.SOURCE_VERSION
+                                    ]
+                                    sh """
+                                      kubectl --context=${env.eksKubeContext} create configmap source-${sourceVersionExpanded}-migration-config \
+                                        --from-file=cluster-config=/tmp/source-cluster-config.json \
+                                        --namespace ma --dry-run=client -o yaml | kubectl --context=${env.eksKubeContext} apply -f -
+
+                                      kubectl --context=${env.eksKubeContext} -n ma get configmap source-${sourceVersionExpanded}-migration-config -o yaml
                                     """
                                 }
                             }
