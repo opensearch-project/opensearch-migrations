@@ -28,11 +28,18 @@ def agradle(*args):
         if gradlew.exists() and os.access(gradlew, os.X_OK):
             result = subprocess.run(
                 [str(gradlew), *args],
+                cwd=parent,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                check=True,
             )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Gradle command failed (exit {result.returncode}):\n"
+                    f"  args: {[str(gradlew), *args]}\n"
+                    f"  stdout: {result.stdout}\n"
+                    f"  stderr: {result.stderr}"
+                )
             return result.stdout.strip()
     raise RuntimeError("No gradlew script found in ancestor directories")
 

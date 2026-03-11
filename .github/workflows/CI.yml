@@ -264,7 +264,6 @@ jobs:
         npm-project:
           - ./deployment/cdk/opensearch-service-migration
           - ./deployment/migration-assistant-solution
-          - ./frontend
           # TODO - get these enabled
 #          - ./orchestrationSpecs/packages/argo-workflow-builders
 #          - ./orchestrationSpecs/packages/config-processor
