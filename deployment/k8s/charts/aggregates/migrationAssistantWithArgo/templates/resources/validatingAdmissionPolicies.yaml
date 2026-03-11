@@ -169,4 +169,55 @@ spec:
         operator: In
         values: ["{{ .Release.Namespace }}"]
 
+# ─────────────────────────────────────────────────────────────
+# Managed Deployment Policy - blocks direct edits to workflow-managed Deployments
+# Edit the corresponding CRD instead (ProxyConfig, ReplayerConfig, etc.)
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-managed-deployment-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["apps"]
+      apiVersions: ["v1"]
+      operations: ["UPDATE"]
+      resources: ["deployments"]
+  matchConditions:
+    # Only apply to Deployments with managed-by annotation
+    - name: is-managed
+      expression: |
+        has(object.metadata.annotations) &&
+        'migrations.opensearch.org/managed-by' in object.metadata.annotations
+  validations:
+    # Block direct edits unless override annotation is set
+    - expression: |
+        has(object.metadata.annotations) &&
+        'migrations.opensearch.org/allow-direct-edit' in object.metadata.annotations &&
+        object.metadata.annotations['migrations.opensearch.org/allow-direct-edit'] == 'true'
+      messageExpression: |
+        "Direct edit blocked: This Deployment is managed by '" +
+        object.metadata.annotations['migrations.opensearch.org/managed-by'] +
+        "'. Edit the corresponding CRD instead. " +
+        "To override (use with caution): kubectl annotate deployment/" + object.metadata.name +
+        " migrations.opensearch.org/allow-direct-edit=true --overwrite"
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-managed-deployment-binding
+spec:
+  policyName: {{ .Release.Namespace }}-managed-deployment-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
 {{- end }}
