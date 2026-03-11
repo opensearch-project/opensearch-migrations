@@ -12,7 +12,7 @@ RUN ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
 
 ARG HELM_VERSION="3.14.0"
 ARG KUBECTL_VERSION="1.32.1"
-ARG KAFKA_VERSION="3.9.1"
+ARG KAFKA_VERSION="3.9.2"
 ARG STERN_VERSION="1.33.1"
 
 # Get kafka distribution and unpack to 'kafka'
@@ -25,7 +25,7 @@ RUN mkdir -p /root/kafka-tools/kafka && \
     rm -f /tmp/kafka.tgz && \
     mkdir -p /root/kafka-tools/aws && \
     curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
-        https://github.com/aws/aws-msk-iam-auth/releases/download/v2.0.3/aws-msk-iam-auth-2.0.3-all.jar \
+        https://github.com/aws/aws-msk-iam-auth/releases/download/v2.3.4/aws-msk-iam-auth-2.3.4-all.jar \
         -o /root/kafka-tools/kafka/libs/msk-iam-auth.jar
 
 # Get kubectl and Helm distributions

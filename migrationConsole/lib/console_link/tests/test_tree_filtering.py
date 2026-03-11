@@ -45,6 +45,10 @@ class TestTreeFiltering:
     def test_meaningful_vs_noise(self, input_dir, expected_dir):
         """Test filtering meaningful containers vs noise wrappers."""
         self._test_filtering('meaningful_vs_noise.json', input_dir, expected_dir)
+
+    def test_rfs_coordinator_retry(self, input_dir, expected_dir):
+        """Leaf-only retries are collapsed; retries with statusOutput/groupName children are preserved."""
+        self._test_filtering('rfs_coordinator_retry.json', input_dir, expected_dir)
     
     def _test_filtering(self, filename, input_dir, expected_dir):
         """Test filtering for a specific file."""

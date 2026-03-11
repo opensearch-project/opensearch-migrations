@@ -38,6 +38,15 @@
           "action": "apply",
           "setOwnerReference": true
         },
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -55,6 +64,15 @@
           "manifest": "apiVersion: v1\nkind: Service\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  labels:\n    app: \"{{inputs.parameters.clusterName}}\"\nspec:\n  clusterIP: None\n  selector:\n    app: \"{{inputs.parameters.clusterName}}\"\n  ports:\n    - name: https\n      port: 9200\n      targetPort: https\n",
           "action": "apply",
           "setOwnerReference": true
+        },
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
         },
         "outputs": {
           "parameters": []
@@ -77,6 +95,15 @@
           "action": "apply",
           "setOwnerReference": true,
           "successCondition": "status.readyReplicas > 0"
+        },
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
         },
         "outputs": {
           "parameters": []
@@ -164,6 +191,15 @@
             "--ignore-not-found"
           ]
         },
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -184,6 +220,15 @@
             "--ignore-not-found"
           ]
         },
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -203,6 +248,15 @@
           "flags": [
             "--ignore-not-found"
           ]
+        },
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
         },
         "outputs": {
           "parameters": []

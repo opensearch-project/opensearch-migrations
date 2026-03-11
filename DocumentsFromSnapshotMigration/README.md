@@ -111,8 +111,23 @@ These arguments should be carefully considered before setting, can include exper
 These settings apply to coordinator work-item completion retries only and do not change target bulk indexing retry behavior. They are intended for transient coordinator outages such as pod restarts or evictions.
 
 The coordinator can be:
-- The target cluster (default behavior).
-- A dedicated cluster via `--coordinator-host` (plus optional coordinator auth/TLS/SigV4 flags).
+- A dedicated single-node OpenSearch cluster deployed and managed for the lifetime of the migration (default, `useTargetClusterForWorkCoordination: false`). The dedicated coordinator is torn down automatically on migration completion. When running RFS outside the workflow, use `--coordinator-host` (plus optional coordinator auth/TLS/SigV4 flags) to point to a separate coordinator.
+- The target cluster (`useTargetClusterForWorkCoordination: true`). Simpler setup with fewer resources, suitable for small migrations where the coordination index overhead on the target is acceptable.
+
+#### Work Coordination Mode
+
+The `useTargetClusterForWorkCoordination` option in `documentBackfillConfig` controls where RFS
+stores work coordination state (lease tracking, shard assignments, completion status).
+
+| Value | Behavior                                                                                                         | Default |
+|-------|------------------------------------------------------------------------------------------------------------------|---------|
+| `false` | Deploys a dedicated single-node OpenSearch coordinator cluster, managed automatically for the migration lifetime | ✔️ |
+| `true` | Uses the user's target OpenSearch cluster for work coordination                                                  | |
+
+The dedicated coordinator (`false`) isolates coordination traffic from the target cluster,
+preventing work-coordination writes from competing with bulk indexing. Set to `true` when
+the overhead is acceptable on the user's target OpenSearch cluster.
+
 
 When RFS finishes migrating documents for a shard, it marks the work item as completed on the coordinator cluster. If the coordinator is temporarily unavailable during this step, RFS retries with exponential backoff (2x multiplier). With defaults (7 retries = 8 total executions, 1000ms initial delay, 64s max delay), the backoff sleep sequence is: 1s, 2s, 4s, 8s, 16s, 32s, 64s (~127s total sleep). Actual elapsed time can be longer due to request timeouts and latency.
 

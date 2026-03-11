@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class InvalidResponse extends RfsException {
     private static final Pattern UNKNOWN_SETTING = Pattern.compile("unknown setting \\[([a-zA-Z0-9_.-]+)\\].+");
+    private static final Pattern PRIVATE_SETTING = Pattern.compile(".*private index setting \\[([a-zA-Z0-9_.-]+)\\] can not be set explicitly.*");
     private static final Pattern AWARENESS_ATTRIBUTE_EXCEPTION = Pattern.compile("expected total copies needs to be a multiple of total awareness attributes");
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private final transient HttpResponse response;
@@ -57,7 +58,10 @@ public class InvalidResponse extends RfsException {
 
             var onlyExpectedErrors = interimResults.stream()
                 .map(Entry::getKey)
-                .allMatch(errorType -> "illegal_argument_exception".equals(errorType) || "settings_exception".equals(errorType));
+                .allMatch(errorType ->
+                    "illegal_argument_exception".equals(errorType)
+                    || "settings_exception".equals(errorType)
+                    || "validation_exception".equals(errorType));
             if (!onlyExpectedErrors) {
                 log.warn("Expecting only invalid argument errors, found additional error types " + interimResults);
                 return Set.of();
@@ -79,12 +83,22 @@ public class InvalidResponse extends RfsException {
             }
             return Map.entry(typeNode, reasonNode);
         }).map(entry -> {
-            var matcher = UNKNOWN_SETTING.matcher(entry.getValue().asText());
-            if (!matcher.matches()) {
-                return null;
+            var reason = entry.getValue().asText();
+            var type = entry.getKey().asText();
+
+            // Try matching "unknown setting [X]..."
+            var matcher = UNKNOWN_SETTING.matcher(reason);
+            if (matcher.matches()) {
+                return Map.entry(type, matcher.group(1));
             }
 
-            return Map.entry(entry.getKey().asText(), matcher.group(1));
+            // Try matching "private index setting [X] can not be set explicitly"
+            matcher = PRIVATE_SETTING.matcher(reason);
+            if (matcher.matches()) {
+                return Map.entry(type, matcher.group(1));
+            }
+
+            return null;
         }).orElse(null);
     }
 
