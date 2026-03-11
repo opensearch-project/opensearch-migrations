@@ -62,7 +62,7 @@ push_images_to_ecr=false
 ma_images_source=""
 skip_setting_k8s_context=false
 skip_test_images=false
-destroy=false
+image_tag=""
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -100,7 +100,7 @@ while [[ $# -gt 0 ]]; do
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
     --skip-test-images) skip_test_images=true; shift 1 ;;
-    --destroy) destroy=true; shift 1 ;;
+    --image-tag) image_tag="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
@@ -158,8 +158,7 @@ while [[ $# -gt 0 ]]; do
       echo "                                            deployments. You will need to pass --context=<context-name>"
       echo "                                            to every kubectl/helm command, or set the context yourself."
       echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
-      echo "  --destroy                                 Delete the CloudFormation stack specified by --stack-name"
-      echo "                                            and exit. Requires --stack-name and --region."
+      echo "  --image-tag <tag>                         Override the image tag (default: git short SHA)"
       echo ""
       echo "Build options:"
       echo "  --base-dir <path>                         opensearch-migrations directory"
@@ -330,40 +329,6 @@ validate_args() {
   fi
 }
 
-# --- destroy mode: delete the CFN stack and exit ---
-if [[ "$destroy" == "true" ]]; then
-  if [[ -z "$cfn_stack_name" ]]; then
-    echo "Error: --stack-name is required with --destroy." >&2
-    exit 1
-  fi
-  if [[ -z "$region" ]]; then
-    echo "Error: --region is required with --destroy." >&2
-    exit 1
-  fi
-  echo "Deleting CloudFormation stack: $cfn_stack_name"
-  # Check if stack exists and handle DELETE_FAILED state
-  stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" --region "$region" \
-    --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DOES_NOT_EXIST")
-  if [[ "$stack_status" == "DOES_NOT_EXIST" ]]; then
-    echo "Stack $cfn_stack_name does not exist."
-    exit 0
-  fi
-  retain_args=()
-  if [[ "$stack_status" == "DELETE_FAILED" ]]; then
-    failed_resources=$(aws cloudformation list-stack-resources --stack-name "$cfn_stack_name" --region "$region" \
-      --query "StackResourceSummaries[?ResourceStatus=='DELETE_FAILED'].LogicalResourceId" --output text 2>/dev/null || true)
-    if [[ -n "$failed_resources" ]]; then
-      echo "Retaining stuck resources: $failed_resources"
-      retain_args=(--retain-resources $failed_resources)
-    fi
-  fi
-  aws cloudformation delete-stack --stack-name "$cfn_stack_name" --region "$region" "${retain_args[@]}"
-  echo "Waiting for stack deletion to complete..."
-  aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" --region "$region"
-  echo "Stack $cfn_stack_name deleted."
-  exit 0
-fi
-
 validate_args
 
 # --- early subnet isolation check (before any slow operations) ---
@@ -427,7 +392,12 @@ TOOLS_ARCH=$(uname -m)
 # --- compute immutable image tag ---
 # Use git short SHA for a unique, immutable tag per commit. This allows
 # pullPolicy: IfNotPresent since each build produces a distinct tag.
-IMAGE_TAG=$(git -C "$base_dir" rev-parse --short HEAD 2>/dev/null || echo "latest")
+# Override with --image-tag for local dev iterations on the same commit.
+if [[ -n "$image_tag" ]]; then
+  IMAGE_TAG="$image_tag"
+else
+  IMAGE_TAG=$(git -C "$base_dir" rev-parse --short HEAD 2>/dev/null || echo "latest")
+fi
 echo "Image tag: $IMAGE_TAG"
 case "$TOOLS_ARCH" in
   x86_64 | amd64) TOOLS_ARCH="amd64" ;;
@@ -675,32 +645,17 @@ if [[ "$deploy_cfn" == "true" ]]; then
 
   echo "Deploying CloudFormation stack: $cfn_stack_name"
 
-  # Delete stack if it's in a terminal failed state
-  delete_stuck_stack() {
-    if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
-      local status
-      status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-        --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
-      echo "Current stack status: $status"
-      if [[ "$status" == "ROLLBACK_COMPLETE" || "$status" == "UPDATE_ROLLBACK_COMPLETE" || "$status" == "DELETE_FAILED" ]]; then
-        echo "Stack $cfn_stack_name is in $status state. Deleting before re-creating..."
-        local retain_args=()
-        if [[ "$status" == "DELETE_FAILED" ]]; then
-          local failed_resources
-          failed_resources=$(aws cloudformation list-stack-resources --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-            --query "StackResourceSummaries[?ResourceStatus=='DELETE_FAILED'].LogicalResourceId" --output text 2>/dev/null)
-          if [[ -n "$failed_resources" ]]; then
-            echo "Retaining stuck resources: $failed_resources"
-            retain_args=(--retain-resources $failed_resources)
-          fi
-        fi
-        aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"} "${retain_args[@]}"
-        aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-          || { echo "Failed to delete $status stack: $cfn_stack_name"; exit 1; }
-        echo "Deleted $status stack: $cfn_stack_name"
-      fi
+  # Check for terminal stack states that prevent deployment
+  if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
+    _stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+      --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
+    if [[ "$_stack_status" == "ROLLBACK_COMPLETE" || "$_stack_status" == "DELETE_FAILED" ]]; then
+      echo "Error: Stack $cfn_stack_name is in $_stack_status state." >&2
+      echo "Delete it manually before re-running:" >&2
+      echo "  aws cloudformation delete-stack --stack-name $cfn_stack_name ${region:+--region $region}" >&2
+      exit 1
     fi
-  }
+  fi
 
   # Stream CloudFormation stack events in the background while deploy runs.
   # Polls describe-stack-events every 10s, prints new resource status changes.
@@ -738,185 +693,10 @@ if [[ "$deploy_cfn" == "true" ]]; then
     return $rc
   }
 
-  # --- parallel task helpers ---
-  # When deploying CFN with --build-images or --push-all-images-to-private-ecr,
-  # we can overlap slow tasks (mirror, buildkit setup, image build) with the
-  # CFN deploy. The EKS cluster and ECR repo are created early in the stack,
-  # while CFN continues creating access entries, node pools, etc.
-  #
-  # Timeline without parallelization:
-  #   CFN deploy (18m) → mirror (23s) → buildkit (44s) → image build (4m) → helm (3m) = ~26m
-  # Timeline with parallelization:
-  #   CFN deploy (18m) ─────────────────────────────────────────────────┐
-  #     ├─ ECR ready (~1m in) → mirror starts in background            │
-  #     └─ EKS ACTIVE (~15m in) → buildkit + image build start         │
-  #                                                                     ├→ helm (3m) = ~21m
-  _parallel_status_dir=$(mktemp -d)
-  _mirror_pid=""
-  _build_pid=""
-
-  # Predict resource names from CFN naming convention
-  _predicted_region="${region:-$(aws configure get region)}"
-  _predicted_account="$(aws sts get-caller-identity --query Account --output text)"
-  _predicted_eks_name="migration-eks-cluster-${stage_filter}-${_predicted_region}"
-  _predicted_ecr_repo="migration-ecr-${stage_filter}-${_predicted_region}"
-  _predicted_ecr_registry="${_predicted_account}.dkr.ecr.${_predicted_region}.amazonaws.com/${_predicted_ecr_repo}"
-
-  # Run mirror to ECR in background. Writes ecr_values_file path to status dir.
-  run_mirror_background() {
-    local ecr_host="${_predicted_ecr_registry%%/*}"
-    local scripts_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
-    echo "⏳ [parallel] Starting mirror to ECR (background)..."
-
-    # Wait for ECR repo to exist
-    while ! aws ecr describe-repositories --repository-names "$_predicted_ecr_repo" \
-        --region "$_predicted_region" >/dev/null 2>&1; do
-      sleep 10
-    done
-    echo "✅ [parallel] ECR repo ready, mirroring images..."
-
-    # Login to ECR for crane
-    aws ecr get-login-password --region "$_predicted_region" | \
-      crane auth login "$ecr_host" -u AWS --password-stdin 2>/dev/null || true
-
-    "$scripts_dir/mirrorToEcr.sh" "$ecr_host" --region "$_predicted_region" || {
-      echo "1" > "$_parallel_status_dir/mirror_failed"
-      echo "❌ [parallel] Mirror to ECR failed"
-      return 1
-    }
-
-    # Generate ECR values override
-    local vals_file
-    vals_file=$(mktemp)
-    "$scripts_dir/generatePrivateEcrValues.sh" "$ecr_host" > "$vals_file"
-    echo "$vals_file" > "$_parallel_status_dir/ecr_values_file"
-    echo "✅ [parallel] Mirror to ECR complete"
-  }
-
-  # Run buildkit setup + image build in background. Needs EKS cluster ACTIVE.
-  run_build_background() {
-    echo "⏳ [parallel] Waiting for EKS cluster to become ACTIVE..."
-    aws eks wait cluster-active --name "$_predicted_eks_name" --region "$_predicted_region" 2>/dev/null || {
-      # Cluster may not exist yet during early CFN — poll manually
-      while true; do
-        local status
-        status=$(aws eks describe-cluster --name "$_predicted_eks_name" --region "$_predicted_region" \
-          --query 'cluster.status' --output text 2>/dev/null) || { sleep 15; continue; }
-        [[ "$status" == "ACTIVE" ]] && break
-        sleep 15
-      done
-    }
-    echo "✅ [parallel] EKS cluster ACTIVE"
-
-    # Configure kubectl for this background process
-    aws eks update-kubeconfig --region "$_predicted_region" --name "$_predicted_eks_name" 2>/dev/null
-
-    # Buildkit setup
-    local multi_arch_native=true
-    export MULTI_ARCH_NATIVE="$multi_arch_native"
-    local builder_name="builder-${_predicted_eks_name//[^a-zA-Z0-9_-]/-}"
-    if docker buildx inspect "$builder_name" --bootstrap &>/dev/null; then
-      echo "✅ [parallel] Buildkit already configured and healthy"
-    else
-      echo "⏳ [parallel] Setting up buildkit..."
-      docker buildx rm "$builder_name" 2>/dev/null || true
-      "${base_dir}/buildImages/setUpK8sImageBuildServices.sh" || {
-        echo "1" > "$_parallel_status_dir/build_failed"
-        echo "❌ [parallel] Buildkit setup failed"
-        return 1
-      }
-    fi
-
-    # ECR login
-    local ecr_domain="${_predicted_ecr_registry%%/*}"
-    aws ecr get-login-password --region "$_predicted_region" \
-      | docker login --username AWS --password-stdin "$ecr_domain" || {
-      echo "1" > "$_parallel_status_dir/build_failed"
-      echo "❌ [parallel] ECR login failed"
-      return 1
-    }
-
-    # Image build with retry
-    local skip_test_arg=""
-    [[ "$skip_test_images" == "true" ]] && skip_test_arg="-PskipTestImages=true"
-    echo "⏳ [parallel] Building images to ${_predicted_ecr_registry}..."
-    "$base_dir/gradlew" -p "$base_dir" :buildImages:buildImagesToRegistry \
-      -PregistryEndpoint="$_predicted_ecr_registry" -Pbuilder="$builder_name" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
-      || { echo "Image build failed, retrying in 10s..."; sleep 10; \
-           "$base_dir/gradlew" -p "$base_dir" :buildImages:buildImagesToRegistry \
-             -PregistryEndpoint="$_predicted_ecr_registry" -Pbuilder="$builder_name" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test; } \
-      || {
-        echo "1" > "$_parallel_status_dir/build_failed"
-        echo "❌ [parallel] Image build failed"
-        return 1
-      }
-
-    echo "✅ [parallel] Image build complete"
-    echo "Cleaning up docker buildx builder to free buildkit pods..."
-    docker buildx rm "$builder_name" 2>/dev/null || true
-  }
-
-  delete_stuck_stack
-
-  # Start parallel tasks after stuck stack cleanup but before CFN deploy.
-  # These poll for resources (ECR repo, EKS cluster) that CFN will create.
-  if [[ "$push_images_to_ecr" == "true" ]]; then
-    run_mirror_background &
-    _mirror_pid=$!
-    echo "Started mirror in background (PID $_mirror_pid)"
-  fi
-  if [[ "$build_images" == "true" ]]; then
-    run_build_background &
-    _build_pid=$!
-    echo "Started image build in background (PID $_build_pid)"
-  fi
-
-  # Run deploy; if changeset fails ResourceExistenceCheck, delete the stack and retry.
-  _kill_parallel() {
-    [[ -n "$_mirror_pid" ]] && { kill "$_mirror_pid" 2>/dev/null; wait "$_mirror_pid" 2>/dev/null; } || true
-    [[ -n "$_build_pid" ]] && { kill "$_build_pid" 2>/dev/null; wait "$_build_pid" 2>/dev/null; } || true
-  }
-  if ! run_cfn_deploy; then
-    echo "Deploy failed. Attempting recovery — deleting stack and retrying..."
-    delete_stuck_stack
-    run_cfn_deploy \
-      || { _kill_parallel; echo "CloudFormation deployment failed for: $cfn_stack_name"; exit 1; }
-  fi
+  run_cfn_deploy \
+    || { echo "CloudFormation deployment failed for: $cfn_stack_name"; exit 1; }
 
   echo "CloudFormation stack deployed successfully: $cfn_stack_name"
-
-  # --- wait for parallel tasks ---
-  if [[ -n "$_mirror_pid" ]]; then
-    echo "Waiting for mirror background task (PID $_mirror_pid)..."
-    if wait "$_mirror_pid"; then
-      echo "Mirror completed successfully"
-      # Pick up the ecr_values_file path from the background task
-      if [[ -f "$_parallel_status_dir/ecr_values_file" ]]; then
-        ecr_values_file=$(cat "$_parallel_status_dir/ecr_values_file")
-        if [[ -n "$extra_helm_values" ]]; then
-          extra_helm_values="$extra_helm_values,$ecr_values_file"
-        else
-          extra_helm_values="$ecr_values_file"
-        fi
-        echo "Private ECR values written to $ecr_values_file"
-      fi
-      _mirror_done=true
-    else
-      echo "❌ Mirror background task failed" >&2
-      # Non-fatal for mirror — will retry below if needed
-    fi
-  fi
-  if [[ -n "$_build_pid" ]]; then
-    echo "Waiting for image build background task (PID $_build_pid)..."
-    if wait "$_build_pid"; then
-      echo "Image build completed successfully"
-      _build_done=true
-    else
-      echo "❌ Image build background task failed" >&2
-      # Will retry below in the normal flow
-    fi
-  fi
-  rm -rf "$_parallel_status_dir"
 fi
 
 if ! output=$(get_cfn_export); then
@@ -1137,8 +917,7 @@ kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null
 
 # --- mirror public images to private ECR (optional) ---
 # Run before build so that buildkit image is available in ECR for isolated clusters.
-# Skip if already completed by parallel task during CFN deploy.
-if [[ "$push_images_to_ecr" == "true" && "${_mirror_done:-}" != "true" ]]; then
+if [[ "$push_images_to_ecr" == "true" ]]; then
   echo "Mirroring public images and helm charts to private ECR..."
   ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
   SCRIPTS_DIR="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
@@ -1154,8 +933,6 @@ if [[ "$push_images_to_ecr" == "true" && "${_mirror_done:-}" != "true" ]]; then
     extra_helm_values="$ecr_values_file"
   fi
   echo "Private ECR values written to $ecr_values_file"
-elif [[ "${_mirror_done:-}" == "true" ]]; then
-  echo "Mirror already completed during CFN deploy (parallel task)"
 fi
 
 # Mirror MA images — runs regardless of whether base mirror was parallel or sequential
@@ -1214,8 +991,7 @@ migration_console|console"
   use_public_images=false
 fi
 
-# Skip if already completed by parallel task during CFN deploy.
-if [[ "$build_images" == "true" && "${_build_done:-}" != "true" ]]; then
+if [[ "$build_images" == "true" ]]; then
   # Always build for both architectures on EKS
   MULTI_ARCH_NATIVE=true
   BUILD_TARGET="buildImagesToRegistry"
@@ -1251,8 +1027,6 @@ if [[ "$build_images" == "true" && "${_build_done:-}" != "true" ]]; then
   echo "Cleaning up docker buildx builder to free buildkit pods..."
   docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
   echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
-elif [[ "${_build_done:-}" == "true" ]]; then
-  echo "Image build already completed during CFN deploy (parallel task)"
 fi
 
 # --- image source selection ---
