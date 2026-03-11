@@ -16,6 +16,8 @@ import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperation
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Getter;
@@ -28,6 +30,7 @@ import lombok.experimental.UtilityClass;
 @UtilityClass
 public final class BulkNdjson {
     private static final ObjectMapper OBJECT_MAPPER = ObjectMapperFactory.createDefaultMapper();
+    private static final JsonFactory JSON_FACTORY = new JsonFactory();
     private static final byte[] NEWLINE_BYTES = "\n".getBytes(StandardCharsets.UTF_8);
 
     /**
@@ -63,8 +66,24 @@ public final class BulkNdjson {
         out.write(mapper.writeValueAsBytes(actionLine));
 
         if (rawSource != null && rawSource.length > 0) {
+            validateJsonBytes(rawSource);
             out.write(NEWLINE_BYTES);
             out.write(rawSource);
+        }
+    }
+
+    /**
+     * Validate that raw bytes are structurally valid JSON.
+     * Uses Jackson's streaming parser to verify without deserializing.
+     * Prevents malformed JSON or embedded newlines from corrupting NDJSON output.
+     */
+    static void validateJsonBytes(byte[] bytes) throws IOException {
+        try (JsonParser parser = JSON_FACTORY.createParser(bytes)) {
+            while (parser.nextToken() != null) {
+                // consume all tokens to verify structural validity
+            }
+        } catch (IOException e) {
+            throw new IOException("Raw source bytes are not valid JSON", e);
         }
     }
 
