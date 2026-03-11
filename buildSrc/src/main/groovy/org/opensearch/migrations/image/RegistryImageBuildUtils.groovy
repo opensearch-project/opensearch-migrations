@@ -146,7 +146,14 @@ class RegistryImageBuildUtils {
                             }
                         }
                         allowInsecureRegistries = true
-                        container { entrypoint = ['tail', '-f', '/dev/null'] }
+                        container {
+                            def flags = (List<String>) config.get("jvmFlags", [])
+                            if (flags) {
+                                jvmFlags = flags
+                            }
+                            // mainClass is auto-detected from the application plugin.
+                            // Jib generates: java <jvmFlags> -cp @/app/jib-classpath-file <mainClass>
+                        }
                     }
 
                     // Handle Dependencies

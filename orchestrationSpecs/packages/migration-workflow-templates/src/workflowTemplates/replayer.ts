@@ -84,9 +84,7 @@ function getReplayerDeploymentManifest
         name: "replayer",
         image: makeStringTypeProxy(args.replayerImageName),
         imagePullPolicy: makeStringTypeProxy(args.replayerImagePullPolicy),
-        command: ["/runJavaWithClasspath.sh"],
         args: [
-            "org.opensearch.migrations.replay.TrafficReplayer",
             "---INLINE-JSON",
             makeStringTypeProxy(args.jsonConfig)
         ],

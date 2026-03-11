@@ -79,9 +79,7 @@ function makeProxyDeploymentManifest(args: {
         name: "proxy",
         image: args.image,
         imagePullPolicy: args.imagePullPolicy,
-        command: ["/runJavaWithClasspath.sh"],
         args: [
-            "org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy",
             "---INLINE-JSON",
             makeStringTypeProxy(args.jsonConfig)
         ],
