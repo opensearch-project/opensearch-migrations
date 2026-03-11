@@ -325,7 +325,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     },
                     repo: repoConfig,
                     ...semaphore,
-                    ...(proxyDeps && proxyDeps.length > 0 ? { dependsOnProxySetups: proxyDeps } : {})
+                    ...{dependsOnProxySetups: proxyDeps ?? []}
                 });
             }
 

@@ -183,7 +183,7 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     repo: DENORMALIZED_S3_REPO_CONFIG,
     semaphoreConfigMapName: z.string(),
     semaphoreKey: z.string(),
-    dependsOnProxySetups: z.array(z.string()).min(1).optional()
+    dependsOnProxySetups: z.array(z.string())
 })
 
 export const DENORMALIZED_CREATE_SNAPSHOTS_CONFIG = z.object({

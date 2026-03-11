@@ -266,8 +266,7 @@
                 "template": "waitforcapturedtraffic",
                 "name": "resource-management"
               },
-              "withParam": "{{=(('dependsOnProxySetups' in fromJSON(inputs.parameters.snapshotItemConfig)) ? (fromJSON(inputs.parameters.snapshotItemConfig)['dependsOnProxySetups']) : ([]))}}",
-              "when": "{{=!(0 == len(sprig.dig('dependsOnProxySetups', [], fromJSON(inputs.parameters.snapshotItemConfig))))}}",
+              "withParam": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['dependsOnProxySetups']}}",
               "arguments": {
                 "parameters": [
                   {

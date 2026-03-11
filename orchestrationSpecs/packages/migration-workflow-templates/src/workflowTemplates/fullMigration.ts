@@ -164,16 +164,7 @@ export const FullMigration = WorkflowBuilder.create({
                         resourceName: c.item
                     }), {
                     loopWith: makeParameterLoop(
-                        expr.ternary(
-                            expr.hasKey(expr.deserializeRecord(b.inputs.snapshotItemConfig),
-                                "dependsOnProxySetups"),
-                            expr.getLoose(expr.deserializeRecord(b.inputs.snapshotItemConfig),
-                                "dependsOnProxySetups"),
-                            expr.literal([]))),
-                    when: {
-                        templateExp: expr.not(expr.isEmpty(
-                            expr.dig(expr.deserializeRecord(b.inputs.snapshotItemConfig), ["dependsOnProxySetups"], [])))
-                    }
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "dependsOnProxySetups")),
                 }
             )
             .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot", c =>
@@ -223,7 +214,7 @@ export const FullMigration = WorkflowBuilder.create({
                         repo: expr.deserializeRecord(expr.get(c.item, "repo")),
                         semaphoreConfigMapName: expr.get(c.item, "semaphoreConfigMapName"),
                         semaphoreKey: expr.get(c.item, "semaphoreKey"),
-                        dependsOnProxySetups: expr.getLoose(
+                        dependsOnProxySetups: expr.get(
                             expr.deserializeRecord(expr.recordToString(c.item)),
                             "dependsOnProxySetups"
                         )
