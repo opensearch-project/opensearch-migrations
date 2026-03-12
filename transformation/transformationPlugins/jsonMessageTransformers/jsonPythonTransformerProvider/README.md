@@ -49,11 +49,11 @@ For metadata migrations, use `--transformer-config` / `--transformer-config-file
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `initializationScriptFile` | One of three | Absolute path to a `.py` file on disk |
+| `initializationScriptFile` | One of three | Path or `s3://` URI to a `.py` file |
 | `initializationScript` | One of three | Inline Python source code |
 | `initializationResourcePath` | One of three | Classpath resource path (for bundled transforms) |
 | `bindingsObject` | Yes | JSON string parsed and passed to `main(context)` |
-| `pythonModulePath` | No | Path to a [GraalPy venv](https://www.graalvm.org/python/docs/) directory or `.tar.gz` archive |
+| `pythonModulePath` | No | Path, `.tar.gz` file, or `s3://` URI to a [GraalPy venv](https://www.graalvm.org/python/docs/) |
 
 Exactly one of the three script sources must be provided.
 
@@ -112,9 +112,30 @@ tar czf transform-venv.tar.gz -C /opt transform-venv
 
 # Upload to S3
 aws s3 cp transform-venv.tar.gz s3://my-bucket/transforms/
+aws s3 cp entry_point.py s3://my-bucket/transforms/
 ```
 
-On the migration host, point directly to the tarball — no manual extraction needed:
+### Deploying to EKS / remote environments
+
+Both `initializationScriptFile` and `pythonModulePath` accept `s3://` URIs.
+The transformer downloads them automatically at startup — no manual file staging needed:
+
+```bash
+--doc-transformer-config '[{
+  "JsonPythonTransformerProvider": {
+    "initializationScriptFile": "s3://my-bucket/transforms/entry_point.py",
+    "bindingsObject": "{}",
+    "pythonModulePath": "s3://my-bucket/transforms/transform-venv.tar.gz"
+  }
+}]'
+```
+
+The S3 client uses default credential resolution (IAM role, environment variables, etc.),
+so in EKS it picks up the pod's IAM role automatically.
+
+### Local deployment
+
+For local or VM-based deployments, you can point directly to local files:
 
 ```bash
 --doc-transformer-config '[{
@@ -124,13 +145,6 @@ On the migration host, point directly to the tarball — no manual extraction ne
     "pythonModulePath": "/opt/transforms/transform-venv.tar.gz"
   }
 }]'
-```
-
-Or if you prefer to extract manually:
-
-```bash
-tar xzf transform-venv.tar.gz -C /opt
-# Then use "pythonModulePath": "/opt/transform-venv"
 ```
 
 ## Complete Example: Custom Python Project

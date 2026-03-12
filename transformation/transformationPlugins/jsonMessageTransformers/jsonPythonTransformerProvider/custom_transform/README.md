@@ -95,39 +95,38 @@ pipenv requirements > requirements.txt
 /tmp/transform-venv/bin/pip install -r requirements.txt
 ```
 
-### Step 3: Package for distribution
+### Step 3: Package and upload to S3
 
 ```bash
-# Create a tarball for transfer to the migration host
+# Create a tarball
 tar czf transform-venv.tar.gz -C /tmp transform-venv
 
-# Or upload to S3
-aws s3 cp transform-venv.tar.gz s3://my-bucket/transforms/transform-venv.tar.gz
+# Upload venv and entry point to S3
+aws s3 cp transform-venv.tar.gz s3://my-bucket/transforms/
+aws s3 cp entry_point.py s3://my-bucket/transforms/
 ```
-
-`pythonModulePath` accepts `.tar.gz` files directly — no manual extraction needed on the migration host.
 
 ## Running with RFS (Document Backfill)
 
 ### On the migration host
 
-```bash
-# Download the tarball and entry point from S3
-aws s3 cp s3://my-bucket/transforms/transform-venv.tar.gz /opt/transforms/
-aws s3 cp s3://my-bucket/transforms/entry_point.py /opt/transforms/
+Both `initializationScriptFile` and `pythonModulePath` accept `s3://` URIs directly —
+no manual file staging needed:
 
-# Run RFS with your transformation — pythonModulePath accepts .tar.gz directly
+```bash
 ./runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments \
   --doc-transformer-config '[{
     "JsonPythonTransformerProvider": {
-      "initializationScriptFile": "/opt/transforms/entry_point.py",
+      "initializationScriptFile": "s3://my-bucket/transforms/entry_point.py",
       "bindingsObject": "{\"index_rewrites\": [{\"source_prefix\": \"logs-\", \"target_prefix\": \"migrated-logs-\"}], \"add_fields\": {\"migrated\": true}}",
-      "pythonModulePath": "/opt/transforms/transform-venv.tar.gz"
+      "pythonModulePath": "s3://my-bucket/transforms/transform-venv.tar.gz"
     }
   }]' \
   --snapshot-name my-snapshot \
   --target-host https://target-opensearch:9200
 ```
+
+In EKS, the S3 client uses the pod's IAM role automatically.
 
 ### Using a config file (recommended for complex configs)
 
@@ -136,9 +135,9 @@ Create `transform-config.json`:
 ```json
 [{
   "JsonPythonTransformerProvider": {
-    "initializationScriptFile": "/opt/transforms/entry_point.py",
+    "initializationScriptFile": "s3://my-bucket/transforms/entry_point.py",
     "bindingsObject": "{\"index_rewrites\": [{\"source_prefix\": \"logs-\", \"target_prefix\": \"migrated-logs-\"}], \"add_fields\": {\"migrated\": true}}",
-    "pythonModulePath": "/opt/transforms/transform-venv.tar.gz"
+    "pythonModulePath": "s3://my-bucket/transforms/transform-venv.tar.gz"
   }
 }]
 ```
@@ -156,9 +155,9 @@ Create `transform-config.json`:
 ./runJavaWithClasspath.sh org.opensearch.migrations.MetadataMigration migrate \
   --transformer-config '[{
     "JsonPythonTransformerProvider": {
-      "initializationScriptFile": "/path/to/entry_point.py",
+      "initializationScriptFile": "s3://my-bucket/transforms/entry_point.py",
       "bindingsObject": "{\"rules\": [{\"source_type\": \"string\", \"target_type\": \"text\", \"remove_keys\": [\"doc_values\"]}]}",
-      "pythonModulePath": "/opt/transform-venv"
+      "pythonModulePath": "s3://my-bucket/transforms/transform-venv.tar.gz"
     }
   }]' \
   --source-host https://source-es:9200 \
@@ -169,11 +168,11 @@ Create `transform-config.json`:
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `initializationScriptFile` | One of three | Path to the entry point `.py` file on disk |
+| `initializationScriptFile` | One of three | Path or `s3://` URI to the entry point `.py` file |
 | `initializationScript` | One of three | Inline Python source code |
 | `initializationResourcePath` | One of three | Classpath resource path (for bundled transforms) |
 | `bindingsObject` | Yes | JSON string passed to `main(context)` for configuration |
-| `pythonModulePath` | No | Path to a GraalPy venv directory or `.tar.gz` archive |
+| `pythonModulePath` | No | Path, `.tar.gz` file, or `s3://` URI to a GraalPy venv |
 
 ## Writing Your Own Transformation
 
