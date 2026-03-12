@@ -8,29 +8,13 @@ installed at runtime via an external [GraalPy venv](https://www.graalvm.org/pyth
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────┐
-│  JsonPythonTransformerProvider (SPI discovery)   │
-│  - Parses config (script source, bindings, venv)│
-│  - Creates PythonTransformer instances           │
-└──────────────────────┬──────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────┐
-│  PythonTransformer (this module)                 │
-│  - Creates GraalPy polyglot context              │
-│  - Evaluates Python script                       │
-│  - Calls main(context) → transform function      │
-│  - Delegates transformJson() to Python           │
-└──────────────────────┬──────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────┐
-│  GraalPy (Python on GraalVM)                     │
-│  - Full Python 3 compatibility                   │
-│  - pip packages via external GraalPy venv        │
-│  - Java ↔ Python interop via polyglot API        │
-└─────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    A["<b>JsonPythonTransformerProvider</b> (SPI discovery)<br/>Parses config: script source, bindings, venv<br/>Creates PythonTransformer instances"]
+    B["<b>PythonTransformer</b> (this module)<br/>Creates GraalPy polyglot context<br/>Evaluates Python script<br/>Calls main(context) → transform function<br/>Delegates transformJson() to Python"]
+    C["<b>GraalPy</b> (Python on GraalVM)<br/>Full Python 3 compatibility<br/>pip packages via external GraalPy venv<br/>Java ↔ Python interop via polyglot API"]
+
+    A --> B --> C
 ```
 
 ## Runtime venv support
