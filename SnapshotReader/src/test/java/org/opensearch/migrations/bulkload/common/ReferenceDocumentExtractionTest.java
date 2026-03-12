@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * To regenerate: delete the sample file and run the test — it will write the current output.
  */
 @Slf4j
-public class GoldenDocumentExtractionTest {
+public class ReferenceDocumentExtractionTest {
     private static final ObjectMapper MAPPER = new ObjectMapper()
         .enable(SerializationFeature.INDENT_OUTPUT);
 
