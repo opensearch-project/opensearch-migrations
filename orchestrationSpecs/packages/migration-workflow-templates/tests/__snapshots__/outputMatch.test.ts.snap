@@ -2924,7 +2924,7 @@ exports[`test workflow template renderings full-migration-with-workflow-cli 1`] 
         },
         {
           "name": "monitor-retry-limit",
-          "value": "33",
+          "value": "132",
         },
       ],
     },
@@ -3106,8 +3106,9 @@ exit 0
         },
         "retryStrategy": {
           "backoff": {
-            "duration": "60",
-            "factor": "1",
+            "cap": "15",
+            "duration": "5",
+            "factor": "1.5",
           },
           "limit": "{{workflow.parameters.monitor-retry-limit}}",
           "retryPolicy": "Always",
@@ -4455,11 +4456,11 @@ spec:
               command:
                 - sh
                 - -c
-                - curl -sk -u "\${OPENSEARCH_INITIAL_ADMIN_USERNAME}:\${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" "https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=10s"
-            initialDelaySeconds: 10
-            periodSeconds: 15
-            timeoutSeconds: 15
-            failureThreshold: 20
+                - curl -sk -u "\${OPENSEARCH_INITIAL_ADMIN_USERNAME}:\${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" "https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s"
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 30
           volumeMounts:
             - name: data
               mountPath: /usr/share/opensearch/data
