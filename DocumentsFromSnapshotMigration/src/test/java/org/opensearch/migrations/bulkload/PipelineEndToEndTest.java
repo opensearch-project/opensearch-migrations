@@ -31,6 +31,7 @@ import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Timeout;
@@ -39,6 +40,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import reactor.blockhound.BlockHound;
+import reactor.core.scheduler.Schedulers;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -62,6 +64,11 @@ public class PipelineEndToEndTest {
             .allowBlockingCallsInside(
                 "org.opensearch.migrations.bulkload.SnapshotExtractor", "readDocuments")
         );
+    }
+
+    @AfterAll
+    static void cleanupReactorResources() {
+        Schedulers.shutdownNow();
     }
 
     private static final String SNAPSHOT_NAME = "test_snapshot";
