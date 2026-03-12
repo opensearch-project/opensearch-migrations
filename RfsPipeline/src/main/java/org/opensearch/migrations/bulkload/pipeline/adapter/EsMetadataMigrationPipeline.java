@@ -1,12 +1,12 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.util.Objects;
+
 import org.opensearch.migrations.bulkload.pipeline.PipelineException;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-
-import java.util.Objects;
 
 /**
  * ES-specific metadata migration pipeline: global templates → per-index metadata.

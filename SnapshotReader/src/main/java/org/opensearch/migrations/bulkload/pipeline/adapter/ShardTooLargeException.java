@@ -1,7 +1,8 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
-import lombok.Getter;
 import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
+
+import lombok.Getter;
 
 /**
  * Thrown when a shard exceeds the configured maximum size, preventing disk overflow
