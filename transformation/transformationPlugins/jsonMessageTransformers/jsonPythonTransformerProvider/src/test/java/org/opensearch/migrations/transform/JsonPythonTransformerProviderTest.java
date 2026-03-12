@@ -146,6 +146,16 @@ public class JsonPythonTransformerProviderTest {
     }
 
     @Test
+    public void testCreateTransformer_invalidPythonModulePath() {
+        var config = Map.of(
+            "bindingsObject", "{}",
+            "initializationScript", SIMPLE_PYTHON_TRANSFORM,
+            "pythonModulePath", "/nonexistent/venv/path");
+        var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
+        assertThat(exception.getMessage(), containsString("does not exist or is not a directory"));
+    }
+
+    @Test
     public void testCreateTransformer_resourceAndFileConflict() throws Exception {
         Files.writeString(tempScriptFile.toPath(), SIMPLE_PYTHON_TRANSFORM);
         var config = Map.of(
