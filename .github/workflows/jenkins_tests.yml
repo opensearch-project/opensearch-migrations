@@ -69,7 +69,6 @@ jobs:
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
           job_timeout_minutes: "120"
-          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }}"
 
   eks-aoss-search-integ-test:
     if: |
