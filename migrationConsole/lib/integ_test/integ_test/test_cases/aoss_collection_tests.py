@@ -46,22 +46,21 @@ class AOSSTestBase(MATestBase):
                             allow_source_target_combinations=[])
         self.source_basic_auth_username = os.environ.get("SOURCE_BASIC_AUTH_USERNAME", "admin")
         self.source_basic_auth_password = os.environ.get("SOURCE_BASIC_AUTH_PASSWORD", "")
+        self.kube_context = os.environ.get("KUBE_CONTEXT")
 
-    def _kubectl_exec(self, command: str) -> str:
-        """Run a command inside the migration-console pod, like a user would."""
-        cmd = ["kubectl", "exec", "-n", "ma", "migration-console-0", "--", "bash", "-c", command]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    def _run_cmd(self, command: str, stdin_input: str = None) -> str:
+        """Run a shell command directly (tests execute inside the pod)."""
+        result = subprocess.run(["bash", "-c", command], input=stdin_input,
+                                capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
-            raise RuntimeError(f"kubectl exec failed (rc={result.returncode}): {result.stderr}\n{result.stdout}")
+            raise RuntimeError(f"Command failed (rc={result.returncode}): {result.stderr}\n{result.stdout}")
         return result.stdout
 
     def _console_cmd(self, args: str) -> str:
-        """Run a console CLI command inside the migration-console pod."""
-        return self._kubectl_exec(f"/.venv/bin/console {args}")
+        return self._run_cmd(f"/.venv/bin/console {args}")
 
     def _workflow_cmd(self, args: str) -> str:
-        """Run a workflow CLI command inside the migration-console pod."""
-        return self._kubectl_exec(f"/.venv/bin/workflow {args}")
+        return self._run_cmd(f"/.venv/bin/workflow {args}")
 
     def _ensure_basic_auth_secret(self):
         """Create the k8s secret for source basic auth if it doesn't already exist."""
@@ -94,7 +93,7 @@ class AOSSTestBase(MATestBase):
         config["sourceClusters"][source_key]["authConfig"] = {
             "basic": {"secretName": BASIC_AUTH_SECRET_NAME}
         }
-        self._workflow_cmd(f"configure edit --stdin <<< '{json.dumps(config)}'")
+        self._run_cmd("/.venv/bin/workflow configure edit --stdin", stdin_input=json.dumps(config))
         # Verify connection with basic auth
         output = self._console_cmd("clusters connection-check")
         assert "Successfully connected" in output, f"Basic auth connection check failed: {output}"
@@ -108,7 +107,7 @@ class AOSSTestBase(MATestBase):
         config["sourceClusters"][source_key]["authConfig"] = {
             "sigv4": {"region": region, "service": "es"}
         }
-        self._workflow_cmd(f"configure edit --stdin <<< '{json.dumps(config)}'")
+        self._run_cmd("/.venv/bin/workflow configure edit --stdin", stdin_input=json.dumps(config))
         logger.info("Source switched back to sigv4 auth")
 
     def test_before(self):
@@ -161,9 +160,12 @@ class AOSSTestBase(MATestBase):
         """Let the workflow create the snapshot — no externally managed snapshot."""
         self.workflow_snapshot_and_migration_config = [{
             "migrations": [{
-                "metadataMigrationConfig": {},
+                "metadataMigrationConfig": {
+                    "indexAllowlist": self.expected_indices
+                },
                 "documentBackfillConfig": {
-                    "useTargetClusterForWorkCoordination": False
+                    "useTargetClusterForWorkCoordination": False,
+                    "indexAllowlist": self.expected_indices
                 }
             }]
         }]
