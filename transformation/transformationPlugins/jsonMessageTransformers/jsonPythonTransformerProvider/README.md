@@ -3,7 +3,7 @@
 Write document and metadata transformations in Python and run them at migration time — no Java required.
 
 This module uses [GraalPy](https://www.graalvm.org/python/) to execute Python code inside the JVM.
-You can use the Python standard library, `dataclasses`, and even third-party pip packages like `pydantic`.
+You can use the Python standard library, `dataclasses`, and third-party pip packages.
 
 ## Quick Start
 
@@ -22,7 +22,7 @@ def main(context):
 
     return transform
 
-main
+main  # GraalPy returns the last evaluated expression
 ```
 
 The script must evaluate to a **`main` function** that:
@@ -32,72 +32,106 @@ The script must evaluate to a **`main` function** that:
 ### 2. Pass it at runtime
 
 ```bash
-# Inline script
---doc-transformer-config '[{"JsonPythonTransformerProvider": {"bindingsObject": "{\"prefix\": \"migrated_\"}", "initializationScript": "def main(ctx):\n    def transform(doc):\n        doc[\"tag\"] = \"migrated\"\n        return doc\n    return transform\nmain"}}]'
-
 # From a file on disk
---doc-transformer-config '[{"JsonPythonTransformerProvider": {"bindingsObject": "{}", "initializationScriptFile": "/path/to/my_transform.py"}}]'
+--doc-transformer-config '[{"JsonPythonTransformerProvider": {
+  "bindingsObject": "{}",
+  "initializationScriptFile": "/path/to/my_transform.py"
+}}]'
 
-# From a bundled resource on the classpath
---doc-transformer-config '[{"JsonPythonTransformerProvider": {"bindingsObject": "{}", "initializationResourcePath": "python/doc_transform.py"}}]'
+# From a config file (recommended)
+--doc-transformer-config-file /path/to/transform-config.json
 ```
 
-The same `--doc-transformer-config` / `--doc-transformer-config-file` / `--doc-transformer-config-base64` flags
-work for both the document backfill (RFS) and the traffic replayer.
-For metadata migrations, use the equivalent metadata transformer config flags.
+The same flags work for both the document backfill (RFS) and the traffic replayer.
+For metadata migrations, use `--transformer-config` / `--transformer-config-file`.
 
 ## Configuration Reference
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `initializationScript` | One of three | Inline Python source code |
 | `initializationScriptFile` | One of three | Absolute path to a `.py` file on disk |
-| `initializationResourcePath` | One of three | Classpath resource path (e.g. `python/doc_transform.py`) |
+| `initializationScript` | One of three | Inline Python source code |
+| `initializationResourcePath` | One of three | Classpath resource path (for bundled transforms) |
 | `bindingsObject` | Yes | JSON string parsed and passed to `main(context)` |
-| `pythonModulePath` | No | Path to a Python venv directory for third-party pip packages |
+| `pythonModulePath` | No | Path to a [GraalPy venv](https://www.graalvm.org/python/docs/) with pip packages |
 
-Exactly one of the three script sources must be provided. Specifying more than one is an error.
+Exactly one of the three script sources must be provided.
 
 ## Using Third-Party Pip Packages
 
-### Option A: Build-time packages (bundled in the jar)
+If your transformation needs pip packages (e.g. pydantic, requests, etc.), create a
+[GraalPy virtual environment](https://www.graalvm.org/python/docs/) and point to it
+at runtime via `pythonModulePath`.
 
-The `jsonPythonTransformer` module's `build.gradle` uses the GraalPy Gradle plugin to bundle pip packages:
-
-```groovy
-graalPy {
-    packages = ["pydantic"]
-}
-```
-
-Any package listed here is available to all Python scripts without extra configuration.
-
-### Option B: Runtime venv (bring your own packages)
-
-For packages not bundled at build time, create a GraalPy venv and point to it at runtime:
+### Step 1: Install GraalPy
 
 ```bash
-# Install GraalPy (https://www.graalvm.org/python/)
-graalpy -m venv /opt/my-venv
-/opt/my-venv/bin/pip install my-custom-package
+# macOS
+brew install graalpy
 
-# Pass the venv path in the transformer config
+# Linux
+curl -L https://github.com/oracle/graalpy/releases/download/graal-25.0.2/graalpy-25.0.2-linux-amd64.tar.gz | tar xz
+export PATH=$PWD/graalpy-25.0.2-linux-amd64/bin:$PATH
+```
+
+### Step 2: Create a venv and install packages
+
+```bash
+graalpy -m venv /opt/transform-venv
+/opt/transform-venv/bin/pip install pydantic  # or any packages you need
+```
+
+If you have a `requirements.txt` or a pip-installable project:
+
+```bash
+/opt/transform-venv/bin/pip install -r requirements.txt
+# or
+/opt/transform-venv/bin/pip install ./my-transform-package
+```
+
+### Step 3: Pass the venv at runtime
+
+```bash
 --doc-transformer-config '[{
   "JsonPythonTransformerProvider": {
+    "initializationScriptFile": "/opt/transforms/entry_point.py",
     "bindingsObject": "{}",
-    "initializationScriptFile": "/path/to/my_transform.py",
-    "pythonModulePath": "/opt/my-venv"
+    "pythonModulePath": "/opt/transform-venv"
   }
 }]'
 ```
 
-Your script can then `import my_custom_package` as usual.
+### Packaging for distribution
 
-## Examples
+```bash
+# Tarball for transfer to the migration host
+tar czf transform-venv.tar.gz -C /opt transform-venv
+
+# Or upload to S3
+aws s3 cp transform-venv.tar.gz s3://my-bucket/transforms/
+
+# On the migration host
+tar xzf transform-venv.tar.gz -C /opt
+```
+
+## Complete Example: Custom Python Project
+
+See the [`custom_transform/`](./custom_transform/) directory for a complete, standalone
+Python project that demonstrates:
+
+- A real Python package with `pyproject.toml` and `Pipfile`
+- Pydantic-based config validation
+- pytest tests
+- A GraalPy entry point script
+- Full deployment instructions
+
+This is the recommended pattern for production transformations.
+
+## Bundled Examples
+
+Two example scripts are bundled as classpath resources:
 
 ### Document transformation: rewrite index names and add fields
-
-Use the bundled `python/doc_transform.py` to rewrite index prefixes and inject fields during backfill:
 
 ```bash
 --doc-transformer-config '[{
@@ -108,22 +142,10 @@ Use the bundled `python/doc_transform.py` to rewrite index prefixes and inject f
 }]'
 ```
 
-Input document batch:
-```json
-[{"operation": {"_index": "logs-2024.01", "_id": "1"}, "document": {"message": "hello"}}]
-```
-
-Output:
-```json
-[{"operation": {"_index": "logs-migrated-2024.01", "_id": "1"}, "document": {"message": "hello", "migrated": true}}]
-```
-
 ### Metadata transformation: rewrite field types
 
-Use the bundled `python/metadata_transform.py` to convert Elasticsearch field types:
-
 ```bash
---doc-transformer-config '[{
+--transformer-config '[{
   "JsonPythonTransformerProvider": {
     "initializationResourcePath": "python/metadata_transform.py",
     "bindingsObject": "{\"rules\": [{\"source_type\": \"string\", \"target_type\": \"text\", \"remove_keys\": [\"doc_values\"]}]}"
@@ -131,61 +153,40 @@ Use the bundled `python/metadata_transform.py` to convert Elasticsearch field ty
 }]'
 ```
 
-This rewrites `"type": "string"` → `"type": "text"` and removes `doc_values` from matching field definitions.
-
-### Pydantic validation example
-
-For strict config validation, use pydantic (bundled at build time):
-
-```python
-from pydantic import BaseModel
-from typing import List
-
-class Rule(BaseModel):
-    source_type: str
-    target_type: str
-    remove_keys: List[str] = []
-
-class Config(BaseModel):
-    rules: List[Rule]
-
-def main(context):
-    config = Config.model_validate_json(str(context))
-
-    def transform(document):
-        # Use config.rules to transform...
-        return document
-
-    return transform
-
-main
-```
-
-Pass the config as a JSON string in `bindingsObject` — pydantic validates it at initialization time,
-failing fast if the config is malformed.
-
 ## Script Contract
 
 ### For document backfill (RFS)
 
-The `transform` function receives a **list** of document maps. Each map has:
-- `operation` — `{"_index": "...", "_id": "..."}`
-- `document` — the document body as a dict
+The `transform` function receives a **list** of document maps:
+
+```python
+[
+    {
+        "operation": {"_index": "my-index", "_id": "doc1"},
+        "document": {"field1": "value1", ...}
+    }
+]
+```
 
 Return the (possibly modified) list.
 
-### For traffic replay / metadata
-
-The `transform` function receives a **single map** (the request or metadata item).
-Return the (possibly modified) map.
-
 ### For metadata migration
 
-The `transform` function receives a map with:
-- `type` — `"index"`, `"legacy_template"`, `"index_template"`, or `"component_template"`
-- `name` — the index or template name
-- `body` — the settings/mappings as a nested dict
+The `transform` function receives a **single map**:
 
+```python
+{
+    "type": "index",           # or "legacy_template", "index_template", "component_template"
+    "name": "my-index",
+    "body": {"mappings": {...}, "settings": {...}}
+}
+```
+
+Return the (possibly modified) map.
+
+### For traffic replay
+
+The `transform` function receives a **single map** representing the HTTP request.
 Return the (possibly modified) map.
 
 ## Thread Safety
