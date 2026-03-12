@@ -9,14 +9,18 @@ Required environment variables:
 - AOSS_TIMESERIES_ENDPOINT: AOSS time-series collection endpoint (Test0022)
 - AOSS_VECTOR_ENDPOINT: AOSS vector collection endpoint (Test0023)
 """
+import json
 import logging
 import os
+import subprocess
 
-from console_link.middleware.clusters import run_aoss_test_benchmarks, connection_check
+from console_link.middleware.clusters import connection_check
 from console_link.models.cluster import Cluster
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
 logger = logging.getLogger(__name__)
+
+BASIC_AUTH_SECRET_NAME = "source-basic-auth"
 
 
 class AOSSTestBase(MATestBase):
@@ -31,11 +35,85 @@ class AOSSTestBase(MATestBase):
     settings_absent = {}
     settings_present = {}
 
+    # Set via env vars for basic auth switching
+    source_basic_auth_username = ""
+    source_basic_auth_password = ""
+
     def __init__(self, user_args: MATestUserArguments, description: str):
         MATestBase.__init__(self, user_args=user_args,
                             description=description,
                             migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL],
                             allow_source_target_combinations=[])
+        self.source_basic_auth_username = os.environ.get("SOURCE_BASIC_AUTH_USERNAME", "admin")
+        self.source_basic_auth_password = os.environ.get("SOURCE_BASIC_AUTH_PASSWORD", "")
+
+    def _kubectl_exec(self, command: str) -> str:
+        """Run a command inside the migration-console pod, like a user would."""
+        cmd = ["kubectl", "exec", "-n", "ma", "migration-console-0", "--", "bash", "-c", command]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            raise RuntimeError(f"kubectl exec failed (rc={result.returncode}): {result.stderr}\n{result.stdout}")
+        return result.stdout
+
+    def _console_cmd(self, args: str) -> str:
+        """Run a console CLI command inside the migration-console pod."""
+        return self._kubectl_exec(f"/.venv/bin/console {args}")
+
+    def _workflow_cmd(self, args: str) -> str:
+        """Run a workflow CLI command inside the migration-console pod."""
+        return self._kubectl_exec(f"/.venv/bin/workflow {args}")
+
+    def _ensure_basic_auth_secret(self):
+        """Create the k8s secret for source basic auth if it doesn't already exist."""
+        try:
+            subprocess.run(
+                ["kubectl", "get", "secret", BASIC_AUTH_SECRET_NAME, "-n", "ma"],
+                capture_output=True, check=True, timeout=30
+            )
+            logger.info(f"Secret {BASIC_AUTH_SECRET_NAME} already exists")
+        except subprocess.CalledProcessError:
+            logger.info(f"Creating secret {BASIC_AUTH_SECRET_NAME}")
+            subprocess.run(
+                ["kubectl", "create", "secret", "generic", BASIC_AUTH_SECRET_NAME,
+                 "-n", "ma",
+                 f"--from-literal=username={self.source_basic_auth_username}",
+                 f"--from-literal=password={self.source_basic_auth_password}"],
+                check=True, timeout=30
+            )
+
+    def _get_workflow_config(self) -> dict:
+        """Get the current workflow config as a dict."""
+        output = self._workflow_cmd("configure view")
+        return json.loads(output)
+
+    def _set_source_auth_basic(self):
+        """Switch source cluster auth to basic auth in the workflow config."""
+        self._ensure_basic_auth_secret()
+        config = self._get_workflow_config()
+        source_key = list(config["sourceClusters"].keys())[0]
+        config["sourceClusters"][source_key]["authConfig"] = {
+            "basic": {"secretName": BASIC_AUTH_SECRET_NAME}
+        }
+        self._workflow_cmd(f"configure edit --stdin <<< '{json.dumps(config)}'")
+        # Verify connection with basic auth
+        output = self._console_cmd("clusters connection-check")
+        assert "Successfully connected" in output, f"Basic auth connection check failed: {output}"
+        logger.info("Source switched to basic auth and connection verified")
+
+    def _set_source_auth_sigv4(self):
+        """Switch source cluster auth back to sigv4 in the workflow config."""
+        config = self._get_workflow_config()
+        source_key = list(config["sourceClusters"].keys())[0]
+        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+        config["sourceClusters"][source_key]["authConfig"] = {
+            "sigv4": {"region": region, "service": "es"}
+        }
+        self._workflow_cmd(f"configure edit --stdin <<< '{json.dumps(config)}'")
+        logger.info("Source switched back to sigv4 auth")
+
+    def test_before(self):
+        """Pre-flight: verify both clusters are reachable."""
+        pass
 
     def import_existing_clusters(self):
         endpoint = os.environ.get(self.aoss_endpoint_env_var)
@@ -61,9 +139,23 @@ class AOSSTestBase(MATestBase):
         logger.info(f"Imported source: {self.source_cluster.endpoint}")
         logger.info(f"Imported AOSS target: {endpoint}")
 
+        # Connection check after import
+        source_result = connection_check(self.source_cluster)
+        assert source_result.connection_established, f"Source connection failed: {source_result.connection_message}"
+        target_result = connection_check(self.target_cluster)
+        assert target_result.connection_established, f"Target connection failed: {target_result.connection_message}"
+
     def prepare_clusters(self):
-        """Load test data on source using OSB workloads."""
-        run_aoss_test_benchmarks(self.source_cluster, self.collection_type)
+        """Switch to basic auth, load test data via CLI, switch back to sigv4."""
+        # Step 1: Switch to basic auth (OSB doesn't support sigv4)
+        self._set_source_auth_basic()
+
+        # Step 2: Load data via console CLI — how a user would do it
+        output = self._console_cmd(f"clusters run-aoss-test-benchmarks --collection-type {self.collection_type}")
+        logger.info(f"Benchmark output: {output}")
+
+        # Step 3: Switch back to sigv4 for the migration workflow
+        self._set_source_auth_sigv4()
 
     def prepare_workflow_snapshot_and_migration_config(self):
         """Let the workflow create the snapshot — no externally managed snapshot."""
