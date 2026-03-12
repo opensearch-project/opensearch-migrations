@@ -12,7 +12,14 @@ logger = logging.getLogger(__name__)
 class ConnectionResult:
     connection_message: str
     connection_established: bool
-    cluster_version: str
+    cluster_version: str = None
+
+    def __repr__(self):
+        parts = [f"connection_message='{self.connection_message}'",
+                 f"connection_established={self.connection_established}"]
+        if self.cluster_version is not None:
+            parts.append(f"cluster_version='{self.cluster_version}'")
+        return f"ConnectionResult({', '.join(parts)})"
 
 
 @dataclass
@@ -40,10 +47,13 @@ def call_api(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, head
 
 def cat_indices(cluster: Cluster, refresh=False, as_json=False):
     try:
-        if refresh:
+        if refresh and not cluster.is_serverless:
             cluster.call_api('/_refresh')
         as_json_suffix = "?format=json" if as_json else "?v=true"
-        cat_indices_path = f"/_cat/indices/_all{as_json_suffix}"
+        if cluster.is_serverless:
+            cat_indices_path = f"/_cat/indices{as_json_suffix}"
+        else:
+            cat_indices_path = f"/_cat/indices/_all{as_json_suffix}"
         r = cluster.call_api(cat_indices_path)
         return r.json() if as_json else r.content
     except Exception as e:
@@ -52,6 +62,16 @@ def cat_indices(cluster: Cluster, refresh=False, as_json=False):
 
 
 def connection_check(cluster: Cluster) -> ConnectionResult:
+    if cluster.is_serverless:
+        try:
+            cluster.call_api("/_cat/indices", timeout=3)
+            return ConnectionResult(connection_message="Successfully connected to serverless collection!",
+                                    connection_established=True)
+        except Exception as e:
+            logger.debug(f"Unable to access AOSS cluster: {cluster} with exception: {e}")
+            return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {e}",
+                                    connection_established=False)
+
     cluster_details_path = "/"
     caught_exception = None
     r = None
@@ -67,8 +87,7 @@ def connection_check(cluster: Cluster) -> ConnectionResult:
                                 cluster_version=response_json['version']['number'])
     else:
         return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {caught_exception}",
-                                connection_established=False,
-                                cluster_version=None)
+                                connection_established=False)
 
 
 def run_test_benchmarks(cluster: Cluster):
@@ -117,6 +136,18 @@ def run_aoss_test_benchmarks(cluster: Cluster, collection_type: str):
 
 # As a default we exclude system indices and searchguard indices
 def clear_indices(cluster: Cluster):
+    if cluster.is_serverless:
+        try:
+            r = cluster.call_api("/_cat/indices", params={"format": "json"})
+            indices = [idx["index"] for idx in r.json() if not idx["index"].startswith(".")]
+            if not indices:
+                return "No user indices to delete."
+            for index in indices:
+                cluster.call_api(f"/{index}", method=HttpMethod.DELETE)
+            return f"Deleted {len(indices)} indices: {', '.join(indices)}"
+        except Exception as e:
+            return f"Error encountered when clearing indices: {e}"
+
     clear_indices_path = "/*,-.*,-searchguard*,-sg7*,.migrations_working_state*"
     try:
         r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})

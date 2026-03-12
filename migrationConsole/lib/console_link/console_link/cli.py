@@ -146,6 +146,13 @@ def cluster_group(ctx):
         raise click.UsageError("Neither source nor target cluster is defined.")
 
 
+def _cluster_label(name: str, cluster) -> str:
+    """Return a display label, e.g. 'TARGET CLUSTER (Amazon OpenSearch Serverless)'."""
+    if cluster and cluster.is_serverless:
+        return f"{name} ({cluster.display_name})"
+    return name
+
+
 @cluster_group.command(name="cat-indices")
 @click.option("--refresh", is_flag=True, default=False)
 @click.pass_obj
@@ -168,12 +175,12 @@ def cat_indices_cmd(ctx, refresh):
 
     if not refresh:
         click.echo("\nWARNING: Cluster information may be stale. Use --refresh to update.\n")
-    click.echo("SOURCE CLUSTER")
+    click.echo(_cluster_label("SOURCE CLUSTER", ctx.env.source_cluster))
     if ctx.env.source_cluster:
         click.echo(clusters_.cat_indices(ctx.env.source_cluster, refresh=refresh))
     else:
         click.echo("No source cluster defined.")
-    click.echo("TARGET CLUSTER")
+    click.echo(_cluster_label("TARGET CLUSTER", ctx.env.target_cluster))
     if ctx.env.target_cluster:
         click.echo(clusters_.cat_indices(ctx.env.target_cluster, refresh=refresh))
     else:
@@ -184,12 +191,12 @@ def cat_indices_cmd(ctx, refresh):
 @click.pass_obj
 def connection_check_cmd(ctx):
     """Checks if a connection can be established to source and target clusters"""
-    click.echo("SOURCE CLUSTER")
+    click.echo(_cluster_label("SOURCE CLUSTER", ctx.env.source_cluster))
     if ctx.env.source_cluster:
         click.echo(clusters_.connection_check(ctx.env.source_cluster))
     else:
         click.echo("No source cluster defined.")
-    click.echo("TARGET CLUSTER")
+    click.echo(_cluster_label("TARGET CLUSTER", ctx.env.target_cluster))
     if ctx.env.target_cluster:
         click.echo(clusters_.connection_check(ctx.env.target_cluster))
     else:
@@ -203,6 +210,17 @@ def run_test_benchmarks_cmd(ctx):
     if not ctx.env.source_cluster:
         raise click.UsageError("Cannot run test benchmarks because no source cluster is defined.")
     click.echo(clusters_.run_test_benchmarks(ctx.env.source_cluster))
+
+
+@cluster_group.command(name="run-aoss-test-benchmarks")
+@click.option("--collection-type", type=click.Choice(["search", "timeseries", "vector"]), required=True,
+              help="AOSS collection type to load workloads for")
+@click.pass_obj
+def run_aoss_test_benchmarks_cmd(ctx, collection_type):
+    """Run AOSS-specific OpenSearch Benchmark workloads against the source cluster"""
+    if not ctx.env.source_cluster:
+        raise click.UsageError("Cannot run test benchmarks because no source cluster is defined.")
+    click.echo(clusters_.run_aoss_test_benchmarks(ctx.env.source_cluster, collection_type))
 
 
 @cluster_group.command(name="clear-indices")

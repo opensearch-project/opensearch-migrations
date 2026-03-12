@@ -12,7 +12,7 @@ Required environment variables:
 import logging
 import os
 
-from console_link.middleware.clusters import run_aoss_test_benchmarks
+from console_link.middleware.clusters import run_aoss_test_benchmarks, connection_check
 from console_link.models.cluster import Cluster
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 

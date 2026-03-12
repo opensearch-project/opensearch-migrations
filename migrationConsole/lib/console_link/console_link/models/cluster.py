@@ -135,6 +135,18 @@ class Cluster:
             self.auth_details = config["sigv4"] if config["sigv4"] is not None else {}
         self.client_options = client_options
 
+    @property
+    def is_serverless(self) -> bool:
+        """Check if this is an Amazon OpenSearch Serverless (AOSS) collection."""
+        return (self.auth_type == AuthMethod.SIGV4 and
+                self.auth_details is not None and
+                self.auth_details.get("service") == "aoss")
+
+    @property
+    def display_name(self) -> str:
+        """Human-readable cluster type label."""
+        return "Amazon OpenSearch Serverless" if self.is_serverless else "cluster"
+
     def get_basic_auth_details(self) -> AuthDetails:
         """Return a tuple of (username, password) for basic auth. Will use username/password if provided in plaintext,
         otherwise will pull both username/password as keys in the specified secrets manager secret.
