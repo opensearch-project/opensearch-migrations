@@ -13,6 +13,7 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             choice(
                     name: 'SOURCE_VERSION',
                     choices: ['all'] + allSourceVersions,
@@ -37,6 +38,7 @@ def call(Map config = [:]) {
                     genericVariables: [
                             [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
                             [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                            [key: 'GIT_COMMIT', value: '$.GIT_COMMIT'],
                             [key: 'job_name', value: '$.job_name']
                     ],
                     tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
@@ -49,19 +51,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    script {
-                        sh 'sudo chown -R $(whoami) .'
-                        sh 'sudo chmod -R u+w .'
-                        // If in an existing git repository, remove any additional files in git tree that are not listed in .gitignore
-                        if (sh(script: 'git rev-parse --git-dir > /dev/null 2>&1', returnStatus: true) == 0) {
-                            echo 'Cleaning any existing git files in workspace'
-                            sh 'git reset --hard'
-                            sh 'git clean -fd'
-                        } else {
-                            echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
-                        }
-                        git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
-                    }
+                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }
 
@@ -95,8 +85,9 @@ def call(Map config = [:]) {
                             sh "kubectl config unset current-context || true"
                             sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
                             sh "USE_LOCAL_REGISTRY=true KUBE_CONTEXT=minikube BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16 --set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0' ./buildImages/setUpK8sImageBuildServices.sh"
-                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 -x test --info --stacktrace --profile --scan"
-                            sh "docker buildx rm local-remote-builder 2>/dev/null || true"
+                            def pullThroughCacheEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
+                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 -Pbuilder=builder-minikube -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
+                            sh "docker buildx rm builder-minikube 2>/dev/null || true"
                             sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
                         }
                     }

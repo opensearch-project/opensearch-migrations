@@ -4325,6 +4325,15 @@ stringData:
 ",
           "setOwnerReference": true,
         },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "60",
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": "3",
+          "retryPolicy": "Always",
+        },
       },
       {
         "inputs": {
@@ -4356,6 +4365,15 @@ spec:
       targetPort: https
 ",
           "setOwnerReference": true,
+        },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "60",
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": "3",
+          "retryPolicy": "Always",
         },
       },
       {
@@ -4458,6 +4476,15 @@ spec:
           "setOwnerReference": true,
           "successCondition": "status.readyReplicas > 0",
         },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "60",
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": "3",
+          "retryPolicy": "Always",
+        },
       },
       {
         "inputs": {
@@ -4548,6 +4575,15 @@ metadata:
   name: "{{inputs.parameters.clusterName}}"
 ",
         },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "60",
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": "3",
+          "retryPolicy": "Always",
+        },
       },
       {
         "inputs": {
@@ -4572,6 +4608,15 @@ metadata:
   name: "{{inputs.parameters.clusterName}}"
 ",
         },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "60",
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": "3",
+          "retryPolicy": "Always",
+        },
       },
       {
         "inputs": {
@@ -4595,6 +4640,15 @@ kind: Secret
 metadata:
   name: "{{=inputs.parameters.clusterName+'-creds'}}"
 ",
+        },
+        "retryStrategy": {
+          "backoff": {
+            "cap": "60",
+            "duration": "10",
+            "factor": "2",
+          },
+          "limit": "3",
+          "retryPolicy": "Always",
         },
       },
       {

@@ -48,6 +48,14 @@ public class KafkaLoader {
         }
     }
 
+    public void loadRecordsToKafkaFromReader(BufferedReader reader, String topicName, int batchSize) throws Exception {
+        var kafkaProperties =
+            KafkaConfig.buildKafkaProperties(kafkaPropertiesFile, kafkaConnection, kafkaClientId, mskAuthEnabled);
+        try (var kafkaProducer = new KafkaProducer<String, byte[]>(kafkaProperties)) {
+            readLinesAndSendToKafka(reader, kafkaProducer, topicName, batchSize);
+        }
+    }
+
     public void readLinesAndSendToKafka(BufferedReader reader, Producer<String, byte[]> producer, String topicName, int batchSize) throws Exception {
         List<Future<RecordMetadata>> futures = new ArrayList<>();
         int i = 0;

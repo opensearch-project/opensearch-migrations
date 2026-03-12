@@ -17,12 +17,15 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class InvalidResponse extends RfsException {
     private static final Pattern UNKNOWN_SETTING = Pattern.compile("unknown setting \\[([a-zA-Z0-9_.-]+)\\].+");
+    private static final Pattern PRIVATE_SETTING = Pattern.compile(".*private index setting \\[([a-zA-Z0-9_.-]+)\\] can not be set explicitly.*");
     private static final Pattern UNSUPPORTED_MAPPING_PARAM = Pattern.compile("unsupported parameters:\\s+(.+)");
     private static final Pattern MAPPING_PARAM_NAME = Pattern.compile("\\[([a-zA-Z0-9_.]+)\\s*:");
     private static final Pattern AWARENESS_ATTRIBUTE_EXCEPTION = Pattern.compile("expected total copies needs to be a multiple of total awareness attributes");
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private final transient HttpResponse response;
     private static final String ERROR_STRING = "error";
+    private static final String ROOT_CAUSE = "root_cause";
+    private static final String REASON = "reason";
 
     public InvalidResponse(String message, HttpResponse response) {
         super(message);
@@ -44,7 +47,7 @@ public class InvalidResponse extends RfsException {
             errorBody.map(InvalidResponse::getUnknownSetting).ifPresent(interimResults::add);
 
             // Check root cause errors
-            errorBody.map(node -> node.get("root_cause")).ifPresent(nodes ->
+            errorBody.map(node -> node.get(ROOT_CAUSE)).ifPresent(nodes ->
                 nodes.forEach(
                     node -> Optional.of(node).map(InvalidResponse::getUnknownSetting).ifPresent(interimResults::add)
                 )
@@ -59,7 +62,10 @@ public class InvalidResponse extends RfsException {
 
             var onlyExpectedErrors = interimResults.stream()
                 .map(Entry::getKey)
-                .allMatch(errorType -> "illegal_argument_exception".equals(errorType) || "settings_exception".equals(errorType));
+                .allMatch(errorType ->
+                    "illegal_argument_exception".equals(errorType)
+                    || "settings_exception".equals(errorType)
+                    || "validation_exception".equals(errorType));
             if (!onlyExpectedErrors) {
                 log.warn("Expecting only invalid argument errors, found additional error types " + interimResults);
                 return Set.of();
@@ -84,7 +90,7 @@ public class InvalidResponse extends RfsException {
 
             // Check high level cause, root causes, and suppressed
             errorBody.map(InvalidResponse::getUnsupportedParams).ifPresent(results::addAll);
-            errorBody.map(node -> node.get("root_cause")).ifPresent(nodes ->
+            errorBody.map(node -> node.get(ROOT_CAUSE)).ifPresent(nodes ->
                 nodes.forEach(node -> Optional.of(node).map(InvalidResponse::getUnsupportedParams).ifPresent(results::addAll))
             );
             errorBody.map(node -> node.get("caused_by")).ifPresent(node ->
@@ -101,7 +107,7 @@ public class InvalidResponse extends RfsException {
     private static Set<String> getUnsupportedParams(JsonNode json) {
         if (json == null) return Set.of();
         var typeNode = json.get("type");
-        var reasonNode = json.get("reason");
+        var reasonNode = json.get(REASON);
         if (typeNode == null || reasonNode == null) return Set.of();
         if (!"mapper_parsing_exception".equals(typeNode.asText())) return Set.of();
 
@@ -119,18 +125,28 @@ public class InvalidResponse extends RfsException {
     private static Map.Entry<String, String> getUnknownSetting(JsonNode json) {
         return Optional.ofNullable(json).map(node -> {
             var typeNode = node.get("type");
-            var reasonNode = node.get("reason");
+            var reasonNode = node.get(REASON);
             if (typeNode == null || reasonNode == null) {
                 return null;
             }
             return Map.entry(typeNode, reasonNode);
         }).map(entry -> {
-            var matcher = UNKNOWN_SETTING.matcher(entry.getValue().asText());
-            if (!matcher.matches()) {
-                return null;
+            var reason = entry.getValue().asText();
+            var type = entry.getKey().asText();
+
+            // Try matching "unknown setting [X]..."
+            var matcher = UNKNOWN_SETTING.matcher(reason);
+            if (matcher.matches()) {
+                return Map.entry(type, matcher.group(1));
             }
 
-            return Map.entry(entry.getKey().asText(), matcher.group(1));
+            // Try matching "private index setting [X] can not be set explicitly"
+            matcher = PRIVATE_SETTING.matcher(reason);
+            if (matcher.matches()) {
+                return Map.entry(type, matcher.group(1));
+            }
+
+            return null;
         }).orElse(null);
     }
 
@@ -146,11 +162,11 @@ public class InvalidResponse extends RfsException {
 
             if (bodyNode != null && bodyNode.has(ERROR_STRING)) {
                 JsonNode errorNode = bodyNode.get(ERROR_STRING);
-                JsonNode rootCauses = errorNode.get("root_cause");
+                JsonNode rootCauses = errorNode.get(ROOT_CAUSE);
 
                 if (rootCauses != null && rootCauses.isArray()) {
                     for (JsonNode cause : rootCauses) {
-                        JsonNode reasonNode = cause.get("reason");
+                        JsonNode reasonNode = cause.get(REASON);
                         if (reasonNode != null && !reasonNode.isNull()) {
                             interimResults.add(reasonNode.textValue());
                         }

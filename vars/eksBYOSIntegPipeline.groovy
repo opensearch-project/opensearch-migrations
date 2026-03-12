@@ -54,19 +54,20 @@ def call(Map config = [:]) {
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
         parameters {
-            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'jenkins-pipeline-eks-large-migration', description: 'Git branch to use for repository')
+            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
+            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill (podReplicas)')
             // Snapshot configuration
-            string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es5x/', description: 'Full S3 URI to snapshot repository (e.g., s3://bucket/folder/)')
+            string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/ma_osb_data/es7x-osb-data/', description: 'Full S3 URI to snapshot repository (e.g., s3://bucket/folder/)')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment and snapshot bucket')
-            string(name: 'SNAPSHOT_NAME', defaultValue: 'large-snapshot', description: 'Name of the snapshot')
+            string(name: 'SNAPSHOT_NAME', defaultValue: 'es7x-osb-data', description: 'Name of the snapshot')
             string(name: 'TEST_IDS', defaultValue: '0010', description: 'Test IDs to execute (comma separated, e.g., "0010" or "0010,0011")')
             string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '900', description: 'Max retries for workflow monitoring (~1/min). 33=~30min, 900=~15hrs')
             choice(
                 name: 'SOURCE_VERSION',
-                choices: ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10', 'ES_8.19', 'OS_1.3', 'OS_2.19'],
+                choices: ['ES_7.10', 'ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_8.19', 'OS_1.3', 'OS_2.19'],
                 description: 'Version of the cluster that created the snapshot'
             )
             // Target cluster configuration
@@ -92,6 +93,7 @@ def call(Map config = [:]) {
                 genericVariables: [
                     [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
                     [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                    [key: 'GIT_COMMIT', value: '$.GIT_COMMIT'],
                     [key: 'job_name', value: '$.job_name']
                 ],
                 tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
@@ -103,7 +105,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout & Print params') {
                 steps {
-                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
+                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
                         echo """
                             ================================================================
@@ -345,7 +347,8 @@ def call(Map config = [:]) {
                                     echo "Creating buildx builder ecr-builder"
                                     sh "docker buildx create --name ecr-builder --driver docker-container --bootstrap"
                                     sh "docker buildx use ecr-builder"
-                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder"
+                                    def pullThroughCacheEndpoint = env.registryEndpoint.split('/')[0]
+                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}"
                                 }
                             }
                         }

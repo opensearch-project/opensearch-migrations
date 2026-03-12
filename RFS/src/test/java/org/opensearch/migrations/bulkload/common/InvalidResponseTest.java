@@ -269,4 +269,3 @@ class InvalidResponseTest {
         assertThat(result, empty());
     }
 }
-
