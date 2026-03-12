@@ -50,7 +50,7 @@ function convertSingleFacet(facetDef: any): JavaMap {
 
   const type = (facetDef.get('type') || '').toString().toLowerCase();
 
-  switch (type) {
+  switch (type) {  // NOSONAR
     case 'terms':
       return convertTermsFacet(facetDef);
     default:
