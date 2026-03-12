@@ -11,7 +11,7 @@
  * - requestPath: the Solr query to test
  * - assertionRules: expected differences from Solr (everything else must match exactly)
  */
-import { solrTest } from '../test-types';
+import { solrTest, SOLR_INTERNAL_RULES } from '../test-types';
 import type { TestCase } from '../test-types';
 
 export const testCases: TestCase[] = [
@@ -51,5 +51,42 @@ export const testCases: TestCase[] = [
         content: { type: 'text' },
       },
     },
+  }),
+
+  // ───────────────────────────────────────────────────────────
+  // Facet tests — JSON Facet API (json.facet)
+  // ───────────────────────────────────────────────────────────
+
+  solrTest('facet-basic-terms', {
+    description: 'Basic terms facet on a keyword field with distinct counts',
+    documents: [
+      { id: '1', title: 'laptop', category: 'electronics' },
+      { id: '2', title: 'phone', category: 'electronics' },
+      { id: '3', title: 'phone case', category: 'electronics' },
+      { id: '4', title: 'shirt', category: 'clothing' },
+      { id: '5', title: 'pants', category: 'clothing' },
+      { id: '6', title: 'apple', category: 'food' },
+    ],
+    requestPath:
+      '/solr/testcollection/select?q=*:*&wt=json&json.facet=' +
+      encodeURIComponent(JSON.stringify({
+        categories: { type: 'terms', field: 'category', sort: 'count desc' },
+      })),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        category: { type: 'string' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        category: { type: 'keyword' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.response', rule: 'ignore', reason: 'Facet test — only validating $.facets, not hits' },
+    ],
   }),
 ];
