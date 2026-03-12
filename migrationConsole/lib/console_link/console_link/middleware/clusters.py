@@ -1,4 +1,6 @@
+import os
 import requests.exceptions
+import subprocess
 
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.snapshot import Snapshot
@@ -97,6 +99,21 @@ def run_test_benchmarks(cluster: Cluster):
     cluster.execute_benchmark_workload(workload="nyc_taxis")
 
 
+def _ensure_vectorsearch_workload():
+    """Ensure the vectorsearch workload is available in the OSB workload cache."""
+    workload_dir = os.path.expanduser("~/.osb/benchmarks/workloads/default/vectorsearch")
+    workload_file = os.path.join(workload_dir, "workload.json")
+    if os.path.exists(workload_file):
+        return
+    repo_dir = os.path.expanduser("~/.osb/benchmarks/workloads/default")
+    logger.info("vectorsearch workload not found, updating OSB workload repo...")
+    subprocess.run(["git", "fetch", "origin"], cwd=repo_dir, capture_output=True, check=True)
+    subprocess.run(["git", "checkout", "origin/main", "--", "vectorsearch"], cwd=repo_dir, capture_output=True, check=True)
+    if not os.path.exists(workload_file):
+        raise RuntimeError("Failed to fetch vectorsearch workload from OSB workload repo")
+    logger.info("vectorsearch workload fetched successfully")
+
+
 def run_aoss_test_benchmarks(cluster: Cluster, collection_type: str):
     """Run OSB workloads appropriate for a specific AOSS collection type.
     
@@ -110,6 +127,7 @@ def run_aoss_test_benchmarks(cluster: Cluster, collection_type: str):
         cluster.execute_benchmark_workload(workload="http_logs")
         cluster.execute_benchmark_workload(workload="eventdata")
     elif collection_type == 'vector':
+        _ensure_vectorsearch_workload()
         cluster.execute_benchmark_workload(
             workload="vectorsearch",
             workload_params="target_index_name:vectors_faiss,"
@@ -117,7 +135,9 @@ def run_aoss_test_benchmarks(cluster: Cluster, collection_type: str):
                             "target_field_name:target_field,"
                             "target_index_dimension:768,"
                             "target_index_space_type:l2,"
-                            "bulk_size:10,bulk_indexing_clients:1",
+                            "target_index_bulk_size:10,"
+                            "target_index_bulk_indexing_clients:1,"
+                            "target_index_bulk_index_data_set_corpus:cohere",
             test_procedure="no-train-test-index-only"
         )
         cluster.execute_benchmark_workload(
@@ -127,7 +147,9 @@ def run_aoss_test_benchmarks(cluster: Cluster, collection_type: str):
                             "target_field_name:target_field,"
                             "target_index_dimension:768,"
                             "target_index_space_type:l2,"
-                            "bulk_size:10,bulk_indexing_clients:1",
+                            "target_index_bulk_size:10,"
+                            "target_index_bulk_indexing_clients:1,"
+                            "target_index_bulk_index_data_set_corpus:cohere",
             test_procedure="no-train-test-index-only"
         )
     else:

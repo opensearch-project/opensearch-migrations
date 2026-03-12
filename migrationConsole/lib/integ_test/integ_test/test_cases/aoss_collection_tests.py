@@ -9,12 +9,10 @@ Required environment variables:
 - AOSS_TIMESERIES_ENDPOINT: AOSS time-series collection endpoint (Test0022)
 - AOSS_VECTOR_ENDPOINT: AOSS vector collection endpoint (Test0023)
 """
-import json
 import logging
 import os
-import subprocess
 
-from console_link.middleware.clusters import connection_check
+from console_link.middleware.clusters import connection_check, run_aoss_test_benchmarks
 from console_link.models.cluster import Cluster
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
@@ -39,45 +37,13 @@ class AOSSTestBase(MATestBase):
                             migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL],
                             allow_source_target_combinations=[])
 
-    def _run_cmd(self, command: str, stdin_input: str = None) -> str:
-        """Run a shell command directly (tests execute inside the pod)."""
-        result = subprocess.run(["bash", "-c", command], input=stdin_input,
-                                capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
-            raise RuntimeError(f"Command failed (rc={result.returncode}): {result.stderr}\n{result.stdout}")
-        return result.stdout
-
-    def _console_cmd(self, args: str) -> str:
-        return self._run_cmd(f"/.venv/bin/console {args}")
-
-    def _workflow_cmd(self, args: str) -> str:
-        return self._run_cmd(f"/.venv/bin/workflow {args}")
-
-    def _get_workflow_config(self) -> dict:
-        output = self._workflow_cmd("configure view")
-        return json.loads(output)
-
-    def _set_source_auth_no_auth(self):
-        """Switch source to no_auth for OSB benchmarks (source has open access policy)."""
-        config = self._get_workflow_config()
-        source_key = list(config["sourceClusters"].keys())[0]
-        config["sourceClusters"][source_key].pop("authConfig", None)
-        self._run_cmd("/.venv/bin/workflow configure edit --stdin", stdin_input=json.dumps(config))
-        output = self._console_cmd("clusters connection-check")
-        assert "Successfully connected" in output, f"No-auth connection check failed: {output}"
-        logger.info("Source switched to no_auth and connection verified")
-
-    def _set_source_auth_sigv4(self):
-        """Switch source cluster auth back to sigv4 in the workflow config."""
-        config = self._get_workflow_config()
-        source_key = list(config["sourceClusters"].keys())[0]
-        config["sourceClusters"][source_key].pop("noAuth", None)
-        region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
-        config["sourceClusters"][source_key]["authConfig"] = {
-            "sigv4": {"region": region, "service": "es"}
-        }
-        self._run_cmd("/.venv/bin/workflow configure edit --stdin", stdin_input=json.dumps(config))
-        logger.info("Source switched back to sigv4 auth")
+    def _create_no_auth_source_cluster(self) -> Cluster:
+        """Create a no_auth copy of the source cluster for OSB benchmarks."""
+        config = dict(self.source_cluster.config)
+        for key in ["sigv4", "basic_auth", "no_auth"]:
+            config.pop(key, None)
+        config["no_auth"] = None
+        return Cluster(config=config)
 
     def test_before(self):
         """Pre-flight: verify both clusters are reachable."""
@@ -114,11 +80,10 @@ class AOSSTestBase(MATestBase):
         assert target_result.connection_established, f"Target connection failed: {target_result.connection_message}"
 
     def prepare_clusters(self):
-        """Switch to no_auth, load test data via CLI, switch back to sigv4."""
-        self._set_source_auth_no_auth()
-        output = self._console_cmd(f"clusters run-aoss-test-benchmarks --collection-type {self.collection_type}")
-        logger.info(f"Benchmark output: {output}")
-        self._set_source_auth_sigv4()
+        """Load test data on source using OSB workloads with no_auth."""
+        no_auth_source = self._create_no_auth_source_cluster()
+        logger.info("Loading benchmark data with no_auth source cluster")
+        run_aoss_test_benchmarks(no_auth_source, self.collection_type)
 
     def prepare_workflow_snapshot_and_migration_config(self):
         """Let the workflow create the snapshot — no externally managed snapshot."""
