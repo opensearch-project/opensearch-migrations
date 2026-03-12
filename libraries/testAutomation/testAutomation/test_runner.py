@@ -197,11 +197,11 @@ class TestRunner:
         """Lightweight cleanup between version combinations.
 
         Only removes test clusters and argo workflows, keeping the MA
-        infrastructure (argo, kyverno, etcd, migration-console) intact.
+        infrastructure (argo, kyverno, etcd, migration-console, workflow templates) intact.
         This avoids the expensive helm uninstall/install cycle (~3min).
         """
         self.cleanup_clusters()
-        self.k8s_service.delete_all_argo_templates()
+        self.k8s_service.delete_all_argo_workflows()
 
     def cleanup_deployment(self) -> None:
         helm_uninstall_error = None

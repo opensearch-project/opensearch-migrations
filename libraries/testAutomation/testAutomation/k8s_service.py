@@ -390,3 +390,10 @@ class K8sService:
         self.run_command(self._kubectl_base() + [
             "delete", "workflowtemplates", "--all-namespaces", "--all", "--ignore-not-found"
         ], ignore_errors=True)
+
+    def delete_all_argo_workflows(self) -> None:
+        """Deletes all Argo Workflow instances (not templates) from the namespace."""
+        logger.info("Deleting all Argo Workflows from namespace")
+        self.run_command(self._kubectl_base() + [
+            "delete", "workflows", "--all", "-n", self.namespace, "--ignore-not-found"
+        ], ignore_errors=True)
