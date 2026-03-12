@@ -9,12 +9,13 @@ dependencies {
 
     implementation libs.jackson.core
     implementation libs.jackson.databind
+    implementation libs.commons.compress
+    implementation libs.slf4j.api
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
 
     testImplementation libs.junit.jupiter.api
     testImplementation libs.junit.jupiter.params
-    testImplementation libs.slf4j.api
     testImplementation libs.hamcrest
     testRuntimeOnly libs.junit.jupiter.engine
 }

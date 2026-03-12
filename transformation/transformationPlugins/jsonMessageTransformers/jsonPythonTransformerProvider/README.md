@@ -53,7 +53,7 @@ For metadata migrations, use `--transformer-config` / `--transformer-config-file
 | `initializationScript` | One of three | Inline Python source code |
 | `initializationResourcePath` | One of three | Classpath resource path (for bundled transforms) |
 | `bindingsObject` | Yes | JSON string parsed and passed to `main(context)` |
-| `pythonModulePath` | No | Path to a [GraalPy venv](https://www.graalvm.org/python/docs/) with pip packages |
+| `pythonModulePath` | No | Path to a [GraalPy venv](https://www.graalvm.org/python/docs/) directory or `.tar.gz` archive |
 
 Exactly one of the three script sources must be provided.
 
@@ -103,15 +103,34 @@ If you have a `requirements.txt` or a pip-installable project:
 
 ### Packaging for distribution
 
+Package the venv as a tarball — `pythonModulePath` accepts `.tar.gz` files directly
+and auto-extracts them at startup:
+
 ```bash
-# Tarball for transfer to the migration host
+# Create a tarball
 tar czf transform-venv.tar.gz -C /opt transform-venv
 
-# Or upload to S3
+# Upload to S3
 aws s3 cp transform-venv.tar.gz s3://my-bucket/transforms/
+```
 
-# On the migration host
+On the migration host, point directly to the tarball — no manual extraction needed:
+
+```bash
+--doc-transformer-config '[{
+  "JsonPythonTransformerProvider": {
+    "initializationScriptFile": "/opt/transforms/entry_point.py",
+    "bindingsObject": "{}",
+    "pythonModulePath": "/opt/transforms/transform-venv.tar.gz"
+  }
+}]'
+```
+
+Or if you prefer to extract manually:
+
+```bash
 tar xzf transform-venv.tar.gz -C /opt
+# Then use "pythonModulePath": "/opt/transform-venv"
 ```
 
 ## Complete Example: Custom Python Project

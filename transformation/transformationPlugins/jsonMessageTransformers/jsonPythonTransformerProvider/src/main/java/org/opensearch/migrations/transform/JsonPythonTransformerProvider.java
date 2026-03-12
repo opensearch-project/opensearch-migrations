@@ -13,7 +13,12 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 
+@Slf4j
 public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
 
     public static final String SCRIPT_FILE_KEY = "initializationScriptFile";
@@ -112,18 +117,51 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
         }
     }
 
-    private Path resolveVenvPath(Map<String, Object> config) {
+    private Path resolveVenvPath(Map<String, Object> config) throws IOException {
         var modulePath = (String) config.getOrDefault(PYTHON_MODULE_PATH_KEY, null);
         if (modulePath == null) {
             return null;
         }
         var path = Path.of(modulePath);
-        if (!Files.isDirectory(path)) {
-            throw new IllegalArgumentException(
-                "pythonModulePath '" + modulePath + "' does not exist or is not a directory."
-            );
+        if (Files.isDirectory(path)) {
+            return path;
         }
-        return path;
+        if (Files.isRegularFile(path) && (modulePath.endsWith(".tar.gz") || modulePath.endsWith(".tgz"))) {
+            return extractTarGz(path);
+        }
+        throw new IllegalArgumentException(
+            "pythonModulePath '" + modulePath + "' must be a directory or a .tar.gz file."
+        );
+    }
+
+    private static Path extractTarGz(Path tarGzPath) throws IOException {
+        var extractDir = Files.createTempDirectory("python-venv-");
+        log.atInfo().setMessage("Extracting {} to {}").addArgument(tarGzPath).addArgument(extractDir).log();
+        try (var fis = Files.newInputStream(tarGzPath);
+             var gis = new GzipCompressorInputStream(fis);
+             var tis = new TarArchiveInputStream(gis)) {
+            TarArchiveEntry entry;
+            while ((entry = tis.getNextEntry()) != null) {
+                var entryPath = extractDir.resolve(entry.getName()).normalize();
+                if (!entryPath.startsWith(extractDir)) {
+                    throw new IOException("Tar entry outside target dir: " + entry.getName());
+                }
+                if (entry.isDirectory()) {
+                    Files.createDirectories(entryPath);
+                } else {
+                    Files.createDirectories(entryPath.getParent());
+                    Files.copy(tis, entryPath);
+                }
+            }
+        }
+        // If the tarball contains a single top-level directory, use that as the venv path
+        try (var children = Files.list(extractDir)) {
+            var entries = children.toList();
+            if (entries.size() == 1 && Files.isDirectory(entries.get(0))) {
+                return entries.get(0);
+            }
+        }
+        return extractDir;
     }
 
     private String getConfigUsageStr() {
@@ -140,6 +178,6 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
             + " is a value which can be deserialized with Jackson ObjectMapper into a Map, List, Array,"
             + " or primitive type/wrapper.\n"
             + PYTHON_MODULE_PATH_KEY
-            + " (optional) is a path to a directory containing a Python venv with pip packages.";
+            + " (optional) is a path to a directory or .tar.gz file containing a Python venv with pip packages.";
     }
 }

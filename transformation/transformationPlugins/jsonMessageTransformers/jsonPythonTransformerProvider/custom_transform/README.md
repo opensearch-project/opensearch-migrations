@@ -105,21 +105,24 @@ tar czf transform-venv.tar.gz -C /tmp transform-venv
 aws s3 cp transform-venv.tar.gz s3://my-bucket/transforms/transform-venv.tar.gz
 ```
 
+`pythonModulePath` accepts `.tar.gz` files directly — no manual extraction needed on the migration host.
+
 ## Running with RFS (Document Backfill)
 
 ### On the migration host
 
 ```bash
-# If you packaged as a tarball, extract it
-tar xzf transform-venv.tar.gz -C /opt
+# Download the tarball and entry point from S3
+aws s3 cp s3://my-bucket/transforms/transform-venv.tar.gz /opt/transforms/
+aws s3 cp s3://my-bucket/transforms/entry_point.py /opt/transforms/
 
-# Run RFS with your transformation
+# Run RFS with your transformation — pythonModulePath accepts .tar.gz directly
 ./runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments \
   --doc-transformer-config '[{
     "JsonPythonTransformerProvider": {
-      "initializationScriptFile": "/path/to/entry_point.py",
+      "initializationScriptFile": "/opt/transforms/entry_point.py",
       "bindingsObject": "{\"index_rewrites\": [{\"source_prefix\": \"logs-\", \"target_prefix\": \"migrated-logs-\"}], \"add_fields\": {\"migrated\": true}}",
-      "pythonModulePath": "/opt/transform-venv"
+      "pythonModulePath": "/opt/transforms/transform-venv.tar.gz"
     }
   }]' \
   --snapshot-name my-snapshot \
@@ -135,7 +138,7 @@ Create `transform-config.json`:
   "JsonPythonTransformerProvider": {
     "initializationScriptFile": "/opt/transforms/entry_point.py",
     "bindingsObject": "{\"index_rewrites\": [{\"source_prefix\": \"logs-\", \"target_prefix\": \"migrated-logs-\"}], \"add_fields\": {\"migrated\": true}}",
-    "pythonModulePath": "/opt/transform-venv"
+    "pythonModulePath": "/opt/transforms/transform-venv.tar.gz"
   }
 }]
 ```
@@ -170,7 +173,7 @@ Create `transform-config.json`:
 | `initializationScript` | One of three | Inline Python source code |
 | `initializationResourcePath` | One of three | Classpath resource path (for bundled transforms) |
 | `bindingsObject` | Yes | JSON string passed to `main(context)` for configuration |
-| `pythonModulePath` | No | Path to a GraalPy venv directory with pip packages |
+| `pythonModulePath` | No | Path to a GraalPy venv directory or `.tar.gz` archive |
 
 ## Writing Your Own Transformation
 

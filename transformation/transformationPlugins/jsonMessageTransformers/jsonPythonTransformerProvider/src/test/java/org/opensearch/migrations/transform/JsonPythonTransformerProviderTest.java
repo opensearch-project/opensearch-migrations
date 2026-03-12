@@ -1,10 +1,14 @@
 package org.opensearch.migrations.transform;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -152,7 +156,7 @@ public class JsonPythonTransformerProviderTest {
             "initializationScript", SIMPLE_PYTHON_TRANSFORM,
             "pythonModulePath", "/nonexistent/venv/path");
         var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
-        assertThat(exception.getMessage(), containsString("does not exist or is not a directory"));
+        assertThat(exception.getMessage(), containsString("must be a directory or a .tar.gz file"));
     }
 
     @Test
@@ -164,5 +168,36 @@ public class JsonPythonTransformerProviderTest {
             "initializationResourcePath", "test-transform.py");
         var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
         assertThat(exception.getMessage(), containsString("Unable to use both parameters at the same time"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testCreateTransformer_tarGzPythonModulePath() throws Exception {
+        // Create a tarball with a single top-level "my-venv/" directory
+        var tarGzFile = File.createTempFile("test-venv", ".tar.gz");
+        try (var fos = new FileOutputStream(tarGzFile);
+             var gos = new GzipCompressorOutputStream(fos);
+             var tos = new TarArchiveOutputStream(gos)) {
+            var dirEntry = new TarArchiveEntry("my-venv/");
+            tos.putArchiveEntry(dirEntry);
+            tos.closeArchiveEntry();
+
+            var content = "marker".getBytes();
+            var fileEntry = new TarArchiveEntry("my-venv/pyvenv.cfg");
+            fileEntry.setSize(content.length);
+            tos.putArchiveEntry(fileEntry);
+            tos.write(content);
+            tos.closeArchiveEntry();
+        }
+
+        var config = Map.of(
+            "bindingsObject", "{}",
+            "initializationScript", SIMPLE_PYTHON_TRANSFORM,
+            "pythonModulePath", tarGzFile.getAbsolutePath());
+        var transformer = provider.createTransformer(config);
+        var result = (Map<String, Object>) transformer.transformJson(new HashMap<>(TEST_DOC));
+
+        assertThat(result.getOrDefault("modified", null), equalTo(true));
+        tarGzFile.delete();
     }
 }
