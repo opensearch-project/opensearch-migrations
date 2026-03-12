@@ -3108,7 +3108,7 @@ exit 0
           "backoff": {
             "cap": "15",
             "duration": "5",
-            "factor": "1.5",
+            "factor": "2",
           },
           "limit": "{{workflow.parameters.monitor-retry-limit}}",
           "retryPolicy": "Always",

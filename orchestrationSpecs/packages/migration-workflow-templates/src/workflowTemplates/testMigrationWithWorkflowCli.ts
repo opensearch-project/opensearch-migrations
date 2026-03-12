@@ -67,7 +67,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             retryPolicy: "Always",
             backoff: {
                 duration: "5",     // Start checking every 5 seconds
-                factor: "1.5",     // Slow backoff: 5s → 7s → 11s → 15s
+                factor: "2",       // Backoff: 5s → 10s → 15s (capped)
                 cap: "15"          // Cap at 15 second intervals
             }
         })
