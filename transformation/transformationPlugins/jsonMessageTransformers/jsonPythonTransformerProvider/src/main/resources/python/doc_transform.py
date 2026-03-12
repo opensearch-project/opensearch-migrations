@@ -81,4 +81,4 @@ def _add_fields(doc, add_fields):
         body[key] = value
 
 
-main
+main  # GraalPy requires the last expression to be the entry point

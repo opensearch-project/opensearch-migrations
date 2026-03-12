@@ -32,16 +32,21 @@ class FieldTypeRule:
     remove_keys: list = field(default_factory=list)
 
 
+def _apply_rule(node, rule):
+    """Apply a single type-rewrite rule to a mapping node."""
+    current_type = node.get('type')
+    if current_type is not None and str(current_type) == rule.source_type:
+        node['type'] = rule.target_type
+        for k in rule.remove_keys:
+            if k in node:
+                del node[k]
+
+
 def _apply_rules(node, rules):
     """Recursively walk a mapping tree and apply type-rewrite rules."""
     if hasattr(node, 'get') and hasattr(node, '__setitem__'):
         for rule in rules:
-            current_type = node.get('type')
-            if current_type is not None and str(current_type) == rule.source_type:
-                node['type'] = rule.target_type
-                for k in rule.remove_keys:
-                    if k in node:
-                        del node[k]
+            _apply_rule(node, rule)
         for key in node.keys():
             _apply_rules(node[key], rules)
     elif hasattr(node, '__iter__') and not isinstance(node, (str, bytes)):
@@ -67,4 +72,4 @@ def main(context):
     return transform
 
 
-main
+main  # GraalPy requires the last expression to be the entry point
