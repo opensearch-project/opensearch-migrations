@@ -13,6 +13,7 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use')
+            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'ISOLATED_VPC_ID', defaultValue: isolatedVpcId, description: 'VPC ID for isolated deployment')
             string(name: 'ISOLATED_SUBNET_IDS', defaultValue: isolatedSubnetIds, description: 'Comma-separated subnet IDs (isolated, no internet)')
             string(name: 'REGION', defaultValue: region, description: 'AWS region')
@@ -27,7 +28,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
+                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }
 
