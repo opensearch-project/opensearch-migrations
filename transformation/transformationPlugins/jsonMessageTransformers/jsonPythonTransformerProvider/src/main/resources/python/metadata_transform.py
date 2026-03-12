@@ -1,9 +1,9 @@
 """
 Example: Typed Python metadata transformation using dataclasses.
 
-Transforms index metadata by rewriting field types according to configurable rules.
-Each rule specifies a source_type to match, a target_type to replace it with,
-and optional keys to remove from the field definition.
+Transforms index metadata by rewriting field types according to
+configurable rules. Each rule specifies a source_type to match,
+a target_type to replace it with, and optional keys to remove.
 
 Transformer config JSON:
 {
@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class FieldTypeRule:
-    """A rule that rewrites a field's 'type' and optionally removes keys."""
+    """A rule that rewrites a field's 'type' and removes keys."""
     source_type: str
     target_type: str
     remove_keys: list = field(default_factory=list)
@@ -42,7 +42,7 @@ def _apply_rules(node, rules):
                 for k in rule.remove_keys:
                     if k in node:
                         del node[k]
-        for key in list(node.keys()):
+        for key in node.keys():
             _apply_rules(node[key], rules)
     elif hasattr(node, '__iter__') and not isinstance(node, (str, bytes)):
         for item in node:
