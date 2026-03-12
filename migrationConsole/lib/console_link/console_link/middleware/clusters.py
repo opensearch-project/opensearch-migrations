@@ -106,9 +106,13 @@ def _ensure_vectorsearch_workload():
     if os.path.exists(workload_file):
         return
     repo_dir = os.path.expanduser("~/.osb/benchmarks/workloads/default")
-    logger.info("vectorsearch workload not found, updating OSB workload repo...")
-    subprocess.run(["git", "fetch", "origin"], cwd=repo_dir, capture_output=True, check=True)
-    subprocess.run(["git", "checkout", "origin/main", "--", "vectorsearch"], cwd=repo_dir, capture_output=True, check=True)
+    if not os.path.isdir(repo_dir):
+        logger.info("OSB workload cache not found, bootstrapping via 'opensearch-benchmark list workloads'...")
+        subprocess.run(["opensearch-benchmark", "list", "workloads"], capture_output=True, check=True)
+    else:
+        logger.info("vectorsearch workload not found, updating OSB workload repo...")
+        subprocess.run(["git", "fetch", "origin"], cwd=repo_dir, capture_output=True, check=True)
+        subprocess.run(["git", "checkout", "origin/main", "--", "vectorsearch"], cwd=repo_dir, capture_output=True, check=True)
     if not os.path.exists(workload_file):
         raise RuntimeError("Failed to fetch vectorsearch workload from OSB workload repo")
     logger.info("vectorsearch workload fetched successfully")

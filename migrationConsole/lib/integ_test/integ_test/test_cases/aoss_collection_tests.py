@@ -37,6 +37,9 @@ class AOSSTestBase(MATestBase):
                             migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL],
                             allow_source_target_combinations=[])
 
+    def workflow_perform_migrations(self, timeout_seconds: int = 1800):  # 30 min for EKS node churn
+        super().workflow_perform_migrations(timeout_seconds=timeout_seconds)
+
     def _create_no_auth_source_cluster(self) -> Cluster:
         """Create a no_auth copy of the source cluster for OSB benchmarks."""
         config = dict(self.source_cluster.config)
