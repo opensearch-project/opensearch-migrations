@@ -8,7 +8,7 @@
  * This matches the replayer/document transform pattern in backfill.
  */
 
-export type SolrEndpoint = 'select' | 'update' | 'admin' | 'schema' | 'config' | 'unknown';
+export type SolrEndpoint = 'select' | 'terms' | 'update' | 'admin' | 'schema' | 'config' | 'unknown';
 
 /**
  * A Java Map passed through GraalVM polyglot with allowMapAccess(true).
@@ -47,6 +47,7 @@ export interface ResponseContext {
 
 const ENDPOINT_PATTERNS: [RegExp, SolrEndpoint][] = [
   [/\/solr\/[^/]+\/select/, 'select'],
+  [/\/solr\/[^/]+\/terms/, 'terms'],
   [/\/solr\/[^/]+\/update/, 'update'],
   [/\/solr\/[^/]+\/admin/, 'admin'],
   [/\/solr\/[^/]+\/schema/, 'schema'],
