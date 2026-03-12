@@ -11,7 +11,6 @@ dependencies {
     implementation libs.jackson.databind
     implementation libs.commons.compress
     implementation libs.slf4j.api
-    implementation libs.aws.s3
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
 

@@ -17,8 +17,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
-import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 
 @Slf4j
 public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
@@ -28,8 +26,6 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
     public static final String INLINE_SCRIPT_KEY = "initializationScript";
     public static final String BINDINGS_OBJECT = "bindingsObject";
     public static final String PYTHON_MODULE_PATH_KEY = "pythonModulePath";
-
-    private static final String S3_PREFIX = "s3://";
 
     @SneakyThrows
     @Override
@@ -68,7 +64,7 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
         var scriptFile = (String) config.getOrDefault(SCRIPT_FILE_KEY, null);
         if (scriptFile != null) {
             try {
-                var localPath = resolveFileUri(scriptFile, ".py");
+                var localPath = ConfigUriResolver.resolve(scriptFile, ".py");
                 script = Files.readString(localPath);
             } catch (IOException ioe) {
                 throw new IllegalArgumentException(
@@ -127,7 +123,7 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
         if (modulePath == null) {
             return null;
         }
-        var localPath = resolveFileUri(modulePath, ".tar.gz");
+        var localPath = ConfigUriResolver.resolve(modulePath, ".tar.gz");
         if (Files.isDirectory(localPath)) {
             return localPath;
         }
@@ -140,39 +136,7 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
         );
     }
 
-    /**
-     * Resolves a file URI to a local path. If the URI starts with "s3://", downloads
-     * the file to a temp location first. Otherwise returns the path as-is.
-     */
-    private static Path resolveFileUri(String uri, String suffix) throws IOException {
-        if (uri.startsWith(S3_PREFIX)) {
-            return downloadFromS3(uri, suffix);
-        }
-        return Path.of(uri);
-    }
-
-    private static Path downloadFromS3(String s3Uri, String suffix) throws IOException {
-        var withoutPrefix = s3Uri.substring(S3_PREFIX.length());
-        var slashIndex = withoutPrefix.indexOf('/');
-        if (slashIndex <= 0) {
-            throw new IllegalArgumentException("Invalid S3 URI: " + s3Uri);
-        }
-        var bucket = withoutPrefix.substring(0, slashIndex);
-        var key = withoutPrefix.substring(slashIndex + 1);
-
-        log.atInfo().setMessage("Downloading {} from S3").addArgument(s3Uri).log();
-        var tempFile = Files.createTempFile("python-s3-", suffix);
-        try (var s3Client = S3Client.create()) {
-            s3Client.getObject(
-                GetObjectRequest.builder().bucket(bucket).key(key).build(),
-                tempFile
-            );
-        }
-        log.atInfo().setMessage("Downloaded {} to {}").addArgument(s3Uri).addArgument(tempFile).log();
-        return tempFile;
-    }
-
-    private static Path extractTarGz(Path tarGzPath) throws IOException {
+    static Path extractTarGz(Path tarGzPath) throws IOException {
         var extractDir = Files.createTempDirectory("python-venv-");
         log.atInfo().setMessage("Extracting {} to {}").addArgument(tarGzPath).addArgument(extractDir).log();
         try (var fis = Files.newInputStream(tarGzPath);
@@ -205,7 +169,7 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
     private String getConfigUsageStr() {
         return this.getClass().getName() + " expects the incoming configuration to be a Map<String, Object>, "
             + "with keys: " + INLINE_SCRIPT_KEY + " or " + SCRIPT_FILE_KEY + ", " + BINDINGS_OBJECT + ".\n"
-            + SCRIPT_FILE_KEY + " is a string pointing to a local file path or s3:// URI to a Python file. \n"
+            + SCRIPT_FILE_KEY + " is a string pointing to a local file path or remote URI to a Python file. \n"
             + RESOURCE_PATH_KEY
             + " is a string pointing to a resource path to a Python file in a jar on the classpath. \n"
             + INLINE_SCRIPT_KEY
@@ -216,6 +180,6 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
             + " is a value which can be deserialized with Jackson ObjectMapper into a Map, List, Array,"
             + " or primitive type/wrapper.\n"
             + PYTHON_MODULE_PATH_KEY
-            + " (optional) is a local path, .tar.gz file, or s3:// URI to a Python venv with pip packages.";
+            + " (optional) is a local path, .tar.gz file, or remote URI to a Python venv with pip packages.";
     }
 }
