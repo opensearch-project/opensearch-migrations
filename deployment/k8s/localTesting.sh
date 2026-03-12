@@ -24,8 +24,12 @@ gradlew() {
     "${MIGRATIONS_REPO_ROOT_DIR}/gradlew" "$@"
 }
 
+export KUBE_CONTEXT="${KUBE_CONTEXT:-minikube}"
+
 export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
 "${MIGRATIONS_REPO_ROOT_DIR}"/buildImages/setUpK8sImageBuildServices.sh
+
+BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
 
 LOCAL_REGISTRY_PORT="${LOCAL_REGISTRY_PORT:-30500}"
 MINIKUBE_IP="$(minikube ip)"
@@ -47,7 +51,7 @@ case "$ARCH" in
     ;;
 esac
 
-gradlew :buildImages:buildImagesToRegistry_$PLATFORM
+gradlew :buildImages:buildImagesToRegistry_$PLATFORM -Pbuilder="$BUILDER_NAME"
 
 kubectl config set-context --current --namespace=ma
 

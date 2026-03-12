@@ -75,7 +75,6 @@ allprojects {
 }
 
 tasks.register('buildDockerImages') {
-    dependsOn(':frontend:buildDockerImage')
     dependsOn(':TrafficCapture:dockerSolution:buildDockerImages')
     dependsOn(':DocumentsFromSnapshotMigration:buildDockerImages')
 }
@@ -84,8 +83,7 @@ def commonExclusions = ['**/build/**',
                         '**/node_modules/**',
                         '**/opensearch-cluster-cdk/**',
                         '**/cdk.out/**',
-                        '**/transformation/standardJavascriptTransforms/node_modules/**',
-                        '**/frontend/**']
+                        '**/transformation/standardJavascriptTransforms/node_modules/**']
 spotless {
     format 'misc', {
         target fileTree('.') {
@@ -120,14 +118,12 @@ subprojects {
     apply plugin: 'jacoco'
     apply plugin: 'maven-publish'
 
-    // Skip spotless for frontend as it has no Java code and node_modules causes scan failures
-    if (project.name != 'frontend') {
-        apply plugin: "com.diffplug.spotless"
+    apply plugin: "com.diffplug.spotless"
 
-        // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
-        // though what '#' does is still undocumented from what I can tell
-        spotless {
-            java {
+    // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
+    // though what '#' does is still undocumented from what I can tell
+    spotless {
+        java {
                 target "**/*.java"
                 targetExclude '**/build/**', ".gradle/**", "**/node_modules/**"
                 importOrder(
@@ -140,7 +136,6 @@ subprojects {
                 endWithNewline()
                 removeUnusedImports()
             }
-        }
     }
 
     plugins.withId('com.google.cloud.tools.jib') {

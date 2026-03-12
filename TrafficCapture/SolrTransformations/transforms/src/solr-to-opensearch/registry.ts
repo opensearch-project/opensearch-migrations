@@ -11,7 +11,9 @@ import type { RequestContext, ResponseContext } from './context';
 
 import * as selectUri from './features/select-uri';
 import * as queryQ from './features/query-q';
+import * as jsonFacets from './features/json-facets';
 import * as hitsToDocs from './features/hits-to-docs';
+import * as aggsToFacets from './features/aggs-to-facets';
 import * as responseHeader from './features/response-header';
 
 export const requestRegistry: TransformRegistry<RequestContext> = {
@@ -20,6 +22,7 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
     select: [
       selectUri.request, // URI rewrite — must be first
       queryQ.request, // q=... → query DSL
+      jsonFacets.request, // json.facet → aggs
     ],
   },
 };
@@ -29,6 +32,7 @@ export const responseRegistry: TransformRegistry<ResponseContext> = {
   byEndpoint: {
     select: [
       hitsToDocs.response, // hits.hits → response.docs
+      aggsToFacets.response, // aggregations → facets
       responseHeader.response, // synthesize responseHeader
     ],
   },

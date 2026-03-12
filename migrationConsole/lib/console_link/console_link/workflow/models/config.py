@@ -1,39 +1,30 @@
 """Configuration models for the workflow library."""
 
-from typing import Dict, Any
-from io import StringIO
+from typing import Dict, Any, Optional
 from ruamel.yaml import YAML
 
 
 class WorkflowConfig:
-    """Simple workflow configuration that stores raw YAML data with comment preservation."""
+    """Workflow configuration that preserves the user's original YAML text."""
 
-    def __init__(self, data: Dict[str, Any] = None):
+    def __init__(self, data: Dict[str, Any] = None, raw_yaml: Optional[str] = None):
         """Initialize with raw configuration data.
 
         Args:
-            data: Raw configuration dictionary
+            data: Raw configuration dictionary (used by tests and legacy callers)
+            raw_yaml: Original YAML string to preserve formatting
         """
         self.data = data or {}
-
-    def to_yaml(self) -> str:
-        """Convert to YAML string with comment preservation."""
-        yaml = YAML()
-        yaml.preserve_quotes = True
-        yaml.default_flow_style = False
-
-        stream = StringIO()
-        yaml.dump(self.data, stream)
-        return stream.getvalue()
+        self.raw_yaml = raw_yaml or ""
 
     @classmethod
     def from_yaml(cls, yaml_str: str) -> 'WorkflowConfig':
-        """Create from YAML string (supports both YAML and JSON since JSON is a subset of YAML 1.2)."""
+        """Create from YAML string, preserving the original text."""
         yaml = YAML()
         yaml.preserve_quotes = True
 
         data = yaml.load(yaml_str) or {}
-        return cls(data)
+        return cls(data, raw_yaml=yaml_str)
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a configuration value by key."""
@@ -44,5 +35,5 @@ class WorkflowConfig:
         self.data[key] = value
 
     def __bool__(self) -> bool:
-        """Return True if config has any data."""
-        return bool(self.data)
+        """Return True if config has any data or raw YAML."""
+        return bool(self.data) or bool(self.raw_yaml)

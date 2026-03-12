@@ -6,7 +6,8 @@ import {
 } from "@opensearch-migrations/schemas";
 import {Console} from "console";
 import {parseUserConfig, parseYaml} from "./userConfigReader";
-import {setNamesInUserConfig} from "./migrationConfigTransformer";
+import {MigrationConfigTransformer, setNamesInUserConfig} from "./migrationConfigTransformer";
+import {formatInputValidationError, InputValidationError} from "./streamSchemaTransformer";
 import {YAMLParseError} from "yaml";
 
 global.console = new Console({
@@ -16,7 +17,7 @@ global.console = new Console({
 
 const COMMAND_LINE_HELP_MESSAGE = `Usage: find-secrets [input-file|-]
 
-Scrape a user workflow configuration for all occurrences of secret names.
+Validate a user workflow configuration and scrape all occurrences of secret names.
 `
 
 function isBasicAuth(ac: unknown): ac is z.infer<typeof HTTP_AUTH_BASIC> {
@@ -53,29 +54,41 @@ export async function main() {
         process.exit(2);
     }
 
-    let userConfig;
+    let data;
     try {
-        userConfig = await parseYaml(args[0]);
+        data = await parseYaml(args[0]);
     } catch (error) {
         if (error instanceof YAMLParseError) {
-            console.error('Error: YAML parse error: ' + error.message);
-            process.exit(3);
-        } else if (error instanceof Error) {
-            console.error('Error: Problem loading configuration: ' + error.message);
-            process.exit(4);
+            process.stdout.write(JSON.stringify({valid: false, errors: `YAML parse error: ${error.message}`}));
+            return;
         }
-        console.error('Error: Unknown error loading configuration: ' + String(error));
-        process.exit(5);
+        process.stdout.write(JSON.stringify({valid: false, errors: String(error)}));
+        return;
     }
 
-    if (userConfig) {
-        const reducedData = getCategorizedCredentialsSecretsFromConfig(userConfig);
-        process.stdout.write(JSON.stringify(reducedData, null, 2));
-    } else {
-        console.error("No userConfig cound");
-        console.error(COMMAND_LINE_HELP_MESSAGE);
-        process.exit(6);
+    if (!data) {
+        process.stdout.write(JSON.stringify({valid: false, errors: "Configuration was empty"}));
+        return;
     }
+
+    // Validate against full Zod schema with refinements
+    try {
+        const transformer = new MigrationConfigTransformer();
+        transformer.validateInput(data);
+    } catch (error) {
+        if (error instanceof InputValidationError) {
+            process.stdout.write(JSON.stringify({valid: false, errors: formatInputValidationError(error)}));
+        } else if (error instanceof z.ZodError) {
+            process.stdout.write(JSON.stringify({valid: false, errors: JSON.stringify(error.issues, null, 2)}));
+        } else {
+            process.stdout.write(JSON.stringify({valid: false, errors: String(error)}));
+        }
+        return;
+    }
+
+    // Validation passed — scrape secrets
+    const secrets = getCategorizedCredentialsSecretsFromConfig(data);
+    process.stdout.write(JSON.stringify({valid: true, ...secrets}));
 }
 
 if (require.main === module && !process.env.SUPPRESS_AUTO_LOAD) {
