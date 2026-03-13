@@ -1,6 +1,6 @@
 ARG BASE_IMAGE=migrations/elasticsearch_client_test_console:latest
 
-# Stage 1: Download and install tools (kafka, kubectl, helm, etcd)
+# Stage 1: Download and install tools (kafka, kubectl, helm)
 FROM ${BASE_IMAGE} AS migration-console-tools
 
 RUN ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
