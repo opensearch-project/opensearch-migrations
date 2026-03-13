@@ -425,7 +425,9 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
 
     # Sort nodes: by sort_order if present, then by timestamp, then by name
     def _sort_key(n):
-        return (n.get('sort_order', 999), n.get('finished_at') or n.get('started_at') or '9999-12-31T23:59:59Z', n.get('display_name', ''))
+        return (n.get('sort_order', 999),
+                n.get('finished_at') or n.get('started_at') or '9999-12-31T23:59:59Z',
+                n.get('display_name', ''))
 
     sorted_nodes = sorted(tree_nodes, key=_sort_key)
     logger.info("display_workflow_tree running ")

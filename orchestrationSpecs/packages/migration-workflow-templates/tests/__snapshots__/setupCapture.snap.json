@@ -232,6 +232,10 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{=toJSON({})}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='KafkaTopic: '+inputs.parameters.kafkaTopicName}}"
                   }
                 ]
               },

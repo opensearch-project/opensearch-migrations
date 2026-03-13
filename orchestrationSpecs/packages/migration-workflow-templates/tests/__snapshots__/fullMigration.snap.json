@@ -51,8 +51,12 @@
               "name": "version"
             },
             {
-              "name": "groupName",
+              "name": "groupName_view",
               "value": "Kafka Cluster"
+            },
+            {
+              "name": "sortOrder_view",
+              "value": "999"
             }
           ]
         },
@@ -110,8 +114,12 @@
               "name": "podReplicas"
             },
             {
-              "name": "groupName",
+              "name": "groupName_view",
               "value": "Proxy"
+            },
+            {
+              "name": "sortOrder_view",
+              "value": "999"
             },
             {
               "name": "imageMigrationConsoleLocation"
@@ -231,8 +239,12 @@
               "name": "sourceConfig"
             },
             {
-              "name": "groupName",
+              "name": "groupName_view",
               "value": "Snapshot"
+            },
+            {
+              "name": "sortOrder_view",
+              "value": "999"
             },
             {
               "name": "uniqueRunNonce",
@@ -364,8 +376,12 @@
               "name": "snapshotsSourceConfig"
             },
             {
-              "name": "groupName",
+              "name": "groupName_view",
               "value": "Snapshots"
+            },
+            {
+              "name": "sortOrder_view",
+              "value": "999"
             },
             {
               "name": "uniqueRunNonce",
@@ -412,8 +428,12 @@
               "arguments": {
                 "parameters": [
                   {
-                    "name": "groupName",
-                    "value": "{{inputs.parameters.groupName}}"
+                    "name": "groupName_view",
+                    "value": "{{inputs.parameters.groupName_view}}"
+                  },
+                  {
+                    "name": "sortOrder_view",
+                    "value": "{{inputs.parameters.sortOrder_view}}"
                   },
                   {
                     "name": "uniqueRunNonce",
@@ -497,7 +517,7 @@
               "name": "migrationLabel"
             },
             {
-              "name": "groupName"
+              "name": "groupName_view"
             },
             {
               "name": "metadataMigrationConfig",
@@ -682,8 +702,12 @@
               "name": "resourceName"
             },
             {
-              "name": "groupName",
+              "name": "groupName_view",
               "value": "Snapshot Migration"
+            },
+            {
+              "name": "sortOrder_view",
+              "value": "999"
             },
             {
               "name": "uniqueRunNonce",
@@ -774,7 +798,7 @@
               "arguments": {
                 "parameters": [
                   {
-                    "name": "groupName",
+                    "name": "groupName_view",
                     "value": "{{=item['label']}}"
                   },
                   {
@@ -900,8 +924,12 @@
               "name": "replayerOptions"
             },
             {
-              "name": "groupName",
+              "name": "groupName_view",
               "value": "Traffic Replay"
+            },
+            {
+              "name": "sortOrder_view",
+              "value": "999"
             },
             {
               "name": "dependsOnSnapshotMigrations"
@@ -1168,12 +1196,16 @@
                     "value": "{{=item['version']}}"
                   },
                   {
-                    "name": "groupName",
-                    "value": "{{='Kafka Cluster: '+item['name']}}"
+                    "name": "groupName_view",
+                    "value": "{{=item['name']}}"
+                  },
+                  {
+                    "name": "sortOrder_view",
+                    "value": "1"
                   }
                 ]
               },
-              "name": "setupKafkaCluster"
+              "name": "createKafka"
             },
             {
               "template": "setupsingleproxy",
@@ -1221,12 +1253,16 @@
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(item['proxyConfig']))}}"
                   },
                   {
-                    "name": "groupName",
-                    "value": "{{='Proxy: '+item['name']}}"
+                    "name": "groupName_view",
+                    "value": "{{=item['name']}}"
+                  },
+                  {
+                    "name": "sortOrder_view",
+                    "value": "2"
                   }
                 ]
               },
-              "name": "setupProxy"
+              "name": "createProxy"
             },
             {
               "template": "createsnapshotsforsource",
@@ -1282,8 +1318,12 @@
                     "value": "{{=toJSON(sprig.dict(\"createSnapshotConfig\", fromJSON(item['createSnapshotConfig']), \"sourceConfig\", fromJSON(item['sourceConfig'])))}}"
                   },
                   {
-                    "name": "groupName",
-                    "value": "{{='Snapshot: '+fromJSON(item['sourceConfig'])['label']}}"
+                    "name": "groupName_view",
+                    "value": "{{=fromJSON(item['sourceConfig'])['label']}}"
+                  },
+                  {
+                    "name": "sortOrder_view",
+                    "value": "3"
                   }
                 ]
               },
@@ -1343,16 +1383,20 @@
                     "value": "{{=item['sourceLabel']+'-'+sprig.dig('label', '', fromJSON(item['targetConfig']))+'-'+item['label']}}"
                   },
                   {
-                    "name": "groupName",
-                    "value": "{{='Migration: '+item['sourceLabel']+' → '+sprig.dig('label', '', fromJSON(item['targetConfig']))}}"
+                    "name": "groupName_view",
+                    "value": "{{=item['sourceLabel']+' → '+sprig.dig('label', '', fromJSON(item['targetConfig']))}}"
                   },
                   {
                     "name": "snapshotMigrationConfig",
                     "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotNameResolution\", fromJSON(item['snapshotNameResolution']), \"migrations\", fromJSON(item['migrations']), \"sourceVersion\", item['sourceVersion'], \"sourceLabel\", item['sourceLabel'], \"targetConfig\", fromJSON(item['targetConfig']), \"snapshotConfig\", fromJSON(item['snapshotConfig'])))}}"
+                  },
+                  {
+                    "name": "sortOrder_view",
+                    "value": "4"
                   }
                 ]
               },
-              "name": "snapshotMigration"
+              "name": "performSnapshotMigration"
             },
             {
               "template": "runsinglereplay",
@@ -1408,12 +1452,16 @@
                     "value": "{{=item['replayerConfig']}}"
                   },
                   {
-                    "name": "groupName",
-                    "value": "{{='Replay: '+item['fromProxy']+' → '+sprig.dig('label', '', fromJSON(item['toTarget']))}}"
+                    "name": "groupName_view",
+                    "value": "{{=item['fromProxy']+' → '+sprig.dig('label', '', fromJSON(item['toTarget']))}}"
+                  },
+                  {
+                    "name": "sortOrder_view",
+                    "value": "5"
                   }
                 ]
               },
-              "name": "trafficReplay"
+              "name": "createTrafficReplayer"
             }
           ]
         ],

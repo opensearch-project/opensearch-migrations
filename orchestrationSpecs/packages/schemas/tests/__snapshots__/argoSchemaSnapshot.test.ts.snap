@@ -1136,10 +1136,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "Resource limits and requests for replayer container."
                     },
-                    "authHeaderValue": {
-                      "type": "string",
-                      "default": ""
-                    },
                     "kafkaTrafficEnableMSKAuth": {
                       "type": "boolean",
                       "default": false
@@ -2399,11 +2395,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "requests"
                     ],
                     "description": "Resource limits and requests for replayer container."
-                  },
-                  "authHeaderValue": {
-                    "type": "string",
-                    "default": "",
-                    "description": "Static value for the authorization header of each request."
                   },
                   "kafkaTrafficEnableMSKAuth": {
                     "type": "boolean",

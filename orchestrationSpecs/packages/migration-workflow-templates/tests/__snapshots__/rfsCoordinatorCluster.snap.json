@@ -120,7 +120,7 @@
               "name": "coordinatorImage"
             },
             {
-              "name": "groupName",
+              "name": "groupName_view",
               "value": "Start RFS OpenSearch cluster for worker coordination"
             }
           ]
@@ -270,7 +270,7 @@
               "name": "clusterName"
             },
             {
-              "name": "groupName",
+              "name": "groupName_view",
               "value": "Stop RFS OpenSearch cluster for worker coordination"
             }
           ]

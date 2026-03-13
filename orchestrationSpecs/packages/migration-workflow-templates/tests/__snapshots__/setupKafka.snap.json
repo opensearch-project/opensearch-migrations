@@ -193,6 +193,10 @@
             },
             {
               "name": "clusterConfig"
+            },
+            {
+              "name": "retryGroupName_view",
+              "value": "Apply"
             }
           ]
         },
@@ -246,6 +250,10 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{inputs.parameters.retryGroupName_view}}"
                   }
                 ]
               },
@@ -266,6 +274,10 @@
             },
             {
               "name": "version"
+            },
+            {
+              "name": "retryGroupName_view",
+              "value": "Apply"
             }
           ]
         },
@@ -319,6 +331,10 @@
                   {
                     "name": "version",
                     "value": "{{inputs.parameters.version}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{inputs.parameters.retryGroupName_view}}"
                   }
                 ]
               },
@@ -349,6 +365,10 @@
             },
             {
               "name": "clusterConfig"
+            },
+            {
+              "name": "retryGroupName_view",
+              "value": "Apply"
             }
           ]
         },
@@ -410,6 +430,10 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{inputs.parameters.retryGroupName_view}}"
                   }
                 ]
               },
@@ -456,6 +480,10 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='KafkaNodePool: '+inputs.parameters.clusterName}}"
                   }
                 ]
               },
@@ -474,6 +502,10 @@
                   {
                     "name": "version",
                     "value": "{{inputs.parameters.version}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='KafkaCluster: '+inputs.parameters.clusterName}}"
                   }
                 ]
               },

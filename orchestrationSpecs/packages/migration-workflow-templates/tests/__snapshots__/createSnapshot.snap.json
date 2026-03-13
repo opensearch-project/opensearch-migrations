@@ -222,7 +222,7 @@
               "name": "snapshotK8sLabel"
             },
             {
-              "name": "groupName",
+              "name": "groupName_view",
               "value": "checks"
             },
             {
