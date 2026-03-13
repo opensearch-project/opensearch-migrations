@@ -1,0 +1,21 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonPythonTransformer')
+
+    implementation libs.jackson.core
+    implementation libs.jackson.databind
+    implementation libs.commons.compress
+    implementation libs.slf4j.api
+
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testImplementation libs.hamcrest
+    testRuntimeOnly libs.junit.jupiter.engine
+}
