@@ -492,7 +492,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "properties": {
                     "endpoint": {
                       "type": "string",
-                      "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?)?$",
+                      "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?)?$",
                       "default": ""
                     },
                     "allowInsecure": {
@@ -575,6 +575,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "label": {
                       "type": "string"
+                    },
+                    "proxy": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "endpoint": {
+                          "type": "string",
+                          "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$"
+                        },
+                        "allowInsecure": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "endpoint"
+                      ]
                     }
                   },
                   "required": [
@@ -859,7 +879,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "properties": {
                     "endpoint": {
                       "type": "string",
-                      "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?$"
+                      "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$"
                     },
                     "allowInsecure": {
                       "type": "boolean",
@@ -1142,7 +1162,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "kafkaTrafficPropertyFile": {
                       "type": "string",
-                      "default": ""
+                      "description": "File path for Kafka properties file for additional or overridden Kafka properties."
                     },
                     "lookaheadTimeSeconds": {
                       "type": "number",
@@ -1182,31 +1202,31 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "transformerConfig": {
                       "type": "string",
-                      "default": ""
+                      "description": "Request transformer configuration as a string or JSON."
                     },
                     "transformerConfigEncoded": {
                       "type": "string",
-                      "default": ""
+                      "description": "Base64-encoded request transformer configuration."
                     },
                     "transformerConfigFile": {
                       "type": "string",
-                      "default": ""
+                      "description": "Path to the JSON configuration file for request transformers."
                     },
                     "tupleTransformerConfig": {
                       "type": "string",
-                      "default": ""
+                      "description": "Tuple transformer configuration as a string or JSON."
                     },
                     "tupleTransformerConfigBase64": {
                       "type": "string",
-                      "default": ""
+                      "description": "Base64-encoded tuple transformer configuration."
                     },
                     "tupleTransformerConfigFile": {
                       "type": "string",
-                      "default": ""
+                      "description": "Path to the JSON configuration file for tuple transformers."
                     },
                     "userAgent": {
                       "type": "string",
-                      "default": ""
+                      "description": "String appended to the user-agent header for requests to the target cluster."
                     }
                   }
                 },
@@ -1215,7 +1235,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "properties": {
                     "endpoint": {
                       "type": "string",
-                      "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?$"
+                      "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$"
                     },
                     "allowInsecure": {
                       "type": "boolean",
@@ -1442,7 +1462,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "properties": {
           "endpoint": {
             "type": "string",
-            "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?)?$",
+            "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?)?$",
             "default": ""
           },
           "allowInsecure": {
@@ -1670,7 +1690,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "properties": {
           "endpoint": {
             "type": "string",
-            "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?$"
+            "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$"
           },
           "allowInsecure": {
             "type": "boolean",
@@ -2403,7 +2423,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "kafkaTrafficPropertyFile": {
                     "type": "string",
-                    "default": "",
                     "description": "File path for Kafka properties file for additional or overridden Kafka properties."
                   },
                   "lookaheadTimeSeconds": {
@@ -2453,37 +2472,30 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "transformerConfig": {
                     "type": "string",
-                    "default": "",
                     "description": "Request transformer configuration as a string or JSON."
                   },
                   "transformerConfigEncoded": {
                     "type": "string",
-                    "default": "",
                     "description": "Base64-encoded request transformer configuration."
                   },
                   "transformerConfigFile": {
                     "type": "string",
-                    "default": "",
                     "description": "Path to the JSON configuration file for request transformers."
                   },
                   "tupleTransformerConfig": {
                     "type": "string",
-                    "default": "",
                     "description": "Tuple transformer configuration as a string or JSON."
                   },
                   "tupleTransformerConfigBase64": {
                     "type": "string",
-                    "default": "",
                     "description": "Base64-encoded tuple transformer configuration."
                   },
                   "tupleTransformerConfigFile": {
                     "type": "string",
-                    "default": "",
                     "description": "Path to the JSON configuration file for tuple transformers."
                   },
                   "userAgent": {
                     "type": "string",
-                    "default": "",
                     "description": "String appended to the user-agent header for requests to the target cluster."
                   }
                 }

@@ -149,4 +149,38 @@ describe('MigrationConfigTransformer validation', () => {
             transformer.validateInput(baseConfig);
         }).not.toThrow();
     });
+
+    it('should attach a derived proxy route onto the transformed source config', async () => {
+        const result = await transformer.processFromObject(baseConfig);
+        expect(result.snapshots?.[0]?.sourceConfig).toMatchObject({
+            label: "source1",
+            proxy: {
+                name: "proxy1",
+                endpoint: "http://proxy1:9201",
+                allowInsecure: false
+            }
+        });
+    });
+
+    it('should reject multiple proxies attached to a single source', async () => {
+        const configWithMultipleSourceProxies = {
+            ...baseConfig,
+            traffic: {
+                ...baseConfig.traffic,
+                proxies: {
+                    ...baseConfig.traffic.proxies,
+                    "proxy2": {
+                        "source": "source1",
+                        "proxyConfig": { "listenPort": 9202 }
+                    }
+                }
+            }
+        };
+
+        await expect(transformer.processFromObject(configWithMultipleSourceProxies))
+            .rejects.toThrow(
+                "Source 'source1' maps to multiple proxies (proxy1, proxy2). " +
+                "Console test routing requires exactly zero or one proxy per source."
+            );
+    });
 });

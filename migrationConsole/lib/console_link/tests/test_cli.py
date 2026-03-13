@@ -56,6 +56,7 @@ def set_fake_aws_credentials():
     # before any real calls are made.
     os.environ['AWS_ACCESS_KEY_ID'] = 'AKIAIOSFODNN7EXAMPLE'
     os.environ['AWS_SECRET_ACCESS_KEY'] = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
+    os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 
 
 @pytest.fixture
@@ -88,6 +89,32 @@ target_cluster:
     with open(target_cluster_only_path, 'w') as f:
         f.write(target_cluster_only_yaml)
     return target_cluster_only_path
+
+
+@pytest.fixture
+def proxy_enabled_yaml_path(tmp_path):
+    proxy_enabled_path = tmp_path / "proxy_enabled.yaml"
+    proxy_enabled_yaml = """
+source_cluster:
+  endpoint: "https://elasticsearch:9200"
+  allow_insecure: true
+  basic_auth:
+    username: "admin"
+    password: "admin"
+  proxy:
+    name: "capture-proxy"
+    endpoint: "http://capture-proxy:9201"
+    allow_insecure: true
+target_cluster:
+  endpoint: "https://opensearchtarget:9200"
+  allow_insecure: true
+  basic_auth:
+    username: "admin"
+    password: "myStrongPassword123!"
+"""
+    with open(proxy_enabled_path, 'w') as f:
+        f.write(proxy_enabled_yaml)
+    return proxy_enabled_path
 
 # Tests around the general CLI functionality
 
@@ -181,6 +208,17 @@ def test_cli_cluster_cat_indices_as_json(runner, mocker):
     assert json.loads(result.output).keys() == {'source_cluster', 'target_cluster'}
 
 
+def test_cli_cluster_cat_indices_proxy(runner, mocker, proxy_enabled_yaml_path):
+    middleware_mock = mocker.spy(middleware.clusters, 'cat_indices')
+    api_mock = mocker.patch.object(Cluster, 'call_api')
+    result = runner.invoke(cli, ['--config-file', str(proxy_enabled_yaml_path), 'clusters', 'cat-indices',
+                                 '--cluster', 'proxy'],
+                           catch_exceptions=True)
+    assert result.exit_code == 0
+    middleware_mock.assert_called_once()
+    api_mock.assert_called_once()
+
+
 def test_cli_cluster_connection_check(runner, mocker):
     middleware_mock = mocker.spy(middleware.clusters, 'connection_check')
     api_mock = mocker.patch.object(Cluster, 'call_api')
@@ -192,6 +230,17 @@ def test_cli_cluster_connection_check(runner, mocker):
     # Should have been called two times.
     middleware_mock.assert_called()
     api_mock.assert_called()
+
+
+def test_cli_cluster_connection_check_proxy(runner, mocker, proxy_enabled_yaml_path):
+    middleware_mock = mocker.spy(middleware.clusters, 'connection_check')
+    api_mock = mocker.patch.object(Cluster, 'call_api')
+    result = runner.invoke(cli, ['--config-file', str(proxy_enabled_yaml_path), 'clusters', 'connection-check',
+                                 '--cluster', 'proxy'],
+                           catch_exceptions=True)
+    assert result.exit_code == 0
+    middleware_mock.assert_called_once()
+    api_mock.assert_called_once()
 
 
 def test_cli_version_check(runner, mocker):
@@ -255,7 +304,8 @@ def test_cli_cluster_cat_indices_and_connection_check_with_one_cluster(runner, m
 def test_cli_cluster_run_test_benchmarks(runner, mocker):
     middleware_mock = mocker.spy(middleware.clusters, 'run_test_benchmarks')
     model_mock = mocker.patch.object(Cluster, 'execute_benchmark_workload')
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'run-test-benchmarks'],
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'run-test-benchmarks',
+                                 '--cluster', 'source'],
                            catch_exceptions=True)
     middleware_mock.assert_called_once()
     model_mock.assert_called()
@@ -272,12 +322,23 @@ def test_cli_cluster_run_test_benchmarks_without_source_raises_error(runner, moc
     assert result.exit_code == 2
 
 
+def test_cli_cluster_run_test_benchmarks_proxy(runner, mocker, proxy_enabled_yaml_path):
+    middleware_mock = mocker.spy(middleware.clusters, 'run_test_benchmarks')
+    model_mock = mocker.patch.object(Cluster, 'execute_benchmark_workload')
+    result = runner.invoke(cli, ['--config-file', str(proxy_enabled_yaml_path), 'clusters', 'run-test-benchmarks',
+                                 '--cluster', 'proxy'],
+                           catch_exceptions=True)
+    middleware_mock.assert_called_once()
+    model_mock.assert_called()
+    assert result.exit_code == 0
+
+
 def test_cli_cluster_run_curl_source_cluster(runner, mocker):
     middleware_mock = mocker.spy(middleware.clusters, 'call_api')
     model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
     json_body = '{"id": 3, "number": 5}'
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
-                                 'source_cluster', 'new_index/_doc', '-XPOST', '--json', json_body],
+                                 'source', 'new_index/_doc', '-XPOST', '--json', json_body],
                            catch_exceptions=True)
     middleware_mock.assert_called_once()
     model_mock.assert_called_once()
@@ -292,7 +353,7 @@ def test_cli_cluster_run_curl_target_cluster(runner, mocker):
     middleware_mock = mocker.spy(middleware.clusters, 'call_api')
     model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
-                                 'target_cluster', '/_cat/indices', '-XGET', '-H', 'user-agent:TestAgent'],
+                                 'target', '/_cat/indices', '-XGET', '-H', 'user-agent:TestAgent'],
                            catch_exceptions=True)
     middleware_mock.assert_called_once()
     model_mock.assert_called_once()
@@ -302,11 +363,25 @@ def test_cli_cluster_run_curl_target_cluster(runner, mocker):
     assert result.exit_code == 0
 
 
+def test_cli_cluster_run_curl_proxy(runner, mocker, proxy_enabled_yaml_path):
+    middleware_mock = mocker.spy(middleware.clusters, 'call_api')
+    model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
+    result = runner.invoke(cli, ['--config-file', str(proxy_enabled_yaml_path), 'clusters', 'curl',
+                                 'proxy', '/_cat/indices', '-XGET'],
+                           catch_exceptions=True)
+    middleware_mock.assert_called_once()
+    model_mock.assert_called_once()
+    assert model_mock.call_args.kwargs == {'path': '/_cat/indices', 'method': HttpMethod.GET,
+                                           'data': None, 'headers': {}, 'timeout': 15,
+                                           'session': None, 'raise_error': False}
+    assert result.exit_code == 0
+
+
 def test_cli_cluster_run_curl_undefined_cluster(runner, mocker, source_cluster_only_yaml_path):
     middleware_mock = mocker.spy(middleware.clusters, 'call_api')
     model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(source_cluster_only_yaml_path), 'clusters', 'curl',
-                                 'target_cluster', '/_cat/indices'],
+                                 'target', '/_cat/indices'],
                            catch_exceptions=True)
     middleware_mock.assert_not_called()
     model_mock.assert_not_called()
@@ -318,7 +393,7 @@ def test_cli_cluster_run_curl_bad_json(runner, mocker):
     model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
     malformed_json = '{"id": 3, "number": "5}'
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
-                                 'source_cluster', '/new-index', '-XPOST', '--json', malformed_json],
+                                 'source', '/new-index', '-XPOST', '--json', malformed_json],
                            catch_exceptions=True)
     middleware_mock.assert_not_called()
     model_mock.assert_not_called()
@@ -329,7 +404,7 @@ def test_cli_cluster_run_curl_bad_headers(runner, mocker):
     middleware_mock = mocker.spy(middleware.clusters, 'call_api')
     model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
-                                 'source_cluster', '/new-index', '-H', 'key=value'],
+                                 'source', '/new-index', '-H', 'key=value'],
                            catch_exceptions=True)
     middleware_mock.assert_not_called()
     model_mock.assert_not_called()
@@ -341,7 +416,7 @@ def test_cli_cluster_run_curl_multiple_headers(runner, mocker):
     model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
     headers = [('key1', 'value1'), ('key2', 'value2')]
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
-                                 'target_cluster', '/', '-H', f"{headers[0][0]}:{headers[0][1]}",
+                                 'target', '/', '-H', f"{headers[0][0]}:{headers[0][1]}",
                                  "-H", f"{headers[1][0]}:{headers[1][1]}"],
                            catch_exceptions=True)
     middleware_mock.assert_called_once()
@@ -356,7 +431,7 @@ def test_cli_cluster_run_curl_head_method(runner, mocker):
     middleware_mock = mocker.spy(middleware.clusters, 'call_api')
     model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
-                                 'target_cluster', '/', '-X', 'HEAD'],
+                                 'target', '/', '-X', 'HEAD'],
                            catch_exceptions=True)
     middleware_mock.assert_called_once()
     model_mock.assert_called_once()
@@ -372,13 +447,39 @@ def test_cli_cluster_curl_timeout_shows_friendly_error(runner, mocker):
                         side_effect=requests.exceptions.ReadTimeout(
                             "HTTPSConnectionPool(host='example.com', port=443): Read timed out. (read timeout=15)"))
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
-                                 'target_cluster', '/_cluster/health'],
+                                 'target', '/_cluster/health'],
                            catch_exceptions=True)
     assert result.exit_code == 0
     assert "timed out" in result.output
     assert "--timeout" in result.output
     assert "HTTPSConnectionPool" not in result.output
     assert "Traceback" not in result.output
+
+
+def test_cli_cluster_generate_data_proxy(runner, mocker, proxy_enabled_yaml_path):
+    module_mock = mocker.patch('importlib.util.module_from_spec')
+    spec_mock = mocker.patch('importlib.util.spec_from_file_location')
+    exists_mock = mocker.patch('os.path.exists', return_value=True)
+    bulk_insert_data = mocker.Mock(return_value={
+        'total_inserted': 10,
+        'total_errors': 0,
+        'elapsed_time': 1.0,
+        'docs_per_sec': 10.0,
+        'estimated_size_mb': 0.1
+    })
+    module_mock.return_value.bulk_insert_data = bulk_insert_data
+    spec_mock.return_value.loader.exec_module = mocker.Mock()
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(proxy_enabled_yaml_path), 'clusters', 'generate-data',
+         '--cluster', 'proxy', '--index-name', 'test-index', '--num-docs', '10'],
+        catch_exceptions=True
+    )
+
+    exists_mock.assert_called()
+    bulk_insert_data.assert_called_once()
+    assert result.exit_code == 0
 
 
 def test_cli_cluster_clear_indices(runner, mocker):

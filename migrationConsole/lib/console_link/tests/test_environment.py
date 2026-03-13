@@ -5,7 +5,7 @@ import pytest
 
 from console_link.environment import Environment
 from console_link.models.backfill_base import Backfill
-from console_link.models.cluster import Cluster
+from console_link.models.cluster import Cluster, SourceCluster
 from console_link.models.metrics_source import MetricsSource
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
@@ -28,7 +28,7 @@ def test_valid_services_yaml_to_environment_succeeds():
     assert env.target_cluster is not None
     print(env.source_cluster)
     print(type(env.source_cluster))
-    assert isinstance(env.source_cluster, Cluster)
+    assert isinstance(env.source_cluster, SourceCluster)
     assert isinstance(env.target_cluster, Cluster)
     assert env.backfill is not None
     assert isinstance(env.backfill, Backfill)
@@ -80,3 +80,26 @@ def test_invalid_services_yaml_to_environment_raises_error(tmp_path):
     invalid_yaml_path = create_file_in_tmp_path(tmp_path, "invalid.yaml", INVALID_YAML)
     with pytest.raises((ValueError, yaml.YAMLError)):
         Environment(config_file=invalid_yaml_path)
+
+
+def test_source_cluster_proxy_is_attached_and_inherits_auth():
+    env = Environment(config={
+        "source_cluster": {
+            "endpoint": "https://source.example.com:9200",
+            "allow_insecure": False,
+            "basic_auth": {
+                "username": "admin",
+                "password": "admin"
+            },
+            "proxy": {
+                "name": "capture-proxy",
+                "endpoint": "http://capture-proxy:9201",
+                "allow_insecure": True
+            }
+        }
+    })
+
+    assert isinstance(env.source_cluster, SourceCluster)
+    assert env.proxy is not None
+    assert env.proxy.endpoint == "http://capture-proxy:9201"
+    assert env.proxy.auth_type == env.source_cluster.auth_type

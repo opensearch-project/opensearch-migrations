@@ -90,6 +90,10 @@ export function setNamesInUserConfig(userConfig: InputConfig): InputConfig {
     };
 }
 
+function makeProxyServiceEndpoint(proxyName: string, listenPort: number, hasTls: boolean): string {
+    return `${hasTls ? "https" : "http"}://${proxyName}:${listenPort}`;
+}
+
 function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = []): void {
     const schemaType = schema.constructor.name;
     
@@ -290,6 +294,30 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         });
     }
 
+    private getSourceAttachedProxy(userConfig: InputConfig, sourceName: string) {
+        const matchingProxies = Object.entries(userConfig.traffic?.proxies || {})
+            .filter(([_, proxy]) => proxy.source === sourceName);
+
+        if (matchingProxies.length === 0) {
+            return undefined;
+        }
+        if (matchingProxies.length > 1) {
+            const proxyNames = matchingProxies.map(([proxyName]) => proxyName).join(", ");
+            throw new Error(
+                `Source '${sourceName}' maps to multiple proxies (${proxyNames}). ` +
+                `Console test routing requires exactly zero or one proxy per source.`
+            );
+        }
+
+        const [proxyName, proxy] = matchingProxies[0];
+        const hasTls = proxy.proxyConfig.tls !== undefined;
+        return {
+            name: proxyName,
+            endpoint: makeProxyServiceEndpoint(proxyName, proxy.proxyConfig.listenPort, hasTls),
+            allowInsecure: hasTls,
+        };
+    }
+
     /** Build snapshot creation configs grouped by source cluster. */
     private buildSnapshots(userConfig: InputConfig) {
         // Build a map of source → proxy names for dependsOnProxySetups
@@ -331,9 +359,14 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
             if (createConfigs.length > 0) {
                 const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
+                const proxy = this.getSourceAttachedProxy(userConfig, sourceName);
                 results.push({
                     createSnapshotConfig: createConfigs,
-                    sourceConfig: { ...restOfSource, label: sourceName }
+                    sourceConfig: {
+                        ...restOfSource,
+                        label: sourceName,
+                        ...(proxy ? {proxy} : {})
+                    }
                 });
             }
         }

@@ -8,11 +8,17 @@ sourceClusters:
     endpoint: "https://elasticsearch-master-headless:9200"
     allowInsecure: true
     version: "ES 7.10.2"
+    authConfig:
+      basic:
+        secretName: "source-creds"
 
 targetClusters:
   target:
     endpoint: "https://opensearch-cluster-master-headless:9200"
     allowInsecure: true
+    authConfig:
+      basic:
+        secretName: "target-creds"
 
 snapshotMigrationConfigs: []
 

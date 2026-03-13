@@ -14,12 +14,23 @@ import {
     TARGET_CLUSTER_CONFIG, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG
 } from "./userSchemas";
 import {z} from "zod";
-import {S3_REPO_CONFIG} from "./userSchemas";
+import {HTTP_ENDPOINT_PATTERN, S3_REPO_CONFIG} from "./userSchemas";
 
 // DO NOT CHANGE FROM SNAKE CASE - used to create services.yaml files for the console
+export const SOURCE_PROXY_CONFIG = z.object({
+    name: z.string(),
+    endpoint: z.string().regex(new RegExp(HTTP_ENDPOINT_PATTERN)),
+    allowInsecure: z.boolean().default(false).optional(),
+});
+
+export const CONSOLE_SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.safeExtend({
+    proxy: SOURCE_PROXY_CONFIG.optional(),
+});
+
+// These keys are emitted into the services.yaml-style config used by the console.
 export const CONSOLE_SERVICES_CONFIG_FILE = z.object({
     kafka: KAFKA_CLIENT_CONFIG.optional(),
-    source_cluster: CLUSTER_CONFIG.optional(),
+    source_cluster: CONSOLE_SOURCE_CLUSTER_CONFIG.optional(),
     snapshot: NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.optional(),
     target_cluster: TARGET_CLUSTER_CONFIG.optional()
 });
@@ -82,6 +93,7 @@ export const NAMED_KAFKA_CLUSTER_CONFIG = z.object({
 export const NAMED_SOURCE_CLUSTER_CONFIG =
     makeOptionalDefaultedFieldsRequired(SOURCE_CLUSTER_CONFIG.omit({enabled: true}).safeExtend({
         label: z.string(), // override to required
+        proxy: SOURCE_PROXY_CONFIG.optional(),
     }));
 
 export const NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO =

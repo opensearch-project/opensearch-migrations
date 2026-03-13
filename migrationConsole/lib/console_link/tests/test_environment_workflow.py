@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 import pytest
 from console_link.environment import Environment, WorkflowConfigException
+from console_link.models.cluster import SourceCluster
 
 
 def test_get_cluster_from_workflow_config_valid():
@@ -59,10 +60,12 @@ def test_from_workflow_config(mock_store_cls):
     }
     mock_store.load_config.return_value = mock_config
 
-    with patch.object(Environment, '_get_cluster_from_workflow_config') as mock_get_cluster:
+    with patch.object(Environment, '_get_cluster_from_workflow_config') as mock_get_cluster, \
+            patch.object(Environment, '_get_source_cluster_from_workflow_config') as mock_get_source_cluster:
         mock_target = MagicMock()
         mock_source = MagicMock()
-        mock_get_cluster.side_effect = [mock_target, mock_source]
+        mock_get_cluster.return_value = mock_target
+        mock_get_source_cluster.return_value = mock_source
 
         env = Environment.from_workflow_config()
 
@@ -71,9 +74,40 @@ def test_from_workflow_config(mock_store_cls):
         assert env.source_cluster == mock_source
 
         # Verify calls
-        assert mock_get_cluster.call_count == 2
-        mock_get_cluster.assert_any_call(mock_config, "targetClusters", "target cluster")
-        mock_get_cluster.assert_any_call(mock_config, "sourceClusters", "source cluster")
+        mock_get_cluster.assert_called_once_with(mock_config, "targetClusters", "target cluster")
+        mock_get_source_cluster.assert_called_once_with(mock_config)
+
+
+def test_get_source_cluster_from_workflow_config_attaches_proxy():
+    config = {
+        "sourceClusters": {
+            "source": {
+                "endpoint": "https://elasticsearch-master-headless:9200",
+                "allowInsecure": True,
+                "authConfig": {
+                    "basic": {
+                        "secretName": "source-creds"
+                    }
+                }
+            }
+        },
+        "traffic": {
+            "proxies": {
+                "capture-proxy": {
+                    "source": "source",
+                    "proxyConfig": {
+                        "listenPort": 9201
+                    }
+                }
+            }
+        }
+    }
+
+    cluster = Environment._get_source_cluster_from_workflow_config(config)
+
+    assert isinstance(cluster, SourceCluster)
+    assert cluster.proxy is not None
+    assert cluster.proxy.endpoint == "http://capture-proxy:9201"
 
 
 @patch('console_link.environment.WorkflowConfigStore')

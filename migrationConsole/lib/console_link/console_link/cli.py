@@ -146,11 +146,28 @@ def cluster_group(ctx):
         raise click.UsageError("Neither source nor target cluster is defined.")
 
 
+def resolve_named_cluster(ctx, cluster_name):
+    cluster_map = {
+        'source': ('source', ctx.env.source_cluster),
+        'target': ('target', ctx.env.target_cluster),
+        'proxy': ('proxy', ctx.env.proxy),
+    }
+    attr, cluster_obj = cluster_map[cluster_name]
+    if cluster_obj is None:
+        raise click.UsageError(f"No {attr} cluster is defined.")
+    return cluster_obj
+
+
 @cluster_group.command(name="cat-indices")
 @click.option("--refresh", is_flag=True, default=False)
+@click.option('--cluster', type=click.Choice(['source', 'target', 'proxy'], case_sensitive=False),
+              required=False, help='Optional cluster to query instead of the default source+target output')
 @click.pass_obj
-def cat_indices_cmd(ctx, refresh):
+def cat_indices_cmd(ctx, refresh, cluster):
     """Simple program that calls `_cat/indices` on both a source and target cluster."""
+    if cluster:
+        click.echo(clusters_.cat_indices(resolve_named_cluster(ctx, cluster), refresh=refresh, as_json=ctx.json))
+        return
     if ctx.json:
         click.echo(
             json.dumps(
@@ -181,9 +198,14 @@ def cat_indices_cmd(ctx, refresh):
 
 
 @cluster_group.command(name="connection-check")
+@click.option('--cluster', type=click.Choice(['source', 'target', 'proxy'], case_sensitive=False),
+              required=False, help='Optional cluster to query instead of the default source+target output')
 @click.pass_obj
-def connection_check_cmd(ctx):
+def connection_check_cmd(ctx, cluster):
     """Checks if a connection can be established to source and target clusters"""
+    if cluster:
+        click.echo(clusters_.connection_check(resolve_named_cluster(ctx, cluster)))
+        return
     click.echo("SOURCE CLUSTER")
     if ctx.env.source_cluster:
         click.echo(clusters_.connection_check(ctx.env.source_cluster))
@@ -197,12 +219,14 @@ def connection_check_cmd(ctx):
 
 
 @cluster_group.command(name="run-test-benchmarks")
+@click.option('--cluster',
+              type=click.Choice(['source', 'target', 'proxy'], case_sensitive=False),
+              default='source',
+              help="Cluster to run benchmarks against (default: source)")
 @click.pass_obj
-def run_test_benchmarks_cmd(ctx):
-    """Run a series of OpenSearch Benchmark workloads against the source cluster"""
-    if not ctx.env.source_cluster:
-        raise click.UsageError("Cannot run test benchmarks because no source cluster is defined.")
-    click.echo(clusters_.run_test_benchmarks(ctx.env.source_cluster))
+def run_test_benchmarks_cmd(ctx, cluster):
+    """Run a series of OpenSearch Benchmark workloads against the specified cluster"""
+    click.echo(clusters_.run_test_benchmarks(resolve_named_cluster(ctx, cluster)))
 
 
 @cluster_group.command(name="clear-indices")
@@ -249,17 +273,19 @@ def parse_headers(header: str) -> Dict:
 @click.option('--json', 'json_data', help='Send data as JSON.')
 @click.option('--timeout', type=int, default=15, show_default=True,
               help='Request timeout in seconds.')
-@click.argument('cluster', required=True, type=click.Choice(['target_cluster', 'source_cluster'], case_sensitive=False))
+@click.argument('cluster', required=True, type=click.Choice(['target', 'source', 'proxy'], case_sensitive=False))
 @click.argument('path', required=True)
 @click.pass_obj
 def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data, timeout):
-    """This implements a small subset of curl commands, formatted for use against configured source or target clusters.
+    """This implements a small subset of curl commands.
+
+    It is formatted for use against configured source, target, or proxy clusters.
     By default the cluster definition is configured to use the `/config/migration_services.yaml` file that is
     pre-prepared on the migration console, but `--config-file` can point to any YAML file that defines a
-    source_cluster` or target_cluster` based on the schema of the `services.yaml` file.
+    `source`, `target`, or `source.proxy` based on the schema of the `services.yaml` file.
 
     In specifying the path of the route, use the name of the YAML object as the domain, followed by a space and the
-    path, e.g. `source_cluster /_cat/indices`."""
+    path, e.g. `source /_cat/indices`."""
 
     headers = parse_headers(header)
 
@@ -270,13 +296,7 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data, timeo
         except json.JSONDecodeError:
             raise click.BadParameter("Invalid JSON format.")
 
-    try:
-        cluster = ctx.env.__getattribute__(cluster)
-        if cluster is None:
-            raise AttributeError
-    except AttributeError:
-        raise click.BadArgumentUsage(f"Unknown cluster {cluster}. Currently only `source_cluster` and "
-                                     "`target_cluster` are valid and must also be defined in the config file.")
+    cluster = resolve_named_cluster(ctx, cluster)
 
     if path[0] != '/':
         path = '/' + path
@@ -293,7 +313,7 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data, timeo
 
 
 @cluster_group.command(name="generate-data")
-@click.option('--cluster', type=click.Choice(['source_cluster', 'target_cluster'], case_sensitive=False),
+@click.option('--cluster', type=click.Choice(['source', 'target', 'proxy'], case_sensitive=False),
               required=True, help='Target cluster for data generation')
 @click.option('--index-name', required=True, help='Name of the index to populate')
 @click.option('--doc-size-bytes', type=int, default=150, help='Approximate size of each document in bytes')
@@ -318,13 +338,7 @@ def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target
         click.echo(f"Target size: {target_size_mb}MB = ~{num_docs:,} documents")
     
     # Get the cluster object
-    try:
-        cluster_obj = ctx.env.__getattribute__(cluster)
-        if cluster_obj is None:
-            raise AttributeError
-    except AttributeError:
-        raise click.BadArgumentUsage(f"Unknown cluster {cluster}. Currently only `source_cluster` and "
-                                     "`target_cluster` are valid and must also be defined in the config file.")
+    cluster_obj = resolve_named_cluster(ctx, cluster)
     
     click.echo(f"Generating {num_docs:,} documents in index '{index_name}' on {cluster}")
     click.echo(f"Document size: ~{doc_size_bytes} bytes, Batch size: {batch_size}")
@@ -340,7 +354,7 @@ def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target
         # Dev path (relative to current file)
         dev_path = os.path.join(
             os.path.dirname(__file__),
-            '../../../TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole/testDocumentGenerator.py')
+            '../../../../TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole/testDocumentGenerator.py')
         
         script_path = container_path if os.path.exists(container_path) else dev_path
         
@@ -801,6 +815,7 @@ def show(inputfile, outputfile):
 
 cli.add_command(cluster_group)
 cli.add_command(completion)
+cli.add_command(kafka_group)
 
 if not DISABLE_LEGACY_COMMANDS:
     cli.add_command(snapshot_group)
@@ -808,7 +823,6 @@ if not DISABLE_LEGACY_COMMANDS:
     cli.add_command(replay_group)
     cli.add_command(metadata_group)
     cli.add_command(metrics_group)
-    cli.add_command(kafka_group)
     cli.add_command(tuples_group)
 
 if __name__ == "__main__":

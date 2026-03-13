@@ -15,6 +15,7 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {
     CLUSTER_CONFIG,
+    CONSOLE_SOURCE_CLUSTER_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
     DEFAULT_RESOURCES,
@@ -46,7 +47,7 @@ export const configComponentParameters = {
         description: "Snapshot configuration information (JSON)"
     }),
     sourceConfig: defineParam({
-        expression: expr.cast(expr.literal("")).to<z.infer<typeof CLUSTER_CONFIG>>(),
+        expression: expr.cast(expr.literal("")).to<z.infer<typeof CONSOLE_SOURCE_CLUSTER_CONFIG>>(),
         description: "Source cluster configuration (JSON)"
     }),
     snapshotConfig: defineParam({
@@ -113,7 +114,7 @@ export const MigrationConsole = WorkflowBuilder.create({
                     expr.mergeDicts(
                         expr.mergeDicts(
                             makeOptionalDict("kafka", expr.asString(c.inputs.kafkaInfo), typeToken<z.infer<typeof CONSOLE_KAFKA_SERVICES_CONFIG>>()),
-                            makeOptionalDict("source_cluster", expr.asString(c.inputs.sourceConfig), typeToken<z.infer<typeof CLUSTER_CONFIG>>())
+                            makeOptionalDict("source_cluster", expr.asString(c.inputs.sourceConfig), typeToken<z.infer<typeof CONSOLE_SOURCE_CLUSTER_CONFIG>>())
                         ),
                         expr.mergeDicts(
                             makeOptionalDict("target_cluster", expr.asString(c.inputs.targetConfig), typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>()),

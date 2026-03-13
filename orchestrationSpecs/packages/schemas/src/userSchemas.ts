@@ -103,12 +103,18 @@ export const S3_REPO_CONFIG = z.object({
         .describe("IAM role ARN to assume when accessing S3 for snapshot operations")
 });
 
+export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
+export const OPTIONAL_PORT_PATTERN = `(?::${PORT_NUMBER_PATTERN})?`;
+export const HOSTNAME_PATTERN = "[^:\\/\\s]+";
+export const HTTP_ENDPOINT_PATTERN = `^https?:\\/\\/${HOSTNAME_PATTERN}${OPTIONAL_PORT_PATTERN}(?:\\/)?$`;
+export const OPTIONAL_HTTP_ENDPOINT_PATTERN = `^(?:https?:\\/\\/${HOSTNAME_PATTERN}${OPTIONAL_PORT_PATTERN}(?:\\/)?)?$`;
+
 export const KAFKA_CLIENT_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional(),
     kafkaConnection: z.string()
         .describe("Sequence of <HOSTNAME:PORT> values delimited by ','.  " +
             "If empty, the cluster is automatically created and this is filled in.")
-        .regex(/^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])(?:,(?!$)|$))*$/),
+        .regex(new RegExp(`^(?:[a-z0-9][-a-z0-9.]*:${PORT_NUMBER_PATTERN}(?:,(?!$)|$))*$`)),
     kafkaTopic: z.string().describe("Empty defaults to the name of the target label").default(""),
 });
 
@@ -379,14 +385,14 @@ export const HTTP_AUTH_MTLS = z.object({
 export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123])(?:\.[0-9]+)+$/);
 
 export const CLUSTER_CONFIG = z.object({
-    endpoint:  z.string().regex(/^(?:https?:\/\/[^:\/\s]+(:\d+)?(\/)?)?$/).default("").optional(),
+    endpoint:  z.string().regex(new RegExp(OPTIONAL_HTTP_ENDPOINT_PATTERN)).default("").optional(),
     allowInsecure: z.boolean().default(false).optional(),
     authConfig: z.union([HTTP_AUTH_BASIC, HTTP_AUTH_SIGV4, HTTP_AUTH_MTLS]).optional(),
 });
 
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     enabled: z.boolean().default(true).optional(),
-    endpoint:  z.string().regex(/^https?:\/\/[^:\/\s]+(:\d+)?(\/)?$/), // override to required
+    endpoint:  z.string().regex(new RegExp(HTTP_ENDPOINT_PATTERN)), // override to required
 });
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
