@@ -121,6 +121,41 @@ otelConfiguration:
           exporters: [awsemf, prometheus]
 
 charts:
+  argo-workflows:
+    values:
+      controller:
+        replicas: 2
+        pdb:
+          enabled: true
+          minAvailable: 1
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: argo-workflows-controller
+                  topologyKey: kubernetes.io/hostname
+        persistence:
+          postgresql:
+            ssl: true
+            sslMode: require
+      server:
+        replicas: 2
+        pdb:
+          enabled: true
+          minAvailable: 1
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/name: argo-workflows-server
+                  topologyKey: kubernetes.io/hostname
+
   fluent-bit:
     values:
       env:
@@ -162,3 +197,18 @@ charts:
 etcdCluster:
   cpu: 500m
   memory: 1Gi
+
+# HA CNPG cluster for EKS production
+cnpgCluster:
+  instances: 2
+  storageSize: "10Gi"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  # Prevent both instances from being disrupted simultaneously
+  podAntiAffinityType: "required"        # Hard anti-affinity: instances MUST be on different nodes
+  topologyKey: "topology.kubernetes.io/zone"  # Spread across AZs for zone failure resilience

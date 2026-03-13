@@ -1,0 +1,109 @@
+{{- if index .Values.conditionalPackageInstalls "cloudnative-pg" }}
+# Job to delete CNPG Cluster before operator is uninstalled
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-delete-cnpg-cluster
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: OnFailure
+      containers:
+      - name: delete-cnpg
+        image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "Deleting CNPG Cluster..."
+          kubectl delete cluster argo-postgres -n {{ .Release.Namespace }} --ignore-not-found=true --wait=true --timeout=120s
+          echo "Waiting for PVCs to be cleaned up..."
+          kubectl wait --for=delete pvc -l cnpg.io/cluster=argo-postgres -n {{ .Release.Namespace }} --timeout=60s 2>/dev/null || true
+          echo "CNPG Cluster deleted"
+---
+# Job to create CNPG Cluster after operator is installed
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-create-cnpg-cluster
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 300
+  template:
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: OnFailure
+      containers:
+      - name: create-cnpg
+        image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          kubectl wait --for=condition=Established crd/clusters.postgresql.cnpg.io --timeout=300s
+          kubectl wait --for=condition=available deployment/cloudnative-pg -n {{ .Release.Namespace }} --timeout=300s
+
+          echo "Creating CNPG Cluster..."
+          cat <<EOF | kubectl apply -f -
+          apiVersion: postgresql.cnpg.io/v1
+          kind: Cluster
+          metadata:
+            name: argo-postgres
+            namespace: {{ .Release.Namespace }}
+          spec:
+            instances: {{ .Values.cnpgCluster.instances }}
+
+            # Rolling update strategy: automatic failover with graceful switchover
+            primaryUpdateStrategy: {{ .Values.cnpgCluster.primaryUpdateStrategy | default "unsupervised" }}
+            primaryUpdateMethod: {{ .Values.cnpgCluster.primaryUpdateMethod | default "switchover" }}
+
+            # Pod scheduling: anti-affinity and topology spread
+            affinity:
+              enablePodAntiAffinity: true
+              podAntiAffinityType: {{ .Values.cnpgCluster.podAntiAffinityType | default "preferred" }}
+              topologyKey: {{ .Values.cnpgCluster.topologyKey | default "kubernetes.io/hostname" }}
+
+            {{- if .Values.cnpgCluster.imageName }}
+            imageName: {{ .Values.cnpgCluster.imageName }}
+            {{- end }}
+
+            bootstrap:
+              initdb:
+                database: {{ .Values.cnpgCluster.database }}
+                owner: {{ .Values.cnpgCluster.owner }}
+            storage:
+              size: {{ .Values.cnpgCluster.storageSize }}
+              {{- if .Values.cnpgCluster.storageClass }}
+              storageClassName: {{ .Values.cnpgCluster.storageClass }}
+              {{- end }}
+            resources:
+              requests:
+                cpu: {{ .Values.cnpgCluster.resources.requests.cpu }}
+                memory: {{ .Values.cnpgCluster.resources.requests.memory }}
+              limits:
+                cpu: {{ .Values.cnpgCluster.resources.limits.cpu }}
+                memory: {{ .Values.cnpgCluster.resources.limits.memory }}
+
+            monitoring:
+              enablePodMonitor: true
+          EOF
+
+          echo "Waiting for CNPG Cluster to be ready..."
+          kubectl wait --for=condition=Ready cluster/argo-postgres -n {{ .Release.Namespace }} --timeout=600s
+          echo "CNPG Cluster created and ready"
+{{- end }}

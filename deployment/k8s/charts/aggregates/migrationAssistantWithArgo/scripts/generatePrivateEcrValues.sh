@@ -152,6 +152,12 @@ charts:
         image:
           repository: "${M}/quay.io/brancz/kube-rbac-proxy"
 
+  cloudnative-pg:
+    repository: "oci://${ECR}/charts/cloudnative-pg"
+    values:
+      image:
+        repository: "${M}/ghcr.io/cloudnative-pg/cloudnative-pg"
+
   localstack:
     repository: "oci://${ECR}/charts/localstack"
     values:
@@ -216,4 +222,8 @@ images:
 # --- Etcd data image (used by etcd-operator CRD) ---
 etcdCluster:
   image: "${M}/quay.io/coreos/etcd:v3.5.12"
+
+# --- CNPG PostgreSQL data image (used by CNPG operator at runtime) ---
+cnpgCluster:
+  imageName: "${M}/ghcr.io/cloudnative-pg/postgresql:17.2"
 EOF
