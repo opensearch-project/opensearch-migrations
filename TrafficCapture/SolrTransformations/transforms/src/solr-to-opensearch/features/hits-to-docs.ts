@@ -30,7 +30,7 @@ export const response: MicroTransform<ResponseContext> = {
 
     const responseMap = new Map();
     responseMap.set('numFound', total.get('value'));
-    responseMap.set('start', 0);
+    responseMap.set('start', Number.parseInt(ctx.requestParams.get('start') || '0', 10));
     responseMap.set('numFoundExact', true);
     responseMap.set('docs', docs);
     ctx.responseBody.set('response', responseMap);
