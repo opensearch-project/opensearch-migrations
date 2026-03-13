@@ -156,18 +156,18 @@ function createRfsCoordinatorStatefulSetManifest(clusterName: BaseExpression<str
                                     command: [
                                         "sh",
                                         "-c",
-                                        "curl -sk -u \"${OPENSEARCH_INITIAL_ADMIN_USERNAME}:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}\" \"https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=10s\""
+                                        "curl -sk -u \"${OPENSEARCH_INITIAL_ADMIN_USERNAME}:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}\" \"https://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s\""
                                     ]
                                 },
                                 // Waits and gives JVM time to start before probing
-                                initialDelaySeconds: 10,
-                                // Check every 15s; matched with timeoutSeconds to prevent overlapping probes
-                                periodSeconds: 15,
-                                // Must be >= the curl internal timeout (10s) to allow the API to respond
-                                timeoutSeconds: 15,
-                                // 20 failures * 15s = 300s (5m). Provides a 5min window for the
+                                initialDelaySeconds: 5,
+                                // Check every 10s; matched with timeoutSeconds to prevent overlapping probes
+                                periodSeconds: 10,
+                                // Must be >= the curl internal timeout (5s) to allow the API to respond
+                                timeoutSeconds: 10,
+                                // 30 failures * 10s = 300s (5m). Provides a 5min window for the
                                 // single-node cluster to reach 'yellow' status during bootstrap.
-                                failureThreshold: 20
+                                failureThreshold: 30
                             },
                             volumeMounts: [
                                 {

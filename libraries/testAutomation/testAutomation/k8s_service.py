@@ -80,7 +80,7 @@ class K8sService:
                 logger.info("All non-workflow pods are healthy.")
                 return True
             logger.info(f"The following pods are not healthy yet: [{', '.join(unhealthy_pods)}]")
-            time.sleep(3)
+            time.sleep(2)
 
         raise TimeoutError(
             f"Timeout reached: Not all pods became healthy within {timeout} seconds. "
@@ -265,7 +265,7 @@ class K8sService:
             if not result or not result.stdout.strip():
                 logger.info(f"Namespace '{namespace}' deleted successfully")
                 return
-            time.sleep(3)
+            time.sleep(1)
         raise TimeoutError(f"Namespace '{namespace}' still exists after {timeout_seconds}s")
 
     def delete_namespace(self) -> None:
@@ -389,4 +389,11 @@ class K8sService:
         logger.info("Deleting all Argo WorkflowTemplates from all namespaces")
         self.run_command(self._kubectl_base() + [
             "delete", "workflowtemplates", "--all-namespaces", "--all", "--ignore-not-found"
+        ], ignore_errors=True)
+
+    def delete_all_argo_workflows(self) -> None:
+        """Deletes all Argo Workflow instances (not templates) from the namespace."""
+        logger.info("Deleting all Argo Workflows from namespace")
+        self.run_command(self._kubectl_base() + [
+            "delete", "workflows", "--all", "-n", self.namespace, "--ignore-not-found"
         ], ignore_errors=True)
