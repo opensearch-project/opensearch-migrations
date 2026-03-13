@@ -37,7 +37,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec:\n  replicas: {{=sprig.dig('replicas', 1, fromJSON(inputs.parameters.clusterConfig))}}\n  roles:\n    - controller\n    - broker\n  storage:\n    type: ephemeral\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec:\n  replicas: {{=sprig.dig('replicas', 1, fromJSON(inputs.parameters.clusterConfig))}}\n  roles:\n    - controller\n    - broker\n  storage:\n    type: persistent-claim\n    size: 1Gi\n    deleteClaim: true\n",
           "action": "apply",
           "setOwnerReference": false
         },

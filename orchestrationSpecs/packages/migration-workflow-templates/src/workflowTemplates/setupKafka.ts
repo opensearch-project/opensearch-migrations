@@ -29,7 +29,7 @@ function makeDeployKafkaNodePool(args: {
         spec: {
             replicas: makeDirectTypeProxy(args.replicas),
             roles: ["controller", "broker"],
-            storage: {type: "ephemeral"}
+            storage: {type: "persistent-claim", size: "1Gi", deleteClaim: true}
         }
     };
 }
