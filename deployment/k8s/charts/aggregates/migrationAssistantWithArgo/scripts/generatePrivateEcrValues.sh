@@ -54,6 +54,9 @@ charts:
       kafka:
         image:
           registry: "${M}/quay.io"
+      buildah:
+        image:
+          registry: "${M}/quay.io"
 
   argo-workflows:
     repository: "oci://${ECR}/charts/argo-workflows"
