@@ -29,7 +29,7 @@ tasks.register('buildTransforms', NpmTask) {
 
 tasks.register('testTransforms', NpmTask) {
     description = 'Run vitest tests for TypeScript transforms'
-    args = ['run', 'test']
+    args = ['run', 'test:nocov']
     dependsOn installTransformDeps
     inputs.dir("${projectDir}/transforms/src")
     inputs.file("${projectDir}/transforms/package.json")

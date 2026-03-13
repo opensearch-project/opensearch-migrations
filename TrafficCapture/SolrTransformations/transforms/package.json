@@ -10,13 +10,15 @@
     "lint": "eslint src/",
     "format": "prettier --check src/",
     "format:fix": "prettier --write src/",
-    "test": "vitest run",
+    "test": "vitest run --coverage",
+    "test:nocov": "vitest run",
     "clean": "rm -rf dist"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
     "@typescript/native-preview": "7.0.0-dev.20251210.1",
+    "@vitest/coverage-v8": "^4.0.18",
     "esbuild": "^0.25.0",
     "eslint": "^10.0.2",
     "eslint-config-prettier": "^10.1.8",
