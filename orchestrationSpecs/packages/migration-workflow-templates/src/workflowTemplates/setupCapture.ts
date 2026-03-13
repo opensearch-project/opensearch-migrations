@@ -291,6 +291,7 @@ export const SetupCapture = WorkflowBuilder.create({
                         clusterName: b.inputs.kafkaClusterName,
                         topicName: b.inputs.kafkaTopicName,
                         clusterConfig: expr.serialize(expr.literal({})),
+                        retryGroupName_view: expr.concat(expr.literal("KafkaTopic: "), b.inputs.kafkaTopicName),
                     })
                 )
                 .addStepGroup(g => g

@@ -173,7 +173,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("targetK8sLabel", typeToken<string>())
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
-        .addOptionalInput("groupName", c => "checks")
+        .addOptionalInput("groupName_view", c => "checks")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
             .addStep("runStatusChecks", INTERNAL, "checkSnapshotStatusInternal", c =>

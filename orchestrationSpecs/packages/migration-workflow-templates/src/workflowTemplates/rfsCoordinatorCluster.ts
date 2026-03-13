@@ -255,7 +255,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
     .addTemplate("createRfsCoordinator", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("coordinatorImage", typeToken<string>())
-        .addOptionalInput("groupName", c => "Start RFS OpenSearch cluster for worker coordination")
+        .addOptionalInput("groupName_view", c => "Start RFS OpenSearch cluster for worker coordination")
         .addSteps(b => b
             .addStep("createSecret", INTERNAL, "createRfsCoordinatorSecret", c =>
                 c.register({clusterName: b.inputs.clusterName}))
@@ -321,7 +321,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
 
     .addTemplate("deleteRfsCoordinator", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addOptionalInput("groupName", c => "Stop RFS OpenSearch cluster for worker coordination")
+        .addOptionalInput("groupName_view", c => "Stop RFS OpenSearch cluster for worker coordination")
         .addSteps(b => b
             .addStepGroup(g => g
                 .addStep("deleteStatefulSet", INTERNAL, "deleteRfsCoordinatorStatefulSet", c =>

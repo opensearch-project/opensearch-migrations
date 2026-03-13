@@ -202,6 +202,7 @@ export const SetupKafka = WorkflowBuilder.create({
     .addTemplate("deployKafkaNodePoolWithRetry", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addOptionalInput("retryGroupName_view", c => "Apply")
 
         .addSteps(b => b
             .addStep("tryApply", INTERNAL, "deployKafkaNodePool", c =>
@@ -221,6 +222,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 c.register({
                     clusterName: b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
+                    retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
                 {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
             )
@@ -230,6 +232,7 @@ export const SetupKafka = WorkflowBuilder.create({
     .addTemplate("deployKafkaClusterKraftWithRetry", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("version", typeToken<string>())
+        .addOptionalInput("retryGroupName_view", c => "Apply")
 
         .addSteps(b => b
             .addStep("tryApply", INTERNAL, "deployKafkaClusterKraft", c =>
@@ -249,6 +252,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 c.register({
                     clusterName: b.inputs.clusterName,
                     version: b.inputs.version,
+                    retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
                 {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
             )
@@ -260,6 +264,7 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("topicName", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addOptionalInput("retryGroupName_view", c => "Apply")
 
         .addSteps(b => b
             .addStep("tryApply", INTERNAL, "createKafkaTopic", c =>
@@ -281,6 +286,7 @@ export const SetupKafka = WorkflowBuilder.create({
                     clusterName: b.inputs.clusterName,
                     topicName: b.inputs.topicName,
                     clusterConfig: b.inputs.clusterConfig,
+                    retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
                 {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
             )
@@ -299,12 +305,14 @@ export const SetupKafka = WorkflowBuilder.create({
                 c.register({
                     clusterName: b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
+                    retryGroupName_view: expr.concat(expr.literal("KafkaNodePool: "), b.inputs.clusterName),
                 })
             )
             .addStep("deployCluster", INTERNAL, "deployKafkaClusterKraftWithRetry", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
                     version: b.inputs.version,
+                    retryGroupName_view: expr.concat(expr.literal("KafkaCluster: "), b.inputs.clusterName),
                 })
             )
         )

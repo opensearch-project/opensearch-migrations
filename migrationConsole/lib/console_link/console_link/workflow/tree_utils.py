@@ -48,15 +48,19 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
 
     # First pass: create all nodes
     for node_id, node in nodes.items():
-        # Extract groupName if available
         inputs = node.get('inputs', {})
         parameters = inputs.get('parameters', [])
         group_name = None
+        sort_order = None
 
         for param in parameters:
-            if param.get('name') == 'groupName':
+            if param.get('name') == 'groupName_view':
                 group_name = param.get('value', '')
-                break
+            elif param.get('name') == 'sortOrder_view':
+                try:
+                    sort_order = int(param.get('value', ''))
+                except (ValueError, TypeError):
+                    pass
 
         tree_node = {
             'id': node_id,
@@ -72,6 +76,8 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
         }
         if group_name:
             tree_node['group_name'] = group_name
+        if sort_order is not None:
+            tree_node['sort_order'] = sort_order
         tree_nodes[node_id] = tree_node
 
     # Second pass: establish parent-child relationships via boundaryID
@@ -125,7 +131,7 @@ def _is_leaf_only_retry(node: Dict[str, Any]) -> bool:
             return False
         if any(p.get('name') == 'statusOutput' for p in child.get('outputs', {}).get('parameters', [])):
             return False
-        if any(p.get('name') == 'groupName' for p in child.get('inputs', {}).get('parameters', [])):
+        if any(p.get('name') == 'groupName_view' for p in child.get('inputs', {}).get('parameters', [])):
             return False
     return True
 
@@ -157,10 +163,67 @@ def _collapse_retry(node: Dict[str, Any]) -> Dict[str, Any]:
     return collapsed
 
 
+def _is_retry_group(node: Dict[str, Any]) -> bool:
+    """Check if a node is a *WithRetry Steps node (tryApply/waitForFix/retryLoop pattern)."""
+    if node.get('type') not in ('Steps',):
+        return False
+    child_names = {c.get('display_name', '').split('(')[0] for c in node.get('children', [])}
+    return 'tryApply' in child_names and 'waitForFix' in child_names
+
+
+def _collapse_retry_group(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Collapse a *WithRetry Steps node into a single display node."""
+    children = node.get('children', [])
+    child_map = {}
+    for c in children:
+        base = c.get('display_name', '').split('(')[0]
+        child_map[base] = c
+
+    try_apply = child_map.get('tryApply')
+    wait_for_fix = child_map.get('waitForFix')
+    retry_loop = child_map.get('retryLoop')
+
+    if not try_apply:
+        return node
+
+    # Walk recursive retryLoop chain to find final attempt
+    attempt = 1
+    final_try = try_apply
+    final_wait = wait_for_fix
+    current_retry = retry_loop
+    while current_retry and current_retry.get('phase') != 'Skipped':
+        retry_child_map = {}
+        for c in current_retry.get('children', []):
+            retry_child_map[c.get('display_name', '').split('(')[0]] = c
+        next_try = retry_child_map.get('tryApply')
+        if next_try:
+            attempt += 1
+            final_try = next_try
+            final_wait = retry_child_map.get('waitForFix', final_wait)
+            current_retry = retry_child_map.get('retryLoop')
+        else:
+            break
+
+    group_name = get_node_input_parameter(node, 'retryGroupName_view') or 'Apply'
+    display = group_name if attempt == 1 else f"{group_name} (attempt {attempt})"
+
+    collapsed = final_try.copy()
+    collapsed['display_name'] = display
+    collapsed['children'] = []
+
+    # If tryApply failed and waitForFix is running, show as waiting for approval
+    if final_try.get('phase') == 'Failed' and final_wait and final_wait.get('phase') == 'Running':
+        collapsed['phase'] = 'Running'
+        collapsed['type'] = 'Suspend'
+
+    return collapsed
+
+
 def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Filter tree nodes: preserve Pod/Suspend/Skipped nodes and containers with groupName.
 
     Collapse infrastructure retry nodes (bare leaf Pods) to a single logical step.
+    Collapse *WithRetry retry groups (tryApply/waitForFix/retryLoop) to a single node.
     """
 
     def should_keep_by_type(node):
@@ -170,14 +233,16 @@ def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def has_group_name(node):
         # Keep containers that have a groupName (meaningful grouping)
         for param in node.get('inputs', {}).get('parameters', []):
-            if param.get('name') == 'groupName':
+            if param.get('name') == 'groupName_view':
                 return True
         return False
 
     def filter_recursive(nodes):
         filtered = []
         for node in nodes:
-            if node.get('type') == 'Retry' and _is_leaf_only_retry(node):
+            if _is_retry_group(node):
+                filtered.append(_collapse_retry_group(node))
+            elif node.get('type') == 'Retry' and _is_leaf_only_retry(node):
                 filtered.append(_collapse_retry(node))
             elif should_keep_by_type(node) or has_group_name(node):
                 filtered_node = node.copy()
@@ -283,11 +348,11 @@ def get_step_rich_label(node: dict, status_output: str, show_approval_name: bool
     step_name = node['display_name']
 
     # Clean up container node names (non-Pod types)
-    if node['type'] not in ['Pod', 'Suspend', 'Skipped']:
+    if node['type'] not in ['Pod', 'Suspend']:
         step_name = clean_display_name(step_name)
 
     if node.get('group_name'):
-        step_name = f"{step_name} ({node['group_name']})"
+        step_name = f"{step_name}: {node['group_name']}"
 
     # Add timestamp - prefer finished_at, fallback to started_at
     timestamp_str = ""
@@ -358,15 +423,18 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
                           workflow_data: Optional[Dict] = None) -> None:
     """Display workflow tree using Rich with proper nesting and live check results."""
 
-    # Sort nodes chronologically by startedAt time (ascending - earliest first)
-    sorted_nodes = sorted(tree_nodes, key=lambda n: n.get('started_at') or '9999-12-31T23:59:59Z')
+    # Sort nodes: by sort_order if present, then by timestamp, then by name
+    def _sort_key(n):
+        return (n.get('sort_order', 999), n.get('finished_at') or n.get('started_at') or '9999-12-31T23:59:59Z', n.get('display_name', ''))
+
+    sorted_nodes = sorted(tree_nodes, key=_sort_key)
     logger.info("display_workflow_tree running ")
 
     console = Console()
     tree = Tree("[bold]Workflow Steps[/bold]")
 
     def add_nodes_to_tree(nodes, parent_tree):
-        sorted_children = sorted(nodes, key=lambda n: n.get('started_at') or '9999-12-31T23:59:59Z')
+        sorted_children = sorted(nodes, key=_sort_key)
 
         for node in sorted_children:
             # Get statusOutput for all nodes that might have it

@@ -352,7 +352,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("targetK8sLabel", typeToken<string>())
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
         .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
-        .addOptionalInput("groupName", c => "checks")
+        .addOptionalInput("groupName_view", c => "checks")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
             .addStep("runStatusChecks", INTERNAL, "waitForCompletionInternal", c =>

@@ -96,6 +96,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("version", typeToken<string>())
+        .addOptionalInput("groupName_view", c => "Kafka Cluster")
+        .addOptionalInput("sortOrder_view", c => 999)
 
         .addSteps(b => b
             .addStep("deployCluster", SetupKafka, "deployKafkaClusterWithRetry", c =>
@@ -118,6 +120,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
+        .addOptionalInput("groupName_view", c => "Proxy")
+        .addOptionalInput("sortOrder_view", c => 999)
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "CaptureProxy"]))
 
         .addSteps(b => b
@@ -154,6 +158,8 @@ export const FullMigration = WorkflowBuilder.create({
             typeToken<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>())
         .addRequiredInput("sourceConfig",
             typeToken<z.infer<typeof DENORMALIZED_CREATE_SNAPSHOTS_CONFIG>['sourceConfig']>())
+        .addOptionalInput("groupName_view", c => "Snapshot")
+        .addOptionalInput("sortOrder_view", c => 999)
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
@@ -200,6 +206,8 @@ export const FullMigration = WorkflowBuilder.create({
     .addTemplate("createSnapshotsForSource", t => t
         .addRequiredInput("snapshotsSourceConfig",
             typeToken<z.infer<typeof DENORMALIZED_CREATE_SNAPSHOTS_CONFIG>>())
+        .addOptionalInput("groupName_view", c => "Snapshots")
+        .addOptionalInput("sortOrder_view", c => 999)
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
@@ -241,7 +249,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
-        .addRequiredInput("groupName", typeToken<string>())
+        .addRequiredInput("groupName_view", typeToken<string>())
         .addOptionalInput("metadataMigrationConfig", c =>
             expr.empty<z.infer<typeof ARGO_METADATA_OPTIONS>>())
         .addOptionalInput("documentBackfillConfig", c =>
@@ -275,6 +283,8 @@ export const FullMigration = WorkflowBuilder.create({
     .addTemplate("runSingleSnapshotMigration", t => t
         .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("resourceName", typeToken<string>())
+        .addOptionalInput("groupName_view", c => "Snapshot Migration")
+        .addOptionalInput("sortOrder_view", c => 999)
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
@@ -341,7 +351,7 @@ export const FullMigration = WorkflowBuilder.create({
                             repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
                         })),
                         migrationLabel: expr.get(c.item, "label"),
-                        groupName: expr.get(c.item, "label")
+                        groupName_view: expr.get(c.item, "label")
                     });
                 }, {
                     loopWith: makeParameterLoop(
@@ -363,6 +373,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("fromProxy", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
+        .addOptionalInput("groupName_view", c => "Traffic Replay")
+        .addOptionalInput("sortOrder_view", c => 999)
         .addRequiredInput("dependsOnSnapshotMigrations", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_FILTER>[]>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "TrafficReplayer"]))
@@ -424,7 +436,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
         .addSteps(b => b.addStepGroup(g => g
-            .addStep("setupKafkaClusters", INTERNAL, "setupSingleKafkaCluster", c =>
+            .addStep("createKafka", INTERNAL, "setupSingleKafkaCluster", c =>
                 c.register({
                     kafkaClusterConfig: expr.serialize(expr.makeDict({
                         name: expr.get(c.item, "name"),
@@ -435,6 +447,8 @@ export const FullMigration = WorkflowBuilder.create({
                     //kafkaClusterConfig: expr.cast(c.item).to<Serialized<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>>(),
                     clusterName: expr.get(c.item, "name"),
                     version: expr.cast(expr.get(c.item, "version")).to<string>(),
+                    groupName_view: expr.get(c.item, "name"),
+                    sortOrder_view: expr.literal(1),
                 }), {
                     loopWith: makeParameterLoop(
                         expr.ternary(
@@ -445,7 +459,7 @@ export const FullMigration = WorkflowBuilder.create({
                     when: {templateExp: expr.hasKey(expr.deserializeRecord(b.inputs.config), "kafkaClusters")}
                 }
             )
-            .addStep("setupProxies", INTERNAL, "setupSingleProxy", c =>
+            .addStep("createProxy", INTERNAL, "setupSingleProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     proxyConfig: expr.serialize(expr.makeDict({
@@ -477,25 +491,29 @@ export const FullMigration = WorkflowBuilder.create({
                         ["podReplicas"],
                         1
                     ),
+                    groupName_view: expr.get(c.item, "name"),
+                    sortOrder_view: expr.literal(2),
                 }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "proxies"))
                 }
             )
-            .addStep("createSnapshots", INTERNAL, "createSnapshotsForSource", c =>
+            .addStep("createSnapshot", INTERNAL, "createSnapshotsForSource", c =>
                 c.register({
                         ...selectInputsForRegister(b, c),
                         snapshotsSourceConfig: expr.serialize(expr.makeDict({
                             createSnapshotConfig: expr.deserializeRecord(expr.get(c.item, "createSnapshotConfig")),
                             sourceConfig: expr.deserializeRecord(expr.get(c.item, "sourceConfig"))
-                        }))
+                        })),
                         //snapshotsSourceConfig: expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_CREATE_SNAPSHOTS_CONFIG>>>()
+                        groupName_view: expr.get(expr.deserializeRecord(expr.get(c.item, "sourceConfig")), "label"),
+                        sortOrder_view: expr.literal(3),
                     }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "snapshots"))
                 }
             )
-            .addStep("runSnapshotMigrations", INTERNAL, "runSingleSnapshotMigration", c =>
+            .addStep("performSnapshotMigration", INTERNAL, "runSingleSnapshotMigration", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: expr.concat(
@@ -512,6 +530,15 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.literal("-"),
                         expr.get(c.item, "label")
                     ),
+                    groupName_view: expr.concat(
+                        expr.get(c.item, "sourceLabel"),
+                        expr.literal(" → "),
+                        expr.dig(
+                            expr.deserializeRecord(expr.get(c.item, "targetConfig")),
+                            ["label"],
+                            ""
+                        )
+                    ),
                     snapshotMigrationConfig: expr.serialize(expr.makeDict({
                         label: expr.get(c.item, "label"),
                         snapshotNameResolution: expr.deserializeRecord(expr.get(c.item, "snapshotNameResolution")),
@@ -522,17 +549,28 @@ export const FullMigration = WorkflowBuilder.create({
                         snapshotConfig: expr.deserializeRecord(expr.get(c.item, "snapshotConfig"))
                     })),
 //                    snapshotMigrationConfig: expr.cast(c.item).to<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>()
+                    sortOrder_view: expr.literal(4),
                 }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "snapshotMigrations"))
                 }
             )
-            .addStep("runTrafficReplays", INTERNAL, "runSingleReplay", c =>
+            .addStep("createTrafficReplayer", INTERNAL, "runSingleReplay", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
                         ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(DENORMALIZED_REPLAY_CONFIG)),
                         targetConfig: expr.get(c.item, "toTarget"),
                         replayerOptions: expr.get(c.item, "replayerConfig"),
+                        groupName_view: expr.concat(
+                            expr.get(c.item, "fromProxy"),
+                            expr.literal(" → "),
+                            expr.dig(
+                                expr.deserializeRecord(expr.get(c.item, "toTarget")),
+                                ["label"],
+                                ""
+                            )
+                        ),
+                        sortOrder_view: expr.literal(5),
                     }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.config), "trafficReplays"))

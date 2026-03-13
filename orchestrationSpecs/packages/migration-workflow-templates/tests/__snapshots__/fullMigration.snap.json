@@ -49,6 +49,10 @@
             },
             {
               "name": "version"
+            },
+            {
+              "name": "groupName",
+              "value": "Kafka Cluster"
             }
           ]
         },
@@ -104,6 +108,10 @@
             },
             {
               "name": "podReplicas"
+            },
+            {
+              "name": "groupName",
+              "value": "Proxy"
             },
             {
               "name": "imageMigrationConsoleLocation"
@@ -221,6 +229,10 @@
             },
             {
               "name": "sourceConfig"
+            },
+            {
+              "name": "groupName",
+              "value": "Snapshot"
             },
             {
               "name": "uniqueRunNonce",
@@ -352,6 +364,10 @@
               "name": "snapshotsSourceConfig"
             },
             {
+              "name": "groupName",
+              "value": "Snapshots"
+            },
+            {
               "name": "uniqueRunNonce",
               "description": "Workflow session nonce",
               "value": "{{workflow.uid}}"
@@ -395,6 +411,10 @@
               "withParam": "{{=fromJSON(inputs.parameters.snapshotsSourceConfig)['createSnapshotConfig']}}",
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "groupName",
+                    "value": "{{inputs.parameters.groupName}}"
+                  },
                   {
                     "name": "uniqueRunNonce",
                     "value": "{{inputs.parameters.uniqueRunNonce}}"
@@ -662,6 +682,10 @@
               "name": "resourceName"
             },
             {
+              "name": "groupName",
+              "value": "Snapshot Migration"
+            },
+            {
               "name": "uniqueRunNonce",
               "description": "Workflow session nonce",
               "value": "{{workflow.uid}}"
@@ -750,6 +774,10 @@
               "arguments": {
                 "parameters": [
                   {
+                    "name": "groupName",
+                    "value": "{{=item['label']}}"
+                  },
+                  {
                     "name": "uniqueRunNonce",
                     "value": "{{inputs.parameters.uniqueRunNonce}}"
                   },
@@ -824,10 +852,6 @@
                   {
                     "name": "migrationLabel",
                     "value": "{{=item['label']}}"
-                  },
-                  {
-                    "name": "groupName",
-                    "value": "{{=item['label']}}"
                   }
                 ]
               },
@@ -874,6 +898,10 @@
             },
             {
               "name": "replayerOptions"
+            },
+            {
+              "name": "groupName",
+              "value": "Traffic Replay"
             },
             {
               "name": "dependsOnSnapshotMigrations"
@@ -1138,10 +1166,14 @@
                   {
                     "name": "version",
                     "value": "{{=item['version']}}"
+                  },
+                  {
+                    "name": "groupName",
+                    "value": "{{='Kafka Cluster: '+item['name']}}"
                   }
                 ]
               },
-              "name": "setupKafkaClusters"
+              "name": "setupKafkaCluster"
             },
             {
               "template": "setupsingleproxy",
@@ -1187,10 +1219,14 @@
                   {
                     "name": "podReplicas",
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(item['proxyConfig']))}}"
+                  },
+                  {
+                    "name": "groupName",
+                    "value": "{{='Proxy: '+item['name']}}"
                   }
                 ]
               },
-              "name": "setupProxies"
+              "name": "setupProxy"
             },
             {
               "template": "createsnapshotsforsource",
@@ -1244,10 +1280,14 @@
                   {
                     "name": "snapshotsSourceConfig",
                     "value": "{{=toJSON(sprig.dict(\"createSnapshotConfig\", fromJSON(item['createSnapshotConfig']), \"sourceConfig\", fromJSON(item['sourceConfig'])))}}"
+                  },
+                  {
+                    "name": "groupName",
+                    "value": "{{='Snapshot: '+fromJSON(item['sourceConfig'])['label']}}"
                   }
                 ]
               },
-              "name": "createSnapshots"
+              "name": "createSnapshot"
             },
             {
               "template": "runsinglesnapshotmigration",
@@ -1303,12 +1343,16 @@
                     "value": "{{=item['sourceLabel']+'-'+sprig.dig('label', '', fromJSON(item['targetConfig']))+'-'+item['label']}}"
                   },
                   {
+                    "name": "groupName",
+                    "value": "{{='Migration: '+item['sourceLabel']+' → '+sprig.dig('label', '', fromJSON(item['targetConfig']))}}"
+                  },
+                  {
                     "name": "snapshotMigrationConfig",
                     "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotNameResolution\", fromJSON(item['snapshotNameResolution']), \"migrations\", fromJSON(item['migrations']), \"sourceVersion\", item['sourceVersion'], \"sourceLabel\", item['sourceLabel'], \"targetConfig\", fromJSON(item['targetConfig']), \"snapshotConfig\", fromJSON(item['snapshotConfig'])))}}"
                   }
                 ]
               },
-              "name": "runSnapshotMigrations"
+              "name": "snapshotMigration"
             },
             {
               "template": "runsinglereplay",
@@ -1362,10 +1406,14 @@
                   {
                     "name": "replayerOptions",
                     "value": "{{=item['replayerConfig']}}"
+                  },
+                  {
+                    "name": "groupName",
+                    "value": "{{='Replay: '+item['fromProxy']+' → '+sprig.dig('label', '', fromJSON(item['toTarget']))}}"
                   }
                 ]
               },
-              "name": "runTrafficReplays"
+              "name": "trafficReplay"
             }
           ]
         ],

@@ -208,8 +208,6 @@ export const USER_REPLAYER_OPTIONS = z.object({
         .describe("Resource limits and requests for replayer container."),
 
     // -- replayer CLI params (passed via ---INLINE-JSON) --
-    authHeaderValue: z.string().default("").optional()
-        .describe("Static value for the authorization header of each request."),
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enables SASL properties required for connecting to MSK with IAM auth."),
     kafkaTrafficPropertyFile: z.string().default("").optional()
