@@ -210,7 +210,7 @@ export const USER_REPLAYER_OPTIONS = z.object({
     // -- replayer CLI params (passed via ---INLINE-JSON) --
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enables SASL properties required for connecting to MSK with IAM auth."),
-    kafkaTrafficPropertyFile: z.string().default("").optional()
+    kafkaTrafficPropertyFile: z.string().optional()
         .describe("File path for Kafka properties file for additional or overridden Kafka properties."),
     lookaheadTimeSeconds: z.number().default(400).optional()
         .describe("Number of seconds of data that will be buffered."),
@@ -230,19 +230,19 @@ export const USER_REPLAYER_OPTIONS = z.object({
         .describe("Factor to accelerate replayed communications relative to original timing."),
     targetServerResponseTimeoutSeconds: z.number().default(150).optional()
         .describe("Seconds to wait before timing out a replayed request to the target."),
-    transformerConfig: z.string().default("").optional()
+    transformerConfig: z.string().optional()
         .describe("Request transformer configuration as a string or JSON."),
-    transformerConfigEncoded: z.string().default("").optional()
+    transformerConfigEncoded: z.string().optional()
         .describe("Base64-encoded request transformer configuration."),
-    transformerConfigFile: z.string().default("").optional()
+    transformerConfigFile: z.string().optional()
         .describe("Path to the JSON configuration file for request transformers."),
-    tupleTransformerConfig: z.string().default("").optional()
+    tupleTransformerConfig: z.string().optional()
         .describe("Tuple transformer configuration as a string or JSON."),
-    tupleTransformerConfigBase64: z.string().default("").optional()
+    tupleTransformerConfigBase64: z.string().optional()
         .describe("Base64-encoded tuple transformer configuration."),
-    tupleTransformerConfigFile: z.string().default("").optional()
+    tupleTransformerConfigFile: z.string().optional()
         .describe("Path to the JSON configuration file for tuple transformers."),
-    userAgent: z.string().default("").optional()
+    userAgent: z.string().optional()
         .describe("String appended to the user-agent header for requests to the target cluster."),
 });
 
