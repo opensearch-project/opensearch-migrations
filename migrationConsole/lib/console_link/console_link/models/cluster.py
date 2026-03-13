@@ -135,6 +135,18 @@ class Cluster:
             self.auth_details = config["sigv4"] if config["sigv4"] is not None else {}
         self.client_options = client_options
 
+    @property
+    def is_serverless(self) -> bool:
+        """Check if this is an Amazon OpenSearch Serverless (AOSS) collection."""
+        return (self.auth_type == AuthMethod.SIGV4 and
+                self.auth_details is not None and
+                self.auth_details.get("service") == "aoss")
+
+    @property
+    def display_name(self) -> str:
+        """Human-readable cluster type label."""
+        return "Amazon OpenSearch Serverless" if self.is_serverless else "cluster"
+
     def get_basic_auth_details(self) -> AuthDetails:
         """Return a tuple of (username, password) for basic auth. Will use username/password if provided in plaintext,
         otherwise will pull both username/password as keys in the specified secrets manager secret.
@@ -226,7 +238,8 @@ class Cluster:
         return r
 
     def execute_benchmark_workload(self, workload: str,
-                                   workload_params='bulk_size:10,bulk_indexing_clients:1'):
+                                   workload_params='bulk_size:10,bulk_indexing_clients:1',
+                                   test_procedure: str = None):
         client_options = "verify_certs:false"
         if not self.allow_insecure:
             client_options += ",use_ssl:true"
@@ -249,6 +262,8 @@ class Cluster:
                    "--test-mode --kill-running-processes "
                    f"--workload-params={workload_params} "
                    f"--client-options={client_options}")
+        if test_procedure:
+            command += f" --test-procedure={test_procedure}"
         # While a little wordier, this approach prevents us from censoring the password if it appears in other contexts,
         # e.g. username:admin,password:admin.
         display_command = command.replace(f"basic_auth_password:{password_to_censor}", "basic_auth_password:********")

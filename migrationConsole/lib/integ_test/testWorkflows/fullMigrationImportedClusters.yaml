@@ -174,16 +174,21 @@ spec:
             
             # Build snapshotExtractAndLoadConfigs from snapshot-and-migration-configs
             SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '[
-              .[0]["snapshot-and-migration-configs"][] | {
-                "snapshotConfig": {
-                  "repoName": "default",
-                  "snapshotNameConfig": {
-                    "snapshotNamePrefix": "testsnapshot"
-                  }
-                },
-                "createSnapshotConfig": {},
-                "migrations": .migrations
-              }
+              .[0]["snapshot-and-migration-configs"][] |
+              if (.snapshotConfig.snapshotNameConfig.externallyManagedSnapshot // null) != null then
+                { "snapshotConfig": .snapshotConfig, "migrations": .migrations }
+              else
+                {
+                  "snapshotConfig": {
+                    "repoName": "default",
+                    "snapshotNameConfig": {
+                      "snapshotNamePrefix": "testsnapshot"
+                    }
+                  },
+                  "createSnapshotConfig": {},
+                  "migrations": .migrations
+                }
+              end
             ]')
             
             # Build the complete OVERALL_MIGRATION_CONFIG

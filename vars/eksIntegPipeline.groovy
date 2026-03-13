@@ -281,10 +281,8 @@ def call(Map config = [:]) {
                 timeout(time: 75, unit: 'MINUTES') {
                     script {
                         def region = "us-east-1"
+                        def clusterStackName = "OpenSearch-${maStageName}-${region}"
                         def maStackName = "Migration-Assistant-Infra-Import-VPC-eks-${maStageName}-${region}"
-                        def sourceDomainStackName = "OpenSearchDomain-source-${maStageName}-${region}"
-                        def targetDomainStackName = "OpenSearchDomain-target-${maStageName}-${region}"
-                        def networkStackName = "NetworkInfra-${maStageName}-${region}"
 
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: region, duration: 4500, roleSessionName: 'jenkins-session') {
@@ -327,15 +325,9 @@ def call(Map config = [:]) {
                                 sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
                                 sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
 
-                                echo "CLEANUP: Deleting domain stacks"
-                                sh "aws cloudformation delete-stack --stack-name ${sourceDomainStackName} --region ${region} || true"
-                                sh "aws cloudformation delete-stack --stack-name ${targetDomainStackName} --region ${region} || true"
-                                sh "aws cloudformation wait stack-delete-complete --stack-name ${sourceDomainStackName} --region ${region} || true"
-                                sh "aws cloudformation wait stack-delete-complete --stack-name ${targetDomainStackName} --region ${region} || true"
-
-                                echo "CLEANUP: Deleting network stack ${networkStackName}"
-                                sh "aws cloudformation delete-stack --stack-name ${networkStackName} --region ${region} || true"
-                                sh "aws cloudformation wait stack-delete-complete --stack-name ${networkStackName} --region ${region} || true"
+                                echo "CLEANUP: Deleting cluster stack ${clusterStackName}"
+                                sh "aws cloudformation delete-stack --stack-name ${clusterStackName} --region ${region} || true"
+                                sh "aws cloudformation wait stack-delete-complete --stack-name ${clusterStackName} --region ${region} || true"
                             }
                         }
                     }
