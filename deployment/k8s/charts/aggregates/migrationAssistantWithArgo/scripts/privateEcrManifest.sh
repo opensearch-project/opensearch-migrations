@@ -22,7 +22,7 @@ opentelemetry-operator|0.86.4|https://open-telemetry.github.io/opentelemetry-hel
 localstack|0.6.23|https://localstack.github.io/helm-charts
 grafana|8.15.0|https://grafana.github.io/helm-charts
 jaeger|3.2.0|https://jaegertracing.github.io/helm-charts
-kyverno|3.5.2|https://kyverno.github.io/kyverno/
+kyverno|3.7.1|https://kyverno.github.io/kyverno/
 "
 
 # ALL container images required for deployment.
@@ -85,14 +85,14 @@ mirror.gcr.io/jaegertracing/jaeger-cassandra-schema:1.53.0
 mirror.gcr.io/library/cassandra:3.11.6
 
 # --- kyverno ---
-reg.kyverno.io/kyverno/kyverno:v1.15.2
-reg.kyverno.io/kyverno/kyvernopre:v1.15.2
-reg.kyverno.io/kyverno/background-controller:v1.15.2
-reg.kyverno.io/kyverno/cleanup-controller:v1.15.2
-reg.kyverno.io/kyverno/reports-controller:v1.15.2
-reg.kyverno.io/kyverno/kyverno-cli:v1.15.2
-registry.k8s.io/kubectl:v1.32.7
-mirror.gcr.io/library/busybox:1.35
+reg.kyverno.io/kyverno/kyverno:v1.17.1
+reg.kyverno.io/kyverno/kyvernopre:v1.17.1
+reg.kyverno.io/kyverno/background-controller:v1.17.1
+reg.kyverno.io/kyverno/cleanup-controller:v1.17.1
+reg.kyverno.io/kyverno/reports-controller:v1.17.1
+reg.kyverno.io/kyverno/kyverno-cli:v1.17.1
+ghcr.io/kyverno/readiness-checker:v0.1.0
+registry.k8s.io/kubectl:v1.34.3
 
 # --- localstack ---
 mirror.gcr.io/localstack/localstack:4.3.0
