@@ -30,8 +30,12 @@ def call(Map config = [:]) {
             string(name: 'GIT_BRANCH', defaultValue: 'jenkins-target-aoss-collection', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
-            choice(name: 'SOURCE_VERSION', choices: ['ES_7.10'], description: 'Version of the source cluster')
+            choice(name: 'SOURCE_VERSION', choices: ['ES_6.8', 'ES_7.10'], description: 'Version of the cluster that created the snapshot')
             string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill')
+            // Snapshot configuration
+            string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/aoss-osb-data/es6x-aoss-osb-data/', description: 'Full S3 URI to snapshot repository')
+            string(name: 'SNAPSHOT_NAME', defaultValue: 'es6x-aoss-osb-data', description: 'Name of the snapshot')
+            string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '33', description: 'Max retries for workflow monitoring (~1/min). 33=~30min')
         }
 
         options {
@@ -152,7 +156,7 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Deploy Source + AOSS Target') {
+            stage('Deploy AOSS Target') {
                 steps {
                     timeout(time: 60, unit: 'MINUTES') {
                         dir('test') {
@@ -165,14 +169,6 @@ def call(Map config = [:]) {
                                         stage: "${maStageName}",
                                         vpcId: "${env.MA_VPC_ID}",
                                         clusters: [
-                                            [
-                                                clusterId: "source",
-                                                clusterVersion: "${params.SOURCE_VERSION}",
-                                                clusterType: "OPENSEARCH_MANAGED_SERVICE",
-                                                openAccessPolicyEnabled: true,
-                                                allowAllVpcTraffic: true,
-                                                domainRemovalPolicy: "DESTROY"
-                                            ],
                                             [
                                                 clusterId: "target",
                                                 clusterType: "OPENSEARCH_SERVERLESS",
@@ -192,9 +188,7 @@ def call(Map config = [:]) {
                                     }
 
                                     def clusterDetails = readJSON text: readFile("tmp/cluster-details-${maStageName}.json")
-                                    env.SOURCE_ENDPOINT = clusterDetails.source.endpoint
                                     env.AOSS_COLLECTION_ENDPOINT = clusterDetails['target'].endpoint
-                                    echo "Source: ${env.SOURCE_ENDPOINT}"
                                     echo "AOSS: ${env.AOSS_COLLECTION_ENDPOINT}"
                                 }
                             }
@@ -209,30 +203,22 @@ def call(Map config = [:]) {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    // Inject AOSS endpoint as container env var (visible to all processes)
+                                    // Normalize S3 URI - ensure it ends with /
+                                    def s3RepoUri = params.S3_REPO_URI
+                                    if (!s3RepoUri.endsWith('/')) {
+                                        s3RepoUri = s3RepoUri + '/'
+                                    }
+
+                                    // Inject AOSS endpoint and snapshot config as container env vars
                                     sh """
                                         kubectl --context=${env.eksKubeContext} set env statefulset/migration-console \
-                                          -n ma ${endpointEnvVar}=${env.AOSS_COLLECTION_ENDPOINT}
+                                          -n ma \
+                                          ${endpointEnvVar}=${env.AOSS_COLLECTION_ENDPOINT} \
+                                          AOSS_SNAPSHOT_NAME=${params.SNAPSHOT_NAME} \
+                                          AOSS_S3_REPO_URI=${s3RepoUri} \
+                                          AOSS_S3_REGION=${params.REGION} \
+                                          AOSS_MONITOR_RETRY_LIMIT=${params.MONITOR_RETRY_LIMIT}
                                         kubectl --context=${env.eksKubeContext} rollout status statefulset/migration-console -n ma --timeout=120s
-                                    """
-
-                                    // Source cluster configmap (needed by test's import_existing_clusters)
-                                    def sourceVersionExpanded = expandVersionString("${params.SOURCE_VERSION}")
-                                    writeJSON file: '/tmp/source-cluster-config.json', json: [
-                                            endpoint: env.SOURCE_ENDPOINT,
-                                            allow_insecure: true,
-                                            sigv4: [
-                                                    region: params.REGION,
-                                                    service: "es"
-                                            ],
-                                            version: params.SOURCE_VERSION
-                                    ]
-                                    sh """
-                                      kubectl --context=${env.eksKubeContext} create configmap source-${sourceVersionExpanded}-migration-config \
-                                        --from-file=cluster-config=/tmp/source-cluster-config.json \
-                                        --namespace ma --dry-run=client -o yaml | kubectl --context=${env.eksKubeContext} apply -f -
-
-                                      kubectl --context=${env.eksKubeContext} -n ma get configmap source-${sourceVersionExpanded}-migration-config -o yaml
                                     """
                                 }
                             }
@@ -259,7 +245,7 @@ def call(Map config = [:]) {
 
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                // 1. Delete cluster stack first (source domain + AOSS — depends on MA VPC)
+                                // 1. Delete cluster stack (AOSS collection — depends on MA VPC)
                                 echo "CLEANUP: Deleting cluster stack ${env.CLUSTER_STACK}"
                                 sh """
                                     aws cloudformation delete-stack --stack-name "${env.CLUSTER_STACK}" --region "${params.REGION}" || true

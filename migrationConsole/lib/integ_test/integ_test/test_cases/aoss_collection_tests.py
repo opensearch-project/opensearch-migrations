@@ -4,15 +4,21 @@ Tests for migration to Amazon OpenSearch Serverless (AOSS) collections.
 Each test targets a specific AOSS collection type (search, time-series, vector)
 and validates that indices, mappings, settings, and doc counts survive migration.
 
+Uses pre-staged S3 snapshots (BYOS pattern) — no source cluster is deployed.
+
 Required environment variables:
 - AOSS_SEARCH_ENDPOINT: AOSS search collection endpoint (Test0021)
 - AOSS_TIMESERIES_ENDPOINT: AOSS time-series collection endpoint (Test0022)
 - AOSS_VECTOR_ENDPOINT: AOSS vector collection endpoint (Test0023)
+- AOSS_SNAPSHOT_NAME: Name of the pre-staged snapshot
+- AOSS_S3_REPO_URI: S3 URI to snapshot repository
+- AOSS_S3_REGION: AWS region for S3 (default: us-east-1)
+- AOSS_MONITOR_RETRY_LIMIT: Max retries for workflow monitoring (default: 33)
 """
 import logging
 import os
 
-from console_link.middleware.clusters import connection_check, run_aoss_test_benchmarks
+from console_link.middleware.clusters import connection_check
 from console_link.models.cluster import Cluster
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
@@ -40,16 +46,15 @@ class AOSSTestBase(MATestBase):
     def workflow_perform_migrations(self, timeout_seconds: int = 1800):  # 30 min for EKS node churn
         super().workflow_perform_migrations(timeout_seconds=timeout_seconds)
 
-    def _create_no_auth_source_cluster(self) -> Cluster:
-        """Create a no_auth copy of the source cluster for OSB benchmarks."""
-        config = dict(self.source_cluster.config)
-        for key in ["sigv4", "basic_auth", "no_auth"]:
-            config.pop(key, None)
-        config["no_auth"] = None
-        return Cluster(config=config)
+    def _load_snapshot_config(self):
+        """Load snapshot configuration from environment variables."""
+        self.snapshot_name = os.environ['AOSS_SNAPSHOT_NAME']
+        self.s3_repo_uri = os.environ['AOSS_S3_REPO_URI']
+        self.s3_region = os.environ.get('AOSS_S3_REGION', 'us-east-1')
+        self.monitor_retry_limit = int(os.environ.get('AOSS_MONITOR_RETRY_LIMIT', '33'))
 
     def test_before(self):
-        """Pre-flight: verify both clusters are reachable."""
+        """Pre-flight: verify target cluster is reachable."""
         pass
 
     def import_existing_clusters(self):
@@ -65,32 +70,28 @@ class AOSSTestBase(MATestBase):
             "allow_insecure": False,
             "sigv4": {"region": region, "service": "aoss"}
         })
-        # Source cluster from configmap (set up by MA deployment)
-        self.source_cluster = self.argo_service.get_cluster_from_configmap(
-            f"source-{self.source_version.full_cluster_type}-"
-            f"{self.source_version.major_version}-{self.source_version.minor_version}"
-        )
-        if not self.source_cluster:
-            raise ValueError("Could not find source cluster configmap")
+        self.source_cluster = None
         self.imported_clusters = True
-        logger.info(f"Imported source: {self.source_cluster.endpoint}")
+        self._load_snapshot_config()
         logger.info(f"Imported AOSS target: {endpoint}")
+        logger.info(f"Using snapshot: {self.snapshot_name} from {self.s3_repo_uri}")
 
-        # Connection check after import
-        source_result = connection_check(self.source_cluster)
-        assert source_result.connection_established, f"Source connection failed: {source_result.connection_message}"
+        # Connection check on target only (no source cluster)
         target_result = connection_check(self.target_cluster)
         assert target_result.connection_established, f"Target connection failed: {target_result.connection_message}"
 
     def prepare_clusters(self):
-        """Load test data on source using OSB workloads with no_auth."""
-        no_auth_source = self._create_no_auth_source_cluster()
-        logger.info("Loading benchmark data with no_auth source cluster")
-        run_aoss_test_benchmarks(no_auth_source, self.collection_type)
+        """No source cluster to prepare — using pre-staged snapshot."""
+        pass
 
     def prepare_workflow_snapshot_and_migration_config(self):
-        """Let the workflow create the snapshot — no externally managed snapshot."""
+        """Configure for external snapshot with index allowlists."""
         self.workflow_snapshot_and_migration_config = [{
+            "snapshotConfig": {
+                "snapshotNameConfig": {
+                    "externallyManagedSnapshot": self.snapshot_name
+                }
+            },
             "migrations": [{
                 "metadataMigrationConfig": {
                     "indexAllowlist": self.expected_indices
@@ -101,6 +102,26 @@ class AOSSTestBase(MATestBase):
                 }
             }]
         }]
+
+    def prepare_workflow_parameters(self):
+        """Build workflow parameters for snapshot-based AOSS migration."""
+        source_config = {
+            "endpoint": "",
+            "version": f"{self.source_version.cluster_type} "
+                       f"{self.source_version.major_version}.{self.source_version.minor_version}",
+            "snapshotRepo": {
+                "awsRegion": self.s3_region,
+                "s3RepoPathUri": self.s3_repo_uri
+            }
+        }
+
+        self.workflow_template = "full-migration-imported-clusters"
+        self.parameters["source-configs"] = [{
+            "source": source_config,
+            "snapshot-and-migration-configs": self.workflow_snapshot_and_migration_config
+        }]
+        self.parameters["target-config"] = self.target_cluster.config
+        self.parameters["monitor-retry-limit"] = str(self.monitor_retry_limit)
 
     # --- Verification helpers ---
 
