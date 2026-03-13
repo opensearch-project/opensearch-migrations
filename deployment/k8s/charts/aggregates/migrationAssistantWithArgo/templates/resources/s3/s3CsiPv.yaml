@@ -1,0 +1,31 @@
+{{- $bucketName := printf "migrations-default-%s-%s-%s" (toString .Values.aws.account) .Values.stageName .Values.aws.region -}}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ .Release.Namespace }}-s3-snapshot
+spec:
+  capacity:
+    storage: 1200Gi
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: ""
+  claimRef:
+    namespace: {{ .Release.Namespace }}
+    name: s3-snapshot
+  mountOptions:
+    - --read-only
+    - --region {{ .Values.aws.region }}
+    {{- if .Values.defaultBucketConfiguration.useLocalStack }}
+    - --endpoint-url http://{{ .Values.defaultBucketConfiguration.endpoint }}.{{ .Release.Namespace }}.svc.cluster.local:4566
+    - --force-path-style
+    {{- end }}
+  csi:
+    driver: s3.csi.aws.com
+    volumeHandle: {{ .Release.Namespace }}-s3-snapshot
+    volumeAttributes:
+      bucketName: {{ $bucketName }}
+      {{- if .Values.defaultBucketConfiguration.useLocalStack }}
+      authenticationSource: driver
+      {{- else }}
+      authenticationSource: pod
+      {{- end }}

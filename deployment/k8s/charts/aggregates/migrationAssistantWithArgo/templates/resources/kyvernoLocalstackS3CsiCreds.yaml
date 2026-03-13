@@ -1,0 +1,80 @@
+{{- if and .Values.conditionalPackageInstalls.kyverno .Values.defaultBucketConfiguration.useLocalStack }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-kyverno-localstack-s3-csi-creds
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "9"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  policy.yaml: |
+    apiVersion: kyverno.io/v1
+    kind: ClusterPolicy
+    metadata:
+      name: localstack-s3-csi-creds
+      annotations:
+        policies.kyverno.io/title: Localstack S3 CSI Credentials
+        policies.kyverno.io/description: >-
+          Injects dummy AWS credentials into mount-s3 namespace pods so the
+          mountpoint-s3 CSI driver can authenticate against localstack.
+    spec:
+      rules:
+        - name: inject-localstack-creds
+          match:
+            any:
+              - resources:
+                  kinds:
+                    - Pod
+                  namespaces:
+                    - mount-s3
+          mutate:
+            patchStrategicMerge:
+              spec:
+                containers:
+                  - (name): "*"
+                    env:
+                      - name: AWS_ACCESS_KEY_ID
+                        value: "test"
+                      - name: AWS_SECRET_ACCESS_KEY
+                        value: "test"
+                      - name: AWS_DEFAULT_REGION
+                        value: "{{ .Values.aws.region }}"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-apply-kyverno-localstack-s3-csi
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 10
+  template:
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: OnFailure
+      containers:
+        - name: apply-policy
+          image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+          imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for Kyverno CRD to be established..."
+              kubectl wait --for=condition=Established crd/clusterpolicies.kyverno.io --timeout=300s
+              echo "Waiting for Kyverno admission controller to be ready..."
+              kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=admission-controller -n {{ .Values.charts.kyverno.namespace }} --timeout=120s
+              kubectl apply -f /policy/policy.yaml
+          volumeMounts:
+            - name: policy
+              mountPath: /policy
+      volumes:
+        - name: policy
+          configMap:
+            name: {{ .Release.Name }}-kyverno-localstack-s3-csi-creds
+{{- end }}

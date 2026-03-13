@@ -57,6 +57,10 @@ images:
     repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
+  snapshotFuse:
+    repository: migrations/snapshot_fuse
+    tag: latest
+    pullPolicy: IfNotPresent
   installer:
     repository: migrations/migration_console
     tag: latest
