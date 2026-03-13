@@ -108,7 +108,7 @@ export const KAFKA_CLIENT_CONFIG = z.object({
     kafkaConnection: z.string()
         .describe("Sequence of <HOSTNAME:PORT> values delimited by ','.  " +
             "If empty, the cluster is automatically created and this is filled in.")
-        .regex(/^(?:[a-z0-9][-a-z0-9.]*:[0-9]+,?)*$/),
+        .regex(/^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\d{0,3}|[1-5]\d{4}|6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5])(?:,(?!$)|$))*$/),
     kafkaTopic: z.string().describe("Empty defaults to the name of the target label").default(""),
 });
 
