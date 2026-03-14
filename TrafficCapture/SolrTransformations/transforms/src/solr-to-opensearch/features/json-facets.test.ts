@@ -116,14 +116,9 @@ describe('json-facets MicroTransform', () => {
       expect(inner.has('size')).toBe(false);
     });
 
-    it('should map offset to shard_size', () => {
+    it('should map offset to size without limit', () => {
       const inner = applyBodyFacet({ type: 'terms', field: 'category', offset: 10 });
-      expect(inner.get('shard_size')).toBe(10);
-    });
-
-    it('should not set shard_size when offset is absent', () => {
-      const inner = applyBodyFacet({ type: 'terms', field: 'category' });
-      expect(inner.has('shard_size')).toBe(false);
+      expect(inner.get('size')).toBe(20);
     });
 
     it('should map mincount to min_doc_count', () => {
@@ -221,8 +216,7 @@ describe('json-facets MicroTransform', () => {
       });
 
       expect(inner.get('field')).toBe('status');
-      expect(inner.get('size')).toBe(20);
-      expect(inner.get('shard_size')).toBe(5);
+      expect(inner.get('size')).toBe(25);
       expect(inner.get('min_doc_count')).toBe(1);
       expect(inner.get('include')).toBe('active.*');
       expect(inner.get('missing')).toBe('');
