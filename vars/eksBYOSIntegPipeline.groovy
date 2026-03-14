@@ -260,6 +260,26 @@ def call(Map config = [:]) {
                                             --namespace ma --dry-run=client -o yaml | kubectl --context=${env.eksKubeContext} apply -f -
                                     """
 
+                                    // Add SG rule to allow EKS cluster traffic to reach the target OpenSearch domain
+                                    if (targetCluster.securityGroupId) {
+                                        sh """
+                                          exists=\$(aws ec2 describe-security-groups \
+                                            --group-ids $targetCluster.securityGroupId \
+                                            --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
+                                            --output text)
+
+                                          if [ -z "\$exists" ]; then
+                                            echo "Ingress rule not found. Adding EKS cluster SG to target OpenSearch SG..."
+                                            aws ec2 authorize-security-group-ingress \
+                                              --group-id $targetCluster.securityGroupId \
+                                              --protocol -1 \
+                                              --port -1 \
+                                              --source-group $env.clusterSecurityGroup
+                                          else
+                                            echo "Ingress rule already exists. Skipping."
+                                          fi
+                                        """
+                                    }
 
                                 }
                             }
