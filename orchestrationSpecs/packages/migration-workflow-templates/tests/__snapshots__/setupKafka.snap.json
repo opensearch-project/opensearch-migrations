@@ -41,6 +41,15 @@
           "action": "apply",
           "setOwnerReference": false
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -62,6 +71,15 @@
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.listeners"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
         },
         "outputs": {
           "parameters": [
@@ -158,6 +176,15 @@
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.topicName"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
         },
         "outputs": {
           "parameters": [

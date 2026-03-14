@@ -7,6 +7,7 @@ import {
 } from '@opensearch-migrations/argo-workflow-builders';
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
 const SECONDS_IN_DAYS = 24 * 3600;
 const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
@@ -147,6 +148,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     status: {phase: "Ready"}
                 }
             }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
@@ -164,6 +166,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     status: {phase: "Ready", snapshotName: b.inputs.snapshotName}
                 }
             }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
@@ -180,6 +183,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     status: {phase: "Ready"}
                 }
             }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
@@ -195,6 +199,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }
             })
             .addJsonPathOutput("snapshotName", "{.status.snapshotName}", typeToken<string>()))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 

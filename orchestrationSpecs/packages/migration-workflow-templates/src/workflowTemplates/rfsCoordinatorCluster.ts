@@ -7,12 +7,7 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
-
-const RFS_COORDINATOR_RETRY_STRATEGY = {
-    limit: "3",
-    retryPolicy: "Always",
-    backoff: { duration: "10", factor: "2", cap: "60" }
-};
+import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
 export function getRfsCoordinatorClusterName(sessionName: BaseExpression<string>): BaseExpression<string> {
     return expr.concat(sessionName, expr.literal("-rfs-coordinator"));
@@ -225,7 +220,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                 setOwnerReference: true,
                 manifest: createRfsCoordinatorSecretManifest(b.inputs.clusterName)
             }))
-        .addRetryParameters(RFS_COORDINATOR_RETRY_STRATEGY)
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
     .addTemplate("createRfsCoordinatorService", t => t
@@ -236,7 +231,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                 setOwnerReference: true,
                 manifest: createRfsCoordinatorServiceManifest(b.inputs.clusterName)
             }))
-        .addRetryParameters(RFS_COORDINATOR_RETRY_STRATEGY)
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
     .addTemplate("createRfsCoordinatorStatefulSet", t => t
@@ -249,7 +244,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                 successCondition: "status.readyReplicas > 0",
                 manifest: createRfsCoordinatorStatefulSetManifest(b.inputs.clusterName, b.inputs.coordinatorImage)
             }))
-        .addRetryParameters(RFS_COORDINATOR_RETRY_STRATEGY)
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
     .addTemplate("createRfsCoordinator", t => t
@@ -282,7 +277,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                     }
                 }
             }))
-        .addRetryParameters(RFS_COORDINATOR_RETRY_STRATEGY)
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
     .addTemplate("deleteRfsCoordinatorService", t => t
@@ -299,7 +294,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                     }
                 }
             }))
-        .addRetryParameters(RFS_COORDINATOR_RETRY_STRATEGY)
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
     .addTemplate("deleteRfsCoordinatorSecret", t => t
@@ -316,7 +311,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                     }
                 }
             }))
-        .addRetryParameters(RFS_COORDINATOR_RETRY_STRATEGY)
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
     .addTemplate("deleteRfsCoordinator", t => t

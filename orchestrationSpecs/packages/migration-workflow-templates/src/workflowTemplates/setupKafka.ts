@@ -12,6 +12,7 @@ import {
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {KAFKA_CLUSTER_CREATION_CONFIG, NAMED_KAFKA_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
+import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
 type KafkaConfig = z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>;
 
@@ -117,6 +118,7 @@ export const SetupKafka = WorkflowBuilder.create({
                     replicas: expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["replicas"], 1),
                 })
             }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
@@ -135,6 +137,7 @@ export const SetupKafka = WorkflowBuilder.create({
             }))
         .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
             typeToken<string>())
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
@@ -179,6 +182,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 })
             }))
         .addJsonPathOutput("topicName", "{.status.topicName}", typeToken<string>())
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 

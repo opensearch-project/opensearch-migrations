@@ -30,6 +30,7 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
+import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
 
 function shouldCreateRfsWorkCoordinationCluster(
@@ -319,7 +320,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     }
                 }
             })
-        ))
+        )
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
 
 
     .addTemplate("waitForCompletionInternal", t => t
@@ -411,6 +414,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 }),
                 successCondition: "status.readyReplicas > 0"
             }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 

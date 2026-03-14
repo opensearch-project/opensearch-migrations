@@ -12,6 +12,7 @@ import {
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {configureAndSubmitScript, monitorScript} from "../testResourceLoader";
 
 export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
@@ -112,6 +113,7 @@ fi
                 }
             })
         )
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
     .addTemplate("main", t => t

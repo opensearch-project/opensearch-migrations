@@ -291,6 +291,15 @@
             "--subresource=status"
           ]
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -316,6 +325,15 @@
             "--subresource=status"
           ]
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -338,6 +356,15 @@
             "--subresource=status"
           ]
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -354,6 +381,15 @@
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
           "action": "get"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
         },
         "outputs": {
           "parameters": [

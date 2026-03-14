@@ -59,6 +59,15 @@
           "action": "create",
           "setOwnerReference": true
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }

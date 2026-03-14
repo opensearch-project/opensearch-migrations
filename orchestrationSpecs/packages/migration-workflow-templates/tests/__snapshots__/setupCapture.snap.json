@@ -41,6 +41,15 @@
           "action": "apply",
           "setOwnerReference": false
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -81,6 +90,15 @@
           "action": "apply",
           "setOwnerReference": false
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -120,6 +138,15 @@
           "action": "apply",
           "setOwnerReference": false
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -158,6 +185,15 @@
           "manifest": "apiVersion: cert-manager.io/v1\nkind: Certificate\nmetadata:\n  name: \"{{inputs.parameters.certName}}\"\nspec:\n  secretName: \"{{inputs.parameters.secretName}}\"\n  issuerRef:\n    name: \"{{inputs.parameters.issuerName}}\"\n    kind: \"{{inputs.parameters.issuerKind}}\"\n    group: \"{{inputs.parameters.issuerGroup}}\"\n  dnsNames: {{inputs.parameters.dnsNames}}\n  duration: \"{{inputs.parameters.duration}}\"\n  renewBefore: \"{{inputs.parameters.renewBefore}}\"\n",
           "action": "apply",
           "setOwnerReference": false
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
         },
         "outputs": {
           "parameters": []

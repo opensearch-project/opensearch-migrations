@@ -187,6 +187,15 @@
             "--ignore-not-found"
           ]
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -203,6 +212,10 @@
             },
             {
               "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "keepMigrationWorkflow",
+              "value": "false"
             }
           ]
         },
@@ -272,6 +285,7 @@
           [
             {
               "template": "deletemigrationworkflow",
+              "when": "{{=!(fromJSON(inputs.parameters.keepMigrationWorkflow))}}",
               "arguments": {
                 "parameters": []
               },

@@ -16,6 +16,7 @@ import {
 import {setupLog4jConfigForContainer} from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
 function makeReplayerTargetParamDict(
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>
@@ -163,6 +164,7 @@ export const Replayer = WorkflowBuilder.create({
                     resources: expr.deserializeRecord(b.inputs.resources),
                 })
             }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 

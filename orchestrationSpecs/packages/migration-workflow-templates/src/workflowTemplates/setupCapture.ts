@@ -14,6 +14,7 @@ import {SetupKafka} from "./setupKafka";
 import {DENORMALIZED_PROXY_CONFIG, PROXY_TLS_CONFIG, ResourceRequirementsType} from "@opensearch-migrations/schemas";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {z} from "zod";
+import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
 function makeProxyServiceManifest(proxyName: BaseExpression<string>, listenPort: BaseExpression<Serialized<number>>) {
     return {
@@ -159,6 +160,7 @@ export const SetupCapture = WorkflowBuilder.create({
                 setOwnerReference: false,
                 manifest: makeProxyServiceManifest(b.inputs.proxyName, b.inputs.listenPort)
             }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
@@ -184,6 +186,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     jsonConfig: expr.toBase64(b.inputs.jsonConfig),
                 })
             }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
@@ -210,6 +213,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     tlsSecretName: b.inputs.tlsSecretName,
                 })
             }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
@@ -237,6 +241,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     renewBefore: b.inputs.renewBefore,
                 })
             }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 

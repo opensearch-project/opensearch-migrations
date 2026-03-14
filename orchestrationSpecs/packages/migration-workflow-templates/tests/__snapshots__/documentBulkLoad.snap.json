@@ -40,6 +40,15 @@
             "--ignore-not-found"
           ]
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -285,6 +294,15 @@
           "action": "create",
           "setOwnerReference": true,
           "successCondition": "status.readyReplicas > 0"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
         },
         "outputs": {
           "parameters": []
