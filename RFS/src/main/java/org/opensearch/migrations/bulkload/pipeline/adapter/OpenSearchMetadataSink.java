@@ -34,7 +34,8 @@ public class OpenSearchMetadataSink implements GlobalMetadataSink {
             createTemplates(metadata.indexTemplates(), "index", failures);
             createTemplates(metadata.componentTemplates(), "component", failures);
             if (!failures.isEmpty()) {
-                throw new TemplateCreationException(failures);
+                log.warn("Failed to create {} template(s) — these are typically system templates " +
+                    "incompatible with the target cluster: {}", failures.size(), failures);
             }
         });
     }

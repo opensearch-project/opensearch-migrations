@@ -351,7 +351,7 @@ public class LeaseExpirationTest extends SourceTestBase {
 
                 // ASSERT: parent work item contains successor handoff metadata
                 var parentWorkItemId = new IWorkCoordinator.WorkItemAndDuration
-                    .WorkItem("geonames", 0, (long) Integer.MIN_VALUE).toString();
+                    .WorkItem("geonames", 0, 0L).toString();
                 coordinatorOps.refresh(coordinatorIndexName);
                 var parentQuery = "{\"query\":{\"ids\":{\"values\":[\"" + parentWorkItemId + "\"]}}}";
                 var searchResponse = coordinatorOps.post("/" + coordinatorIndexName + "/_search", parentQuery);

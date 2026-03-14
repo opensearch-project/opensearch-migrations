@@ -141,12 +141,21 @@ public class SnapshotShardUnpacker {
                             .subscribeOn(Schedulers.boundedElastic()),
                         MAX_CONCURRENT_EXTRACTIONS
                     )
-                    .subscribe(v -> {}, error::set, latch::countDown);
-                latch.await();
+                    .subscribe(
+                        v -> {},
+                        t -> { error.set(t); latch.countDown(); },
+                        latch::countDown
+                    );
+                try {
+                    latch.await();
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new CouldNotUnpackShard("Interrupted while unpacking shard " + shardId, ie);
+                }
                 if (error.get() != null) {
                     var cause = error.get();
                     if (cause instanceof RuntimeException) throw (RuntimeException) cause;
-                    throw new RuntimeException(cause);
+                    throw new CouldNotUnpackShard("File unpacking failed for shard " + shardId, (Exception) cause);
                 }
 
                 log.atInfo()
