@@ -49,7 +49,7 @@ def call(Map config = [:]) {
             dataNodeCount: 24,
             dedicatedManagerNodeCount: 4,
             ebsVolumeSize: 2048,
-            ebsThroughput: 1250  // r8g.8xlarge.search EBS bandwidth cap ~1250 MB/s
+            ebsThroughput: 1000  // gp3 max: 1000 MB/s (CDK validation limit)
         ]
     ]
     pipeline {
