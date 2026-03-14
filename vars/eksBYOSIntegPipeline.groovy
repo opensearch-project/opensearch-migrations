@@ -27,6 +27,26 @@ static def expandVersionString(String input) {
     return "${name}-${major}-${minor}"
 }
 
+// Groovy script embedded in reactive parameters to resolve preset values.
+// Returns a single-item list (greyed out) for presets, or the full choices for 'custom'.
+static String presetReactiveScript(String field, String customChoices) {
+    // Preset map duplicated as a string literal so it can run in the Active Choices sandbox
+    return """
+        def presets = [
+            'large-es7x-24B':  [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es7x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_7.10', rfsWorkers: '90', targetClusterSize: 'large'],
+            'large-es6x-20B':  [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es6x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_6.8',  rfsWorkers: '90', targetClusterSize: 'large'],
+            'large-es5x':      [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es5x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_5.6',  rfsWorkers: '90', targetClusterSize: 'large'],
+            'small-es5x-300k': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/another_set/large-snapshot-es5x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_5.6', rfsWorkers: '1', targetClusterSize: 'default'],
+            'small-es7x-osb':  [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/ma_osb_data/es7x-osb-data/',      snapshotName: 'es7x-osb-data', sourceVersion: 'ES_7.10', rfsWorkers: '1', targetClusterSize: 'default']
+        ]
+        if (TEST_PRESET == 'custom') {
+            return ${customChoices}
+        }
+        def p = presets[TEST_PRESET]
+        return p ? [p.${field}] : ${customChoices}
+    """
+}
+
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksbyos"
     def jobName = config.jobName ?: "byos-eks-integ-test"
@@ -52,42 +72,90 @@ def call(Map config = [:]) {
             ebsThroughput: 1250  // r8g.8xlarge.search EBS bandwidth cap ~1250 MB/s
         ]
     ]
+
+    def fallback = 'return ["error"]'
+
+    // Active Choices parameters: TEST_PRESET dropdown + reactive fields that grey out when a preset is selected
+    properties([
+        parameters([
+            // --- TEST_PRESET selector ---
+            [$class: 'ChoiceParameter',
+                name: 'TEST_PRESET',
+                choiceType: 'PT_SINGLE_SELECT',
+                description: 'Select a test preset to auto-fill snapshot config, or "custom" to set all params manually',
+                script: [$class: 'GroovyScript',
+                    script: [classpath: [], sandbox: true,
+                        script: "return ['custom', 'large-es7x-24B', 'large-es6x-20B', 'large-es5x', 'small-es5x-300k', 'small-es7x-osb']"],
+                    fallbackScript: [classpath: [], sandbox: true, script: fallback]]],
+            // --- Reactive: S3_REPO_URI ---
+            [$class: 'CascadeChoiceParameter',
+                name: 'S3_REPO_URI',
+                choiceType: 'PT_SINGLE_SELECT',
+                referencedParameters: 'TEST_PRESET',
+                description: 'Full S3 URI to snapshot repository',
+                script: [$class: 'GroovyScript',
+                    script: [classpath: [], sandbox: true,
+                        script: presetReactiveScript('s3RepoUri',
+                            "['s3://migrations-snapshots-library-us-east-1/ma_osb_data/es7x-osb-data/:selected', 's3://migrations-snapshots-library-us-east-1/large-snapshot-es7x/', 's3://migrations-snapshots-library-us-east-1/large-snapshot-es6x/', 's3://migrations-snapshots-library-us-east-1/large-snapshot-es5x/', 's3://migrations-snapshots-library-us-east-1/another_set/large-snapshot-es5x/']")],
+                    fallbackScript: [classpath: [], sandbox: true, script: fallback]]],
+            // --- Reactive: SNAPSHOT_NAME ---
+            [$class: 'CascadeChoiceParameter',
+                name: 'SNAPSHOT_NAME',
+                choiceType: 'PT_SINGLE_SELECT',
+                referencedParameters: 'TEST_PRESET',
+                description: 'Name of the snapshot',
+                script: [$class: 'GroovyScript',
+                    script: [classpath: [], sandbox: true,
+                        script: presetReactiveScript('snapshotName',
+                            "['es7x-osb-data:selected', 'large-snapshot']")],
+                    fallbackScript: [classpath: [], sandbox: true, script: fallback]]],
+            // --- Reactive: SOURCE_VERSION ---
+            [$class: 'CascadeChoiceParameter',
+                name: 'SOURCE_VERSION',
+                choiceType: 'PT_SINGLE_SELECT',
+                referencedParameters: 'TEST_PRESET',
+                description: 'Version of the cluster that created the snapshot',
+                script: [$class: 'GroovyScript',
+                    script: [classpath: [], sandbox: true,
+                        script: presetReactiveScript('sourceVersion',
+                            "['ES_7.10:selected', 'ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_8.19', 'OS_1.3', 'OS_2.19']")],
+                    fallbackScript: [classpath: [], sandbox: true, script: fallback]]],
+            // --- Reactive: RFS_WORKERS ---
+            [$class: 'CascadeChoiceParameter',
+                name: 'RFS_WORKERS',
+                choiceType: 'PT_SINGLE_SELECT',
+                referencedParameters: 'TEST_PRESET',
+                description: 'Number of RFS worker pods for document backfill',
+                script: [$class: 'GroovyScript',
+                    script: [classpath: [], sandbox: true,
+                        script: presetReactiveScript('rfsWorkers',
+                            "['1:selected', '10', '40', '80', '90', '100', '110']")],
+                    fallbackScript: [classpath: [], sandbox: true, script: fallback]]],
+            // --- Reactive: TARGET_CLUSTER_SIZE ---
+            [$class: 'CascadeChoiceParameter',
+                name: 'TARGET_CLUSTER_SIZE',
+                choiceType: 'PT_SINGLE_SELECT',
+                referencedParameters: 'TEST_PRESET',
+                description: 'Target cluster size (default: 2x r8g.large, large: 24x r8g.8xlarge with dedicated masters)',
+                script: [$class: 'GroovyScript',
+                    script: [classpath: [], sandbox: true,
+                        script: presetReactiveScript('targetClusterSize',
+                            "['default:selected', 'large']")],
+                    fallbackScript: [classpath: [], sandbox: true, script: fallback]]],
+            // --- Non-reactive params (always editable) ---
+            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url'),
+            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository'),
+            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch'),
+            string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment'),
+            string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment and snapshot bucket'),
+            string(name: 'TEST_IDS', defaultValue: '0010', description: 'Test IDs to execute (comma separated, e.g., "0010" or "0010,0011")'),
+            string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '1000000', description: 'Max retries for workflow monitoring (~1/min). Default effectively infinite — Argo handles retries.'),
+            choice(name: 'TARGET_VERSION', choices: ['OS_2.19', 'OS_3.1'], description: 'Target OpenSearch version'),
+        ])
+    ])
+
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
-        parameters {
-            choice(
-                name: 'TEST_PRESET',
-                choices: ['custom', 'large-es7x-24B', 'large-es6x-20B', 'large-es5x', 'small-es5x-300k', 'small-es7x-osb'],
-                description: 'Select a test preset to auto-fill snapshot config, or "custom" to set all params manually'
-            )
-            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
-            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
-            string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
-            string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill (podReplicas)')
-            // Snapshot configuration
-            string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/ma_osb_data/es7x-osb-data/', description: 'Full S3 URI to snapshot repository (e.g., s3://bucket/folder/)')
-            string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment and snapshot bucket')
-            string(name: 'SNAPSHOT_NAME', defaultValue: 'es7x-osb-data', description: 'Name of the snapshot')
-            string(name: 'TEST_IDS', defaultValue: '0010', description: 'Test IDs to execute (comma separated, e.g., "0010" or "0010,0011")')
-            string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '1000000', description: 'Max retries for workflow monitoring (~1/min). Default effectively infinite — Argo handles retries.')
-            choice(
-                name: 'SOURCE_VERSION',
-                choices: ['ES_7.10', 'ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_8.19', 'OS_1.3', 'OS_2.19'],
-                description: 'Version of the cluster that created the snapshot'
-            )
-            // Target cluster configuration
-            choice(
-                name: 'TARGET_VERSION',
-                choices: ['OS_2.19', 'OS_3.1'],
-                description: 'Target OpenSearch version'
-            )
-            choice(
-                name: 'TARGET_CLUSTER_SIZE',
-                choices: ['default', 'large'],
-                description: 'Target cluster size (default: 2x r8g.large, large: 24x r8g.8xlarge with dedicated masters)'
-            )
-        }
         options {
             lock(label: params.STAGE, quantity: 1, variable: 'maStageName')
             timeout(time: 18, unit: 'HOURS')
@@ -113,28 +181,13 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
-                        // Resolve TEST_PRESET → effective parameter values
-                        def testPresets = [
-                            'large-es7x-24B': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es7x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_7.10', rfsWorkers: '90', targetClusterSize: 'large'],
-                            'large-es6x-20B': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es6x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_6.8', rfsWorkers: '90', targetClusterSize: 'large'],
-                            'large-es5x':     [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es5x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_5.6', rfsWorkers: '90', targetClusterSize: 'large'],
-                            'small-es5x-300k': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/another_set/large-snapshot-es5x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_5.6', rfsWorkers: '1', targetClusterSize: 'default'],
-                            'small-es7x-osb': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/ma_osb_data/es7x-osb-data/', snapshotName: 'es7x-osb-data', sourceVersion: 'ES_7.10', rfsWorkers: '1', targetClusterSize: 'default']
-                        ]
-                        def preset = testPresets[params.TEST_PRESET]
-                        if (preset) {
-                            env.resolvedS3RepoUri         = preset.s3RepoUri
-                            env.resolvedSnapshotName      = preset.snapshotName
-                            env.resolvedSourceVersion     = preset.sourceVersion
-                            env.resolvedRfsWorkers        = preset.rfsWorkers
-                            env.resolvedTargetClusterSize = preset.targetClusterSize
-                        } else {
-                            env.resolvedS3RepoUri         = params.S3_REPO_URI
-                            env.resolvedSnapshotName      = params.SNAPSHOT_NAME
-                            env.resolvedSourceVersion     = params.SOURCE_VERSION
-                            env.resolvedRfsWorkers        = params.RFS_WORKERS
-                            env.resolvedTargetClusterSize = params.TARGET_CLUSTER_SIZE
-                        }
+                        // Active Choices reactive params already resolve preset values directly.
+                        // Map to env vars used by downstream stages.
+                        env.resolvedS3RepoUri         = params.S3_REPO_URI
+                        env.resolvedSnapshotName      = params.SNAPSHOT_NAME
+                        env.resolvedSourceVersion     = params.SOURCE_VERSION
+                        env.resolvedRfsWorkers        = params.RFS_WORKERS
+                        env.resolvedTargetClusterSize = params.TARGET_CLUSTER_SIZE
 
                         echo """
                             ================================================================
