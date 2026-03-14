@@ -125,24 +125,29 @@ public class SnapshotShardUnpacker {
                 int totalFiles = filesToUnpack.size();
 
                 // Use Flux to process files in parallel with controlled concurrency.
-                // Wrap in Mono.fromCallable + subscribeOn(boundedElastic) so blockLast()
-                // executes on a blocking-safe thread, not the caller's non-blocking scheduler.
-                Mono.fromCallable(() -> {
-                    Flux.fromIterable(filesToUnpack)
-                        .flatMap(
-                            fileMetadata -> unpackFile(primaryDirectory, fileMetadata)
-                                .doOnSuccess(v -> {
-                                    int done = ++completedFiles[0];
-                                    if (done % 5 == 0 || done == totalFiles) {
-                                        log.info("Shard {} unpack progress: {}/{} files", shardId, done, totalFiles);
-                                    }
-                                })
-                                .subscribeOn(Schedulers.boundedElastic()),
-                            MAX_CONCURRENT_EXTRACTIONS
-                        )
-                        .blockLast();
-                    return true;
-                }).subscribeOn(Schedulers.boundedElastic()).block();
+                // Use CountDownLatch instead of blockLast()/block() to avoid Reactor's
+                // blocking detection when called from non-blocking scheduler threads.
+                var latch = new java.util.concurrent.CountDownLatch(1);
+                var error = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+                Flux.fromIterable(filesToUnpack)
+                    .flatMap(
+                        fileMetadata -> unpackFile(primaryDirectory, fileMetadata)
+                            .doOnSuccess(v -> {
+                                int done = ++completedFiles[0];
+                                if (done % 5 == 0 || done == totalFiles) {
+                                    log.info("Shard {} unpack progress: {}/{} files", shardId, done, totalFiles);
+                                }
+                            })
+                            .subscribeOn(Schedulers.boundedElastic()),
+                        MAX_CONCURRENT_EXTRACTIONS
+                    )
+                    .subscribe(v -> {}, error::set, latch::countDown);
+                latch.await();
+                if (error.get() != null) {
+                    var cause = error.get();
+                    if (cause instanceof RuntimeException) throw (RuntimeException) cause;
+                    throw new RuntimeException(cause);
+                }
 
                 log.atInfo()
                     .setMessage("Successfully unpacked {} files for shard {}")
