@@ -44,7 +44,6 @@
         {
           label: "t2Migration",
           "snapshotConfig": {
-            "repoName": "default",
             "snapshotNameConfig": {
 #              "externallyManagedSnapshot": "source_sourcesnapshot1_88a9f10c-207e-4c04-b6c6-fbc058501131",
               "snapshotNamePrefix": "sourcesnapshot1"

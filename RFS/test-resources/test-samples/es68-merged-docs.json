@@ -1,0 +1,16 @@
+[ {
+  "id" : "unchangeddoc",
+  "type" : "type2",
+  "source" : "\n\n\n{\n  \"content\": \"This doc will not be changed\\nIt has multiple lines of text\\nIts source doc has extra newlines.\"\n}\n\n",
+  "operation" : "INDEX"
+}, {
+  "id" : "updateddoc",
+  "type" : "type2",
+  "source" : "{\"content\":\"Updated!\"}",
+  "operation" : "INDEX"
+}, {
+  "id" : "complexdoc",
+  "type" : "type1",
+  "source" : "{\"title\":\"This is a doc with complex history. Updated!\"}",
+  "operation" : "INDEX"
+} ]
