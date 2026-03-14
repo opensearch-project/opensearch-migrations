@@ -160,13 +160,91 @@ const manifest = {
             ...baseManifest.metadata.annotations,
             // Add approval annotation if skipApprovals is set
             ...(skipApprovals ? {
-                'migrations.opensearch.org/approved-replicas': 'true',
-                'migrations.opensearch.org/approved-storage-size': 'true'
+                'migrations.opensearch.org/approved-replicas': String(baseManifest.spec.replicas),
+                'migrations.opensearch.org/approved-storage-size': baseManifest.spec.storage?.size
             } : {})
         }
     }
 }
 ```
+
+---
+
+## Advanced Patterns & Operational Considerations
+
+This section covers patterns for CRD lifecycle management, resource locking after completion, and efficient status detection — building on the core VAP + retry architecture above.
+
+### CRD Upgrade "In-Flight" Handling
+
+Updating a CRD while resources are being processed is a standard day-to-day operation in Kubernetes, but there are two ways it can go:
+
+* **Non-Breaking Changes (Additive):** Adding a new optional field is safe — K8s is resilient here.
+    * **The In-Flight Resource:** Existing objects in etcd won't have the new field. Controllers/workflows should treat the absence of the field as a default value.
+    * **The Policy Impact:** If a CEL policy references a field that doesn't exist yet on the `oldObject`, the expression may error out.
+    * **Solution:** Use the CEL `has()` or `?` operator. E.g., `!has(object.spec.newFeature) || object.spec.newFeature == oldObject.spec.newFeature`. This ensures the policy doesn't crash when comparing an old resource to a new manifest. (Note: the Phase 1 VAPs already follow this pattern for annotations and optional fields.)
+
+* **Breaking Changes (Renames/Deletions):**
+    * **Versioned APIs:** K8s handles this by letting you serve multiple versions (e.g., `v1alpha1` and `v1beta1`).
+    * **Conversion Webhooks:** If you move a field, you'll eventually need a Conversion Webhook to translate between versions. Without one, if you change the storage version, K8s might lose data during the transition.
+
+### "Lock-on-Complete" CEL Pattern (Subgraph Skip & Consistency Guard)
+
+This pattern is **not** for infrastructure resources like Kafka clusters or node pools. It applies to resources that represent **completed work products** — snapshots, snapshot migrations, and similar artifacts where the resource tracks the outcome of an entire workflow subgraph.
+
+**The problem it solves:** When a user re-runs a workflow, completed subgraphs should be skippable. But skipping is only safe if the parameters that produced the completed artifact match what the user is requesting now. If the user changed their config (e.g., different index filter, different target), the old "done" artifact is stale and the subgraph needs to re-run.
+
+**How it works:** When the workflow completes a subgraph (e.g., snapshot creation), it marks the resource as Complete. On re-run, the workflow attempts to apply the manifest with the user's current parameters. If the spec matches what's already there, the apply is a no-op and the workflow skips the subgraph. If the spec differs, the CEL policy rejects the update instantly (403), signaling that the completed artifact is inconsistent with the new request.
+
+> "If the status is 'Complete', then any update to the 'spec' must be exactly equal to the current 'spec'."
+
+**Target resources** (future implementation, not Kafka):
+- `DataSnapshot` — a completed snapshot can't be retroactively reconfigured
+- `SnapshotMigration` — a completed migration's parameters are fixed
+- `CapturedTraffic` — a completed capture session's config is immutable
+
+```yaml
+validations:
+  - expression: |
+      # If the existing resource is marked as 'Complete'
+      !(oldObject.status.phase == 'Complete') || 
+      # Then the new object's spec must match the old one exactly
+      (object.spec == oldObject.spec)
+    message: "Resource is in 'Complete' state and current parameters don't match. To re-run with different parameters, delete the existing resource first."
+```
+
+> **Note:** For CRDs where the status subresource is enabled, CEL may not see `status` during a standard UPDATE. In that case, reflect the phase into an annotation (e.g., `migrations.opensearch.org/phase=Complete`) and check that instead. See the Gotchas table below.
+
+**Why this is better than a wait-based consistency check:**
+- **Immediate Failure:** The `kubectl apply` fails instantly with a 403 Forbidden — no polling needed. The workflow can immediately branch to "stale artifact" handling.
+- **Atomic Truth:** No race conditions where the workflow thinks it's okay to skip, but someone changed the spec a millisecond later. The API server is the single source of truth.
+- **Subgraph Skip:** On match, the apply is a no-op. The workflow sees the resource is already Complete and skips the entire subgraph — no need to re-deploy, re-run, or re-wait.
+
+This pattern is complementary to the value-based approval annotations above. Approvals gate *intentional changes* to infrastructure. Lock-on-Complete guards *consistency of completed work products* to enable safe subgraph skipping.
+
+### Efficient "Done" vs. "Consistent" Detection in Argo
+
+To avoid blind sleeps when waiting for resource readiness, use the Argo `resource` template with `successCondition` / `failureCondition`:
+
+1. **Check/Apply Step:**
+    * Apply the manifest.
+    * If it fails due to the CEL consistency block (Lock-on-Complete), branch to "Inconsistent/Fail" logic.
+    * If it succeeds, the update was either a no-op or a valid change.
+
+2. **Wait Step:** Use a `resource` template:
+    ```yaml
+    successCondition: status.phase == Complete
+    failureCondition: status.phase == Failed
+    ```
+
+Argo watches the resource and moves forward the instant the controller updates the status — no polling interval needed. This pairs well with the recursive retry loop in Phase 3.
+
+### Major Gotchas
+
+| Gotcha | Detail | Mitigation |
+|--------|--------|------------|
+| **Status Subresource** | If your CRD doesn't define `.spec.status: {}`, updates to status will increment `metadata.generation`, triggering unnecessary reconciliation loops. | Ensure all CRDs used with this pattern have the status subresource enabled. |
+| **CEL and Status Visibility** | By default, many ValidatingAdmissionPolicies don't see the `status` field during a standard `UPDATE` if the status subresource is enabled. | Either target the correct subresource in the policy, or have the controller reflect key state into **annotations** (which CEL can always see). This is especially relevant if adopting the Lock-on-Complete pattern above. |
+| **Two-Phase Race** | If the workflow updates status to "Complete" at the very end, cleanup steps in the same workflow could accidentally trigger the Lock-on-Complete policy. | Sequence cleanup steps *before* the status transition to "Complete", or exclude the workflow's service account from the lock policy. |
 
 ---
 
@@ -215,24 +293,24 @@ spec:
         object.spec.replicas == oldObject.spec.replicas ||
         (has(object.metadata.annotations) &&
          has(object.metadata.annotations['migrations.opensearch.org/approved-replicas']) &&
-         object.metadata.annotations['migrations.opensearch.org/approved-replicas'] == 'true')
+         object.metadata.annotations['migrations.opensearch.org/approved-replicas'] == string(object.spec.replicas))
       messageExpression: |
         "Major Change Blocked [replicas]: NodePool scaling from " +
         string(oldObject.spec.replicas) + " to " + string(object.spec.replicas) +
         ". To proceed: kubectl annotate kafkanodepool/" + object.metadata.name +
-        " migrations.opensearch.org/approved-replicas=true --overwrite"
+        " migrations.opensearch.org/approved-replicas=" + string(object.spec.replicas) + " --overwrite"
     # Major change: storage size requires specific approval
     - expression: |
         !has(object.spec.storage.size) || !has(oldObject.spec.storage.size) ||
         object.spec.storage.size == oldObject.spec.storage.size ||
         (has(object.metadata.annotations) &&
          has(object.metadata.annotations['migrations.opensearch.org/approved-storage-size']) &&
-         object.metadata.annotations['migrations.opensearch.org/approved-storage-size'] == 'true')
+         object.metadata.annotations['migrations.opensearch.org/approved-storage-size'] == object.spec.storage.size)
       messageExpression: |
         "Major Change Blocked [storage.size]: Storage resize from " +
         oldObject.spec.storage.size + " to " + object.spec.storage.size +
         ". To proceed: kubectl annotate kafkanodepool/" + object.metadata.name +
-        " migrations.opensearch.org/approved-storage-size=true --overwrite"
+        " migrations.opensearch.org/approved-storage-size=" + object.spec.storage.size + " --overwrite"
     # Immutable: storage type
     - expression: |
         object.spec.storage.type == oldObject.spec.storage.type
@@ -278,12 +356,12 @@ spec:
         object.spec.kafka.version == oldObject.spec.kafka.version ||
         (has(object.metadata.annotations) &&
          has(object.metadata.annotations['migrations.opensearch.org/approved-version']) &&
-         object.metadata.annotations['migrations.opensearch.org/approved-version'] == 'true')
+         object.metadata.annotations['migrations.opensearch.org/approved-version'] == object.spec.kafka.version)
       messageExpression: |
         "Major Change Blocked [version]: Kafka version change from '" +
         oldObject.spec.kafka.version + "' to '" + object.spec.kafka.version +
         "'. To proceed: kubectl annotate kafka/" + object.metadata.name +
-        " migrations.opensearch.org/approved-version=true --overwrite"
+        " migrations.opensearch.org/approved-version=" + object.spec.kafka.version + " --overwrite"
 
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -328,12 +406,12 @@ spec:
         object.spec.replicas == oldObject.spec.replicas ||
         (has(object.metadata.annotations) &&
          has(object.metadata.annotations['migrations.opensearch.org/approved-topic-replicas']) &&
-         object.metadata.annotations['migrations.opensearch.org/approved-topic-replicas'] == 'true')
+         object.metadata.annotations['migrations.opensearch.org/approved-topic-replicas'] == string(object.spec.replicas))
       messageExpression: |
         "Major Change Blocked [replicas]: Topic replication factor change from " +
         string(oldObject.spec.replicas) + " to " + string(object.spec.replicas) +
         ". To proceed: kubectl annotate kafkatopic/" + object.metadata.name +
-        " migrations.opensearch.org/approved-topic-replicas=true --overwrite"
+        " migrations.opensearch.org/approved-topic-replicas=" + string(object.spec.replicas) + " --overwrite"
     # Immutable: cluster assignment
     - expression: |
         !has(oldObject.metadata.labels) ||
@@ -550,8 +628,8 @@ EOF
 kubectl patch kafkanodepool test-pool --type=merge -p '{"spec":{"replicas":3}}'
 # Expected: Error "Major Change Blocked [replicas]..."
 
-# Add specific approval annotation
-kubectl annotate kafkanodepool test-pool migrations.opensearch.org/approved-replicas=true
+# Add specific approval annotation with the target value
+kubectl annotate kafkanodepool test-pool migrations.opensearch.org/approved-replicas=3
 
 # Retry (should succeed)
 kubectl patch kafkanodepool test-pool --type=merge -p '{"spec":{"replicas":3}}'
