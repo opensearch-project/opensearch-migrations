@@ -55,6 +55,11 @@ def call(Map config = [:]) {
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
         parameters {
+            choice(
+                name: 'TEST_PRESET',
+                choices: ['custom', 'large-es7x-24B', 'large-es6x-20B', 'large-es5x', 'small-es5x-300k', 'small-es7x-osb'],
+                description: 'Select a test preset to auto-fill snapshot config, or "custom" to set all params manually'
+            )
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
@@ -108,27 +113,52 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
+                        // Resolve TEST_PRESET → effective parameter values
+                        def testPresets = [
+                            'large-es7x-24B': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es7x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_7.10', rfsWorkers: '90', targetClusterSize: 'large'],
+                            'large-es6x-20B': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es6x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_6.8', rfsWorkers: '90', targetClusterSize: 'large'],
+                            'large-es5x':     [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es5x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_5.6', rfsWorkers: '90', targetClusterSize: 'large'],
+                            'small-es5x-300k': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/another_set/large-snapshot-es5x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_5.6', rfsWorkers: '1', targetClusterSize: 'default'],
+                            'small-es7x-osb': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/ma_osb_data/es7x-osb-data/', snapshotName: 'es7x-osb-data', sourceVersion: 'ES_7.10', rfsWorkers: '1', targetClusterSize: 'default']
+                        ]
+                        def preset = testPresets[params.TEST_PRESET]
+                        if (preset) {
+                            env.resolvedS3RepoUri         = preset.s3RepoUri
+                            env.resolvedSnapshotName      = preset.snapshotName
+                            env.resolvedSourceVersion     = preset.sourceVersion
+                            env.resolvedRfsWorkers        = preset.rfsWorkers
+                            env.resolvedTargetClusterSize = preset.targetClusterSize
+                        } else {
+                            env.resolvedS3RepoUri         = params.S3_REPO_URI
+                            env.resolvedSnapshotName      = params.SNAPSHOT_NAME
+                            env.resolvedSourceVersion     = params.SOURCE_VERSION
+                            env.resolvedRfsWorkers        = params.RFS_WORKERS
+                            env.resolvedTargetClusterSize = params.TARGET_CLUSTER_SIZE
+                        }
+
                         echo """
                             ================================================================
                             BYOS Migration Pipeline Configuration
                             ================================================================
+                            Test Preset:         ${params.TEST_PRESET}
+
                             Git Configuration:
                               Repository:        ${params.GIT_REPO_URL}
                               Branch:            ${params.GIT_BRANCH}
                               Stage:             ${maStageName}
                             
                             Snapshot Configuration:
-                              S3 URI:            ${params.S3_REPO_URI}
+                              S3 URI:            ${env.resolvedS3RepoUri}
                               Region:            ${params.REGION}
-                              Snapshot Name:     ${params.SNAPSHOT_NAME}
-                              Source Version:    ${params.SOURCE_VERSION}
+                              Snapshot Name:     ${env.resolvedSnapshotName}
+                              Source Version:    ${env.resolvedSourceVersion}
                             
                             Target Cluster Configuration:
                               Target Version:    ${params.TARGET_VERSION}
-                              Cluster Size:      ${params.TARGET_CLUSTER_SIZE}
+                              Cluster Size:      ${env.resolvedTargetClusterSize}
                             
                             Migration Configuration:
-                              RFS Workers:       ${params.RFS_WORKERS}
+                              RFS Workers:       ${env.resolvedRfsWorkers}
                               Test IDs:          ${params.TEST_IDS}
                             ================================================================
                         """
@@ -217,9 +247,9 @@ def call(Map config = [:]) {
                     timeout(time: 45, unit: 'MINUTES') {
                         dir('test') {
                             script {
-                                env.sourceVer = sourceVersion ?: params.SOURCE_VERSION
+                                env.sourceVer = sourceVersion ?: env.resolvedSourceVersion
                                 env.targetVer = targetVersion ?: params.TARGET_VERSION
-                                env.targetClusterSize = targetClusterSize ?: params.TARGET_CLUSTER_SIZE
+                                env.targetClusterSize = targetClusterSize ?: env.resolvedTargetClusterSize
                                 
                                 def sizeConfig = targetClusterSizes[env.targetClusterSize]
                                 deployTargetClusterOnly(
@@ -307,7 +337,7 @@ def call(Map config = [:]) {
                                     """
 
                                     // Normalize S3 URI - ensure it ends with /
-                                    def s3RepoUri = params.S3_REPO_URI
+                                    def s3RepoUri = env.resolvedS3RepoUri
                                     if (!s3RepoUri.endsWith('/')) {
                                         s3RepoUri = s3RepoUri + '/'
                                     }
@@ -318,10 +348,10 @@ def call(Map config = [:]) {
                                     // Run the BYOS test with env vars passed via file to avoid logging
                                     sh """
                                         cat > /tmp/byos-env.sh << 'ENVEOF'
-export BYOS_SNAPSHOT_NAME='${params.SNAPSHOT_NAME}'
+export BYOS_SNAPSHOT_NAME='${env.resolvedSnapshotName}'
 export BYOS_S3_REPO_URI='${s3RepoUri}'
 export BYOS_S3_REGION='${params.REGION}'
-export BYOS_POD_REPLICAS='${params.RFS_WORKERS}'
+export BYOS_POD_REPLICAS='${env.resolvedRfsWorkers}'
 export BYOS_MONITOR_RETRY_LIMIT='${params.MONITOR_RETRY_LIMIT}'
 ENVEOF
 
