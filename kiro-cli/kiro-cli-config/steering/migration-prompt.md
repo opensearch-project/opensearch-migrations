@@ -54,7 +54,15 @@ After discovery, ask the user to choose one of these paths:
 
 Use `steering/workflow.md` for workflow CLI commands, safety rails, and migration estimation details.
 
-For deeper product docs, prefer:
+For deeper product docs, prefer current repo docs first:
+
+```bash
+cat migrationConsole/README.md
+cat docs/MigrationAsAWorkflow.md
+cat orchestrationSpecs/README.md
+```
+
+Use the wiki for additional walkthroughs and troubleshooting context:
 
 ```bash
 cat opensearch-migrations.wiki/Workflow-CLI-Overview.md

@@ -12,20 +12,22 @@ A Kubernetes-native tool for migrating data from Elasticsearch/OpenSearch cluste
 Data streams, ISM policies, security config, Kibana objects, ingest pipelines
 
 ## Documentation
-The wiki is cloned locally. To get the latest docs:
+Prefer current repo docs and generated workflow/schema artifacts over wiki copies when they disagree.
+
+Start with:
 ```bash
-cd opensearch-migrations.wiki && git pull
+cat README.md
+cat migrationConsole/README.md
+cat docs/MigrationAsAWorkflow.md
+cat orchestrationSpecs/README.md
 ```
 
-Read specific docs with:
+For workflow config shape, read the checked-in schema sources or generate the sample/schema from `orchestrationSpecs`.
+
+Use the wiki only as supplemental background or when you need historical operator walkthroughs:
 ```bash
+cd opensearch-migrations.wiki && git pull
 cat opensearch-migrations.wiki/Home.md
 cat opensearch-migrations.wiki/Architecture.md
-cat opensearch-migrations.wiki/Migration-Paths.md
-cat opensearch-migrations.wiki/Workflow-CLI-Overview.md
-cat opensearch-migrations.wiki/Workflow-CLI-Getting-Started.md
-cat opensearch-migrations.wiki/Backfill-Workflow.md
-cat opensearch-migrations.wiki/Deploying-to-EKS.md
-cat opensearch-migrations.wiki/Deploying-to-Kubernetes.md
 cat opensearch-migrations.wiki/Troubleshooting.md
 ```
