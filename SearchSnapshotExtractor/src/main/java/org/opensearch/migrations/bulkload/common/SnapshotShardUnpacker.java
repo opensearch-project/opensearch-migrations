@@ -124,7 +124,9 @@ public class SnapshotShardUnpacker {
                 final int[] completedFiles = { 0 };
                 int totalFiles = filesToUnpack.size();
 
-                // Use Flux to process files in parallel with controlled concurrency
+                // Use Flux to process files in parallel with controlled concurrency.
+                // publishOn(boundedElastic) ensures blockLast() runs on a blocking-safe thread,
+                // avoiding IllegalStateException when called from non-blocking schedulers.
                 Flux.fromIterable(filesToUnpack)
                     .flatMap(
                         fileMetadata -> unpackFile(primaryDirectory, fileMetadata)
@@ -137,6 +139,7 @@ public class SnapshotShardUnpacker {
                             .subscribeOn(Schedulers.boundedElastic()),
                         MAX_CONCURRENT_EXTRACTIONS
                     )
+                    .publishOn(Schedulers.boundedElastic())
                     .blockLast();
 
                 log.atInfo()
