@@ -58,7 +58,13 @@ def call(Map config = [:]) {
             choice(
                 name: 'TEST_PRESET',
                 choices: ['custom', 'large-es7x-24B', 'large-es6x-20B', 'large-es5x', 'small-es5x-300k', 'small-es7x-osb'],
-                description: 'Select a test preset to auto-fill snapshot config, or "custom" to set all params manually'
+                description: '''<b>Presets</b> (overrides S3_REPO_URI, SNAPSHOT_NAME, SOURCE_VERSION, RFS_WORKERS, TARGET_CLUSTER_SIZE):<br/>
+<b>large-es7x-24B</b> — ES 7.10, 24B docs / 5.8TB, 90 workers, large cluster<br/>
+<b>large-es6x-20B</b> — ES 6.8, 20B docs / 5.2TB, 90 workers, large cluster<br/>
+<b>large-es5x</b> — ES 5.6, 90 workers, large cluster<br/>
+<b>small-es5x-300k</b> — ES 5.6, 300K docs, 1 worker, default cluster<br/>
+<b>small-es7x-osb</b> — ES 7.10, OSB data, 1 worker, default cluster<br/>
+<b>custom</b> — uses the parameter fields below as-is'''
             )
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
