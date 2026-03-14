@@ -38,7 +38,7 @@ def record_test(test_case: MATestBase, record_data) -> None:
 
 # The test_case parameter here is dynamically provided by the pytest_generate_tests() function in conftest.py. This
 # function will add a parametrize tag on this test to provide the 'test_case' it has collected
-def test_migration_assistant_workflow(record_data, test_case: MATestBase):
+def test_migration_assistant_workflow(record_data, keep_workflows, test_case: MATestBase):
     logger.info(f"Performing the following test case: {test_case}")
     record_test(test_case=test_case, record_data=record_data)
 
@@ -48,7 +48,7 @@ def test_migration_assistant_workflow(record_data, test_case: MATestBase):
     test_case.test_before()
     test_case.import_existing_clusters()
     test_case.prepare_workflow_snapshot_and_migration_config()
-    test_case.prepare_workflow_parameters()
+    test_case.prepare_workflow_parameters(keep_workflows=keep_workflows)
     # For imported clusters, we should load test data before the workflow starts as we will not
     # set up clusters and suspend
     if test_case.imported_clusters:

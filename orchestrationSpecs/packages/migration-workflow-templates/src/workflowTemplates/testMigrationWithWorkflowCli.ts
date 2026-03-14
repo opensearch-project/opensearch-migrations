@@ -122,6 +122,9 @@ fi
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
+        // When true, skip deleting the inner migration-workflow (useful for local debugging)
+        .addOptionalInput("keepMigrationWorkflow", () => false)
+
         .addSteps(b => b
             // Step 1: Configure and submit workflow
             .addStep("configureAndSubmitWorkflow", INTERNAL, "configureAndSubmitWorkflow", c =>
@@ -146,8 +149,10 @@ fi
                 })
             )
 
-            // Step 4: Delete the migration workflow (always executes)
-            .addStep("deleteMigrationWorkflow", INTERNAL, "deleteMigrationWorkflow")
+            // Step 4: Delete the migration workflow (skipped when keepMigrationWorkflow=true)
+            .addStep("deleteMigrationWorkflow", INTERNAL, "deleteMigrationWorkflow",
+                {when: {templateExp: expr.not(expr.deserializeRecord(b.inputs.keepMigrationWorkflow))}}
+            )
         )
     )
 
