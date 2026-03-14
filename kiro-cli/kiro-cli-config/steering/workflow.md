@@ -1,5 +1,7 @@
 # Workflow CLI Reference
 
+Use this document for current, operator-safe workflow execution. For workflow generation internals and template/source-of-truth details, see `orchestrationSpecs/README.md`.
+
 ## ⛔ NEVER Modify Without User Confirmation
 **STOP and ASK the user before running ANY of these operations:**
 
@@ -26,13 +28,34 @@ aws opensearch update-domain-config --domain-name <domain> --region <region> \
 Should I proceed with this change? (yes/no)
 ```
 
+## Namespace / Pod Assumptions
+
+Most examples below assume:
+
+- namespace: `ma`
+- migration console pod: `migration-console-0`
+
+Confirm those before reusing commands in a different environment:
+
+```bash
+kubectl get pods -n ma
+kubectl get pods -A | grep migration-console
+```
+
+If needed, set reusable variables first:
+
+```bash
+export MA_NAMESPACE=ma
+export MA_CONSOLE_POD=$(kubectl get pods -n "$MA_NAMESPACE" -o name | grep 'migration-console' | head -1 | cut -d/ -f2)
+```
+
 ## Run Commands in Migration Console
 ```bash
 # For workflow/console commands (need venv)
-kubectl exec migration-console-0 -n ma -- bash -c "source /.venv/bin/activate && <command>"
+kubectl exec "$MA_CONSOLE_POD" -n "$MA_NAMESPACE" -- bash -c "source /.venv/bin/activate && <command>"
 
 # For simple file reads (no venv needed)
-kubectl exec migration-console-0 -n ma -- cat <file>
+kubectl exec "$MA_CONSOLE_POD" -n "$MA_NAMESPACE" -- cat <file>
 ```
 
 ## Configuration Commands
@@ -45,16 +68,16 @@ workflow configure view          # View current config
 workflow configure clear         # Reset config
 
 # View full config schema (JSON Schema)
-kubectl exec migration-console-0 -n ma -- cat /root/.workflowUser.schema.json
+kubectl exec "$MA_CONSOLE_POD" -n "$MA_NAMESPACE" -- cat /root/.workflowUser.schema.json
 ```
 
 ## Load Config Programmatically
 ```bash
 # Write config to pod, then load via stdin
-cat << 'EOF' | kubectl exec -i migration-console-0 -n ma -- bash -c "cat > /tmp/config.yaml"
+cat << 'EOF' | kubectl exec -i "$MA_CONSOLE_POD" -n "$MA_NAMESPACE" -- bash -c "cat > /tmp/config.yaml"
 { "sourceClusters": { ... }, "targetClusters": { ... }, "migrationConfigs": [...] }
 EOF
-kubectl exec migration-console-0 -n ma -- bash -c "source /.venv/bin/activate && cat /tmp/config.yaml | workflow configure edit --stdin"
+kubectl exec "$MA_CONSOLE_POD" -n "$MA_NAMESPACE" -- bash -c "source /.venv/bin/activate && cat /tmp/config.yaml | workflow configure edit --stdin"
 ```
 
 ## Execution Commands
@@ -66,12 +89,31 @@ workflow status                  # List running workflows
 workflow status --all            # Include completed workflows
 workflow status <workflow-name>  # Specific workflow status
 workflow output <workflow-name>  # View logs (interactive step selection)
+
+# Note: some helper scripts and docs assume a fixed workflow name of
+# `migration-workflow`, while config-processor helpers may instead use
+# `generateName` when `USE_GENERATE_NAME=true`. Confirm which naming mode is in
+# use before hardcoding monitoring or cleanup commands.
 workflow output -f               # Stream logs in real-time
 workflow output --tail-lines 100 # Last N lines
 workflow approve                 # Approve manual gates (interactive)
 workflow approve --acknowledge   # Approve without confirmation
 workflow stop                    # Stop running workflow
 ```
+
+## Resolve the Actual Workflow Name First
+
+Before using `kubectl logs` directly, resolve the concrete workflow name:
+
+```bash
+kubectl get workflows -n "$MA_NAMESPACE"
+
+# Most recent workflow name
+export MA_WORKFLOW_NAME=$(kubectl get workflows -n "$MA_NAMESPACE" --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')
+echo "$MA_WORKFLOW_NAME"
+```
+
+Use `$MA_WORKFLOW_NAME` in direct log/inspection commands instead of assuming `migration-workflow`.
 
 ### Before Approving Any Step
 **ALWAYS check the output before approving:**
@@ -83,10 +125,10 @@ Review the step output for errors, warnings, or unexpected results before procee
 **Non-interactive alternative (for automation):**
 ```bash
 # Get logs from workflow pods directly
-kubectl logs -n ma -l workflows.argoproj.io/workflow=migration-workflow --tail=100
+kubectl logs -n "$MA_NAMESPACE" -l workflows.argoproj.io/workflow="$MA_WORKFLOW_NAME" --tail=100
 
 # Filter for specific step output (e.g., metadata evaluation)
-kubectl logs -n ma -l workflows.argoproj.io/workflow=migration-workflow --tail=200 | grep -A 50 "Starting Metadata"
+kubectl logs -n "$MA_NAMESPACE" -l workflows.argoproj.io/workflow="$MA_WORKFLOW_NAME" --tail=200 | grep -A 50 "Starting Metadata"
 ```
 
 ### Monitoring Long-Running Migrations
@@ -95,12 +137,12 @@ kubectl logs -n ma -l workflows.argoproj.io/workflow=migration-workflow --tail=2
 
 1. **For metadata evaluate/migrate steps** - Get full output (important to review):
    ```bash
-   kubectl logs -n ma -l workflows.argoproj.io/workflow=migration-workflow --tail=100 | grep -A 50 "Starting Metadata"
+   kubectl logs -n "$MA_NAMESPACE" -l workflows.argoproj.io/workflow="$MA_WORKFLOW_NAME" --tail=100 | grep -A 50 "Starting Metadata"
    ```
 
 2. **For RFS backfill** - Use minimal tail (progress only):
    ```bash
-   kubectl logs -n ma -l app.kubernetes.io/name=reindex-from-snapshot --tail=5 | grep -o "Doc Number [0-9]*"
+   kubectl logs -n "$MA_NAMESPACE" -l app.kubernetes.io/name=reindex-from-snapshot --tail=5 | grep -o "Doc Number [0-9]*"
    ```
 
 3. **Status checks with exponential backoff:**
@@ -115,7 +157,7 @@ kubectl logs -n ma -l workflows.argoproj.io/workflow=migration-workflow --tail=2
 
 5. If user wants async: provide command to check status later
    ```bash
-   kubectl exec migration-console-0 -n ma -- bash -c "source /.venv/bin/activate && workflow status"
+   kubectl exec "$MA_CONSOLE_POD" -n "$MA_NAMESPACE" -- bash -c "source /.venv/bin/activate && workflow status"
    ```
 
 ## Pre-Migration Estimation (REQUIRED)
@@ -264,17 +306,6 @@ aws opensearch describe-domain --domain-name <domain> --region <region> \
 # Destination: OpenSearch domain security group
 ```
 
-### 5. For VPC domains - check network path
-```bash
-# Check if domain is in VPC
-aws opensearch describe-domain --domain-name <domain> --region <region> \
-  --query 'DomainStatus.VPCOptions' --output json
-
-# If VPC, use Reachability Analyzer in AWS Console:
-# VPC > Reachability Analyzer > Create path
-# Source: EKS cluster security group
-# Destination: OpenSearch domain security group
-```
 
 ## Find OpenSearch Service Domains (All Regions)
 ```bash
