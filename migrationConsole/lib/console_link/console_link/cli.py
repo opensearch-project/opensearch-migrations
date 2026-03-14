@@ -24,7 +24,7 @@ from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
 from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
 from console_link.workflow.models.utils import KubernetesConfigNotFoundError
-from click.shell_completion import get_completion_class
+from click.shell_completion import CompletionItem, get_completion_class
 from click.core import ParameterSource
 
 import logging
@@ -265,6 +265,48 @@ def parse_headers(header: str) -> Dict:
     return headers
 
 
+def _complete_from_command_result(result, incomplete):
+    if not result.success or not result.value:
+        return []
+
+    return [
+        CompletionItem(line.strip())
+        for line in result.value.splitlines()
+        if line.strip() and line.strip().startswith(incomplete)
+    ]
+
+
+def _get_completion_env(ctx):
+    root = ctx.find_root()
+    params = root.params or {}
+    config_file = params.get('config_file', '/config/migration_services.yaml')
+    force_use_config_file = params.get('force_use_config_file', False)
+
+    if can_use_k8s_config_store() and not force_use_config_file:
+        return Environment.from_workflow_config(allow_empty=True)
+    return Environment(config_file=config_file, allow_empty=True)
+
+
+def get_kafka_topic_completions(ctx, _, incomplete):
+    try:
+        env = _get_completion_env(ctx)
+        if env.kafka is None:
+            return []
+        return _complete_from_command_result(kafka_.list_topics(env.kafka), incomplete)
+    except Exception:
+        return []
+
+
+def get_kafka_consumer_group_completions(ctx, _, incomplete):
+    try:
+        env = _get_completion_env(ctx)
+        if env.kafka is None:
+            return []
+        return _complete_from_command_result(kafka_.list_consumer_groups(env.kafka), incomplete)
+    except Exception:
+        return []
+
+
 @cluster_group.command(name="curl")
 @click.option('-X', '--request', default='GET', help="HTTP method to use",
               type=click.Choice([m.name for m in HttpMethod]))
@@ -354,7 +396,8 @@ def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target
         # Dev path (relative to current file)
         dev_path = os.path.join(
             os.path.dirname(__file__),
-            '../../../../TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole/testDocumentGenerator.py')
+            '../../../../TrafficCapture/dockerSolution/src/main/docker/'
+            'elasticsearchTestConsole/testDocumentGenerator.py')
         
         script_path = container_path if os.path.exists(container_path) else dev_path
         
@@ -701,17 +744,26 @@ def kafka_group(ctx):
 
 
 @kafka_group.command(name="create-topic")
-@click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to create')
+@click.argument('topic_name', required=False, default="logging-traffic-topic",
+                shell_complete=get_kafka_topic_completions)
 @click.pass_obj
 def create_topic_cmd(ctx, topic_name):
     result = kafka_.create_topic(ctx.env.kafka, topic_name=topic_name)
     click.echo(result.value)
 
 
+@kafka_group.command(name="list-topics")
+@click.pass_obj
+def list_topics_cmd(ctx):
+    result = kafka_.list_topics(ctx.env.kafka)
+    click.echo(result.value)
+
+
 @kafka_group.command(name="delete-topic")
 @click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
               help="Flag to acknowledge risk and skip confirmation")
-@click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to delete')
+@click.argument('topic_name', required=False, default="logging-traffic-topic",
+                shell_complete=get_kafka_topic_completions)
 @click.pass_obj
 def delete_topic_cmd(ctx, acknowledge_risk, topic_name):
     if acknowledge_risk:
@@ -728,15 +780,24 @@ def delete_topic_cmd(ctx, acknowledge_risk, topic_name):
 
 
 @kafka_group.command(name="describe-consumer-group")
-@click.option('--group-name', default="logging-group-default", help='Specify a group name to describe')
+@click.argument('group_name', required=False, default="logging-group-default",
+                shell_complete=get_kafka_consumer_group_completions)
 @click.pass_obj
 def describe_group_command(ctx, group_name):
     result = kafka_.describe_consumer_group(ctx.env.kafka, group_name=group_name)
     click.echo(result.value)
 
 
+@kafka_group.command(name="list-consumer-groups")
+@click.pass_obj
+def list_consumer_groups_cmd(ctx):
+    result = kafka_.list_consumer_groups(ctx.env.kafka)
+    click.echo(result.value)
+
+
 @kafka_group.command(name="describe-topic-records")
-@click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to describe')
+@click.argument('topic_name', required=False, default="logging-traffic-topic",
+                shell_complete=get_kafka_topic_completions)
 @click.pass_obj
 def describe_topic_records_cmd(ctx, topic_name):
     result = kafka_.describe_topic_records(ctx.env.kafka, topic_name=topic_name)

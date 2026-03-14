@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from console_link.environment import Environment, WorkflowConfigException
 from console_link.models.cluster import SourceCluster
+from console_link.models.kafka import StandardKafka, MSK
 
 
 def test_get_cluster_from_workflow_config_valid():
@@ -108,6 +109,55 @@ def test_get_source_cluster_from_workflow_config_attaches_proxy():
     assert isinstance(cluster, SourceCluster)
     assert cluster.proxy is not None
     assert cluster.proxy.endpoint == "http://capture-proxy:9201"
+
+
+def test_get_kafka_from_workflow_config_autocreate_default_cluster():
+    config = {
+        "kafkaClusterConfiguration": {
+            "default": {
+                "autoCreate": {}
+            }
+        },
+        "traffic": {
+            "proxies": {
+                "capture-proxy": {
+                    "source": "source"
+                }
+            }
+        }
+    }
+
+    kafka = Environment._get_kafka_from_workflow_config(config)
+
+    assert isinstance(kafka, StandardKafka)
+    assert kafka.brokers == "default-kafka-bootstrap:9092"
+
+
+def test_get_kafka_from_workflow_config_existing_cluster_uses_reference():
+    config = {
+        "kafkaClusterConfiguration": {
+            "myKafka": {
+                "existing": {
+                    "enableMSKAuth": True,
+                    "kafkaConnection": "broker.a:9092,broker.b:9092",
+                    "kafkaTopic": ""
+                }
+            }
+        },
+        "traffic": {
+            "proxies": {
+                "capture-proxy": {
+                    "source": "source",
+                    "kafka": "myKafka"
+                }
+            }
+        }
+    }
+
+    kafka = Environment._get_kafka_from_workflow_config(config)
+
+    assert isinstance(kafka, MSK)
+    assert kafka.brokers == "broker.a:9092,broker.b:9092"
 
 
 @patch('console_link.environment.WorkflowConfigStore')

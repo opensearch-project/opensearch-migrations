@@ -1,4 +1,7 @@
 import subprocess
+import os
+import shutil
+from pathlib import Path
 from typing import List
 
 from cerberus import Validator
@@ -29,8 +32,69 @@ SCHEMA = {
     }
 }
 
-KAFKA_TOPICS_COMMAND = '/root/kafka-tools/kafka/bin/kafka-topics.sh'
-MSK_AUTH_PARAMETERS = ['--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties']
+CONTAINER_KAFKA_TOOLS_HOME = Path('/root/kafka-tools')
+
+
+def _candidate_kafka_homes() -> list[Path]:
+    model_dir = Path(__file__).resolve().parent
+    repo_root = model_dir.parents[4]
+
+    candidates: list[Path] = []
+    for env_var in ('KAFKA_TOOLS_HOME', 'KAFKA_HOME'):
+        value = os.getenv(env_var)
+        if value:
+            candidates.append(Path(value))
+
+    candidates.extend([
+        repo_root / 'kafka-tools',
+        repo_root / 'build' / 'kafka-tools',
+        repo_root / 'build' / 'dockerContext' / 'kafka-tools',
+        CONTAINER_KAFKA_TOOLS_HOME,
+    ])
+    return candidates
+
+
+def resolve_kafka_tool(script_name: str) -> str:
+    on_path = shutil.which(script_name)
+    if on_path:
+        return on_path
+
+    for home in _candidate_kafka_homes():
+        candidates = [
+            home / script_name,
+            home / 'bin' / script_name,
+            home / 'kafka' / 'bin' / script_name,
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+
+    raise FileNotFoundError(
+        f"Could not find Kafka tool '{script_name}'. Set KAFKA_TOOLS_HOME to a directory containing "
+        f"'{script_name}', 'bin/{script_name}', or 'kafka/bin/{script_name}', or run from the container image "
+        f"where /root/kafka-tools is available."
+    )
+
+
+def resolve_msk_auth_config() -> str:
+    for home in _candidate_kafka_homes():
+        candidates = [
+            home / 'msk-iam-auth.properties',
+            home / 'aws' / 'msk-iam-auth.properties',
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+
+    candidate = Path(__file__).resolve().parents[4] / 'msk-iam-auth.properties'
+    if candidate.exists():
+        return str(candidate)
+
+    raise FileNotFoundError(
+        "Could not find msk-iam-auth.properties. Set KAFKA_TOOLS_HOME to a directory containing "
+        "'msk-iam-auth.properties' or 'aws/msk-iam-auth.properties', or run from the container image where "
+        "/root/kafka-tools is available."
+    )
 
 
 def get_result_for_command(command: List[str], operation_name: str) -> CommandResult:
@@ -89,7 +153,15 @@ class Kafka(ABC):
         pass
 
     @abstractmethod
+    def list_topics(self) -> CommandResult:
+        pass
+
+    @abstractmethod
     def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
+        pass
+
+    @abstractmethod
+    def list_consumer_groups(self) -> CommandResult:
         pass
 
     @abstractmethod
@@ -106,27 +178,41 @@ class MSK(Kafka):
         super().__init__(config)
 
     def delete_topic(self, topic_name='logging-traffic-topic') -> CommandResult:
-        command = [KAFKA_TOPICS_COMMAND, '--bootstrap-server', f'{self.brokers}', '--delete',
-                   '--topic', f'{topic_name}'] + MSK_AUTH_PARAMETERS
+        command = [resolve_kafka_tool('kafka-topics.sh'), '--bootstrap-server', f'{self.brokers}', '--delete',
+                   '--topic', f'{topic_name}', '--command-config', resolve_msk_auth_config()]
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Delete Topic")
 
     def create_topic(self, topic_name='logging-traffic-topic') -> CommandResult:
-        command = [KAFKA_TOPICS_COMMAND, '--bootstrap-server', f'{self.brokers}', '--create',
-                   '--topic', f'{topic_name}'] + MSK_AUTH_PARAMETERS
+        command = [resolve_kafka_tool('kafka-topics.sh'), '--bootstrap-server', f'{self.brokers}', '--create',
+                   '--topic', f'{topic_name}', '--command-config', resolve_msk_auth_config()]
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Create Topic")
 
+    def list_topics(self) -> CommandResult:
+        command = [resolve_kafka_tool('kafka-topics.sh'), '--bootstrap-server', f'{self.brokers}', '--list',
+                   '--command-config', resolve_msk_auth_config()]
+        logger.info(f"Executing command: {command}")
+        return get_result_for_command(command, "List Topics")
+
     def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
-        command = ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh', '--bootstrap-server', f'{self.brokers}',
-                   '--timeout', '100000', '--describe', '--group', f'{group_name}'] + MSK_AUTH_PARAMETERS
+        command = [resolve_kafka_tool('kafka-consumer-groups.sh'), '--bootstrap-server', f'{self.brokers}',
+                   '--timeout', '100000', '--describe', '--group', f'{group_name}',
+                   '--command-config', resolve_msk_auth_config()]
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Describe Consumer Group")
 
+    def list_consumer_groups(self) -> CommandResult:
+        command = [resolve_kafka_tool('kafka-consumer-groups.sh'), '--bootstrap-server', f'{self.brokers}',
+                   '--timeout', '100000', '--list', '--command-config', resolve_msk_auth_config()]
+        logger.info(f"Executing command: {command}")
+        return get_result_for_command(command, "List Consumer Groups")
+
     def describe_topic_records(self, topic_name='logging-traffic-topic') -> CommandResult:
-        command = ['/root/kafka-tools/kafka/bin/kafka-run-class.sh',
+        command = [resolve_kafka_tool('kafka-run-class.sh'),
                    'org.apache.kafka.tools.GetOffsetShell', '--bootstrap-server',
-                   f'{self.brokers}', '--topic', f'{topic_name}', '--time', '-1'] + MSK_AUTH_PARAMETERS
+                   f'{self.brokers}', '--topic', f'{topic_name}', '--time', '-1',
+                   '--command-config', resolve_msk_auth_config()]
         logger.info(f"Executing command: {command}")
         result = get_result_for_command(command, "Describe Topic Records")
         if result.success and result.value:
@@ -144,25 +230,36 @@ class StandardKafka(Kafka):
         super().__init__(config)
 
     def delete_topic(self, topic_name='logging-traffic-topic') -> CommandResult:
-        command = [KAFKA_TOPICS_COMMAND, '--bootstrap-server', f'{self.brokers}', '--delete',
+        command = [resolve_kafka_tool('kafka-topics.sh'), '--bootstrap-server', f'{self.brokers}', '--delete',
                    '--topic', f'{topic_name}']
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Delete Topic")
 
     def create_topic(self, topic_name='logging-traffic-topic') -> CommandResult:
-        command = [KAFKA_TOPICS_COMMAND, '--bootstrap-server', f'{self.brokers}', '--create',
+        command = [resolve_kafka_tool('kafka-topics.sh'), '--bootstrap-server', f'{self.brokers}', '--create',
                    '--topic', f'{topic_name}']
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Create Topic")
 
+    def list_topics(self) -> CommandResult:
+        command = [resolve_kafka_tool('kafka-topics.sh'), '--bootstrap-server', f'{self.brokers}', '--list']
+        logger.info(f"Executing command: {command}")
+        return get_result_for_command(command, "List Topics")
+
     def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
-        command = ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh', '--bootstrap-server', f'{self.brokers}',
+        command = [resolve_kafka_tool('kafka-consumer-groups.sh'), '--bootstrap-server', f'{self.brokers}',
                    '--timeout', '100000', '--describe', '--group', f'{group_name}']
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Describe Consumer Group")
 
+    def list_consumer_groups(self) -> CommandResult:
+        command = [resolve_kafka_tool('kafka-consumer-groups.sh'), '--bootstrap-server', f'{self.brokers}',
+                   '--timeout', '100000', '--list']
+        logger.info(f"Executing command: {command}")
+        return get_result_for_command(command, "List Consumer Groups")
+
     def describe_topic_records(self, topic_name='logging-traffic-topic') -> CommandResult:
-        command = ['/root/kafka-tools/kafka/bin/kafka-run-class.sh',
+        command = [resolve_kafka_tool('kafka-run-class.sh'),
                    'org.apache.kafka.tools.GetOffsetShell', '--bootstrap-server',
                    f'{self.brokers}', '--topic', f'{topic_name}', '--time', '-1']
         logger.info(f"Executing command: {command}")

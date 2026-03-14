@@ -10,7 +10,12 @@ from subprocess import CompletedProcess
 
 import console_link.middleware as middleware
 import console_link.cli as cli_module
-from console_link.cli import cli, main
+from console_link.cli import (
+    cli,
+    get_kafka_consumer_group_completions,
+    get_kafka_topic_completions,
+    main,
+)
 from console_link.environment import Environment
 from console_link.models.backfill_rfs import ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.cluster import Cluster, HttpMethod
@@ -914,10 +919,20 @@ def test_cli_kafka_create_topic(runner, mocker):
     middleware_mock = mocker.spy(middleware.kafka, 'create_topic')
     model_mock = mocker.patch.object(StandardKafka, 'create_topic')
     result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'create-topic',
-                                 '--topic-name', 'test'],
+                                 'test'],
                            catch_exceptions=True)
 
     model_mock.assert_called_once_with(topic_name='test')
+    middleware_mock.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_cli_kafka_list_topics(runner, mocker):
+    model_mock = mocker.patch.object(StandardKafka, 'list_topics')
+    middleware_mock = mocker.spy(middleware.kafka, 'list_topics')
+    result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'list-topics'],
+                           catch_exceptions=True)
+    model_mock.assert_called_once_with()
     middleware_mock.assert_called_once()
     assert result.exit_code == 0
 
@@ -926,7 +941,7 @@ def test_cli_kafka_delete_topic(runner, mocker):
     model_mock = mocker.patch.object(StandardKafka, 'delete_topic')
     middleware_mock = mocker.spy(middleware.kafka, 'delete_topic')
     result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'delete-topic',
-                                 '--topic-name', 'test', '--acknowledge-risk'],
+                                 '--acknowledge-risk', 'test'],
                            catch_exceptions=True)
     model_mock.assert_called_once_with(topic_name='test')
     middleware_mock.assert_called_once()
@@ -937,18 +952,52 @@ def test_cli_kafka_describe_consumer_group(runner, mocker):
     model_mock = mocker.patch.object(StandardKafka, 'describe_consumer_group')
     middleware_mock = mocker.spy(middleware.kafka, 'describe_consumer_group')
     result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'describe-consumer-group',
-                                 '--group-name', 'test-group'],
+                                 'test-group'],
                            catch_exceptions=True)
     model_mock.assert_called_once_with(group_name='test-group')
     middleware_mock.assert_called_once()
     assert result.exit_code == 0
 
 
+def test_cli_kafka_list_consumer_groups(runner, mocker):
+    model_mock = mocker.patch.object(StandardKafka, 'list_consumer_groups')
+    middleware_mock = mocker.spy(middleware.kafka, 'list_consumer_groups')
+    result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'list-consumer-groups'],
+                           catch_exceptions=True)
+    model_mock.assert_called_once_with()
+    middleware_mock.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_kafka_topic_completion_uses_list_topics(mocker, env):
+    ctx = mocker.Mock()
+    ctx.find_root.return_value.params = {'config_file': '/fake/config.yaml', 'force_use_config_file': True}
+    mocker.patch('console_link.cli.Environment', return_value=env)
+    mocker.patch('console_link.middleware.kafka.list_topics',
+                 return_value=CommandResult(success=True, value='logging-traffic-topic\nlogs-topic\n'))
+
+    completions = get_kafka_topic_completions(ctx, None, 'log')
+
+    assert [item.value for item in completions] == ['logging-traffic-topic', 'logs-topic']
+
+
+def test_kafka_consumer_group_completion_uses_list_groups(mocker, env):
+    ctx = mocker.Mock()
+    ctx.find_root.return_value.params = {'config_file': '/fake/config.yaml', 'force_use_config_file': True}
+    mocker.patch('console_link.cli.Environment', return_value=env)
+    mocker.patch('console_link.middleware.kafka.list_consumer_groups',
+                 return_value=CommandResult(success=True, value='logging-group-default\nother-group\n'))
+
+    completions = get_kafka_consumer_group_completions(ctx, None, 'log')
+
+    assert [item.value for item in completions] == ['logging-group-default']
+
+
 def test_cli_kafka_describe_topic(runner, mocker):
     model_mock = mocker.patch.object(StandardKafka, 'describe_topic_records')
     middleware_mock = mocker.spy(middleware.kafka, 'describe_topic_records')
     result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'describe-topic-records',
-                                 '--topic-name', 'test'],
+                                 'test'],
                            catch_exceptions=True)
     model_mock.assert_called_once_with(topic_name='test')
     middleware_mock.assert_called_once()

@@ -177,6 +177,7 @@ class Environment:
         instance.target_cluster = target_cluster
         instance.source_cluster = source_cluster
         instance.proxy = getattr(source_cluster, "proxy", None)
+        instance.kafka = cls._get_kafka_from_workflow_config(config)
         return instance
 
     @classmethod
@@ -232,6 +233,54 @@ class Environment:
             "endpoint": f"{'https' if has_tls else 'http'}://{proxy_name}:{listen_port}",
             "allow_insecure": has_tls,
         }
+
+    @classmethod
+    def _get_kafka_from_workflow_config(cls, config: Dict) -> Optional[Kafka]:
+        kafka_clusters = config.get("kafkaClusterConfiguration") or {}
+        if not kafka_clusters:
+            logger.info("No kafka cluster configuration is defined in the workflow config.")
+            return None
+
+        proxies = ((config.get("traffic") or {}).get("proxies") or {})
+        referenced_clusters = {
+            proxy_config.get("kafka", "default")
+            for proxy_config in proxies.values()
+        }
+
+        if not referenced_clusters:
+            if "default" in kafka_clusters:
+                cluster_name = "default"
+            elif len(kafka_clusters) == 1:
+                cluster_name = next(iter(kafka_clusters))
+            else:
+                logger.warning("Multiple kafka clusters are defined but no proxy references specify which to use.")
+                return None
+        elif len(referenced_clusters) == 1:
+            cluster_name = next(iter(referenced_clusters))
+        else:
+            cluster_names = ", ".join(sorted(referenced_clusters))
+            raise ValueError(
+                f"Workflow config references multiple kafka clusters ({cluster_names}). "
+                f"Console kafka commands require exactly zero or one kafka cluster."
+            )
+
+        cluster_config = kafka_clusters.get(cluster_name)
+        if cluster_config is None:
+            raise ValueError(f"Kafka cluster '{cluster_name}' not found in kafkaClusterConfiguration")
+
+        if "existing" in cluster_config:
+            existing_config = cluster_config["existing"]
+            kafka_config = {
+                "broker_endpoints": existing_config["kafkaConnection"],
+                "msk" if existing_config.get("enableMSKAuth") else "standard": None
+            }
+        else:
+            kafka_config = {
+                "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9092",
+                "standard": None
+            }
+
+        return get_kafka(kafka_config)
 
     @classmethod
     def _get_cluster_from_workflow_config(cls, config: Dict, cluster_key: str, cluster_label: str) -> Optional[Cluster]:
