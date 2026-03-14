@@ -2,6 +2,19 @@
 
 Configuration files for [Kiro](https://kiro.dev), an AI-powered development assistant for OpenSearch Migrations.
 
+## What This Config Is For
+
+The files under `kiro-cli/kiro-cli-config/` steer an agent toward the repo's current migration workflows, deployment paths, and operator guardrails.
+
+If you are updating agent behavior, treat these as the main agent-facing prompts:
+
+- `kiro-cli/kiro-cli-config/steering/product.md`
+- `kiro-cli/kiro-cli-config/steering/deployment.md`
+- `kiro-cli/kiro-cli-config/steering/workflow.md`
+- `kiro-cli/kiro-cli-config/steering/migration-prompt.md`
+
+Repo-local guidance for non-Kiro agents lives in [`AGENTS.md`](../AGENTS.md).
+
 ## Quick Start (Gradle)
 
 ```bash
