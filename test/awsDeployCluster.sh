@@ -126,7 +126,7 @@ if [ ! -d "amazon-opensearch-service-sample-cdk" ]; then
 else
   echo "Repo already exists, skipping clone."
 fi
-cd amazon-opensearch-service-sample-cdk && git fetch --tags && git checkout "$SAMPLE_CDK_VERSION"
+cd amazon-opensearch-service-sample-cdk && git checkout -- . && git fetch --tags && git checkout "$SAMPLE_CDK_VERSION"
 npm install
 npm run build
 
