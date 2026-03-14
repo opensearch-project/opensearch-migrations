@@ -1,0 +1,38 @@
+# Build output
+/opensearch-pricing-calculator
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.html
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Pricing cache (downloaded at runtime)
+priceCache.json
+
+# Logs
+/logs/*.log
+*.log
+
+# Examples (covered by Swagger docs and README)
+/examples/
+
+# Temporary files
+/tmp/

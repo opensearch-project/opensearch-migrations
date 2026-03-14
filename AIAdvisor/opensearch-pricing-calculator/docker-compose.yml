@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  opensearch-pricing-calculator:
+    build: .
+    ports:
+      - "5050:5050"   # HTTP API
+      - "8081:8081"   # MCP server
+    environment:
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_PROFILE=${AWS_PROFILE:-}
+      - ENVIRONMENT=docker
+      - RATE_LIMIT_GENERAL=${RATE_LIMIT_GENERAL:-100}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+      # OpenTelemetry (optional)
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_INSECURE=${OTEL_EXPORTER_OTLP_INSECURE:-true}
+    volumes:
+      - ./priceCache.json:/app/priceCache.json
+      - ~/.aws:/root/.aws:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5050/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
