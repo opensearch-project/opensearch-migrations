@@ -359,19 +359,21 @@ kubectl create secret generic <secret-name> -n ma \
 ### Structure Overview
 ```
 skipApprovals                    # Global: skip all approval steps
-sourceClusters.<name>            # Source cluster with snapshotRepo config
+sourceClusters.<name>            # Source cluster with snapshotRepos map
 targetClusters.<name>            # Target cluster config
 migrationConfigs[]               # Array of migration definitions
   └─ snapshotExtractAndLoadConfigs[]  # Snapshot-based migration
        ├─ createSnapshotConfig        # Create new snapshots (needs s3RoleArn)
-       ├─ snapshotConfig              # Snapshot naming
+       ├─ snapshotConfig              # Snapshot naming + selected repoName
        └─ migrations[]                # Migration steps
             ├─ metadataMigrationConfig   # Index templates, mappings
             └─ documentBackfillConfig    # Reindex from snapshot
 ```
 
 ### Key Points
-- **snapshotRepo** goes inside source cluster (not top-level)
+- **snapshotRepos** lives inside each source cluster as a map of repo name → repo config
+- **snapshotConfig.repoName** must reference one of the configured `snapshotRepos` keys
+- Some legacy console/helper paths still refer to singular `snapshotRepo`; prefer `snapshotRepos` in new workflow configs and agent guidance
 - **s3RepoPathUri** must be `s3://bucket-name` only - NO path suffix (schema validation fails)
 - **Empty `{}` enables a feature with defaults** - without it, feature is disabled
 - **replayerConfig** is for live traffic replay - NOT supported for AWS managed domains
@@ -442,10 +444,11 @@ kubectl get configmap migrations-default-s3-config -n ma -o yaml
       "endpoint": "https://search-<domain>.<region>.es.amazonaws.com",
       "version": "ES 7.10",
       "authConfig": {"sigv4": {"region": "us-east-1", "service": "es"}},
-      "snapshotRepo": {
-        "awsRegion": "us-east-1",
-        "s3RepoPathUri": "s3://<bucket-name>",
-        "repoName": "migration_assistant_repo"
+      "snapshotRepos": {
+        "migration_assistant_repo": {
+          "awsRegion": "us-east-1",
+          "s3RepoPathUri": "s3://<bucket-name>"
+        }
       }
     }
   },
@@ -467,6 +470,7 @@ kubectl get configmap migrations-default-s3-config -n ma -o yaml
             "s3RoleArn": "arn:aws:iam::<account>:role/migration-eks-cluster-<stage>-<region>-snapshot-role"
           },
           "snapshotConfig": {
+            "repoName": "migration_assistant_repo",
             "snapshotNameConfig": {"snapshotNamePrefix": "migration-snapshot"}
           },
           "migrations": [
@@ -492,9 +496,11 @@ kubectl get configmap migrations-default-s3-config -n ma -o yaml
       "version": "ES 7.10",
       "allowInsecure": false,
       "authConfig": {"basic": {"secretName": "source-creds"}},
-      "snapshotRepo": {
-        "awsRegion": "us-east-1",
-        "s3RepoPathUri": "s3://bucket-name"
+      "snapshotRepos": {
+        "default": {
+          "awsRegion": "us-east-1",
+          "s3RepoPathUri": "s3://bucket-name"
+        }
       }
     }
   },
@@ -511,7 +517,7 @@ kubectl get configmap migrations-default-s3-config -n ma -o yaml
       "snapshotExtractAndLoadConfigs": [
         {
           "createSnapshotConfig": {},
-          "snapshotConfig": {"snapshotNameConfig": {"snapshotNamePrefix": "migration"}},
+          "snapshotConfig": {"repoName": "default", "snapshotNameConfig": {"snapshotNamePrefix": "migration"}},
           "migrations": [
             {
               "metadataMigrationConfig": {"indexAllowlist": ["*"]},
@@ -607,6 +613,20 @@ Real-world example (1M docs, 4.2 GB, 1 × m6g.large target):
 5. **Not verifying doc counts** after migration → silent data loss
 
 ## Full Documentation
+Prefer current repo docs and schema sources first:
+```bash
+cat migrationConsole/README.md
+cat docs/MigrationAsAWorkflow.md
+cat orchestrationSpecs/README.md
+```
+
+Use the wiki for supplemental walkthroughs or troubleshooting history:
+```bash
+cat opensearch-migrations.wiki/Workflow-CLI-Overview.md
+cat opensearch-migrations.wiki/Workflow-CLI-Getting-Started.md
+cat opensearch-migrations.wiki/Backfill-Workflow.md
+```
+or supplemental walkthroughs or troubleshooting history:
 ```bash
 cat opensearch-migrations.wiki/Workflow-CLI-Overview.md
 cat opensearch-migrations.wiki/Workflow-CLI-Getting-Started.md
