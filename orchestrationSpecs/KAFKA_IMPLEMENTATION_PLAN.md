@@ -54,7 +54,7 @@ with a checked-in fallback for development.
 
 The current unified schema builder already exists in:
 
-- [packages/schemas/src/unifiedSchema.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/schemas/src/unifiedSchema.ts)
+- [packages/schemas/src/unifiedSchemaBuilder.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/schemas/src/unifiedSchemaBuilder.ts)
 
 It currently:
 

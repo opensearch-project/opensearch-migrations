@@ -110,6 +110,7 @@ export const HTTP_ENDPOINT_PATTERN = `^https?:\\/\\/${HOSTNAME_PATTERN}${OPTIONA
 export const OPTIONAL_HTTP_ENDPOINT_PATTERN = `^(?:https?:\\/\\/${HOSTNAME_PATTERN}${OPTIONAL_PORT_PATTERN}(?:\\/)?)?$`;
 
 export const GENERIC_JSON_OBJECT = z.record(z.string(), z.any());
+export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 
 export const KAFKA_CLIENT_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional(),
@@ -118,9 +119,37 @@ export const KAFKA_CLIENT_CONFIG = z.object({
             "If empty, the cluster is automatically created and this is filled in.")
         .regex(new RegExp(`^(?:[a-z0-9][-a-z0-9.]*:${PORT_NUMBER_PATTERN}(?:,(?!$)|$))*$`)),
     kafkaTopic: z.string().describe("Empty defaults to the name of the target label").default(""),
+    managedByWorkflow: z.boolean().default(false).optional()
+        .describe("Internal flag indicating whether the Kafka cluster is created and resolved by the workflow."),
+    listenerName: z.string().default("").optional()
+        .describe("Resolved Kafka listener name used by migration applications."),
+    authType: z.enum(["none", "scram-sha-512"]).default("none").optional()
+        .describe("Resolved Kafka auth mode used by migration applications."),
+    secretName: z.string().default("").optional()
+        .describe("Resolved Kubernetes secret containing Kafka client credentials."),
+    kafkaUserName: z.string().default("").optional()
+        .describe("Resolved Kafka principal name used by migration applications."),
 });
 
-export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+export const KAFKA_EXISTING_AUTH_CONFIG = z.discriminatedUnion("type", [
+    z.object({
+        type: z.literal("none"),
+    }),
+    z.object({
+        type: z.literal("scram-sha-512"),
+        secretName: z.string().regex(K8S_NAMING_PATTERN),
+        kafkaUserName: z.string().regex(K8S_NAMING_PATTERN).optional(),
+    }),
+]);
+
+export const KAFKA_EXISTING_CLUSTER_CONFIG = z.object({
+    enableMSKAuth: z.boolean().default(false).optional(),
+    kafkaConnection: z.string()
+        .describe("Sequence of <HOSTNAME:PORT> values delimited by ','.")
+        .regex(new RegExp(`^(?:[a-z0-9][-a-z0-9.]*:${PORT_NUMBER_PATTERN}(?:,(?!$)|$))*$`)),
+    kafkaTopic: z.string().describe("Empty defaults to the name of the target label").default(""),
+    auth: KAFKA_EXISTING_AUTH_CONFIG.default({type: "none"}).optional(),
+});
 
 export const CPU_QUANTITY = z.string()
     .regex(/^[0-9]+m$/)
@@ -398,13 +427,6 @@ export const USER_RFS_OPTIONS = z.object({
 });
 
 export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
-    replicas:      z.number().int().min(1).default(1).optional(),
-    storage:       z.discriminatedUnion("type", [
-                       z.object({ type: z.literal("ephemeral") }),
-                       z.object({ type: z.literal("persistent-claim"), size: z.string() })
-                   ]).default({ type: "ephemeral" }).optional(),
-    partitions:    z.number().int().min(1).default(1).optional(),
-    topicReplicas: z.number().int().min(1).default(1).optional(),
     clusterSpecOverrides: GENERIC_JSON_OBJECT.optional()
         .describe("Optional overrides merged into the generated Strimzi Kafka.spec. " +
             "Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."),
@@ -417,7 +439,7 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
 
 export const KAFKA_CLUSTER_CONFIG = z.union([
     z.object({autoCreate: KAFKA_CLUSTER_CREATION_CONFIG}),
-    z.object({existing: KAFKA_CLIENT_CONFIG })
+    z.object({existing: KAFKA_EXISTING_CLUSTER_CONFIG })
 ]);
 
 export const HTTP_AUTH_BASIC = z.object({

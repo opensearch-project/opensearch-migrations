@@ -37,7 +37,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=sprig.merge(sprig.dict(\"replicas\", sprig.dig('replicas', 1, fromJSON(inputs.parameters.clusterConfig)), \"roles\", [\"controller\",\"broker\"], \"storage\", sprig.dict(\"type\", 'persistent-claim', \"size\", '1Gi', \"deleteClaim\", true)), sprig.dig('nodePoolSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig)))}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=sprig.merge(sprig.dict(\"replicas\", 1, \"roles\", [\"controller\",\"broker\"], \"storage\", sprig.dict(\"type\", 'persistent-claim', \"size\", '1Gi', \"deleteClaim\", true)), sprig.dig('nodePoolSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig)))}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -179,7 +179,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=sprig.merge(sprig.dict(\"partitions\", sprig.dig('partitions', 1, fromJSON(inputs.parameters.clusterConfig)), \"replicas\", sprig.dig('topicReplicas', 1, fromJSON(inputs.parameters.clusterConfig)), \"config\", {\"retention.ms\":604800000,\"segment.bytes\":1073741824}), sprig.dig('topicSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig)))}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=sprig.merge(sprig.dict(\"partitions\", 1, \"replicas\", 1, \"config\", {\"retention.ms\":604800000,\"segment.bytes\":1073741824}), sprig.dig('topicSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig)))}}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.topicName"

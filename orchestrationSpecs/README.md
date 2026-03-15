@@ -74,7 +74,7 @@ rest of the migration stack.
 #### How the merge works
 
 The unified schema builder lives in
-[packages/schemas/src/unifiedSchema.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/schemas/src/unifiedSchema.ts).
+[packages/schemas/src/unifiedSchemaBuilder.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/schemas/src/unifiedSchemaBuilder.ts).
 At a high level it does the following:
 
 1. Generates the base migration configuration JSON Schema from the
@@ -245,16 +245,8 @@ targetClusters:
 
 ### Kafka Settings
 
-`kafkaClusterConfiguration.<cluster>.autoCreate` still supports the legacy
-convenience knobs:
-
-- `replicas`
-- `storage`
-- `partitions`
-- `topicReplicas`
-
-It also now accepts Strimzi-shaped pass-through sections that are merged into
-the generated resources:
+`kafkaClusterConfiguration.<cluster>.autoCreate` accepts Strimzi-shaped
+pass-through sections that are merged into the generated resources:
 
 - `clusterSpecOverrides` for `Kafka.spec`
 - `nodePoolSpecOverrides` for `KafkaNodePool.spec`
@@ -266,6 +258,11 @@ workflow still owns the resource names and Kafka access contract.  In
 particular, workflow-managed listeners, auth wiring, and other invariants may
 be overwritten so that proxy, replayer, and console connectivity remains
 stable.
+
+For `kafkaClusterConfiguration.<cluster>.existing`, the user should provide the
+explicit connection and auth material that migration applications must use.  In
+particular, existing Kafka clusters should use an explicit auth block rather
+than relying on the workflow to infer secret names.
 
 ### Updating template and configuration models
 

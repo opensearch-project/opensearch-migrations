@@ -1,4 +1,4 @@
-import {loadUnifiedSchema} from "./unifiedSchema";
+import {loadUnifiedSchema} from "./unifiedSchemaBuilder";
 
 export async function main() {
     const unifiedSchema = loadUnifiedSchema();

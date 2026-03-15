@@ -51,16 +51,37 @@ function makeReplayerParamsDict(
     options: BaseExpression<Serialized<z.infer<typeof USER_REPLAYER_OPTIONS>>>,
     kafkaConfig: BaseExpression<Serialized<z.infer<typeof KAFKA_CLIENT_CONFIG>>>,
     kafkaGroupId: BaseExpression<string>,
+    resolvedKafkaConnection: BaseExpression<string>,
+    resolvedKafkaListenerName: BaseExpression<string>,
+    resolvedKafkaAuthType: BaseExpression<string>,
 ) {
+    const deserializedKafkaConfig = expr.deserializeRecord(kafkaConfig);
+    const effectiveKafkaConnection = expr.ternary(
+        expr.not(expr.equals(resolvedKafkaConnection, expr.literal(""))),
+        resolvedKafkaConnection,
+        expr.get(deserializedKafkaConfig, "kafkaConnection")
+    );
+    const effectiveKafkaListenerName = expr.ternary(
+        expr.not(expr.equals(resolvedKafkaListenerName, expr.literal(""))),
+        resolvedKafkaListenerName,
+        expr.getLoose(deserializedKafkaConfig, "listenerName")
+    );
+    const effectiveKafkaAuthType = expr.ternary(
+        expr.not(expr.equals(resolvedKafkaAuthType, expr.literal(""))),
+        resolvedKafkaAuthType,
+        expr.getLoose(deserializedKafkaConfig, "authType")
+    );
     return expr.mergeDicts(
         expr.mergeDicts(
             makeReplayerTargetParamDict(targetConfig),
             expr.omit(expr.deserializeRecord(options), ...ARGO_REPLAYER_WORKFLOW_OPTION_KEYS)
         ),
         expr.makeDict({
-            kafkaTrafficBrokers: expr.get(expr.deserializeRecord(kafkaConfig), "kafkaConnection"),
-            kafkaTrafficTopic: expr.get(expr.deserializeRecord(kafkaConfig), "kafkaTopic"),
+            kafkaTrafficBrokers: effectiveKafkaConnection,
+            kafkaTrafficTopic: expr.get(deserializedKafkaConfig, "kafkaTopic"),
             kafkaTrafficGroupId: kafkaGroupId,
+            kafkaTrafficListenerName: effectiveKafkaListenerName,
+            kafkaTrafficAuthType: effectiveKafkaAuthType,
         })
     );
 }
@@ -174,6 +195,9 @@ export const Replayer = WorkflowBuilder.create({
         .addRequiredInput("name", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
+        .addOptionalInput("resolvedKafkaConnection", c => "")
+        .addOptionalInput("resolvedKafkaListenerName", c => "")
+        .addOptionalInput("resolvedKafkaAuthType", c => "")
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
 
@@ -189,7 +213,10 @@ export const Replayer = WorkflowBuilder.create({
                             b.inputs.targetConfig,
                             b.inputs.replayerOptions,
                             b.inputs.kafkaConfig,
-                            b.inputs.kafkaGroupId
+                            b.inputs.kafkaGroupId,
+                            b.inputs.resolvedKafkaConnection,
+                            b.inputs.resolvedKafkaListenerName,
+                            b.inputs.resolvedKafkaAuthType
                         ) as any
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.replayerOptions, "resources"))

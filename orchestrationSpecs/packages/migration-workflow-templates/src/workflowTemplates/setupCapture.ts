@@ -53,23 +53,43 @@ function makeProxyServiceManifest(
 }
 
 function makeProxyParamsDict(
-    proxyConfig: BaseExpression<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>
+    proxyConfig: BaseExpression<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>,
+    resolvedKafkaConnection: BaseExpression<string>,
+    resolvedKafkaListenerName: BaseExpression<string>,
+    resolvedKafkaAuthType: BaseExpression<string>,
 ) {
     const config = expr.deserializeRecord(proxyConfig);
+    const kafkaConfig = expr.get(config, "kafkaConfig");
+    const effectiveKafkaConnection = expr.ternary(
+        expr.not(expr.equals(resolvedKafkaConnection, expr.literal(""))),
+        resolvedKafkaConnection,
+        expr.getLoose(kafkaConfig, "kafkaConnection")
+    );
+    const effectiveKafkaListenerName = expr.ternary(
+        expr.not(expr.equals(resolvedKafkaListenerName, expr.literal(""))),
+        resolvedKafkaListenerName,
+        expr.getLoose(kafkaConfig, "listenerName")
+    );
+    const effectiveKafkaAuthType = expr.ternary(
+        expr.not(expr.equals(resolvedKafkaAuthType, expr.literal(""))),
+        resolvedKafkaAuthType,
+        expr.getLoose(kafkaConfig, "authType")
+    );
     return expr.mergeDicts(
         expr.omit(expr.get(config, "proxyConfig"), ...ARGO_PROXY_WORKFLOW_OPTION_KEYS),
         expr.mergeDicts(
             expr.ternary(expr.dig(config, ["proxyConfig", "noCapture"], false),
                 expr.literal({}),
                 expr.makeDict({
-                    kafkaConnection: expr.jsonPathStrict(proxyConfig, "kafkaConfig", "kafkaConnection")
+                    kafkaConnection: effectiveKafkaConnection
                 })
             ),
             expr.makeDict({
                 destinationUri: expr.get(config, "sourceEndpoint"),
                 insecureDestination: expr.get(config, "sourceAllowInsecure"),
                 kafkaTopic: expr.jsonPathStrict(proxyConfig, "kafkaConfig", "kafkaTopic"),
-
+                kafkaListenerName: effectiveKafkaListenerName,
+                kafkaAuthType: effectiveKafkaAuthType,
             })
         )
     );
@@ -283,6 +303,9 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
+        .addOptionalInput("resolvedKafkaConnection", c => "")
+        .addOptionalInput("resolvedKafkaListenerName", c => "")
+        .addOptionalInput("resolvedKafkaAuthType", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
 
         .addSteps(b => {
@@ -350,7 +373,12 @@ export const SetupCapture = WorkflowBuilder.create({
                                 podReplicas: b.inputs.podReplicas,
                                 resources: expr.serialize(expr.get(proxyOpts, "resources") as any),
                                 jsonConfig: expr.asString(expr.serialize(
-                                    makeProxyParamsDict(b.inputs.proxyConfig) as any
+                                    makeProxyParamsDict(
+                                        b.inputs.proxyConfig,
+                                        b.inputs.resolvedKafkaConnection,
+                                        b.inputs.resolvedKafkaListenerName,
+                                        b.inputs.resolvedKafkaAuthType
+                                    ) as any
                                 )),
                             }),
                         {when: {templateExp: expr.not(hasTls)}}
@@ -365,7 +393,12 @@ export const SetupCapture = WorkflowBuilder.create({
                                 tlsSecretName: tlsSecretName,
                                 jsonConfig: expr.asString(expr.serialize(
                                     expr.mergeDicts(
-                                        makeProxyParamsDict(b.inputs.proxyConfig) as any,
+                                        makeProxyParamsDict(
+                                            b.inputs.proxyConfig,
+                                            b.inputs.resolvedKafkaConnection,
+                                            b.inputs.resolvedKafkaListenerName,
+                                            b.inputs.resolvedKafkaAuthType
+                                        ) as any,
                                         expr.makeDict({
                                             sslCertChainFile: expr.literal("/etc/proxy-tls/tls.crt"),
                                             sslKeyFile: expr.literal("/etc/proxy-tls/tls.key"),

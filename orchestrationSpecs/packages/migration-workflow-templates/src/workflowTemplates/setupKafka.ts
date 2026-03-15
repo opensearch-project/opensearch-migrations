@@ -22,7 +22,7 @@ function makeDeployKafkaNodePool(args: {
 }) {
     const config = expr.deserializeRecord(args.clusterConfig);
     const baseSpec = expr.makeDict({
-        replicas: expr.dig(config, ["replicas"], 1),
+        replicas: expr.literal(1),
         roles: expr.literal(["controller", "broker"]),
         storage: expr.makeDict({type: "persistent-claim", size: "1Gi", deleteClaim: true})
     });
@@ -106,8 +106,8 @@ function makeKafkaTopicManifest(args: {
 }) {
     const config = expr.deserializeRecord(args.clusterConfig);
     const baseSpec = expr.makeDict({
-        partitions: expr.dig(config, ["partitions"], 1),
-        replicas: expr.dig(config, ["topicReplicas"], 1),
+        partitions: expr.literal(1),
+        replicas: expr.literal(1),
         config: expr.literal({"retention.ms": 604800000, "segment.bytes": 1073741824})
     });
     return {

@@ -92,7 +92,7 @@ describe("unified schema builder", () => {
         const {schema} = buildUnifiedSchema({
             strimziSchemaPath: strimziFixturePath,
         });
-        const ajv = new Ajv({allErrors: true});
+        const ajv = new Ajv({allErrors: true, strict: false});
         const validate = ajv.compile(schema);
 
         expect(validate(validConfig)).toBe(true);
@@ -120,15 +120,12 @@ describe("unified schema builder", () => {
         };
 
         expect(validate(invalidConfig)).toBe(false);
-        expect(validate.errors).toEqual(expect.arrayContaining([
-            expect.objectContaining({
-                dataPath: ".kafkaClusterConfiguration['default'].autoCreate.nodePoolSpecOverrides.roles[1]",
-                keyword: "enum",
-            }),
-            expect.objectContaining({
-                dataPath: ".kafkaClusterConfiguration['default'].autoCreate.topicSpecOverrides.config['cleanup.policy']",
-                keyword: "enum",
-            }),
+        const errorPointers = (validate.errors ?? []).map(error =>
+            (error as any).instancePath ?? (error as any).dataPath ?? ""
+        );
+        expect(errorPointers).toEqual(expect.arrayContaining([
+            expect.stringMatching(/nodePoolSpecOverrides.*roles/),
+            expect.stringMatching(/topicSpecOverrides.*cleanup\.policy/),
         ]));
     });
 });

@@ -4,60 +4,6 @@ exports[`unified schema builder merges Strimzi definitions from a static OpenAPI
 "{
   "mode": "full",
   "autoCreate": {
-    "replicas": {
-      "type": "integer",
-      "minimum": 1,
-      "default": 1
-    },
-    "storage": {
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "ephemeral"
-              ]
-            }
-          },
-          "required": [
-            "type"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "enum": [
-                "persistent-claim"
-              ]
-            },
-            "size": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "size"
-          ]
-        }
-      ],
-      "default": {
-        "type": "ephemeral"
-      }
-    },
-    "partitions": {
-      "type": "integer",
-      "minimum": 1,
-      "default": 1
-    },
-    "topicReplicas": {
-      "type": "integer",
-      "minimum": 1,
-      "default": 1
-    },
     "clusterSpecOverrides": {
       "$ref": "#/$defs/StrimziKafkaSpec",
       "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."

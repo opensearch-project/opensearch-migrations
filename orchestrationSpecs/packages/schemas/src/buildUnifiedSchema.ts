@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import {buildUnifiedSchema, getFallbackUnifiedSchemaPath} from "./unifiedSchema";
+import {buildUnifiedSchema, getFallbackUnifiedSchemaPath} from "./unifiedSchemaBuilder";
 
 const HELP = `
 Usage: build-unified-schema [--output <file>] [--strimzi-openapi <file>] [--generic]

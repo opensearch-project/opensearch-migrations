@@ -172,9 +172,16 @@ function buildKafkaClientConfig(
         throw new Error(`Kafka cluster '${kafkaClusterKey}' not found in kafkaClusterConfiguration`);
     }
     if ('existing' in cluster) {
+        const auth = cluster.existing.auth ?? {type: "none" as const};
         return {
-            ...cluster.existing,
+            enableMSKAuth: cluster.existing.enableMSKAuth,
+            kafkaConnection: cluster.existing.kafkaConnection,
             kafkaTopic: topic || cluster.existing.kafkaTopic,
+            managedByWorkflow: false,
+            listenerName: "",
+            authType: auth.type,
+            secretName: "secretName" in auth ? auth.secretName : "",
+            kafkaUserName: "kafkaUserName" in auth ? (auth.kafkaUserName ?? "") : "",
             label: kafkaClusterKey
         };
     }
@@ -183,6 +190,11 @@ function buildKafkaClientConfig(
         enableMSKAuth: false,
         kafkaConnection: `${kafkaClusterKey}-kafka-bootstrap:9092`,
         kafkaTopic: topic,
+        managedByWorkflow: true,
+        listenerName: "plain",
+        authType: "none",
+        secretName: "",
+        kafkaUserName: "",
         label: kafkaClusterKey
     };
 }

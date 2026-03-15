@@ -23,60 +23,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "config": {
                   "type": "object",
                   "properties": {
-                    "replicas": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "default": 1
-                    },
-                    "storage": {
-                      "oneOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": [
-                                "ephemeral"
-                              ]
-                            }
-                          },
-                          "required": [
-                            "type"
-                          ]
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "type": {
-                              "type": "string",
-                              "enum": [
-                                "persistent-claim"
-                              ]
-                            },
-                            "size": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "size"
-                          ]
-                        }
-                      ],
-                      "default": {
-                        "type": "ephemeral"
-                      }
-                    },
-                    "partitions": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "default": 1
-                    },
-                    "topicReplicas": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "default": 1
-                    },
                     "clusterSpecOverrides": {
                       "type": "object",
                       "additionalProperties": {
@@ -139,6 +85,30 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": "",
                       "description": "Empty defaults to the name of the target label"
+                    },
+                    "managedByWorkflow": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "listenerName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "authType": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "scram-sha-512"
+                      ],
+                      "default": "none"
+                    },
+                    "secretName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "kafkaUserName": {
+                      "type": "string",
+                      "default": ""
                     },
                     "label": {
                       "type": "string"
@@ -1096,6 +1066,30 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": "",
                       "description": "Empty defaults to the name of the target label"
                     },
+                    "managedByWorkflow": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "listenerName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "authType": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "scram-sha-512"
+                      ],
+                      "default": "none"
+                    },
+                    "secretName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "kafkaUserName": {
+                      "type": "string",
+                      "default": ""
+                    },
                     "label": {
                       "type": "string"
                     }
@@ -1386,60 +1380,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "autoCreate": {
                 "type": "object",
                 "properties": {
-                  "replicas": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "default": 1
-                  },
-                  "storage": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "enum": [
-                              "ephemeral"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "type"
-                        ]
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "enum": [
-                              "persistent-claim"
-                            ]
-                          },
-                          "size": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "type",
-                          "size"
-                        ]
-                      }
-                    ],
-                    "default": {
-                      "type": "ephemeral"
-                    }
-                  },
-                  "partitions": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "default": 1
-                  },
-                  "topicReplicas": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "default": 1
-                  },
                   "clusterSpecOverrides": {
                     "$ref": "#/$defs/StrimziKafkaSpec",
                     "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."
@@ -1477,6 +1417,50 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "default": "",
                     "description": "Empty defaults to the name of the target label"
+                  },
+                  "auth": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "none"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "scram-sha-512"
+                            ]
+                          },
+                          "secretName": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                          },
+                          "kafkaUserName": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "secretName"
+                        ]
+                      }
+                    ],
+                    "default": {
+                      "type": "none"
+                    }
                   }
                 },
                 "required": [
