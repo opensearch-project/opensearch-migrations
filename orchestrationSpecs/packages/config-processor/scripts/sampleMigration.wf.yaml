@@ -1,5 +1,8 @@
 {
-  skipApprovals : false,
+  skipApprovals : true,
+  kafkaClusters: {
+    ...
+  },
   sourceClusters: {
     "source": {
       "endpoint": "https://elasticsearch-master-headless:9200",
@@ -10,17 +13,10 @@
           "secretName": "source-creds"
         }
       },
-      "snapshotRepos": {
-        "default": {
-          "awsRegion": "us-east-2",
-          # Notice that the localstack name will become an IP address.
-          # If you're not able to resolve the IP Address (e.g. if you're
-          # running out of the k8s cluster, you can set it manually
-          "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
-          "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
-        }
-      },
-      "proxy": { }
+      "proxy": {
+        kafkaConfig: "default",
+        options: { listenPort: 9200 }
+      }
     }
   },
   targetClusters: {
@@ -34,55 +30,12 @@
       }
     }
   },
-  migrationConfigs: [
+  snapshotMigrationConfigs: [
     {
       "fromSource": "source",
       "toTarget": "target",
-      "skipApprovals": false,
-
-      "snapshotExtractAndLoadConfigs": [
-        {
-          label: "t2Migration",
-          "snapshotConfig": {
-            "repoName": "default",
-            "snapshotNameConfig": {
-#              "externallyManagedSnapshot": "source_sourcesnapshot1_88a9f10c-207e-4c04-b6c6-fbc058501131",
-              "snapshotNamePrefix": "sourcesnapshot1"
-            },
-          },
-          "createSnapshotConfig": {
-          },
-          "migrations": [
-            {
-              "metadataMigrationConfig": {
-                "skipEvaluateApproval" : true,
-                "skipMigrateApproval" : true
-              },
-              "label": "everything",
-              "documentBackfillConfig": {
-                "documentsPerBulkRequest": 1000,
-                "maxShardSizeBytes": 16000000,
-                "//Max connections is the effective concurrency count": "",
-                "maxConnections": 4,
-                "resources": {
-                  requests: {
-                    cpu: "250m",
-                    memory: "1Gi",
-                    ephemeral-storage: "5Gi"
-                  },
-                  limits: {
-                    cpu: "250m",
-                    memory: "1Gi",
-                    ephemeral-storage: "5Gi"
-                  },
-                }
-              }
-            }
-          ]
-        }
-      ],
       "replayerConfig": {
-        "podReplicas": 0
+        "podReplicas": 1
       }
     }
   ]

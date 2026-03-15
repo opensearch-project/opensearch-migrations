@@ -1,0 +1,55 @@
+# Replayer that depends on snapshot migrations completing first
+kafkaClusterConfiguration:
+  default:
+    autoCreate: {}
+
+sourceClusters:
+  source:
+    endpoint: "https://elasticsearch-master-headless:9200"
+    allowInsecure: true
+    version: "ES 7.10"
+    authConfig:
+      basic:
+        secretName: "source-creds"
+    snapshotInfo:
+      repos:
+        default:
+          awsRegion: "us-east-2"
+          endpoint: "http://10.99.62.203:4566"
+          s3RepoPathUri: "s3://migrations-default-123456789012-dev-us-east-2"
+      snapshots:
+        snap1:
+          config:
+            createSnapshotConfig: {}
+            requiredForCompleteMigration: true
+          repoName: "default"
+
+targetClusters:
+  target:
+    endpoint: "https://opensearch-cluster-master-headless:9200"
+    allowInsecure: true
+    version: "OS 2.11"
+    authConfig:
+      basic:
+        secretName: "target-creds"
+
+snapshotMigrationConfigs:
+  - fromSource: "source"
+    toTarget: "target"
+    perSnapshotConfig:
+      snap1:
+        - metadataMigrationConfig: {}
+
+traffic:
+  proxies:
+    proxy1:
+      source: "source"
+      proxyConfig:
+        listenPort: 9201
+  replayers:
+    replay1:
+      fromProxy: "proxy1"
+      toTarget: "target"
+      dependsOnSnapshotMigrations:
+        - source: "source"
+          snapshot: "snap1"

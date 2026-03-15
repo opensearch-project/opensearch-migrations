@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: concurrency-config
+    data:
+      snapshot-legacy-source: "1"

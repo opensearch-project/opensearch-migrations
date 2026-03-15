@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e  # Exit on any error
+set -e -x # Exit on any error
 
 # Check if config filename argument is provided
 if [ $# -eq 0 ]; then
@@ -25,13 +25,19 @@ TEMP_DIR=$(mktemp -d)
 # Ensure cleanup on exit
 trap "rm -rf $TEMP_DIR" EXIT
 
-UUID=$(printf '%x' $(date +%s))$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom | head -c 4)
+UUID="$(date +%s)"
 echo "Generated unique uniqueRunNonce: $UUID"
-
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config $CONFIG_FILENAME --unique-run-nonce $UUID --output-dir $TEMP_DIR $@
+$INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR $@
 
 echo "Applying Kubernetes resources..."
+
+# Apply CRD resources
+if [ -f "$TEMP_DIR/crdResources.yaml" ]; then
+    echo "Applying CRD resources..."
+    kubectl delete -f "$TEMP_DIR/crdResources.yaml" --ignore-not-found
+    kubectl apply -f "$TEMP_DIR/crdResources.yaml"
+fi
 
 # Apply approval config maps
 if [ -f "$TEMP_DIR/approvalConfigMaps.yaml" ]; then
@@ -49,7 +55,7 @@ fi
 if [ -n "$USE_GENERATE_NAME" ] && [ "$USE_GENERATE_NAME" != "false" ] && [ "$USE_GENERATE_NAME" != "0" ]; then
   # Keeping this as 'full-migration' so that it's intentionally different than the
   # one-single default migration that we will normally be using
-  NAME_FIELD="generateName: full-migration-${UUID}-"
+  NAME_FIELD="generateName: m-${UUID}-"
 else
   NAME_FIELD="name: migration-workflow"
 fi
@@ -70,7 +76,7 @@ spec:
         value: "$UUID"
       - name: approval-config
         value: "approval-config-0"
-      - name: migrationConfigs
+      - name: config
         value: |
 $(sed 's/^/          /' "$TEMP_DIR/workflowMigration.config.yaml")
 EOF

@@ -1,6 +1,6 @@
 ARG BASE_IMAGE=migrations/elasticsearch_client_test_console:latest
 
-# Stage 1: Download and install tools (kafka, kubectl, helm, etcd)
+# Stage 1: Download and install tools (kafka, kubectl, helm)
 FROM ${BASE_IMAGE} AS migration-console-tools
 
 RUN ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
@@ -45,15 +45,6 @@ RUN ARCH=$(cat /arch.env) && \
     mv stern /k8s/bin/ && \
     chmod +x /k8s/bin/stern
 
-# Install etcdctl
-RUN ARCH=$(cat /arch.env) && \
-    ETCD_VER=v3.5.21 && \
-    DOWNLOAD_URL=https://github.com/etcd-io/etcd/releases/download && \
-    mkdir -p /etcd/bin && \
-    curl -L ${DOWNLOAD_URL}/${ETCD_VER}/etcd-${ETCD_VER}-linux-${ARCH}.tar.gz | tar -xz && \
-    mv etcd-${ETCD_VER}-linux-${ARCH}/etcdctl /etcd/bin && \
-    rm -rf etcd-${ETCD_VER}-linux-amd64 etcd.tar.gz
-
 
 # Stage 2: Main migration console base image with Python environment and scripts
 FROM ${BASE_IMAGE}
@@ -67,7 +58,6 @@ ENV PIPENV_MAX_DEPTH=1
 # Copy tools from previous stage
 COPY --from=migration-console-tools /root/kafka-tools /root/kafka-tools
 COPY --from=migration-console-tools /k8s/bin/ /usr/local/bin
-COPY --from=migration-console-tools /etcd/bin/ /usr/local/bin
 
 RUN kubectl completion bash > /etc/bash_completion.d/kubectl && \
     helm completion bash > /etc/bash_completion.d/helm && \
