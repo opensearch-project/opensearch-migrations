@@ -57,12 +57,32 @@ class MATestBase:
         if not supported_combo:
             raise ClusterVersionCombinationUnsupported(self.source_version, self.target_version)
 
-        self.source_argo_cluster_template = (f"{self.source_version.full_cluster_type}-"
-                                             f"{self.source_version.major_version}-"
-                                             f"{self.source_version.minor_version}-single-node")
-        self.target_argo_cluster_template = (f"{self.target_version.full_cluster_type}-"
-                                             f"{self.target_version.major_version}-"
-                                             f"{self.target_version.minor_version}-single-node")
+        # Map version patterns to actual template names
+        # When minor_version is 'x', use the specific version available in cluster-templates
+        def get_template_name(version: ClusterVersion) -> str:
+            # Mapping of version patterns to actual template names
+            version_map = {
+                ('elasticsearch', 1, 'x'): 'elasticsearch-1-5-single-node',
+                ('elasticsearch', 2, 'x'): 'elasticsearch-2-4-single-node',
+                ('elasticsearch', 5, 'x'): 'elasticsearch-5-6-single-node',
+                ('elasticsearch', 6, 'x'): 'elasticsearch-6-8-single-node',
+                ('elasticsearch', 7, 'x'): 'elasticsearch-7-10-single-node',
+                ('opensearch', 1, 'x'): 'opensearch-1-3-single-node',
+                ('opensearch', 2, 'x'): 'opensearch-2-19-single-node',
+                ('opensearch', 3, 'x'): 'opensearch-3-1-single-node',
+            }
+            
+            key = (version.full_cluster_type, version.major_version, version.minor_version)
+            if key in version_map:
+                return version_map[key]
+            
+            # For specific minor versions, construct the name directly
+            return (f"{version.full_cluster_type}-"
+                   f"{version.major_version}-"
+                   f"{version.minor_version}-single-node")
+        
+        self.source_argo_cluster_template = get_template_name(self.source_version)
+        self.target_argo_cluster_template = get_template_name(self.target_version)
 
         self.parameters = {}
         self.workflow_template = "full-migration-with-clusters"
