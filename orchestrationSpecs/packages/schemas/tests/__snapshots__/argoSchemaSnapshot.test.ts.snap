@@ -142,6 +142,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": ""
                     },
+                    "internetFacing": {
+                      "type": "boolean",
+                      "default": false
+                    },
                     "podReplicas": {
                       "type": "number",
                       "default": 1
@@ -405,6 +409,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "config": {
                         "type": "object",
                         "properties": {
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
+                          "loggingConfigurationOverrideConfigMap": {
+                            "type": "string",
+                            "default": ""
+                          },
                           "indexAllowlist": {
                             "type": "array",
                             "items": {
@@ -415,14 +427,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "maxSnapshotRateMbPerNode": {
                             "type": "number",
                             "default": 0
-                          },
-                          "jvmArgs": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "loggingConfigurationOverrideConfigMap": {
-                            "type": "string",
-                            "default": ""
                           }
                         }
                       },
@@ -655,6 +659,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "metadataMigrationConfig": {
                         "type": "object",
                         "properties": {
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
+                          "loggingConfigurationOverrideConfigMap": {
+                            "type": "string",
+                            "default": ""
+                          },
                           "componentTemplateAllowlist": {
                             "type": "array",
                             "items": {
@@ -683,14 +695,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "clusterAwarenessAttributes": {
                             "type": "number",
                             "default": 1
-                          },
-                          "jvmArgs": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "loggingConfigurationOverrideConfigMap": {
-                            "type": "string",
-                            "default": ""
                           },
                           "multiTypeBehavior": {
                             "anyOf": [
@@ -745,13 +749,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "documentBackfillConfig": {
                         "type": "object",
                         "properties": {
-                          "indexAllowlist": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "default": []
-                          },
                           "podReplicas": {
                             "type": "number",
                             "default": 1
@@ -763,35 +760,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
                             "default": ""
-                          },
-                          "allowLooseVersionMatching": {
-                            "type": "boolean",
-                            "default": true,
-                            "description": ""
-                          },
-                          "docTransformerConfigBase64": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "documentsPerBulkRequest": {
-                            "type": "number",
-                            "default": 2147483647
-                          },
-                          "initialLeaseDuration": {
-                            "type": "string",
-                            "default": "PT1H"
-                          },
-                          "maxConnections": {
-                            "type": "number",
-                            "default": 10
-                          },
-                          "maxShardSizeBytes": {
-                            "type": "number",
-                            "default": 85899345920
-                          },
-                          "otelCollectorEndpoint": {
-                            "type": "string",
-                            "default": "http://otel-collector:4317"
                           },
                           "useTargetClusterForWorkCoordination": {
                             "type": "boolean",
@@ -858,6 +826,42 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "requests"
                             ],
                             "description": "Resource limits and requests for RFS container"
+                          },
+                          "indexAllowlist": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
+                          },
+                          "allowLooseVersionMatching": {
+                            "type": "boolean",
+                            "default": true,
+                            "description": ""
+                          },
+                          "docTransformerConfigBase64": {
+                            "type": "string",
+                            "default": ""
+                          },
+                          "documentsPerBulkRequest": {
+                            "type": "number",
+                            "default": 2147483647
+                          },
+                          "initialLeaseDuration": {
+                            "type": "string",
+                            "default": "PT1H"
+                          },
+                          "maxConnections": {
+                            "type": "number",
+                            "default": 10
+                          },
+                          "maxShardSizeBytes": {
+                            "type": "number",
+                            "default": 85899345920
+                          },
+                          "otelCollectorEndpoint": {
+                            "type": "string",
+                            "default": "http://otel-collector:4317"
                           }
                         }
                       }
@@ -1612,6 +1616,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "type": "string",
                                   "default": ""
                                 },
+                                "jvmArgs": {
+                                  "type": "string",
+                                  "default": ""
+                                },
+                                "loggingConfigurationOverrideConfigMap": {
+                                  "type": "string",
+                                  "default": ""
+                                },
                                 "indexAllowlist": {
                                   "type": "array",
                                   "items": {
@@ -1622,14 +1634,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "maxSnapshotRateMbPerNode": {
                                   "type": "number",
                                   "default": 0
-                                },
-                                "jvmArgs": {
-                                  "type": "string",
-                                  "default": ""
-                                },
-                                "loggingConfigurationOverrideConfigMap": {
-                                  "type": "string",
-                                  "default": ""
                                 }
                               }
                             },
@@ -1806,6 +1810,22 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "metadataMigrationConfig": {
                     "type": "object",
                     "properties": {
+                      "jvmArgs": {
+                        "type": "string",
+                        "default": ""
+                      },
+                      "loggingConfigurationOverrideConfigMap": {
+                        "type": "string",
+                        "default": ""
+                      },
+                      "skipEvaluateApproval": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "skipMigrateApproval": {
+                        "type": "boolean",
+                        "default": false
+                      },
                       "componentTemplateAllowlist": {
                         "type": "array",
                         "items": {
@@ -1834,14 +1854,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "clusterAwarenessAttributes": {
                         "type": "number",
                         "default": 1
-                      },
-                      "jvmArgs": {
-                        "type": "string",
-                        "default": ""
-                      },
-                      "loggingConfigurationOverrideConfigMap": {
-                        "type": "string",
-                        "default": ""
                       },
                       "multiTypeBehavior": {
                         "anyOf": [
@@ -1890,27 +1902,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "transformerConfigBase64": {
                         "type": "string",
                         "default": ""
-                      },
-                      "skipEvaluateApproval": {
-                        "type": "boolean",
-                        "default": false
-                      },
-                      "skipMigrateApproval": {
-                        "type": "boolean",
-                        "default": false
                       }
                     }
                   },
                   "documentBackfillConfig": {
                     "type": "object",
                     "properties": {
-                      "indexAllowlist": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        },
-                        "default": []
-                      },
                       "podReplicas": {
                         "type": "number",
                         "default": 1
@@ -1922,35 +1919,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
                         "default": ""
-                      },
-                      "allowLooseVersionMatching": {
-                        "type": "boolean",
-                        "default": true,
-                        "description": ""
-                      },
-                      "docTransformerConfigBase64": {
-                        "type": "string",
-                        "default": ""
-                      },
-                      "documentsPerBulkRequest": {
-                        "type": "number",
-                        "default": 2147483647
-                      },
-                      "initialLeaseDuration": {
-                        "type": "string",
-                        "default": "PT1H"
-                      },
-                      "maxConnections": {
-                        "type": "number",
-                        "default": 10
-                      },
-                      "maxShardSizeBytes": {
-                        "type": "number",
-                        "default": 85899345920
-                      },
-                      "otelCollectorEndpoint": {
-                        "type": "string",
-                        "default": "http://otel-collector:4317"
                       },
                       "skipApproval": {
                         "type": "boolean",
@@ -2021,6 +1989,42 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "requests"
                         ],
                         "description": "Resource limits and requests for RFS container"
+                      },
+                      "indexAllowlist": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "default": []
+                      },
+                      "allowLooseVersionMatching": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": ""
+                      },
+                      "docTransformerConfigBase64": {
+                        "type": "string",
+                        "default": ""
+                      },
+                      "documentsPerBulkRequest": {
+                        "type": "number",
+                        "default": 2147483647
+                      },
+                      "initialLeaseDuration": {
+                        "type": "string",
+                        "default": "PT1H"
+                      },
+                      "maxConnections": {
+                        "type": "number",
+                        "default": 10
+                      },
+                      "maxShardSizeBytes": {
+                        "type": "number",
+                        "default": 85899345920
+                      },
+                      "otelCollectorEndpoint": {
+                        "type": "string",
+                        "default": "http://otel-collector:4317"
                       }
                     }
                   }
@@ -2064,6 +2068,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
                     "default": ""
+                  },
+                  "internetFacing": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When true, configures the proxy Service load balancer scheme as internet-facing."
                   },
                   "podReplicas": {
                     "type": "number",

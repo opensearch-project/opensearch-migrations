@@ -11,12 +11,21 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {SetupKafka} from "./setupKafka";
-import {DENORMALIZED_PROXY_CONFIG, PROXY_TLS_CONFIG, ResourceRequirementsType} from "@opensearch-migrations/schemas";
+import {
+    ARGO_PROXY_WORKFLOW_OPTION_KEYS,
+    DENORMALIZED_PROXY_CONFIG,
+    PROXY_TLS_CONFIG,
+    ResourceRequirementsType,
+} from "@opensearch-migrations/schemas";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {z} from "zod";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
-function makeProxyServiceManifest(proxyName: BaseExpression<string>, listenPort: BaseExpression<Serialized<number>>) {
+function makeProxyServiceManifest(
+    proxyName: BaseExpression<string>,
+    listenPort: BaseExpression<Serialized<number>>,
+    internetFacing: BaseExpression<boolean>
+) {
     return {
         apiVersion: "v1",
         kind: "Service",
@@ -25,7 +34,10 @@ function makeProxyServiceManifest(proxyName: BaseExpression<string>, listenPort:
             annotations: {
                 // NLB IP mode for EKS Auto Mode — ignored on minikube/standard K8s
                 "service.beta.kubernetes.io/aws-load-balancer-type": "external",
-                "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip"
+                "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",
+                "service.beta.kubernetes.io/aws-load-balancer-scheme": makeStringTypeProxy(
+                    expr.ternary(internetFacing, expr.literal("internet-facing"), expr.literal("internal"))
+                )
             }
         },
         spec: {
@@ -45,10 +57,7 @@ function makeProxyParamsDict(
 ) {
     const config = expr.deserializeRecord(proxyConfig);
     return expr.mergeDicts(
-        expr.omit(
-            expr.get(config, "proxyConfig"),
-            "podReplicas", "resources", "loggingConfigurationOverrideConfigMap", "tls"
-        ),
+        expr.omit(expr.get(config, "proxyConfig"), ...ARGO_PROXY_WORKFLOW_OPTION_KEYS),
         expr.mergeDicts(
             expr.ternary(expr.dig(config, ["proxyConfig", "noCapture"], false),
                 expr.literal({}),
@@ -154,11 +163,16 @@ export const SetupCapture = WorkflowBuilder.create({
     .addTemplate("deployProxyService", t => t
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
+        .addOptionalInput("internetFacing", c => false)
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                manifest: makeProxyServiceManifest(b.inputs.proxyName, b.inputs.listenPort)
+                manifest: makeProxyServiceManifest(
+                    b.inputs.proxyName,
+                    b.inputs.listenPort,
+                    expr.deserializeRecord(b.inputs.internetFacing)
+                )
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
@@ -304,6 +318,7 @@ export const SetupCapture = WorkflowBuilder.create({
                         c.register({
                             proxyName: b.inputs.proxyName,
                             listenPort: b.inputs.listenPort,
+                            internetFacing: expr.dig(proxyOpts, ["internetFacing"], false),
                         })
                     )
                     .addStep("provisionCert", INTERNAL, "provisionProxyCert", c =>

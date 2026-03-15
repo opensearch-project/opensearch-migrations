@@ -2,7 +2,7 @@ import {z} from "zod";
 import {
     NAMED_TARGET_CLUSTER_CONFIG,
     USER_REPLAYER_OPTIONS,
-    ResourceRequirementsType, ARGO_REPLAYER_OPTIONS, KAFKA_CLIENT_CONFIG,
+    ResourceRequirementsType, ARGO_REPLAYER_OPTIONS, ARGO_REPLAYER_WORKFLOW_OPTION_KEYS, KAFKA_CLIENT_CONFIG,
 } from "@opensearch-migrations/schemas";
 import {
     BaseExpression, Deployment,
@@ -55,7 +55,7 @@ function makeReplayerParamsDict(
     return expr.mergeDicts(
         expr.mergeDicts(
             makeReplayerTargetParamDict(targetConfig),
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources", "jvmArgs")
+            expr.omit(expr.deserializeRecord(options), ...ARGO_REPLAYER_WORKFLOW_OPTION_KEYS)
         ),
         expr.makeDict({
             kafkaTrafficBrokers: expr.get(expr.deserializeRecord(kafkaConfig), "kafkaConnection"),

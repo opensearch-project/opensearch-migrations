@@ -174,15 +174,17 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
     }).describe("Use a pre-existing K8s TLS secret."),
 ]);
 
-export const USER_PROXY_OPTIONS = z.object({
-    // -- deployment-level fields (not passed to the proxy CLI) --
+export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
+    internetFacing: z.boolean().default(false).optional()
+        .describe("When true, configures the proxy Service load balancer scheme as internet-facing."),
     podReplicas: z.number().default(1).optional(),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.PROXY, (v ?? {})), RESOURCE_REQUIREMENTS)
         .describe("Resource limits and requests for proxy container.")
         .default(DEFAULT_RESOURCES.PROXY),
+});
 
-    // -- proxy CLI params (passed via ---INLINE-JSON) --
+export const USER_PROXY_PROCESS_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
     setHeader: z.array(z.string()).optional(),
     destinationConnectionPoolSize: z.number().default(0).optional(),
@@ -205,15 +207,23 @@ export const USER_PROXY_OPTIONS = z.object({
     suppressMethodAndPath: z.string().default("").optional(),
 });
 
-export const USER_REPLAYER_OPTIONS = z.object({
-    // -- deployment-level fields (not passed to the replayer CLI) --
+export const USER_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(USER_PROXY_WORKFLOW_OPTIONS);
+export const USER_PROXY_PROCESS_OPTION_KEYS = getZodKeys(USER_PROXY_PROCESS_OPTIONS);
+
+export const USER_PROXY_OPTIONS = z.object({
+    ...USER_PROXY_WORKFLOW_OPTIONS.shape,
+    ...USER_PROXY_PROCESS_OPTIONS.shape,
+});
+
+export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
     podReplicas: z.number().default(1).optional(),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.REPLAYER, (v ?? {})), RESOURCE_REQUIREMENTS)
         .describe("Resource limits and requests for replayer container."),
+});
 
-    // -- replayer CLI params (passed via ---INLINE-JSON) --
+export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enables SASL properties required for connecting to MSK with IAM auth."),
     kafkaTrafficPropertyFile: z.string().optional()
@@ -252,48 +262,67 @@ export const USER_REPLAYER_OPTIONS = z.object({
         .describe("String appended to the user-agent header for requests to the target cluster."),
 });
 
+export const USER_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(USER_REPLAYER_WORKFLOW_OPTIONS);
+export const USER_REPLAYER_PROCESS_OPTION_KEYS = getZodKeys(USER_REPLAYER_PROCESS_OPTIONS);
+
+export const USER_REPLAYER_OPTIONS = z.object({
+    ...USER_REPLAYER_WORKFLOW_OPTIONS.shape,
+    ...USER_REPLAYER_PROCESS_OPTIONS.shape,
+});
+
 // Note: noWait is not included here as it is hardcoded to true in the workflow.
 // The workflow manages snapshot completion polling separately via checkSnapshotStatus.
-export const USER_CREATE_SNAPSHOT_OPTIONS = z.object({
+export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
     snapshotPrefix: z.string().default("").optional(),
-    indexAllowlist: z.array(z.string()).default([]).optional(),
-    maxSnapshotRateMbPerNode: z.number().default(0).optional(),
     jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
 });
 
-export const USER_METADATA_OPTIONS = z.object({
+export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
+    indexAllowlist: z.array(z.string()).default([]).optional(),
+    maxSnapshotRateMbPerNode: z.number().default(0).optional(),
+});
+
+export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS);
+export const USER_CREATE_SNAPSHOT_PROCESS_OPTION_KEYS = getZodKeys(USER_CREATE_SNAPSHOT_PROCESS_OPTIONS);
+
+export const USER_CREATE_SNAPSHOT_OPTIONS = z.object({
+    ...USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS.shape,
+    ...USER_CREATE_SNAPSHOT_PROCESS_OPTIONS.shape,
+});
+
+export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
+    jvmArgs: z.string().default("").optional(),
+    loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
+    skipEvaluateApproval: z.boolean().default(false).optional(), // TODO - fullmigration
+    skipMigrateApproval: z.boolean().default(false).optional() // TODO - fullmigration
+});
+
+export const USER_METADATA_PROCESS_OPTIONS = z.object({
     componentTemplateAllowlist: z.array(z.string()).default([]).optional(),
     indexAllowlist: z.array(z.string()).default([]).optional(),
     indexTemplateAllowlist: z.array(z.string()).default([]).optional(),
 
     allowLooseVersionMatching: z.boolean().default(true).optional(),
     clusterAwarenessAttributes: z.number().default(1).optional(),
-    jvmArgs: z.string().default("").optional(),
-    loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
     multiTypeBehavior: z.union(["NONE", "UNION", "SPLIT"].map(s=>z.literal(s))).default("NONE").optional(),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
     output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).default("HUMAN_READABLE").optional(),
     transformerConfigBase64: z.string().default("").optional(),
-
-    skipEvaluateApproval: z.boolean().default(false).optional(), // TODO - fullmigration
-    skipMigrateApproval: z.boolean().default(false).optional() // TODO - fullmigration
 });
 
-export const USER_RFS_OPTIONS = z.object({
-    indexAllowlist: z.array(z.string()).default([]).optional(),
-    podReplicas: z.number().default(1).optional(),
+export const USER_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(USER_METADATA_WORKFLOW_OPTIONS);
+export const USER_METADATA_PROCESS_OPTION_KEYS = getZodKeys(USER_METADATA_PROCESS_OPTIONS);
 
+export const USER_METADATA_OPTIONS = z.object({
+    ...USER_METADATA_WORKFLOW_OPTIONS.shape,
+    ...USER_METADATA_PROCESS_OPTIONS.shape,
+});
+
+export const USER_RFS_WORKFLOW_OPTIONS = z.object({
+    podReplicas: z.number().default(1).optional(),
     jvmArgs: z.string().default("").optional(),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional(),
-    allowLooseVersionMatching: z.boolean().default(true).describe("").optional(),
-    docTransformerConfigBase64: z.string().default("").optional(),
-    documentsPerBulkRequest: z.number().default(0x7fffffff).optional(),
-    initialLeaseDuration: z.string().default("PT1H").optional(),
-    maxConnections: z.number().default(10).optional(),
-    maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional(),
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
-
     skipApproval: z.boolean().default(false).optional(),  // TODO - fullmigration
     useTargetClusterForWorkCoordination: z.boolean().default(false)
         .describe("When true, uses the target OpenSearch cluster for RFS work coordination. When false, a dedicated single-node OpenSearch coordinator cluster is deployed and managed for the lifetime of the migration, then torn down on completion."),
@@ -307,6 +336,25 @@ export const USER_RFS_OPTIONS = z.object({
             }),
         }))
         .describe("Resource limits and requests for RFS container"),
+});
+
+export const USER_RFS_PROCESS_OPTIONS = z.object({
+    indexAllowlist: z.array(z.string()).default([]).optional(),
+    allowLooseVersionMatching: z.boolean().default(true).describe("").optional(),
+    docTransformerConfigBase64: z.string().default("").optional(),
+    documentsPerBulkRequest: z.number().default(0x7fffffff).optional(),
+    initialLeaseDuration: z.string().default("PT1H").optional(),
+    maxConnections: z.number().default(10).optional(),
+    maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional(),
+    otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional(),
+});
+
+export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);
+export const USER_RFS_PROCESS_OPTION_KEYS = getZodKeys(USER_RFS_PROCESS_OPTIONS);
+
+export const USER_RFS_OPTIONS = z.object({
+    ...USER_RFS_WORKFLOW_OPTIONS.shape,
+    ...USER_RFS_PROCESS_OPTIONS.shape,
 })
     .transform((data) => {
         const requestEphemeral = data.resources?.requests?.["ephemeral-storage"];

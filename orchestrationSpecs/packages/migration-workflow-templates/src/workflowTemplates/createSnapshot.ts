@@ -1,5 +1,6 @@
 import {z} from "zod";
 import {
+    ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS,
     ARGO_CREATE_SNAPSHOT_OPTIONS,
     CLUSTER_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
@@ -83,7 +84,7 @@ function makeParamsDict(
         expr.mergeDicts(
             makeSourceParamDict(sourceConfig),
             expr.mergeDicts(
-                expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "jvmArgs"),
+                expr.omit(expr.deserializeRecord(options), ...ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS),
                 // noWait is essential for workflow logic - the workflow handles polling for snapshot
                 // completion separately via checkSnapshotStatus, so the CreateSnapshot command must
                 // return immediately to allow the workflow to manage the wait/retry behavior
@@ -243,4 +244,3 @@ export const CreateSnapshot = WorkflowBuilder.create({
 
 
     .getFullScope();
-

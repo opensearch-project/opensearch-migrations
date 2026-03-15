@@ -3,6 +3,7 @@ import {
     COMPLETE_SNAPSHOT_CONFIG,
     DEFAULT_RESOURCES,
     ARGO_METADATA_OPTIONS,
+    ARGO_METADATA_WORKFLOW_OPTION_KEYS,
     NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
     NAMED_TARGET_CLUSTER_CONFIG,
     S3_REPO_CONFIG
@@ -70,8 +71,7 @@ function makeParamsDict(
     return expr.mergeDicts(
         expr.mergeDicts(
             makeTargetParamDict(targetConfig),
-            // TODO - tighten the type on mergeDicts - it allowed this to go through w/out first calling fromJSON
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "jvmArgs")
+            expr.omit(expr.deserializeRecord(options), ...ARGO_METADATA_WORKFLOW_OPTION_KEYS)
         ),
         expr.mergeDicts(
             expr.makeDict({

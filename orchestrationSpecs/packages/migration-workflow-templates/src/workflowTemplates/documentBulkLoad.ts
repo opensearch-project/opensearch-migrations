@@ -5,7 +5,8 @@ import {
     CONSOLE_SERVICES_CONFIG_FILE,
     NAMED_TARGET_CLUSTER_CONFIG,
     ResourceRequirementsType,
-    ARGO_RFS_OPTIONS
+    ARGO_RFS_OPTIONS,
+    ARGO_RFS_WORKFLOW_OPTION_KEYS,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 
@@ -58,7 +59,7 @@ function makeParamsDict(
                 makeTargetParamDict(targetConfig),
                 makeRfsCoordinatorParamDict(rfsCoordinatorConfig)
             ),
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources", "useTargetClusterForWorkCoordination", "jvmArgs")
+            expr.omit(expr.deserializeRecord(options), ...ARGO_RFS_WORKFLOW_OPTION_KEYS)
         ),
         expr.mergeDicts(
             expr.makeDict({
