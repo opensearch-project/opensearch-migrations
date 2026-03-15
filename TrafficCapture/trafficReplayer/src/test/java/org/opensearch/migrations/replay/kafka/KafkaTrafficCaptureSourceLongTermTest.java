@@ -40,7 +40,9 @@ public class KafkaTrafficCaptureSourceLongTermTest extends InstrumentationTest {
         var kafkaConsumerProps = KafkaTrafficCaptureSource.buildKafkaProperties(
             embeddedKafkaBroker.getBootstrapServers(),
             TEST_GROUP_CONSUMER_ID,
-            false,
+            "none",
+            null,
+            null,
             null
         );
         final long MAX_POLL_MS = 10000;
