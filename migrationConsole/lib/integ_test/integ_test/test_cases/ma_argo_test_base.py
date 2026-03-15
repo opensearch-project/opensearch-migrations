@@ -78,8 +78,8 @@ class MATestBase:
             
             # For specific minor versions, construct the name directly
             return (f"{version.full_cluster_type}-"
-                   f"{version.major_version}-"
-                   f"{version.minor_version}-single-node")
+                    f"{version.major_version}-"
+                    f"{version.minor_version}-single-node")
         
         self.source_argo_cluster_template = get_template_name(self.source_version)
         self.target_argo_cluster_template = get_template_name(self.target_version)
