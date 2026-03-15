@@ -2,6 +2,7 @@ import fs from "node:fs";
 import {parse} from "yaml";
 import {OVERALL_MIGRATION_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
+import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 
 async function readStdin(): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -42,5 +43,6 @@ export async function parseUserConfig(yamlPathOrStdin: string) {
     if (!result.success) {
         throw result.error; // Throw Zod error directly
     }
+    validateInputAgainstUnifiedSchema(data);
     return result.data;
 }

@@ -109,6 +109,8 @@ export const HOSTNAME_PATTERN = "[^:\\/\\s]+";
 export const HTTP_ENDPOINT_PATTERN = `^https?:\\/\\/${HOSTNAME_PATTERN}${OPTIONAL_PORT_PATTERN}(?:\\/)?$`;
 export const OPTIONAL_HTTP_ENDPOINT_PATTERN = `^(?:https?:\\/\\/${HOSTNAME_PATTERN}${OPTIONAL_PORT_PATTERN}(?:\\/)?)?$`;
 
+export const GENERIC_JSON_OBJECT = z.record(z.string(), z.any());
+
 export const KAFKA_CLIENT_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional(),
     kafkaConnection: z.string()
@@ -403,6 +405,14 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
                    ]).default({ type: "ephemeral" }).optional(),
     partitions:    z.number().int().min(1).default(1).optional(),
     topicReplicas: z.number().int().min(1).default(1).optional(),
+    clusterSpecOverrides: GENERIC_JSON_OBJECT.optional()
+        .describe("Optional overrides merged into the generated Strimzi Kafka.spec. " +
+            "Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."),
+    nodePoolSpecOverrides: GENERIC_JSON_OBJECT.optional()
+        .describe("Optional overrides merged into the generated Strimzi KafkaNodePool.spec. " +
+            "Workflow-managed fields such as cluster labels may be overwritten by the workflow."),
+    topicSpecOverrides: GENERIC_JSON_OBJECT.optional()
+        .describe("Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics."),
 });
 
 export const KAFKA_CLUSTER_CONFIG = z.union([

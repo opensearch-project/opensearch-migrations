@@ -76,6 +76,27 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "integer",
                       "minimum": 1,
                       "default": 1
+                    },
+                    "clusterSpecOverrides": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "nullable": true
+                      },
+                      "description": "Optional overrides merged into the generated Strimzi Kafka.spec. Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."
+                    },
+                    "nodePoolSpecOverrides": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "nullable": true
+                      },
+                      "description": "Optional overrides merged into the generated Strimzi KafkaNodePool.spec. Workflow-managed fields such as cluster labels may be overwritten by the workflow."
+                    },
+                    "topicSpecOverrides": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "nullable": true
+                      },
+                      "description": "Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics."
                     }
                   }
                 },
@@ -1418,6 +1439,18 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "integer",
                     "minimum": 1,
                     "default": 1
+                  },
+                  "clusterSpecOverrides": {
+                    "$ref": "#/$defs/StrimziKafkaSpec",
+                    "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."
+                  },
+                  "nodePoolSpecOverrides": {
+                    "$ref": "#/$defs/StrimziKafkaNodePoolSpec",
+                    "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource."
+                  },
+                  "topicSpecOverrides": {
+                    "$ref": "#/$defs/StrimziKafkaTopicSpec",
+                    "description": "Strimzi KafkaTopic.spec overrides merged into workflow-created Kafka topics."
                   }
                 }
               }
@@ -2528,6 +2561,66 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
     "sourceClusters",
     "targetClusters",
     "snapshotMigrationConfigs"
-  ]
+  ],
+  "$defs": {
+    "StrimziKafkaSpec": {
+      "type": "object",
+      "description": "Fallback generic schema for Strimzi Kafka.spec. Use a release-built schema artifact for full validation.",
+      "properties": {
+        "kafka": {
+          "type": "object",
+          "description": "Broker-level Strimzi Kafka settings. Workflow-managed listener/auth fields may be overwritten.",
+          "additionalProperties": true
+        },
+        "entityOperator": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "StrimziKafkaNodePoolSpec": {
+      "type": "object",
+      "description": "Fallback generic schema for Strimzi KafkaNodePool.spec.",
+      "properties": {
+        "replicas": {
+          "type": "integer"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "StrimziKafkaTopicSpec": {
+      "type": "object",
+      "description": "Fallback generic schema for Strimzi KafkaTopic.spec.",
+      "properties": {
+        "partitions": {
+          "type": "integer"
+        },
+        "replicas": {
+          "type": "integer"
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://opensearch.org/schemas/workflowMigration.schema.json",
+  "title": "OpenSearch Migration Workflow Configuration",
+  "x-orchestration-specs-strimzi-schema-mode": "generic",
+  "x-orchestration-specs-strimzi-schema-detail": "generated generic fallback"
 }"
 `;

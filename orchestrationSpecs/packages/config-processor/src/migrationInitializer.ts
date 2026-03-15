@@ -2,7 +2,9 @@ import {StreamSchemaParser} from "./streamSchemaTransformer";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {
     ARGO_MIGRATION_CONFIG,
-    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN
+    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN,
+    loadUnifiedSchema,
+    makeUnifiedSchemaConfigMap,
 } from "@opensearch-migrations/schemas";
 import {stringify} from "yaml";
 import * as fs from "fs/promises";
@@ -39,12 +41,14 @@ export class MigrationInitializer {
         // Generate ConfigMaps
         const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
         const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
+        const schemaConfigMap = makeUnifiedSchemaConfigMap(loadUnifiedSchema().schema);
         const crdResources = this.generateCRDResources(workflows);
         
         return {
             workflows,
             approvalConfigMaps,
             concurrencyConfigMaps,
+            schemaConfigMap,
             crdResources
         };
     }
@@ -67,7 +71,11 @@ export class MigrationInitializer {
         const concurrencyPath = path.join(outputDir, 'concurrencyConfigMaps.yaml');
         await fs.writeFile(concurrencyPath, stringify(bundle.concurrencyConfigMaps));
 
-        // 4. Write CRD resources
+        // 4. Write schema config map
+        const schemaPath = path.join(outputDir, 'schemaConfigMap.yaml');
+        await fs.writeFile(schemaPath, stringify(bundle.schemaConfigMap));
+
+        // 5. Write CRD resources
         const crdPath = path.join(outputDir, 'crdResources.yaml');
         await fs.writeFile(crdPath, stringify(bundle.crdResources));
     }

@@ -16,10 +16,11 @@
     "dev-transform": "tsx src/runMigrationConfigTransformer.ts",
     "bundle": "node makeBundle.js",
     "check-and-bundle": "npm run type-check && npm run test && npm run bundle",
-    "test": "jest --config ./jest.config.js"
+    "test": "ALLOW_GENERIC_UNIFIED_SCHEMA=true jest --config ./jest.config.js"
   },
   "dependencies": {
     "@opensearch-migrations/schemas": "*",
+    "ajv": "^8.17.1",
     "ci": "^2.3.0",
     "yaml": "^2.8.1",
     "zod": "^4"

@@ -52,6 +52,155 @@ full-migration workflow, run
 
 `npm run schema`
 
+The migration config is validated against a single unified JSON Schema.  That
+schema starts with the orchestration config shape from
+`packages/schemas/src/userSchemas.ts`, then splices in selected Strimzi schema
+fragments for the Kafka pass-through sections under
+`kafkaClusterConfiguration.<name>.autoCreate`.
+
+The merge intentionally pulls in only Strimzi `spec` fragments that users are
+allowed to control:
+
+- `Kafka.spec` via `clusterSpecOverrides`
+- `KafkaNodePool.spec` via `nodePoolSpecOverrides`
+- `KafkaTopic.spec` via `topicSpecOverrides`
+
+The workflow still owns names, labels, annotations, and connectivity/auth
+requirements that the proxy, replayer, and console components depend on.  The
+goal is "real Strimzi-shaped validation where users are allowed to configure
+Strimzi" without letting user config drift into fields that would break the
+rest of the migration stack.
+
+#### How the merge works
+
+The unified schema builder lives in
+[packages/schemas/src/unifiedSchema.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/schemas/src/unifiedSchema.ts).
+At a high level it does the following:
+
+1. Generates the base migration configuration JSON Schema from the
+   orchestration config model.
+2. Loads Strimzi schema fragments from an OpenAPI/JSON Schema input, if one is
+   provided.
+3. Extracts the specific Strimzi definitions that correspond to
+   `Kafka.spec`, `KafkaNodePool.spec`, and `KafkaTopic.spec`.
+4. Re-homes those definitions under the unified schema's `$defs`.
+5. Rewrites the orchestration config properties for the Kafka pass-through
+   sections so that they reference those Strimzi-derived definitions.
+6. Emits one JSON Schema artifact that tools, editors, agents, and runtime
+   validation can all use.
+
+That builder is exposed through:
+
+```shell
+npm run -w @opensearch-migrations/schemas build-unified-schema -- \
+  --output /path/to/workflowMigration.schema.json
+```
+
+When a live Strimzi schema is available, pass it explicitly:
+
+```shell
+npm run -w @opensearch-migrations/schemas build-unified-schema -- \
+  --strimzi-openapi /path/to/kafka.strimzi.io-v1-schema.json \
+  --output /path/to/workflowMigration.schema.json
+```
+
+#### Live CRDs vs fallback schema
+
+The preferred source of truth for Strimzi-backed sections is the schema from
+the actual Strimzi deployment that the release or environment is targeting.
+The intended release/deployment flow is:
+
+1. Deploy or upgrade the Helm charts that install Strimzi.
+2. Read the live Kafka CRD/OpenAPI schema from that cluster.
+3. Run `build-unified-schema` against those live definitions.
+4. Save the resulting `workflowMigration.schema.json` as a release artifact.
+5. Publish the same schema into the cluster in a ConfigMap so that runtime
+   tools validate against the same contract.
+
+That gives one schema that matches the Strimzi version actually present in the
+environment, instead of assuming that the checked-in TypeScript types or an
+older generated schema are still correct.
+
+For local development and bootstrapping, there is also a checked-in fallback
+artifact at
+[packages/schemas/generated/workflowMigration.schema.json](/Users/schohn/dev/m2/orchestrationSpecs/packages/schemas/generated/workflowMigration.schema.json).
+That fallback is intentionally generic in the Strimzi sections.  It exists so
+that developers can:
+
+- inspect the overall config shape
+- generate samples
+- run editor tooling before a cluster is available
+- bootstrap tests that do not require full Strimzi fidelity
+
+Because that generic fallback does not provide full CRD-level validation,
+runtime validation treats it as a degraded mode.  By default, the runtime
+validator errors when only the generic schema is available.  Developers can
+opt into that degraded mode by setting:
+
+- `ALLOW_GENERIC_UNIFIED_SCHEMA=true`
+
+That environment variable should be used only for local development, tests, or
+early bootstrapping.  It is not the desired release path.
+
+#### Where the runtime schema comes from
+
+The runtime validator looks for the unified schema in this order:
+
+1. A file path from `MIGRATION_UNIFIED_SCHEMA_PATH`
+2. A ConfigMap reference from:
+   - `MIGRATION_UNIFIED_SCHEMA_CONFIGMAP`
+   - `MIGRATION_UNIFIED_SCHEMA_NAMESPACE`
+   - `MIGRATION_UNIFIED_SCHEMA_KEY`
+3. The checked-in fallback artifact in `packages/schemas/generated`
+
+The config processor writes that schema into the migration bundle as a
+ConfigMap named `migration-configuration-schema`, and
+`createMigrationWorkflowFromUserConfiguration.sh` applies it alongside the
+other generated resources.  The intent is for `migrationInitializer`,
+`migrationConfigTransformer`, CLI-driven validation, and any future editor or
+agent integrations to all consume the same unified artifact.
+
+#### How the fallback is maintained
+
+The fallback schema is not meant to be hand-edited.  It should be regenerated
+with the unified schema builder and checked in as an artifact.  In practice:
+
+- release automation should prefer a schema generated from live Strimzi CRDs
+- local development can regenerate the generic artifact with `--generic`
+- if the orchestration config model changes, regenerate the fallback artifact
+  so the checked-in schema continues to match the current config shape
+
+Today the generic fallback can be refreshed with:
+
+```shell
+npm run -w @opensearch-migrations/schemas build-unified-schema -- --generic
+```
+
+That command updates the checked-in fallback artifact but does not replace the
+preferred release-time step of generating a schema from live CRDs.
+
+#### Why this is one merged schema instead of bespoke validation logic
+
+The reason for building one merged schema is that it becomes a portable
+contract:
+
+- IDEs can use it for completion and validation
+- CI can validate configs against it directly
+- release tooling can publish it as an artifact
+- agents can read the same schema users validate against
+- runtime tools can fail fast before partially applying invalid Kafka config
+
+That is more useful than "some fields validated by Zod, some fields validated
+by custom code, some fields validated only by Strimzi after deployment."
+
+The runtime validator can be pointed at a schema artifact or cluster ConfigMap
+via:
+
+- `MIGRATION_UNIFIED_SCHEMA_PATH`
+- `MIGRATION_UNIFIED_SCHEMA_CONFIGMAP`
+- `MIGRATION_UNIFIED_SCHEMA_NAMESPACE`
+- `MIGRATION_UNIFIED_SCHEMA_KEY`
+
 To generate a sample yaml file from the schema, including descriptions
 of fields and the types of the scalars, run
 
@@ -93,6 +242,30 @@ targetClusters:
   <NAME>:
 ...
 ```
+
+### Kafka Settings
+
+`kafkaClusterConfiguration.<cluster>.autoCreate` still supports the legacy
+convenience knobs:
+
+- `replicas`
+- `storage`
+- `partitions`
+- `topicReplicas`
+
+It also now accepts Strimzi-shaped pass-through sections that are merged into
+the generated resources:
+
+- `clusterSpecOverrides` for `Kafka.spec`
+- `nodePoolSpecOverrides` for `KafkaNodePool.spec`
+- `topicSpecOverrides` for `KafkaTopic.spec`
+
+These sections are validated by the unified JSON Schema, using Strimzi-derived
+definitions when a live or release-built Strimzi schema is available.  The
+workflow still owns the resource names and Kafka access contract.  In
+particular, workflow-managed listeners, auth wiring, and other invariants may
+be overwritten so that proxy, replayer, and console connectivity remains
+stable.
 
 ### Updating template and configuration models
 

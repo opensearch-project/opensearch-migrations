@@ -11,6 +11,7 @@ import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
 import {promises as dns} from "dns";
 import { generateSemaphoreKey } from './semaphoreUtils';
+import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG>;
@@ -201,7 +202,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     validateInput(data: unknown): InputConfig {
         // First pass: normal schema validation (including refinements)
         const obj = super.validateInput(data);
-        
+
+        // Second pass: unified schema validation for embedded Strimzi passthrough sections
+        validateInputAgainstUnifiedSchema(data);
+
         // Second pass: check for extra keys
         validateNoExtraKeys(data, OVERALL_MIGRATION_CONFIG);
         
