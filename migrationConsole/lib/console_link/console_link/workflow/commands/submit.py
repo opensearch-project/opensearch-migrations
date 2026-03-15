@@ -131,13 +131,7 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
         # Step 2: Submit workflow to Kubernetes
         click.echo(f"Submitting workflow to namespace: {namespace}")
         try:
-            # Construct arguments for the submission script
-            args = [
-                f"--prefix {namespace}",
-                f"--etcd-endpoints {etcd_endpoints}"
-            ]
-
-            submit_result = runner.submit_workflow(config_yaml, args)
+            submit_result = runner.submit_workflow(config_yaml, [])
 
             workflow_name = submit_result.get('workflow_name', 'unknown')
 

@@ -22,6 +22,10 @@ rules:
   - apiGroups: ["argoproj.io"]
     resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["migrations.opensearch.org"]
+    resources: ["capturedtraffics", "datasnapshots", "snapshotmigrations",
+                "capturedtraffics/status", "datasnapshots/status", "snapshotmigrations/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

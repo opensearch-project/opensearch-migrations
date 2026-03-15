@@ -8,9 +8,15 @@ import {StepGroup} from "../models/stepsBuilder";
 import {MISSING_FIELD, PlainObject} from "../models/plainObject";
 import {GenericScope, LoopWithUnion} from "../models/workflowTypes";
 import {WorkflowBuilder} from "../models/workflowBuilder";
-import {BaseExpression, makeDirectTypeProxy, UnquotedTypeWrapper} from "../models/expression";
+import {
+    BaseExpression,
+    makeDirectTypeProxy,
+    SimpleExpression,
+    TemplateExpression,
+    UnquotedTypeWrapper
+} from "../models/expression";
 import {NamedTask} from "../models/sharedTypes";
-import { omit } from 'lodash';
+import * as _ from 'lodash';
 import {toSafeYamlOutput} from "../utils";
 import {SynchronizationConfig} from "../models/synchronization";
 
@@ -36,7 +42,7 @@ export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder<any
             ...(wf.workflowParameters != null && {arguments: formatParameters(wf.workflowParameters)}),
             ...(wf.metadata.synchronization && {synchronization: formatSynchronization(wf.metadata.synchronization)}),
             templates: (() => {
-                const list = [];
+                const list: ReturnType<typeof formatTemplate>[] = [];
                 for (const k in wf.templates) {
                     list.push(formatTemplate(wf.templates, k));
                 }
@@ -107,6 +113,15 @@ function formatArguments(passedParameters: { parameters?: Record<string, any> | 
     }));
 }
 
+function formatInlineTemplate(inline: Record<string, any>): Record<string, any> {
+    const {retryStrategy, inputsScope, ...bodyContent} = inline;
+    return {
+        ...(inputsScope ? {inputs: formatParameters(inputsScope)} : {}),
+        ...formatBody(bodyContent),
+        ...(retryStrategy ? {retryStrategy} : {})
+    };
+}
+
 function formatStepOrTask<T extends NamedTask & { withLoop?: unknown }>(step: T) {
     const {
         templateRef: {template: trTemplate, ...trRest} = {},
@@ -114,15 +129,17 @@ function formatStepOrTask<T extends NamedTask & { withLoop?: unknown }>(step: T)
         withLoop,
         when,
         args,
+        inline = undefined,
         ...rest
-    } = step;
+    } = step as T & { inline?: Record<string, any> };
     return {
         ...(undefined === template   ? {} : {template: convertTemplateName(template as string)} ),
         ...(undefined === trTemplate ? {} : {templateRef: { template: convertTemplateName(trTemplate as string), ...trRest}}),
+        ...(undefined === inline     ? {} : {inline: formatInlineTemplate(inline)}),
         ...(undefined === withLoop   ? {} : renderWithLoop(withLoop as LoopWithUnion<any>)),
         ...(undefined === when       ? {} : {
             when:
-                (when && typeof when === "object" && "templateExp" in when) ?
+                isTemplateWhenWrapper(when) ?
                 `${toArgoExpressionString(when.templateExp, "Outer")}` :
                     `${toArgoExpressionString(when, "IdentifierOnly").replace(/^'|'$/g, '')}`
         }),
@@ -131,12 +148,18 @@ function formatStepOrTask<T extends NamedTask & { withLoop?: unknown }>(step: T)
     };
 }
 
+function isTemplateWhenWrapper(
+    when: SimpleExpression<boolean> | { templateExp: TemplateExpression<boolean> }
+): when is { templateExp: TemplateExpression<boolean> } {
+    return typeof when === "object" && when !== null && "templateExp" in when;
+}
+
 function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
     const result: any[] = [];
     Object.entries(envVars).forEach(([key, value]) => {
         const transformedValue = transformExpressionsDeep(value);
         const v = ("configMapKeyRef" in value || "secretKeyRef" in value) ?
-            { valueFrom: omit(transformedValue, "type") } :
+            { valueFrom: _.omit(transformedValue, "type") } :
             { value: transformedValue };
         result.push({name: key, ...v});
     });

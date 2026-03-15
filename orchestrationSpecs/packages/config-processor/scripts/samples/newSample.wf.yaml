@@ -1,0 +1,226 @@
+{
+#"skipApprovals": false,
+"kafkaClusterConfiguration": {
+    "default":
+      "autoCreate": {}
+},
+"sourceClusters": {
+    "source": {
+#        "endpoint": "",  # string
+#        "allowInsecure": false,
+        "version": "",  # string
+#        "authConfig": {},
+##        ## Option 1 (object):
+##            {
+##            "basic": {
+##                "secretName": ""  # string
+##            }
+##            }
+##        ## Option 2 (object):
+##            {
+##            "sigv4": {
+##                "region": "",  # string
+###                "service": "es"
+##            }
+##            }
+##        ## Option 3 (object):
+##            {
+##            "mtls": {
+##                "caCert": "",  # string
+##                "clientSecretName": ""  # string
+##            }
+##            }
+        "snapshotInfo": {
+#            # Keys are the repository names that are managed by the source cluster
+#            "repos": {
+#                "REPO": {
+#                    # The AWS region that the bucket reside in (us-east-2, etc)
+#                    "awsRegion": "",  # string
+##                    "endpoint": "",  # string
+#                    # s3://BUCKETNAME/PATH
+#                    "s3RepoPathUri": "",  # string
+##                    "s3RoleArn": ""  # string
+#                }
+#            },
+            "snapshots": {
+                "SNAPSHOT": {
+                    "config": {},
+#                    ## Option 1 (object):
+#                        {
+#                        "externallyManagedSnapshotName": ""  # string
+#                        }
+#                    ## Option 2 (object):
+#                        {
+#                        "createSnapshotConfig": {
+##                            "indexAllowlist": [],  # string[]
+##                            "maxSnapshotRateMbPerNode": 0,
+##                            "loggingConfigurationOverrideConfigMap": ""  # string
+#                        }
+#                        }
+                    "repoName": ""  # string
+                }
+            }
+        }
+    }
+},
+"targetClusters": {
+    "target": {
+        "endpoint": "",  # string
+#        "allowInsecure": false,
+        "version": "",  # string
+#        "authConfig": {}
+##        ## Option 1 (object):
+##            {
+##            "basic": {
+##                "secretName": ""  # string
+##            }
+##            }
+##        ## Option 2 (object):
+##            {
+##            "sigv4": {
+##                "region": "",  # string
+###                "service": "es"
+##            }
+##            }
+##        ## Option 3 (object):
+##            {
+##            "mtls": {
+##                "caCert": "",  # string
+##                "clientSecretName": ""  # string
+##            }
+##            }
+    }
+},
+"snapshotMigrationConfigs": [
+    {
+#    "skipApprovals": false,
+    "fromSource": "",  # string
+    "toTarget": "",  # string
+#    "perSnapshotConfig": {
+#        "PER_SNAPSHOT_CONFIG": [
+#            {
+##            "label": "",  # string
+##            "metadataMigrationConfig": {
+###                "componentTemplateAllowlist": [],  # string[]
+###                "indexAllowlist": [],  # string[]
+###                "indexTemplateAllowlist": [],  # string[]
+###                "allowLooseVersionMatching": true,
+###                "clusterAwarenessAttributes": 1,
+###                "loggingConfigurationOverrideConfigMap": "",  # string
+###                "multiTypeBehavior": "",  # "NONE" | "UNION" | "SPLIT"
+###                "otelCollectorEndpoint": "http://otel-collector:4317",
+###                "output": "",  # "HUMAN_READABLE" | "JSON"
+###                "transformerConfigBase64": "",  # string
+###                "skipEvaluateApproval": false,
+###                "skipMigrateApproval": false
+##            },
+##            "documentBackfillConfig": {
+###                "indexAllowlist": [],  # string[]
+###                "podReplicas": 1,
+###                "loggingConfigurationOverrideConfigMap": "",  # string
+###                "allowLooseVersionMatching": true,
+###                "docTransformerConfigBase64": "",  # string
+###                "documentsPerBulkRequest": 2147483647,
+###                "initialLeaseDuration": "PT10M",
+###                "maxConnections": 10,
+###                "maxShardSizeBytes": 85899345920,
+###                "otelCollectorEndpoint": "http://otel-collector:4317",
+###                "skipApproval": false,
+##                # Resource limits and requests for RFS container
+##                "resources": ""  # unknown
+##            }
+#            }
+#        ]
+#    }
+    }
+],
+# Top-level items are independent of each other but items in the inner-arrays require all snapshot activities across each of the items' sources to finish before any replays in this group can start.
+"traffic": {
+    "proxies": {
+        "PROXIE": {
+#            "kafka": "default",
+            "source": "",  # string
+            "proxySettings": {
+#                "loggingConfigurationOverrideConfigMap": "",  # string
+#                "podReplicas": 1,
+#                # Resource limits and requests for replayer container.
+#                "resources": {
+#                    # Resource upper bound for a container
+#                    "limits": {
+#                        # CPU quantity in millicores (e.g., '100m', '500m')
+#                        "cpu": "",  # string
+#                        # Memory quantity with unit (e.g., '512Mi', '2G')
+#                        "memory": "",  # string
+##                        # Storage quantity with unit (e.g., '10Gi', '5G')
+##                        "ephemeral-storage": ""  # string
+#                    },
+#                    # Resource lower bound for a container
+#                    "requests": {
+#                        # CPU quantity in millicores (e.g., '100m', '500m')
+#                        "cpu": "",  # string
+#                        # Memory quantity with unit (e.g., '512Mi', '2G')
+#                        "memory": "",  # string
+##                        # Storage quantity with unit (e.g., '10Gi', '5G')
+##                        "ephemeral-storage": ""  # string
+#                    }
+#                },
+#                "otelCollectorEndpoint": "http://otel-collector:4317",
+#                "setHeaders": [],  # string[]
+#                "destinationConnectionPoolSize": 0,
+#                "destinationConnectionPoolTimeout": "PT30S",
+#                "kafkaClientId": "HttpCaptureProxyProducer",
+                "listenPort": "",  # number
+#                "maxTrafficBufferSize": 1048576,
+#                "noCapture": false,
+#                "numThreads": 1,
+#                "sslConfigSettings": "",  # string
+#                "suppressCaptureForHeaderMatch": [],  # string[]
+#                "suppressCaptureForMethod": [],  # string[]
+#                "suppressCaptureForUriPath": [],  # string[]
+#                "suppressMethodAndPath": ""  # string
+            }
+        }
+    },
+    "replayers": {
+        "REPLAYER": {
+#            "skipApprovals": false,
+            "fromProxy": "",  # string
+            "toTarget": "",  # string
+#            "dependsOnSnapshotMigrations": [
+#                {
+#                "source": "",  # string
+#                "snapshot": ""  # string
+#                }
+#            ],
+#            "replayerConfig": {
+##                "speedupFactor": 1.1,
+##                "podReplicas": 1,
+##                "authHeaderOverride": "",  # string
+##                "loggingConfigurationOverrideConfigMap": "",  # string
+##                # Resource limits and requests for replayer container.
+##                "resources": {
+##                    # Resource upper bound for a container
+##                    "limits": {
+##                        # CPU quantity in millicores (e.g., '100m', '500m')
+##                        "cpu": "",  # string
+##                        # Memory quantity with unit (e.g., '512Mi', '2G')
+##                        "memory": "",  # string
+###                        # Storage quantity with unit (e.g., '10Gi', '5G')
+###                        "ephemeral-storage": ""  # string
+##                    },
+##                    # Resource lower bound for a container
+##                    "requests": {
+##                        # CPU quantity in millicores (e.g., '100m', '500m')
+##                        "cpu": "",  # string
+##                        # Memory quantity with unit (e.g., '512Mi', '2G')
+##                        "memory": "",  # string
+###                        # Storage quantity with unit (e.g., '10Gi', '5G')
+###                        "ephemeral-storage": ""  # string
+##                    }
+##                }
+#            }
+        }
+    }
+}
+}
+

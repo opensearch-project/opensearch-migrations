@@ -30,6 +30,15 @@
       ],
       "@opensearch-migrations/schemas": [
         "./packages/schemas/src/index.ts"
+      ],
+      "@opensearch-migrations/k8s-types": [
+        "./packages/k8s-types/src/index.ts"
+      ],
+      "@opensearch-migrations/argo-types": [
+        "./packages/argo-types/src/index.ts"
+      ],
+      "@opensearch-migrations/strimzi-types": [
+        "./packages/strimzi-types/src/index.ts"
       ]
     }
   }

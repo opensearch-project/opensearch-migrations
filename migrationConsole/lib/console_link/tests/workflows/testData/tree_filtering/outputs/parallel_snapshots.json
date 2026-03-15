@@ -8,7 +8,7 @@
     "inputs": {
       "parameters": [
         {
-          "name": "groupName",
+          "name": "groupName_view",
           "value": "test_data2_extraction"
         }
       ]
@@ -41,7 +41,7 @@
     "inputs": {
       "parameters": [
         {
-          "name": "groupName",
+          "name": "groupName_view",
           "value": "test_data4_extraction"
         }
       ]

@@ -225,7 +225,7 @@ export class ContainerBuilder<
         );
     }
 
-    protected getBody() {
+    getBody() {
         const volumes = Object.entries(this.volumeScope).map(([name, config]) => ({
             name,
             configMap: config.configMap

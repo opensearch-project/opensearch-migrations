@@ -94,6 +94,31 @@ SCHEMA = {
     }
 }
 
+SOURCE_PROXY_SCHEMA = {
+    "type": "dict",
+    "schema": {
+        "name": {"type": "string", "required": False},
+        "endpoint": {"type": "string", "required": True},
+        "allow_insecure": {"type": "boolean", "required": False},
+    }
+}
+
+SOURCE_CLUSTER_SCHEMA = {
+    "cluster": {
+        "type": "dict",
+        "schema": {
+            "endpoint": {"type": "string", "required": True},
+            "allow_insecure": {"type": "boolean", "required": False},
+            "version": {"type": "string", "required": False},
+            "no_auth": NO_AUTH_SCHEMA,
+            "basic_auth": BASIC_AUTH_SCHEMA,
+            "sigv4": SIGV4_SCHEMA,
+            "proxy": SOURCE_PROXY_SCHEMA,
+        },
+        "check_with": contains_one_of({auth.name.lower() for auth in AuthMethod})
+    }
+}
+
 
 class AuthDetails(NamedTuple):
     username: str
@@ -313,6 +338,30 @@ class Cluster:
                 session=session,
                 raise_error=False
             )
+
+
+class SourceCluster(Cluster):
+    proxy: Optional[Cluster] = None
+    proxy_name: Optional[str] = None
+
+    def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
+        logger.info(f"Initializing source cluster with config: {config}")
+        v = Validator(SOURCE_CLUSTER_SCHEMA)
+        if not v.validate({'cluster': config}):
+            raise ValueError("Invalid config file for source cluster", v.errors)
+
+        proxy_config = config.get("proxy")
+        base_config = {k: v for k, v in config.items() if k != "proxy"}
+        super().__init__(config=base_config, client_options=client_options)
+
+        if proxy_config is not None:
+            merged_proxy_config = {
+                **base_config,
+                "endpoint": proxy_config["endpoint"],
+                "allow_insecure": proxy_config.get("allow_insecure", False),
+            }
+            self.proxy = Cluster(config=merged_proxy_config, client_options=client_options)
+            self.proxy_name = proxy_config.get("name")
 
 
 class NoSourceClusterDefinedError(Exception):

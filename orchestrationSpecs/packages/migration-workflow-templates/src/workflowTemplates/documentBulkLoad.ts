@@ -5,7 +5,8 @@ import {
     CONSOLE_SERVICES_CONFIG_FILE,
     NAMED_TARGET_CLUSTER_CONFIG,
     ResourceRequirementsType,
-    RFS_OPTIONS
+    ARGO_RFS_OPTIONS,
+    ARGO_RFS_WORKFLOW_OPTION_KEYS,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 
@@ -30,10 +31,11 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
+import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
 
 function shouldCreateRfsWorkCoordinationCluster(
-    documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof RFS_OPTIONS>>>
+    documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>
 ): BaseExpression<boolean, "complicatedExpression"> {
     return expr.not(
         expr.get(
@@ -48,7 +50,7 @@ function makeParamsDict(
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     rfsCoordinatorConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
-    options: BaseExpression<Serialized<z.infer<typeof RFS_OPTIONS>>>,
+    options: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>,
     sessionName: BaseExpression<string>
 ) {
     return expr.mergeDicts(
@@ -57,7 +59,7 @@ function makeParamsDict(
                 makeTargetParamDict(targetConfig),
                 makeRfsCoordinatorParamDict(rfsCoordinatorConfig)
             ),
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap", "podReplicas", "resources", "useTargetClusterForWorkCoordination", "jvmArgs")
+            expr.omit(expr.deserializeRecord(options), ...ARGO_RFS_WORKFLOW_OPTION_KEYS)
         ),
         expr.mergeDicts(
             expr.makeDict({
@@ -189,12 +191,12 @@ function getRfsDeploymentManifest
         resources: makeDirectTypeProxy(args.resources)
     };
 
-    const finalContainerDefinition= setupTestCredsForContainer(
+    const finalContainerDefinition = setupTestCredsForContainer(
         args.useLocalstackAwsCreds,
         setupLog4jConfigForContainer(
             useCustomLogging,
             args.loggingConfigMap,
-            { container: baseContainerDefinition, volumes: []},
+            {container: baseContainerDefinition, volumes: []},
             args.jvmArgs
         )
     );
@@ -319,7 +321,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     }
                 }
             })
-        ))
+        )
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
 
 
     .addTemplate("waitForCompletionInternal", t => t
@@ -352,7 +356,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("targetK8sLabel", typeToken<string>())
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
         .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
-        .addOptionalInput("groupName", c => "checks")
+        .addOptionalInput("groupName_view", c => "checks")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
             .addStep("runStatusChecks", INTERNAL, "waitForCompletionInternal", c =>
@@ -408,8 +412,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     snapshotK8sLabel: b.inputs.snapshotK8sLabel,
                     fromSnapshotMigrationK8sLabel: b.inputs.fromSnapshotMigrationK8sLabel,
                     taskK8sLabel: b.inputs.taskK8sLabel,
-                })
+                }),
+                successCondition: "status.readyReplicas > 0"
             }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
@@ -420,14 +426,14 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("rfsCoordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
+        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof ARGO_RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
             .addStep("startHistoricalBackfill", INTERNAL, "startHistoricalBackfill", c =>
                 c.register({
-                    ...selectInputsForRegister(b,c),
+                    ...selectInputsForRegister(b, c),
                     podReplicas: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["podReplicas"], 1),
                     targetBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.targetConfig),
                     coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.rfsCoordinatorConfig),
@@ -460,8 +466,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("rfsCoordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("sessionName", typeToken<string>())
-        .addOptionalInput("indices", c => [] as readonly string[])
-        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
+        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof ARGO_RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
@@ -504,8 +509,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("sessionName", typeToken<string>())
-        .addOptionalInput("indices", c => [] as readonly string[])
-        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof RFS_OPTIONS>>())
+        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof ARGO_RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole", "CoordinatorCluster"]))
 
@@ -514,11 +518,11 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             return b
                 // (conditional) Deploy an OpenSearch cluster for RFS work coordination
                 .addStep("createRfsCoordinator", RfsCoordinatorCluster, "createRfsCoordinator", c =>
-                    c.register({
-                        clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName),
-                        coordinatorImage: b.inputs.imageCoordinatorClusterLocation
-                    }),
-                    { when: { templateExp: createRfsCluster }}
+                        c.register({
+                            clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName),
+                            coordinatorImage: b.inputs.imageCoordinatorClusterLocation
+                        }),
+                    {when: {templateExp: createRfsCluster}}
                 )
 
                 // Always run bulk load, use deployed cluster or target cluster based on flag 'createRfsCluster'
@@ -534,10 +538,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
                 // (conditional) Cleanup OpenSearch cluster used for RFS work coordination
                 .addStep("cleanupRfsCoordinator", RfsCoordinatorCluster, "deleteRfsCoordinator", c =>
-                    c.register({
-                        clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName)
-                    }),
-                    { when: { templateExp: createRfsCluster }}
+                        c.register({
+                            clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName)
+                        }),
+                    {when: {templateExp: createRfsCluster}}
                 );
         })
     )

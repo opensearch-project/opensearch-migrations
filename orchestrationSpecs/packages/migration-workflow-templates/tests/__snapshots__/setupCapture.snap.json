@@ -1,0 +1,450 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "setup-capture"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "deployproxyservice",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyName"
+            },
+            {
+              "name": "listenPort"
+            },
+            {
+              "name": "internetFacing",
+              "value": "false"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: v1\nkind: Service\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  annotations:\n    service.beta.kubernetes.io/aws-load-balancer-type: external\n    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip\n    service.beta.kubernetes.io/aws-load-balancer-scheme: \"{{=((fromJSON(inputs.parameters.internetFacing)) ? ('internet-facing') : ('internal'))}}\"\nspec:\n  type: LoadBalancer\n  selector:\n    migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  ports:\n    - port: {{inputs.parameters.listenPort}}\n      targetPort: {{inputs.parameters.listenPort}}\n      protocol: TCP\n",
+          "action": "apply",
+          "setOwnerReference": false
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deployproxydeployment",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyName"
+            },
+            {
+              "name": "jsonConfig"
+            },
+            {
+              "name": "listenPort"
+            },
+            {
+              "name": "podReplicas"
+            },
+            {
+              "name": "resources"
+            },
+            {
+              "name": "tlsSecretName",
+              "value": ""
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          args:\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n",
+          "action": "apply",
+          "setOwnerReference": false
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deployproxydeploymentwithtls",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyName"
+            },
+            {
+              "name": "jsonConfig"
+            },
+            {
+              "name": "listenPort"
+            },
+            {
+              "name": "podReplicas"
+            },
+            {
+              "name": "resources"
+            },
+            {
+              "name": "tlsSecretName"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          args:\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          volumeMounts:\n            - name: tls-certs\n              mountPath: /etc/proxy-tls\n              readOnly: true\n      volumes:\n        - name: tls-certs\n          secret:\n            secretName: \"{{inputs.parameters.tlsSecretName}}\"\n",
+          "action": "apply",
+          "setOwnerReference": false
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "provisionproxycert",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "certName"
+            },
+            {
+              "name": "secretName"
+            },
+            {
+              "name": "issuerName"
+            },
+            {
+              "name": "issuerKind"
+            },
+            {
+              "name": "issuerGroup"
+            },
+            {
+              "name": "dnsNames"
+            },
+            {
+              "name": "duration"
+            },
+            {
+              "name": "renewBefore"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: cert-manager.io/v1\nkind: Certificate\nmetadata:\n  name: \"{{inputs.parameters.certName}}\"\nspec:\n  secretName: \"{{inputs.parameters.secretName}}\"\n  issuerRef:\n    name: \"{{inputs.parameters.issuerName}}\"\n    kind: \"{{inputs.parameters.issuerKind}}\"\n    group: \"{{inputs.parameters.issuerGroup}}\"\n  dnsNames: {{inputs.parameters.dnsNames}}\n  duration: \"{{inputs.parameters.duration}}\"\n  renewBefore: \"{{inputs.parameters.renewBefore}}\"\n",
+          "action": "apply",
+          "setOwnerReference": false
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "waitforcertready",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "certName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: cert-manager.io/v1\nkind: Certificate\nmetadata:\n  name: \"{{inputs.parameters.certName}}\"\n",
+          "action": "get",
+          "successCondition": "status.conditions.0.status == True",
+          "failureCondition": "status.conditions.0.status == False"
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "setupproxy",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyConfig"
+            },
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "kafkaTopicName"
+            },
+            {
+              "name": "proxyName"
+            },
+            {
+              "name": "listenPort"
+            },
+            {
+              "name": "podReplicas"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "createkafkatopicwithretry",
+                "name": "setup-kafka"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "topicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "clusterConfig",
+                    "value": "{{=toJSON({})}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='KafkaTopic: '+inputs.parameters.kafkaTopicName}}"
+                  }
+                ]
+              },
+              "name": "createKafkaTopic"
+            }
+          ],
+          [
+            {
+              "template": "deployproxyservice",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "listenPort",
+                    "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "internetFacing",
+                    "value": "{{=sprig.dig('internetFacing', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}"
+                  }
+                ]
+              },
+              "name": "deployService"
+            },
+            {
+              "template": "provisionproxycert",
+              "when": "{{=sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "certName",
+                    "value": "{{=inputs.parameters.proxyName+'-tls'}}"
+                  },
+                  {
+                    "name": "secretName",
+                    "value": "{{=inputs.parameters.proxyName+'-tls'}}"
+                  },
+                  {
+                    "name": "issuerName",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['issuerRef']['name']}}"
+                  },
+                  {
+                    "name": "issuerKind",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['issuerRef']['kind']}}"
+                  },
+                  {
+                    "name": "issuerGroup",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['issuerRef']['group']}}"
+                  },
+                  {
+                    "name": "dnsNames",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['dnsNames'])}}"
+                  },
+                  {
+                    "name": "duration",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['duration']}}"
+                  },
+                  {
+                    "name": "renewBefore",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['renewBefore']}}"
+                  }
+                ]
+              },
+              "name": "provisionCert"
+            }
+          ],
+          [
+            {
+              "template": "waitforcertready",
+              "when": "{{=sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "certName",
+                    "value": "{{=inputs.parameters.proxyName+'-tls'}}"
+                  }
+                ]
+              },
+              "name": "waitForCert"
+            }
+          ],
+          [
+            {
+              "template": "deployproxydeployment",
+              "when": "{{=!(sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager' || sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'existingSecret')}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyName",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['name']}}"
+                  },
+                  {
+                    "name": "listenPort",
+                    "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "podReplicas",
+                    "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "resources",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources'])}}"
+                  },
+                  {
+                    "name": "jsonConfig",
+                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'internetFacing', 'podReplicas', 'resources'), sprig.merge(((sprig.dig('proxyConfig', 'noCapture', false, fromJSON(inputs.parameters.proxyConfig))) ? ({}) : (sprig.dict(\"kafkaConnection\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaConnection')))), sprig.dict(\"destinationUri\", fromJSON(inputs.parameters.proxyConfig)['sourceEndpoint'], \"insecureDestination\", fromJSON(inputs.parameters.proxyConfig)['sourceAllowInsecure'], \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic')))))}}"
+                  }
+                ]
+              },
+              "name": "deployProxyNoTls"
+            },
+            {
+              "template": "deployproxydeploymentwithtls",
+              "when": "{{=sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager' || sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'existingSecret'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyName",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['name']}}"
+                  },
+                  {
+                    "name": "listenPort",
+                    "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "podReplicas",
+                    "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "resources",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources'])}}"
+                  },
+                  {
+                    "name": "tlsSecretName",
+                    "value": "{{=((sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager') ? (inputs.parameters.proxyName+'-tls') : (((sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'existingSecret') ? (fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['secretName']) : (''))))}}"
+                  },
+                  {
+                    "name": "jsonConfig",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'internetFacing', 'podReplicas', 'resources'), sprig.merge(((sprig.dig('proxyConfig', 'noCapture', false, fromJSON(inputs.parameters.proxyConfig))) ? ({}) : (sprig.dict(\"kafkaConnection\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaConnection')))), sprig.dict(\"destinationUri\", fromJSON(inputs.parameters.proxyConfig)['sourceEndpoint'], \"insecureDestination\", fromJSON(inputs.parameters.proxyConfig)['sourceAllowInsecure'], \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic')))), sprig.dict(\"sslCertChainFile\", '/etc/proxy-tls/tls.crt', \"sslKeyFile\", '/etc/proxy-tls/tls.key')))}}"
+                  }
+                ]
+              },
+              "name": "deployProxyWithTls"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}

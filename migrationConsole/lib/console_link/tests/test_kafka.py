@@ -1,7 +1,16 @@
 import pytest
 
+from console_link.models import kafka as kafka_module
 from console_link.models.factories import UnsupportedKafkaError, get_kafka
 from console_link.models.kafka import Kafka, MSK, StandardKafka
+
+
+@pytest.fixture(autouse=True)
+def stub_kafka_tool_paths(mocker):
+    mocker.patch.object(kafka_module, 'resolve_kafka_tool',
+                        side_effect=lambda script_name: f'/root/kafka-tools/kafka/bin/{script_name}')
+    mocker.patch.object(kafka_module, 'resolve_msk_auth_config',
+                        return_value='/root/kafka-tools/aws/msk-iam-auth.properties')
 
 
 def test_get_msk_kafka():
@@ -85,6 +94,39 @@ def test_standard_kafka_create_topic(mocker):
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--create',
          '--topic', 'new_topic'
+         ], capture_output=True, text=True, check=True)
+
+
+def test_msk_kafka_list_topics(mocker):
+    config = {
+        "broker_endpoints": "abc",
+        "msk": None
+    }
+    kafka = get_kafka(config)
+    mock = mocker.patch('subprocess.run', autospec=True)
+    result = kafka.list_topics()
+
+    assert result.success
+    mock.assert_called_once_with(
+        ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
+         '--bootstrap-server', f"{config['broker_endpoints']}", '--list',
+         '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
+         ], capture_output=True, text=True, check=True)
+
+
+def test_standard_kafka_list_topics(mocker):
+    config = {
+        "broker_endpoints": "abc",
+        "standard": None
+    }
+    kafka = get_kafka(config)
+    mock = mocker.patch('subprocess.run', autospec=True)
+    result = kafka.list_topics()
+
+    assert result.success
+    mock.assert_called_once_with(
+        ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
+         '--bootstrap-server', f"{config['broker_endpoints']}", '--list'
          ], capture_output=True, text=True, check=True)
 
 
@@ -191,4 +233,37 @@ def test_standard_kafka_describe_group(mocker):
         ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--describe',
          '--group', 'new_group',
+         ], capture_output=True, text=True, check=True)
+
+
+def test_msk_kafka_list_groups(mocker):
+    config = {
+        "broker_endpoints": "abc",
+        "msk": None
+    }
+    kafka = get_kafka(config)
+    mock = mocker.patch('subprocess.run', autospec=True)
+    result = kafka.list_consumer_groups()
+
+    assert result.success
+    mock.assert_called_once_with(
+        ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
+         '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--list',
+         '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
+         ], capture_output=True, text=True, check=True)
+
+
+def test_standard_kafka_list_groups(mocker):
+    config = {
+        "broker_endpoints": "abc",
+        "standard": None
+    }
+    kafka = get_kafka(config)
+    mock = mocker.patch('subprocess.run', autospec=True)
+    result = kafka.list_consumer_groups()
+
+    assert result.success
+    mock.assert_called_once_with(
+        ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
+         '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--list'
          ], capture_output=True, text=True, check=True)
