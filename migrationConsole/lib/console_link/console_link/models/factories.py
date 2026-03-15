@@ -51,9 +51,7 @@ def get_snapshot(config: Dict, source_cluster: Optional[Cluster]):
     elif 's3' in config:
         return S3Snapshot(config, source_cluster)
     logger.error(f"An unsupported snapshot type was provided: {config.keys()}")
-    if len(config.keys()) > 1:
-        raise UnsupportedSnapshotError(', '.join(config.keys()))
-    raise UnsupportedSnapshotError(next(iter(config.keys())))
+    raise UnsupportedSnapshotError(', '.join(config.keys()) if config else '<empty>')
 
 
 def get_replayer(config: Dict, client_options: Optional[ClientOptions] = None):
@@ -64,7 +62,7 @@ def get_replayer(config: Dict, client_options: Optional[ClientOptions] = None):
     if 'k8s' in config:
         return K8sReplayer(config=config, client_options=client_options)
     logger.error(f"An unsupported replayer type was provided: {config.keys()}")
-    raise UnsupportedReplayerError(next(iter(config.keys())))
+    raise UnsupportedReplayerError(', '.join(config.keys()) if config else '<empty>')
 
 
 def get_kafka(config: Dict):
