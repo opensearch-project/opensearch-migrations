@@ -41,9 +41,11 @@ ARCH=$(uname -m)
 case "$ARCH" in
   x86_64)
     PLATFORM="amd64"
+    JIB_LOCAL_TAG="latest_amd64"
     ;;
   arm64|aarch64)
     PLATFORM="arm64"
+    JIB_LOCAL_TAG="latest_arm64"
     ;;
   *)
     echo "Unsupported architecture: $ARCH"
@@ -51,7 +53,29 @@ case "$ARCH" in
     ;;
 esac
 
-gradlew :buildImages:buildImagesToRegistry_$PLATFORM -Pbuilder="$BUILDER_NAME"
+# Host-side registry publishing is already configured by the build image tooling
+# (see buildImages defaults / registry port-forward setup). Keep localTesting.sh
+# focused on the in-cluster registry endpoint used for minikube preloading.
+gradlew :buildImages:buildImagesToRegistry_$PLATFORM \
+  -Pbuilder="$BUILDER_NAME"
+
+# Preload exact image refs into minikube to avoid local-registry HTTPS/insecure-registry drift.
+# BuildKit-built images publish as :latest, Jib-built images publish as :latest_<arch>.
+PRELOAD_SPECS=(
+  "migrations/elasticsearch_searchguard:latest"
+  "migrations/migration_console:latest"
+  "migrations/reindex_from_snapshot:latest"
+  "migrations/capture_proxy:${JIB_LOCAL_TAG}"
+  "migrations/traffic_replayer:${JIB_LOCAL_TAG}"
+)
+
+for spec in "${PRELOAD_SPECS[@]}"; do
+  cluster_ref="${LOCAL_REGISTRY}/${spec}"
+  echo "Preloading ${cluster_ref} directly into minikube containerd"
+  minikube ssh -- "sudo ctr -n k8s.io images pull --plain-http ${cluster_ref}"
+  echo "Tagging in-cluster alias ${spec}"
+  minikube ssh -- "sudo ctr -n k8s.io images tag ${cluster_ref} ${spec} || true"
+done
 
 kubectl config set-context --current --namespace=ma
 
@@ -66,28 +90,29 @@ helm dependency update charts/aggregates/migrationAssistantWithArgo
 
 if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
   echo "Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
-  helm install --create-namespace -n ma tc charts/aggregates/testClusters \
+  helm upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
       --wait --timeout 10m \
-      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard"
+      --set "source.image=migrations/elasticsearch_searchguard" \
+      --set "source.imageTag=latest"
 
-  helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
+  helm upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
     --wait --timeout 10m \
     -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml \
     --set "images.captureProxy.repository=${LOCAL_REGISTRY}/migrations/capture_proxy" \
-    --set "images.captureProxy.tag=latest" \
-    --set "images.captureProxy.pullPolicy=Always" \
+    --set "images.captureProxy.tag=${JIB_LOCAL_TAG}" \
+    --set "images.captureProxy.pullPolicy=IfNotPresent" \
     --set "images.installer.repository=${LOCAL_REGISTRY}/migrations/migration_console" \
     --set "images.installer.tag=latest" \
-    --set "images.installer.pullPolicy=Always" \
+    --set "images.installer.pullPolicy=IfNotPresent" \
     --set "images.migrationConsole.repository=${LOCAL_REGISTRY}/migrations/migration_console" \
     --set "images.migrationConsole.tag=latest" \
-    --set "images.migrationConsole.pullPolicy=Always" \
+    --set "images.migrationConsole.pullPolicy=IfNotPresent" \
     --set "images.trafficReplayer.repository=${LOCAL_REGISTRY}/migrations/traffic_replayer" \
-    --set "images.trafficReplayer.tag=latest" \
-    --set "images.trafficReplayer.pullPolicy=Always" \
+    --set "images.trafficReplayer.tag=${JIB_LOCAL_TAG}" \
+    --set "images.trafficReplayer.pullPolicy=IfNotPresent" \
     --set "images.reindexFromSnapshot.repository=${LOCAL_REGISTRY}/migrations/reindex_from_snapshot" \
     --set "images.reindexFromSnapshot.tag=latest" \
-    --set "images.reindexFromSnapshot.pullPolicy=Always"
+    --set "images.reindexFromSnapshot.pullPolicy=IfNotPresent"
 else
   echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
   helm install --create-namespace -n ma tc charts/aggregates/testClusters \

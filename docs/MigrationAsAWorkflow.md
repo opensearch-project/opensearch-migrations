@@ -1,5 +1,7 @@
 # Migration as a Workflow
 
+> This document is primarily a product/design vision document. Some sections describe target UX and control-plane behavior that is broader than the current shipped CLI/workflow implementation.
+
 "You're not building a tool. You're building a process." - early feedback for
 this migrations project.
 

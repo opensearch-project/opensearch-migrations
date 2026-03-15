@@ -19,7 +19,7 @@ def normalizeClusterAuthConfig:
   else
     .no_auth = {}
   end
-  | del(.label, .proxy, .snapshotRepo);
+  | del(.label, .proxy, .snapshotRepo, .snapshotRepos);
 
 def normalizeAllowInsecure:
   if has("allowInsecure") then
