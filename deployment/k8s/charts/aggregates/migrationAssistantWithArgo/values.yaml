@@ -1,14 +1,15 @@
 conditionalPackageInstalls:
   kyverno: false
   # Migration infrastructure components
-  cert-manager: true            # needed by otel operator (which is off by default)
-  kube-prometheus-stack: true   # will be needed for auto-scaling
   argo-workflows: true          # orchestrates the steps of a migration
-  strimzi-kafka-operator: true  # Required by capture and replay
+  cert-manager: true            # needed for proxy certificates
   fluent-bit: true
+  kube-prometheus-stack: true   # needed for metric gathering; will be needed for auto-scaling
+  strimzi-kafka-operator: true  # Required by capture and replay
+
   # TLS certificate infrastructure for capture proxy
-  aws-privateca-issuer: false   # opt-in: bridges cert-manager to AWS PCA
   ack-acmpca-controller: false  # opt-in: manages AWS PCA as K8s resources via ACK
+  aws-privateca-issuer: false   # opt-in: bridges cert-manager to AWS PCA
 
   # Simpler alternative to the opentelemetry-operator.
   # ONLY set up the otel-collector and require manual instrumentation
