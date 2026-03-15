@@ -233,6 +233,17 @@ charts:
     values:
       crds:
         enabled: true
+      resources:
+        requests: { cpu: 50m, memory: 64Mi }
+        limits:   { cpu: 250m, memory: 128Mi }
+      cainjector:
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits:   { cpu: 250m, memory: 128Mi }
+      webhook:
+        resources:
+          requests: { cpu: 50m, memory: 32Mi }
+          limits:   { cpu: 100m, memory: 64Mi }
 
   aws-privateca-issuer:
     version: "1.4.0"
@@ -241,6 +252,9 @@ charts:
     values:
       serviceAccount:
         name: aws-pca-issuer
+      resources:
+        requests: { cpu: 25m, memory: 32Mi }
+        limits:   { cpu: 100m, memory: 64Mi }
 
   ack-acmpca-controller:
     version: "1.0.16"
@@ -275,6 +289,9 @@ charts:
     values:
       storageType: ephemeral # strimzi is stateless
       storageSize: 5Gi
+      resources:
+        requests: { cpu: 250m, memory: 384Mi }
+        limits:   { cpu: 1000m, memory: 512Mi }
 
       # Increase probe thresholds to prevent unnecessary restarts during high API load.
       readinessProbe:
@@ -303,6 +320,9 @@ charts:
         pdb:
           enabled: true
           minAvailable: 1  # Ensures at least 1 pod always running
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits:   { cpu: 500m, memory: 256Mi }
         containerSecurityContext:
           runAsNonRoot: true
           allowPrivilegeEscalation: false
@@ -333,6 +353,9 @@ charts:
             value: "1s"
       server:
         replicas: 2
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits:   { cpu: 500m, memory: 256Mi }
         pdb:
           enabled: true
           minAvailable: 1  # Ensures at least 1 pod always running
@@ -362,6 +385,9 @@ charts:
     version: "0.49.0"
     repository: "https://fluent.github.io/helm-charts"
     values:
+      resources:
+        requests: { cpu: 50m, memory: 32Mi }
+        limits:   { cpu: 200m, memory: 64Mi }
       env:
         - name: OUTPUT_FORMAT
           valueFrom:
@@ -529,6 +555,38 @@ charts:
         enabled: true  # If OpenTelemetry for is handling host metrics, this can be disabled
       kubeStateMetrics:
         enabled: true
+      prometheusOperator:
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits:   { cpu: 250m, memory: 128Mi }
+      kube-state-metrics:
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits:   { cpu: 200m, memory: 128Mi }
+      prometheus-node-exporter:
+        resources:
+          requests: { cpu: 25m, memory: 16Mi }
+          limits:   { cpu: 100m, memory: 32Mi }
+      grafana:
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits:   { cpu: 500m, memory: 256Mi }
+        sidecar:
+          dashboards:
+            resources:
+              requests: { cpu: 50m, memory: 100Mi }
+              limits:   { cpu: 200m, memory: 200Mi }
+          datasources:
+            resources:
+              requests: { cpu: 50m, memory: 100Mi }
+              limits:   { cpu: 200m, memory: 200Mi }
+        additionalDataSources:
+          - name: Jaeger
+            type: jaeger
+            url: http://jaeger-query:16686
+            access: proxy
+            isDefault: false
+            editable: true
       defaultRules:
         create: false
         rules:
@@ -549,14 +607,6 @@ charts:
           node: true
           prometheus: true
           prometheusOperator: true
-      grafana:
-        additionalDataSources:
-          - name: Jaeger
-            type: jaeger
-            url: http://jaeger-query:16686
-            access: proxy
-            isDefault: false
-            editable: true
 
 # OPA Gatekeeper dependency to lock down what images we can spin up - not implemented yet
 #  - name: gatekeeper
