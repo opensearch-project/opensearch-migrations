@@ -913,8 +913,6 @@ if [[ "$ignore_checks" != "true" && -n "${VPC_ID:-}" ]]; then
   fi
 fi
 
-kubectl --context="${KUBE_CONTEXT}" get namespace "$namespace" >/dev/null 2>&1 || kubectl --context="${KUBE_CONTEXT}" create namespace "$namespace"
-kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null 2>&1
 
 
 # --- mirror public images to private ECR (optional) ---
@@ -1150,6 +1148,7 @@ echo "Installing Migration Assistant chart now, this can take a couple minutes..
 helm install "$namespace" "${ma_chart_dir}" \
   --kube-context="${KUBE_CONTEXT}" \
   --namespace $namespace \
+  --create-namespace \
   --timeout 20m \
   $HELM_VALUES_FLAGS \
   ${extra_helm_values:+-f "$extra_helm_values"} \
@@ -1160,6 +1159,8 @@ helm install "$namespace" "${ma_chart_dir}" \
   $IMAGE_FLAGS \
   $TLS_HELM_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
+
+kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null 2>&1
 
 echo "Deploying CloudWatch dashboards..."
 deploy_dashboard "CaptureReplay" "${dashboard_dir}/capture-replay-dashboard.json"
