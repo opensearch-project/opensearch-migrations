@@ -298,7 +298,7 @@ class TestMapFromWorkflowConfig:
         assert "version" not in result
 
     def test_additional_fields_are_ignored(self):
-        """Test that additional fields like snapshotRepo and proxy are ignored."""
+        """Test that additional fields like snapshotRepo, snapshotRepos, and proxy are ignored."""
         workflow_config = {
             "endpoint": "https://elasticsearch-master-headless:9200",
             "allowInsecure": True,
@@ -314,6 +314,13 @@ class TestMapFromWorkflowConfig:
                 "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
                 "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
             },
+            "snapshotRepos": {
+                "default": {
+                    "awsRegion": "us-east-2",
+                    "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
+                    "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
+                }
+            },
             "proxy": {}
         }
 
@@ -328,6 +335,7 @@ class TestMapFromWorkflowConfig:
         }
         assert result == expected
         assert "snapshotRepo" not in result
+        assert "snapshotRepos" not in result
         assert "proxy" not in result
 
     # Error condition tests

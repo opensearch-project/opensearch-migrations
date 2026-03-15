@@ -72,6 +72,13 @@ kubectl delete namespace ma
 ```
 
 ## Full Documentation
+Prefer current repo docs first:
+```bash
+cat README.md
+cat DEVELOPER_GUIDE.md
+```
+
+Use the wiki for supplemental deployment walkthroughs:
 ```bash
 cat opensearch-migrations.wiki/Deploying-to-EKS.md
 cat opensearch-migrations.wiki/Deploying-to-Kubernetes.md
