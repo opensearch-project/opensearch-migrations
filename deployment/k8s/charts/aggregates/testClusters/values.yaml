@@ -115,3 +115,7 @@ target:
   singleNode: true
   persistence:
     enabled: false
+  plugins:
+    enabled: true
+    installList:
+      - repository-s3
