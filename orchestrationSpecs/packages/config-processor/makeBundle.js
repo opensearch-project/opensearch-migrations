@@ -103,6 +103,16 @@ async function bundle() {
         }
     }
 
+    // Copy the checked-in unified schema fallback artifact so the bundled
+    // initializer can validate configs without requiring a live Strimzi schema.
+    const fallbackSchemaSrc = path.join(__dirname, '..', 'schemas', 'generated', 'workflowMigration.schema.json');
+    const fallbackSchemaDest = path.join(outputDir, 'generated', 'workflowMigration.schema.json');
+    if (fs.existsSync(fallbackSchemaSrc)) {
+        fs.mkdirSync(path.dirname(fallbackSchemaDest), { recursive: true });
+        fs.copyFileSync(fallbackSchemaSrc, fallbackSchemaDest);
+        console.log(`Copied fallback unified schema to ${fallbackSchemaDest}`);
+    }
+
     // Make the bundle executable
     fs.chmodSync(outputFile, 0o755);
 

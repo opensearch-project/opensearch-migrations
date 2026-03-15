@@ -86,12 +86,6 @@ exports[`unified schema builder merges Strimzi definitions from a static OpenAPI
           "$ref": "#/$defs/io.strimzi.api.kafka.model.KafkaListenerAuthentication"
         }
       },
-      "required": [
-        "name",
-        "port",
-        "type",
-        "tls"
-      ],
       "additionalProperties": false
     }
   }

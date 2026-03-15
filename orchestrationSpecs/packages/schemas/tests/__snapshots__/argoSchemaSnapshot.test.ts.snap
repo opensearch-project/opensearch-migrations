@@ -2620,9 +2620,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
   "$defs": {
     "StrimziKafkaSpec": {
       "type": "object",
-      "required": [
-        "kafka"
-      ],
       "properties": {
         "clientsCa": {
           "type": "object",
@@ -2681,10 +2678,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "properties": {
             "apiUsers": {
               "type": "object",
-              "required": [
-                "type",
-                "valueFrom"
-              ],
               "properties": {
                 "type": {
                   "type": "string",
@@ -2718,9 +2711,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "minItems": 1,
               "items": {
                 "type": "object",
-                "required": [
-                  "mode"
-                ],
                 "properties": {
                   "mode": {
                     "type": "string",
@@ -2759,9 +2749,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "type": "array",
                   "items": {
                     "type": "object",
-                    "required": [
-                      "brokers"
-                    ],
                     "properties": {
                       "brokers": {
                         "type": "array",
@@ -2856,9 +2843,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             },
             "logging": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "loggers": {
                   "type": "object",
@@ -2896,9 +2880,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             },
             "metricsConfig": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "type": {
                   "type": "string",
@@ -3075,17 +3056,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "value"
-                            ],
                             "properties": {
                               "value": {}
                             }
                           },
                           {
-                            "required": [
-                              "valueFrom"
-                            ],
                             "properties": {
                               "valueFrom": {}
                             }
@@ -3102,17 +3077,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "object",
                             "oneOf": [
                               {
-                                "required": [
-                                  "secretKeyRef"
-                                ],
                                 "properties": {
                                   "secretKeyRef": {}
                                 }
                               },
                               {
-                                "required": [
-                                  "configMapKeyRef"
-                                ],
                                 "properties": {
                                   "configMapKeyRef": {}
                                 }
@@ -5391,17 +5360,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "value"
-                            ],
                             "properties": {
                               "value": {}
                             }
                           },
                           {
-                            "required": [
-                              "valueFrom"
-                            ],
                             "properties": {
                               "valueFrom": {}
                             }
@@ -5418,17 +5381,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "object",
                             "oneOf": [
                               {
-                                "required": [
-                                  "secretKeyRef"
-                                ],
                                 "properties": {
                                   "secretKeyRef": {}
                                 }
                               },
                               {
-                                "required": [
-                                  "configMapKeyRef"
-                                ],
                                 "properties": {
                                   "configMapKeyRef": {}
                                 }
@@ -5629,17 +5586,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "value"
-                            ],
                             "properties": {
                               "value": {}
                             }
                           },
                           {
-                            "required": [
-                              "valueFrom"
-                            ],
                             "properties": {
                               "valueFrom": {}
                             }
@@ -5656,17 +5607,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "object",
                             "oneOf": [
                               {
-                                "required": [
-                                  "secretKeyRef"
-                                ],
                                 "properties": {
                                   "secretKeyRef": {}
                                 }
                               },
                               {
-                                "required": [
-                                  "configMapKeyRef"
-                                ],
                                 "properties": {
                                   "configMapKeyRef": {}
                                 }
@@ -5929,9 +5874,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "logging": {
                   "type": "object",
-                  "required": [
-                    "type"
-                  ],
                   "properties": {
                     "loggers": {
                       "type": "object",
@@ -6144,9 +6086,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "logging": {
                   "type": "object",
-                  "required": [
-                    "type"
-                  ],
                   "properties": {
                     "loggers": {
                       "type": "object",
@@ -6272,15 +6211,9 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         },
         "kafka": {
           "type": "object",
-          "required": [
-            "listeners"
-          ],
           "properties": {
             "authorization": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "authorizerClass": {
                   "type": "string"
@@ -6318,9 +6251,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "properties": {
                 "authentication": {
                   "type": "object",
-                  "required": [
-                    "type"
-                  ],
                   "properties": {
                     "type": {
                       "type": "string",
@@ -6373,18 +6303,9 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "minItems": 1,
               "items": {
                 "type": "object",
-                "required": [
-                  "name",
-                  "port",
-                  "type",
-                  "tls"
-                ],
                 "properties": {
                   "authentication": {
                     "type": "object",
-                    "required": [
-                      "type"
-                    ],
                     "properties": {
                       "listenerConfig": {
                         "type": "object",
@@ -6452,11 +6373,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "brokerCertChainAndKey": {
                         "type": "object",
-                        "required": [
-                          "secretName",
-                          "certificate",
-                          "key"
-                        ],
                         "properties": {
                           "certificate": {
                             "type": "string"
@@ -6473,9 +6389,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "array",
                         "items": {
                           "type": "object",
-                          "required": [
-                            "broker"
-                          ],
                           "properties": {
                             "advertisedHost": {
                               "type": "string"
@@ -6722,9 +6635,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             },
             "logging": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "loggers": {
                   "type": "object",
@@ -6765,9 +6675,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             },
             "metricsConfig": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "type": {
                   "type": "string",
@@ -6816,9 +6723,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             },
             "quotas": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "consumerByteRate": {
                   "type": "integer",
@@ -6862,9 +6766,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             },
             "rack": {
               "type": "object",
-              "required": [
-                "topologyKey"
-              ],
               "properties": {
                 "topologyKey": {
                   "type": "string"
@@ -7098,17 +6999,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "value"
-                            ],
                             "properties": {
                               "value": {}
                             }
                           },
                           {
-                            "required": [
-                              "valueFrom"
-                            ],
                             "properties": {
                               "valueFrom": {}
                             }
@@ -7125,17 +7020,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "object",
                             "oneOf": [
                               {
-                                "required": [
-                                  "secretKeyRef"
-                                ],
                                 "properties": {
                                   "secretKeyRef": {}
                                 }
                               },
                               {
-                                "required": [
-                                  "configMapKeyRef"
-                                ],
                                 "properties": {
                                   "configMapKeyRef": {}
                                 }
@@ -7336,17 +7225,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "value"
-                            ],
                             "properties": {
                               "value": {}
                             }
                           },
                           {
-                            "required": [
-                              "valueFrom"
-                            ],
                             "properties": {
                               "valueFrom": {}
                             }
@@ -7363,17 +7246,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "object",
                             "oneOf": [
                               {
-                                "required": [
-                                  "secretKeyRef"
-                                ],
                                 "properties": {
                                   "secretKeyRef": {}
                                 }
                               },
                               {
-                                "required": [
-                                  "configMapKeyRef"
-                                ],
                                 "properties": {
                                   "configMapKeyRef": {}
                                 }
@@ -8662,9 +8539,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             },
             "tieredStorage": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "remoteStorageManager": {
                   "type": "object",
@@ -8828,17 +8702,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "value"
-                            ],
                             "properties": {
                               "value": {}
                             }
                           },
                           {
-                            "required": [
-                              "valueFrom"
-                            ],
                             "properties": {
                               "valueFrom": {}
                             }
@@ -8855,17 +8723,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "object",
                             "oneOf": [
                               {
-                                "required": [
-                                  "secretKeyRef"
-                                ],
                                 "properties": {
                                   "secretKeyRef": {}
                                 }
                               },
                               {
-                                "required": [
-                                  "configMapKeyRef"
-                                ],
                                 "properties": {
                                   "configMapKeyRef": {}
                                 }
@@ -10090,11 +9952,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
     "StrimziKafkaNodePoolSpec": {
       "description": "The specification of the KafkaNodePool.",
       "type": "object",
-      "required": [
-        "replicas",
-        "storage",
-        "roles"
-      ],
       "properties": {
         "jvmOptions": {
           "description": "JVM Options for pods.",
@@ -10209,9 +10066,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "storage": {
           "description": "Storage configuration (disk). Cannot be updated.",
           "type": "object",
-          "required": [
-            "type"
-          ],
           "properties": {
             "class": {
               "description": "The storage class to use for dynamic volume allocation.",
@@ -10267,9 +10121,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "type": "array",
               "items": {
                 "type": "object",
-                "required": [
-                  "type"
-                ],
                 "properties": {
                   "class": {
                     "description": "The storage class to use for dynamic volume allocation.",
@@ -10339,17 +10190,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "object",
                     "oneOf": [
                       {
-                        "required": [
-                          "value"
-                        ],
                         "properties": {
                           "value": {}
                         }
                       },
                       {
-                        "required": [
-                          "valueFrom"
-                        ],
                         "properties": {
                           "valueFrom": {}
                         }
@@ -10369,17 +10214,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "secretKeyRef"
-                            ],
                             "properties": {
                               "secretKeyRef": {}
                             }
                           },
                           {
-                            "required": [
-                              "configMapKeyRef"
-                            ],
                             "properties": {
                               "configMapKeyRef": {}
                             }
@@ -10564,17 +10403,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "object",
                     "oneOf": [
                       {
-                        "required": [
-                          "value"
-                        ],
                         "properties": {
                           "value": {}
                         }
                       },
                       {
-                        "required": [
-                          "valueFrom"
-                        ],
                         "properties": {
                           "valueFrom": {}
                         }
@@ -10594,17 +10427,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "secretKeyRef"
-                            ],
                             "properties": {
                               "secretKeyRef": {}
                             }
                           },
                           {
-                            "required": [
-                              "configMapKeyRef"
-                            ],
                             "properties": {
                               "configMapKeyRef": {}
                             }

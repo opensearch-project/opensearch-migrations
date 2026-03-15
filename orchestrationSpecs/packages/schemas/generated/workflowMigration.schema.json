@@ -1220,9 +1220,6 @@
   "$defs": {
     "StrimziKafkaSpec": {
       "type": "object",
-      "required": [
-        "kafka"
-      ],
       "properties": {
         "clientsCa": {
           "type": "object",
@@ -1281,10 +1278,6 @@
           "properties": {
             "apiUsers": {
               "type": "object",
-              "required": [
-                "type",
-                "valueFrom"
-              ],
               "properties": {
                 "type": {
                   "type": "string",
@@ -1318,9 +1311,6 @@
               "minItems": 1,
               "items": {
                 "type": "object",
-                "required": [
-                  "mode"
-                ],
                 "properties": {
                   "mode": {
                     "type": "string",
@@ -1359,9 +1349,6 @@
                   "type": "array",
                   "items": {
                     "type": "object",
-                    "required": [
-                      "brokers"
-                    ],
                     "properties": {
                       "brokers": {
                         "type": "array",
@@ -1456,9 +1443,6 @@
             },
             "logging": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "loggers": {
                   "type": "object",
@@ -1496,9 +1480,6 @@
             },
             "metricsConfig": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "type": {
                   "type": "string",
@@ -1675,17 +1656,11 @@
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "value"
-                            ],
                             "properties": {
                               "value": {}
                             }
                           },
                           {
-                            "required": [
-                              "valueFrom"
-                            ],
                             "properties": {
                               "valueFrom": {}
                             }
@@ -1702,17 +1677,11 @@
                             "type": "object",
                             "oneOf": [
                               {
-                                "required": [
-                                  "secretKeyRef"
-                                ],
                                 "properties": {
                                   "secretKeyRef": {}
                                 }
                               },
                               {
-                                "required": [
-                                  "configMapKeyRef"
-                                ],
                                 "properties": {
                                   "configMapKeyRef": {}
                                 }
@@ -3991,17 +3960,11 @@
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "value"
-                            ],
                             "properties": {
                               "value": {}
                             }
                           },
                           {
-                            "required": [
-                              "valueFrom"
-                            ],
                             "properties": {
                               "valueFrom": {}
                             }
@@ -4018,17 +3981,11 @@
                             "type": "object",
                             "oneOf": [
                               {
-                                "required": [
-                                  "secretKeyRef"
-                                ],
                                 "properties": {
                                   "secretKeyRef": {}
                                 }
                               },
                               {
-                                "required": [
-                                  "configMapKeyRef"
-                                ],
                                 "properties": {
                                   "configMapKeyRef": {}
                                 }
@@ -4229,17 +4186,11 @@
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "value"
-                            ],
                             "properties": {
                               "value": {}
                             }
                           },
                           {
-                            "required": [
-                              "valueFrom"
-                            ],
                             "properties": {
                               "valueFrom": {}
                             }
@@ -4256,17 +4207,11 @@
                             "type": "object",
                             "oneOf": [
                               {
-                                "required": [
-                                  "secretKeyRef"
-                                ],
                                 "properties": {
                                   "secretKeyRef": {}
                                 }
                               },
                               {
-                                "required": [
-                                  "configMapKeyRef"
-                                ],
                                 "properties": {
                                   "configMapKeyRef": {}
                                 }
@@ -4529,9 +4474,6 @@
                 },
                 "logging": {
                   "type": "object",
-                  "required": [
-                    "type"
-                  ],
                   "properties": {
                     "loggers": {
                       "type": "object",
@@ -4744,9 +4686,6 @@
                 },
                 "logging": {
                   "type": "object",
-                  "required": [
-                    "type"
-                  ],
                   "properties": {
                     "loggers": {
                       "type": "object",
@@ -4872,15 +4811,9 @@
         },
         "kafka": {
           "type": "object",
-          "required": [
-            "listeners"
-          ],
           "properties": {
             "authorization": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "authorizerClass": {
                   "type": "string"
@@ -4918,9 +4851,6 @@
               "properties": {
                 "authentication": {
                   "type": "object",
-                  "required": [
-                    "type"
-                  ],
                   "properties": {
                     "type": {
                       "type": "string",
@@ -4973,18 +4903,9 @@
               "minItems": 1,
               "items": {
                 "type": "object",
-                "required": [
-                  "name",
-                  "port",
-                  "type",
-                  "tls"
-                ],
                 "properties": {
                   "authentication": {
                     "type": "object",
-                    "required": [
-                      "type"
-                    ],
                     "properties": {
                       "listenerConfig": {
                         "type": "object",
@@ -5052,11 +4973,6 @@
                       },
                       "brokerCertChainAndKey": {
                         "type": "object",
-                        "required": [
-                          "secretName",
-                          "certificate",
-                          "key"
-                        ],
                         "properties": {
                           "certificate": {
                             "type": "string"
@@ -5073,9 +4989,6 @@
                         "type": "array",
                         "items": {
                           "type": "object",
-                          "required": [
-                            "broker"
-                          ],
                           "properties": {
                             "advertisedHost": {
                               "type": "string"
@@ -5322,9 +5235,6 @@
             },
             "logging": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "loggers": {
                   "type": "object",
@@ -5365,9 +5275,6 @@
             },
             "metricsConfig": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "type": {
                   "type": "string",
@@ -5416,9 +5323,6 @@
             },
             "quotas": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "consumerByteRate": {
                   "type": "integer",
@@ -5462,9 +5366,6 @@
             },
             "rack": {
               "type": "object",
-              "required": [
-                "topologyKey"
-              ],
               "properties": {
                 "topologyKey": {
                   "type": "string"
@@ -5698,17 +5599,11 @@
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "value"
-                            ],
                             "properties": {
                               "value": {}
                             }
                           },
                           {
-                            "required": [
-                              "valueFrom"
-                            ],
                             "properties": {
                               "valueFrom": {}
                             }
@@ -5725,17 +5620,11 @@
                             "type": "object",
                             "oneOf": [
                               {
-                                "required": [
-                                  "secretKeyRef"
-                                ],
                                 "properties": {
                                   "secretKeyRef": {}
                                 }
                               },
                               {
-                                "required": [
-                                  "configMapKeyRef"
-                                ],
                                 "properties": {
                                   "configMapKeyRef": {}
                                 }
@@ -5936,17 +5825,11 @@
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "value"
-                            ],
                             "properties": {
                               "value": {}
                             }
                           },
                           {
-                            "required": [
-                              "valueFrom"
-                            ],
                             "properties": {
                               "valueFrom": {}
                             }
@@ -5963,17 +5846,11 @@
                             "type": "object",
                             "oneOf": [
                               {
-                                "required": [
-                                  "secretKeyRef"
-                                ],
                                 "properties": {
                                   "secretKeyRef": {}
                                 }
                               },
                               {
-                                "required": [
-                                  "configMapKeyRef"
-                                ],
                                 "properties": {
                                   "configMapKeyRef": {}
                                 }
@@ -7262,9 +7139,6 @@
             },
             "tieredStorage": {
               "type": "object",
-              "required": [
-                "type"
-              ],
               "properties": {
                 "remoteStorageManager": {
                   "type": "object",
@@ -7428,17 +7302,11 @@
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "value"
-                            ],
                             "properties": {
                               "value": {}
                             }
                           },
                           {
-                            "required": [
-                              "valueFrom"
-                            ],
                             "properties": {
                               "valueFrom": {}
                             }
@@ -7455,17 +7323,11 @@
                             "type": "object",
                             "oneOf": [
                               {
-                                "required": [
-                                  "secretKeyRef"
-                                ],
                                 "properties": {
                                   "secretKeyRef": {}
                                 }
                               },
                               {
-                                "required": [
-                                  "configMapKeyRef"
-                                ],
                                 "properties": {
                                   "configMapKeyRef": {}
                                 }
@@ -8690,11 +8552,6 @@
     "StrimziKafkaNodePoolSpec": {
       "description": "The specification of the KafkaNodePool.",
       "type": "object",
-      "required": [
-        "replicas",
-        "storage",
-        "roles"
-      ],
       "properties": {
         "jvmOptions": {
           "description": "JVM Options for pods.",
@@ -8809,9 +8666,6 @@
         "storage": {
           "description": "Storage configuration (disk). Cannot be updated.",
           "type": "object",
-          "required": [
-            "type"
-          ],
           "properties": {
             "class": {
               "description": "The storage class to use for dynamic volume allocation.",
@@ -8867,9 +8721,6 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "required": [
-                  "type"
-                ],
                 "properties": {
                   "class": {
                     "description": "The storage class to use for dynamic volume allocation.",
@@ -8939,17 +8790,11 @@
                     "type": "object",
                     "oneOf": [
                       {
-                        "required": [
-                          "value"
-                        ],
                         "properties": {
                           "value": {}
                         }
                       },
                       {
-                        "required": [
-                          "valueFrom"
-                        ],
                         "properties": {
                           "valueFrom": {}
                         }
@@ -8969,17 +8814,11 @@
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "secretKeyRef"
-                            ],
                             "properties": {
                               "secretKeyRef": {}
                             }
                           },
                           {
-                            "required": [
-                              "configMapKeyRef"
-                            ],
                             "properties": {
                               "configMapKeyRef": {}
                             }
@@ -9164,17 +9003,11 @@
                     "type": "object",
                     "oneOf": [
                       {
-                        "required": [
-                          "value"
-                        ],
                         "properties": {
                           "value": {}
                         }
                       },
                       {
-                        "required": [
-                          "valueFrom"
-                        ],
                         "properties": {
                           "valueFrom": {}
                         }
@@ -9194,17 +9027,11 @@
                         "type": "object",
                         "oneOf": [
                           {
-                            "required": [
-                              "secretKeyRef"
-                            ],
                             "properties": {
                               "secretKeyRef": {}
                             }
                           },
                           {
-                            "required": [
-                              "configMapKeyRef"
-                            ],
                             "properties": {
                               "configMapKeyRef": {}
                             }

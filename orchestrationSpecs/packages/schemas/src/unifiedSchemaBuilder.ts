@@ -6,13 +6,14 @@ import {zodSchemaToJsonSchema} from "./getSchemaFromZod";
 
 export const UNIFIED_SCHEMA_CONFIGMAP_NAME = "migration-configuration-schema";
 export const UNIFIED_SCHEMA_CONFIGMAP_KEY = "workflowMigration.schema.json";
+export const STRIMZI_OPENAPI_API_PATH = "/openapi/v3/apis/kafka.strimzi.io/v1";
 export const UNIFIED_SCHEMA_PATH_ENV = "MIGRATION_UNIFIED_SCHEMA_PATH";
 export const UNIFIED_SCHEMA_CONFIGMAP_ENV = "MIGRATION_UNIFIED_SCHEMA_CONFIGMAP";
 export const UNIFIED_SCHEMA_CONFIGMAP_NAMESPACE_ENV = "MIGRATION_UNIFIED_SCHEMA_NAMESPACE";
 export const UNIFIED_SCHEMA_CONFIGMAP_KEY_ENV = "MIGRATION_UNIFIED_SCHEMA_KEY";
 
 export type UnifiedSchemaMode = "full";
-export type UnifiedSchemaSource = "file" | "configmap" | "fallback-artifact" | "generated";
+export type UnifiedSchemaSource = "file" | "live-cluster" | "configmap" | "fallback-artifact" | "generated";
 
 export interface LoadedUnifiedSchema {
     schema: Record<string, unknown>;
@@ -29,8 +30,22 @@ function packageRoot(...segments: string[]) {
     return path.resolve(__dirname, "..", ...segments);
 }
 
+export function getFallbackUnifiedSchemaCandidatePaths() {
+    const relativeSchemaPath = path.join("packages", "schemas", "generated", "workflowMigration.schema.json");
+    return [
+        packageRoot("generated", "workflowMigration.schema.json"),
+        path.resolve(process.cwd(), "generated", "workflowMigration.schema.json"),
+        path.resolve(process.cwd(), relativeSchemaPath),
+        path.resolve(process.cwd(), "..", relativeSchemaPath),
+    ];
+}
+
 export function getFallbackUnifiedSchemaPath() {
-    return packageRoot("generated", "workflowMigration.schema.json");
+    return getFallbackUnifiedSchemaCandidatePaths()[0];
+}
+
+function findFallbackUnifiedSchemaPath() {
+    return getFallbackUnifiedSchemaCandidatePaths().find(candidate => fs.existsSync(candidate));
 }
 
 function clone<T>(value: T): T {
@@ -96,6 +111,24 @@ function rewriteRefs(value: unknown): unknown {
     return updated;
 }
 
+function makeSchemaPartial(value: unknown): unknown {
+    if (Array.isArray(value)) {
+        return value.map(makeSchemaPartial);
+    }
+    if (!value || typeof value !== "object") {
+        return value;
+    }
+
+    const updated: Record<string, unknown> = {};
+    for (const [key, inner] of Object.entries(value)) {
+        if (key === "required" && Array.isArray(inner)) {
+            continue;
+        }
+        updated[key] = makeSchemaPartial(inner);
+    }
+    return updated;
+}
+
 function collectReferencedDefinitionNames(value: unknown, target = new Set<string>()) {
     if (Array.isArray(value)) {
         value.forEach(v => collectReferencedDefinitionNames(v, target));
@@ -155,11 +188,11 @@ function extractStrimziDefsFromOpenApi(openApi: any) {
 
     const defs: Record<string, unknown> = {};
     for (const name of requiredDefs) {
-        defs[name] = rewriteRefs(definitions[name]);
+        defs[name] = makeSchemaPartial(rewriteRefs(definitions[name]));
     }
-    defs.StrimziKafkaSpec = rewriteRefs(kafkaSpec);
-    defs.StrimziKafkaNodePoolSpec = rewriteRefs(nodePoolSpec);
-    defs.StrimziKafkaTopicSpec = rewriteRefs(topicSpec);
+    defs.StrimziKafkaSpec = makeSchemaPartial(rewriteRefs(kafkaSpec));
+    defs.StrimziKafkaNodePoolSpec = makeSchemaPartial(rewriteRefs(nodePoolSpec));
+    defs.StrimziKafkaTopicSpec = makeSchemaPartial(rewriteRefs(topicSpec));
     return defs;
 }
 
@@ -203,8 +236,8 @@ export function buildUnifiedSchema(options: UnifiedSchemaBuildOptions = {}): Loa
         };
     }
 
-    const fallbackPath = getFallbackUnifiedSchemaPath();
-    if (fs.existsSync(fallbackPath)) {
+    const fallbackPath = findFallbackUnifiedSchemaPath();
+    if (fallbackPath) {
         const schema = JSON.parse(fs.readFileSync(fallbackPath, "utf-8"));
         return {
             schema,
@@ -230,6 +263,15 @@ function readSchemaFromConfigMap(name: string, namespace: string | undefined, ke
     return JSON.parse(output);
 }
 
+function readStrimziOpenApiFromCluster() {
+    const output = childProcess.execFileSync("kubectl", [
+        "get",
+        "--raw",
+        STRIMZI_OPENAPI_API_PATH,
+    ], {encoding: "utf-8"});
+    return JSON.parse(output);
+}
+
 export function loadUnifiedSchema(): LoadedUnifiedSchema {
     const explicitPath = process.env[UNIFIED_SCHEMA_PATH_ENV];
     if (explicitPath && fs.existsSync(explicitPath)) {
@@ -240,6 +282,20 @@ export function loadUnifiedSchema(): LoadedUnifiedSchema {
             source: "file",
             detail: explicitPath,
         };
+    }
+
+    try {
+        const base = buildBaseUnifiedSchema();
+        const openApi = readStrimziOpenApiFromCluster();
+        const fullSchema = injectStrimziRefs(base, extractStrimziDefsFromOpenApi(openApi));
+        return {
+            schema: addSchemaMetadata(fullSchema, "full", STRIMZI_OPENAPI_API_PATH),
+            mode: "full",
+            source: "live-cluster",
+            detail: STRIMZI_OPENAPI_API_PATH,
+        };
+    } catch {
+        // Fall through to explicit legacy configmap / checked-in baseline resolution.
     }
 
     const configMapName = process.env[UNIFIED_SCHEMA_CONFIGMAP_ENV];
@@ -255,8 +311,8 @@ export function loadUnifiedSchema(): LoadedUnifiedSchema {
         };
     }
 
-    const fallbackPath = getFallbackUnifiedSchemaPath();
-    if (fs.existsSync(fallbackPath)) {
+    const fallbackPath = findFallbackUnifiedSchemaPath();
+    if (fallbackPath) {
         const schema = JSON.parse(fs.readFileSync(fallbackPath, "utf-8"));
         return {
             schema,

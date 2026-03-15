@@ -174,11 +174,11 @@ export const Replayer = WorkflowBuilder.create({
 
         .addResourceTask(b => b
             .setDefinition({
-                action: "create",
+                action: "apply",
                 setOwnerReference: true,
                 manifest: getReplayerDeploymentManifest({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
-                    useCustomLogging: expr.equals(expr.literal(""), b.inputs.loggingConfigurationOverrideConfigMap),
+                    useCustomLogging: expr.not(expr.isEmpty(b.inputs.loggingConfigurationOverrideConfigMap)),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     jvmArgs: b.inputs.jvmArgs,
                     name: b.inputs.name,
