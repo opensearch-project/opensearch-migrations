@@ -170,6 +170,7 @@ describe('MigrationConfigTransformer validation', () => {
             listenerName: "tls",
             authType: "scram-sha-512",
             secretName: "default-migration-app",
+            caSecretName: "default-cluster-ca-cert",
             kafkaUserName: "default-migration-app",
             kafkaConnection: "default-kafka-bootstrap:9093",
         });

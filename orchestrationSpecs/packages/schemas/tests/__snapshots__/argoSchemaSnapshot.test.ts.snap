@@ -141,6 +141,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": ""
                     },
+                    "caSecretName": {
+                      "type": "string",
+                      "default": ""
+                    },
                     "kafkaUserName": {
                       "type": "string",
                       "default": ""
@@ -1118,6 +1122,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": "none"
                     },
                     "secretName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "caSecretName": {
                       "type": "string",
                       "default": ""
                     },

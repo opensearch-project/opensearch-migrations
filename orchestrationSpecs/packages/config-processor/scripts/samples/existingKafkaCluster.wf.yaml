@@ -8,6 +8,7 @@ kafkaClusterConfiguration:
       auth:
         type: "scram-sha-512"
         secretName: "existing-kafka-user-secret"
+        caSecretName: "existing-kafka-cluster-ca"
 
 sourceClusters:
   source:

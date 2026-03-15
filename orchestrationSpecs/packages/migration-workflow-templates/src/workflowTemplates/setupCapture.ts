@@ -21,6 +21,10 @@ import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions
 import {z} from "zod";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
+const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
+const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
+const KAFKA_CA_MOUNT_PATH = "/config/kafka-ca";
+
 function makeProxyServiceManifest(
     proxyName: BaseExpression<string>,
     listenPort: BaseExpression<Serialized<number>>,
@@ -77,6 +81,7 @@ function makeProxyParamsDict(
     );
     const effectiveKafkaSecretName = expr.getLoose(kafkaConfig, "secretName");
     const effectiveKafkaUserName = expr.getLoose(kafkaConfig, "kafkaUserName");
+    const shouldUseScram = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
     return expr.mergeDicts(
         expr.omit(expr.get(config, "proxyConfig"), ...ARGO_PROXY_WORKFLOW_OPTION_KEYS),
         expr.mergeDicts(
@@ -90,6 +95,11 @@ function makeProxyParamsDict(
                 destinationUri: expr.get(config, "sourceEndpoint"),
                 insecureDestination: expr.get(config, "sourceAllowInsecure"),
                 kafkaTopic: expr.jsonPathStrict(proxyConfig, "kafkaConfig", "kafkaTopic"),
+                kafkaPropertyFile: expr.ternary(
+                    shouldUseScram,
+                    expr.literal(KAFKA_AUTH_CONFIG_FILE_PATH),
+                    expr.literal("")
+                ),
                 kafkaListenerName: effectiveKafkaListenerName,
                 kafkaAuthType: effectiveKafkaAuthType,
                 kafkaSecretName: effectiveKafkaSecretName,
@@ -97,6 +107,20 @@ function makeProxyParamsDict(
             })
         )
     );
+}
+
+function makeKafkaClientPropertiesConfigMap(name: BaseExpression<string>) {
+    return {
+        apiVersion: "v1",
+        kind: "ConfigMap",
+        metadata: {name},
+        data: {
+            "client.properties": [
+                "ssl.truststore.type=PEM",
+                `ssl.truststore.location=${KAFKA_CA_MOUNT_PATH}/ca.crt`,
+            ].join("\n")
+        }
+    };
 }
 
 function makeProxyDeploymentManifest(args: {
@@ -107,8 +131,13 @@ function makeProxyDeploymentManifest(args: {
     podReplicas: BaseExpression<number>,
     resources: BaseExpression<ResourceRequirementsType>,
     jsonConfig: BaseExpression<string>,
+    kafkaAuthConfigMapName: BaseExpression<string>,
+    kafkaAuthType: BaseExpression<string>,
+    kafkaSecretName: BaseExpression<string>,
+    kafkaCaSecretName: BaseExpression<string>,
     tlsSecretName?: BaseExpression<string>,
 }) {
+    const isScramAuth = expr.equals(args.kafkaAuthType, expr.literal("scram-sha-512"));
     const container: Record<string, any> = {
         name: "proxy",
         image: args.image,
@@ -118,15 +147,62 @@ function makeProxyDeploymentManifest(args: {
             makeStringTypeProxy(args.jsonConfig)
         ],
         ports: [{containerPort: makeDirectTypeProxy(args.listenPort)}],
-        resources: makeDirectTypeProxy(args.resources)
+        resources: makeDirectTypeProxy(args.resources),
+        env: [
+            {
+                name: "CAPTURE_PROXY_KAFKA_PASSWORD",
+                valueFrom: {
+                    secretKeyRef: {
+                        name: makeStringTypeProxy(expr.ternary(
+                            isScramAuth,
+                            args.kafkaSecretName,
+                            expr.literal("empty")
+                        )),
+                        key: "password",
+                        optional: makeDirectTypeProxy(expr.not(isScramAuth))
+                    }
+                }
+            }
+        ],
+        volumeMounts: [
+            {
+                name: "kafka-auth-config",
+                mountPath: KAFKA_AUTH_CONFIG_MOUNT_PATH,
+                readOnly: true
+            },
+            {
+                name: "kafka-ca",
+                mountPath: KAFKA_CA_MOUNT_PATH,
+                readOnly: true
+            }
+        ]
     };
     if (args.tlsSecretName) {
-        container.volumeMounts = [{name: "tls-certs", mountPath: "/etc/proxy-tls", readOnly: true}];
+        container.volumeMounts.push({name: "tls-certs", mountPath: "/etc/proxy-tls", readOnly: true});
     }
 
-    const podSpec: Record<string, any> = {containers: [container]};
+    const podSpec: Record<string, any> = {
+        containers: [container],
+        volumes: [
+            {
+                name: "kafka-auth-config",
+                configMap: {name: args.kafkaAuthConfigMapName}
+            },
+            {
+                name: "kafka-ca",
+                secret: {
+                    secretName: makeStringTypeProxy(expr.ternary(
+                        isScramAuth,
+                        args.kafkaCaSecretName,
+                        expr.literal("empty")
+                    )),
+                    optional: makeDirectTypeProxy(expr.not(isScramAuth))
+                }
+            }
+        ]
+    };
     if (args.tlsSecretName) {
-        podSpec.volumes = [{name: "tls-certs", secret: {secretName: args.tlsSecretName}}];
+        podSpec.volumes.push({name: "tls-certs", secret: {secretName: args.tlsSecretName}});
     }
 
     return {
@@ -135,6 +211,9 @@ function makeProxyDeploymentManifest(args: {
         metadata: {name: args.proxyName},
         spec: {
             replicas: makeDirectTypeProxy(args.podReplicas),
+            strategy: {
+                type: "Recreate"
+            },
             selector: {matchLabels: {"migrations/proxy": args.proxyName}},
             template: {
                 metadata: {labels: {"migrations/proxy": args.proxyName}},
@@ -205,6 +284,10 @@ export const SetupCapture = WorkflowBuilder.create({
     .addTemplate("deployProxyDeployment", t => t
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("jsonConfig", typeToken<string>())
+        .addRequiredInput("kafkaAuthConfigMapName", typeToken<string>())
+        .addRequiredInput("kafkaAuthType", typeToken<string>())
+        .addRequiredInput("kafkaSecretName", typeToken<string>())
+        .addRequiredInput("kafkaCaSecretName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
@@ -214,6 +297,7 @@ export const SetupCapture = WorkflowBuilder.create({
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
+                successCondition: "status.readyReplicas > 0",
                 manifest: makeProxyDeploymentManifest({
                     proxyName: b.inputs.proxyName,
                     image: b.inputs.imageCaptureProxyLocation,
@@ -222,6 +306,10 @@ export const SetupCapture = WorkflowBuilder.create({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     resources: expr.deserializeRecord(b.inputs.resources),
                     jsonConfig: expr.toBase64(b.inputs.jsonConfig),
+                    kafkaAuthConfigMapName: b.inputs.kafkaAuthConfigMapName,
+                    kafkaAuthType: b.inputs.kafkaAuthType,
+                    kafkaSecretName: b.inputs.kafkaSecretName,
+                    kafkaCaSecretName: b.inputs.kafkaCaSecretName,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -231,6 +319,10 @@ export const SetupCapture = WorkflowBuilder.create({
     .addTemplate("deployProxyDeploymentWithTls", t => t
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("jsonConfig", typeToken<string>())
+        .addRequiredInput("kafkaAuthConfigMapName", typeToken<string>())
+        .addRequiredInput("kafkaAuthType", typeToken<string>())
+        .addRequiredInput("kafkaSecretName", typeToken<string>())
+        .addRequiredInput("kafkaCaSecretName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
@@ -240,6 +332,7 @@ export const SetupCapture = WorkflowBuilder.create({
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
+                successCondition: "status.readyReplicas > 0",
                 manifest: makeProxyDeploymentManifest({
                     proxyName: b.inputs.proxyName,
                     image: b.inputs.imageCaptureProxyLocation,
@@ -248,8 +341,24 @@ export const SetupCapture = WorkflowBuilder.create({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     resources: expr.deserializeRecord(b.inputs.resources),
                     jsonConfig: expr.toBase64(b.inputs.jsonConfig),
+                    kafkaAuthConfigMapName: b.inputs.kafkaAuthConfigMapName,
+                    kafkaAuthType: b.inputs.kafkaAuthType,
+                    kafkaSecretName: b.inputs.kafkaSecretName,
+                    kafkaCaSecretName: b.inputs.kafkaCaSecretName,
                     tlsSecretName: b.inputs.tlsSecretName,
                 })
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("createKafkaClientPropertiesConfigMap", t => t
+        .addRequiredInput("name", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: false,
+                manifest: makeKafkaClientPropertiesConfigMap(b.inputs.name)
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
@@ -327,6 +436,13 @@ export const SetupCapture = WorkflowBuilder.create({
             const existingSecretName = expr.get(tlsBlock, "secretName") as any;
             const tlsSecretName = expr.ternary(hasCertManagerTls, certManagerSecretName,
                 expr.ternary(hasExistingSecretTls, existingSecretName, expr.literal(""))) as any;
+            const kafkaConfig = expr.get(config, "kafkaConfig");
+            const effectiveKafkaAuthType = expr.ternary(
+                expr.not(expr.equals(b.inputs.resolvedKafkaAuthType, expr.literal(""))),
+                b.inputs.resolvedKafkaAuthType,
+                expr.getLoose(kafkaConfig, "authType")
+            );
+            const kafkaAuthConfigMapName = expr.concat(b.inputs.proxyName, expr.literal("-kafka-auth"));
             // Issuer fields for cert provisioning
             const issuerRef = expr.get(tlsBlock, "issuerRef") as any;
 
@@ -338,6 +454,11 @@ export const SetupCapture = WorkflowBuilder.create({
                         topicName: b.inputs.kafkaTopicName,
                         clusterConfig: expr.serialize(expr.literal({})),
                         retryGroupName_view: expr.concat(expr.literal("KafkaTopic: "), b.inputs.kafkaTopicName),
+                    })
+                )
+                .addStep("createKafkaClientConfig", INTERNAL, "createKafkaClientPropertiesConfigMap", c =>
+                    c.register({
+                        name: kafkaAuthConfigMapName
                     })
                 )
                 .addStepGroup(g => g
@@ -375,6 +496,10 @@ export const SetupCapture = WorkflowBuilder.create({
                                 proxyName: expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "name"),
                                 listenPort: b.inputs.listenPort,
                                 podReplicas: b.inputs.podReplicas,
+                                kafkaAuthConfigMapName,
+                                kafkaAuthType: effectiveKafkaAuthType,
+                                kafkaSecretName: expr.getLoose(kafkaConfig, "secretName"),
+                                kafkaCaSecretName: expr.getLoose(kafkaConfig, "caSecretName"),
                                 resources: expr.serialize(expr.get(proxyOpts, "resources") as any),
                                 jsonConfig: expr.asString(expr.serialize(
                                     makeProxyParamsDict(
@@ -393,6 +518,10 @@ export const SetupCapture = WorkflowBuilder.create({
                                 proxyName: expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "name"),
                                 listenPort: b.inputs.listenPort,
                                 podReplicas: b.inputs.podReplicas,
+                                kafkaAuthConfigMapName,
+                                kafkaAuthType: effectiveKafkaAuthType,
+                                kafkaSecretName: expr.getLoose(kafkaConfig, "secretName"),
+                                kafkaCaSecretName: expr.getLoose(kafkaConfig, "caSecretName"),
                                 resources: expr.serialize(expr.get(proxyOpts, "resources") as any),
                                 tlsSecretName: tlsSecretName,
                                 jsonConfig: expr.asString(expr.serialize(

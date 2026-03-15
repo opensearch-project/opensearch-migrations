@@ -35,6 +35,18 @@
               "name": "jsonConfig"
             },
             {
+              "name": "kafkaAuthConfigMapName"
+            },
+            {
+              "name": "kafkaAuthType"
+            },
+            {
+              "name": "kafkaSecretName"
+            },
+            {
+              "name": "kafkaCaSecretName"
+            },
+            {
               "name": "podReplicas"
             },
             {
@@ -55,9 +67,37 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{inputs.parameters.name}}\n  labels:\n    app: replayer\n    workflows.argoproj.io/workflow: {{workflow.name}}\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      app: replayer\n  template:\n    metadata:\n      labels:\n        app: replayer\n        workflows.argoproj.io/workflow: {{workflow.name}}\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: replayer\n          image: \"{{inputs.parameters.imageTrafficReplayerLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageTrafficReplayerPullPolicy}}\"\n          args:\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: JDK_JAVA_OPTIONS\n              value: \"{{=inputs.parameters.jvmArgs + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration/configuration') : (''))}}\"\n          volumeMounts:\n            - name: log4j-configuration\n              mountPath: /config/logConfiguration\n              readOnly: true\n      volumes:\n        - name: log4j-configuration\n          configMap:\n            name: \"{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}\"\n            optional: {{=!(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)))}}\n",
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{inputs.parameters.name}}\n  labels:\n    app: replayer\n    workflows.argoproj.io/workflow: {{workflow.name}}\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  strategy:\n    type: Recreate\n  selector:\n    matchLabels:\n      app: replayer\n  template:\n    metadata:\n      labels:\n        app: replayer\n        workflows.argoproj.io/workflow: {{workflow.name}}\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: replayer\n          image: \"{{inputs.parameters.imageTrafficReplayerLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageTrafficReplayerPullPolicy}}\"\n          args:\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: TRAFFIC_REPLAYER_KAFKA_TRAFFIC_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((inputs.parameters.kafkaAuthType == 'scram-sha-512') ? (inputs.parameters.kafkaSecretName) : ('empty'))}}\"\n                  key: password\n                  optional: {{=!(inputs.parameters.kafkaAuthType == 'scram-sha-512')}}\n            - name: JDK_JAVA_OPTIONS\n              value: \"{{=inputs.parameters.jvmArgs + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration/configuration') : (''))}}\"\n          volumeMounts:\n            - name: kafka-auth-config\n              mountPath: /config/kafka-auth\n              readOnly: true\n            - name: kafka-ca\n              mountPath: /config/kafka-ca\n              readOnly: true\n            - name: log4j-configuration\n              mountPath: /config/logConfiguration\n              readOnly: true\n      volumes:\n        - name: kafka-auth-config\n          configMap:\n            name: \"{{inputs.parameters.kafkaAuthConfigMapName}}\"\n        - name: kafka-ca\n          secret:\n            secretName: \"{{=((inputs.parameters.kafkaAuthType == 'scram-sha-512') ? (inputs.parameters.kafkaCaSecretName) : ('empty'))}}\"\n            optional: {{=!(inputs.parameters.kafkaAuthType == 'scram-sha-512')}}\n        - name: log4j-configuration\n          configMap:\n            name: \"{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}\"\n            optional: {{=!(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)))}}\n",
           "action": "apply",
-          "setOwnerReference": true
+          "setOwnerReference": true,
+          "successCondition": "status.readyReplicas > 0"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "createkafkaclientpropertiesconfigmap",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: \"{{inputs.parameters.name}}\"\ndata:\n  client.properties: |-\n    ssl.truststore.type=PEM\n    ssl.truststore.location=/config/kafka-ca/ca.crt\n",
+          "action": "apply",
+          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
@@ -114,6 +154,20 @@
         "steps": [
           [
             {
+              "template": "createkafkaclientpropertiesconfigmap",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{=inputs.parameters.name+'-kafka-auth'}}"
+                  }
+                ]
+              },
+              "name": "createKafkaClientConfig"
+            }
+          ],
+          [
+            {
               "template": "createdeployment",
               "arguments": {
                 "parameters": [
@@ -130,6 +184,22 @@
                     "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
                   },
                   {
+                    "name": "kafkaAuthConfigMapName",
+                    "value": "{{=inputs.parameters.name+'-kafka-auth'}}"
+                  },
+                  {
+                    "name": "kafkaAuthType",
+                    "value": "{{=((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.kafkaConfig)['authType']))}}"
+                  },
+                  {
+                    "name": "kafkaSecretName",
+                    "value": "{{=fromJSON(inputs.parameters.kafkaConfig)['secretName']}}"
+                  },
+                  {
+                    "name": "kafkaCaSecretName",
+                    "value": "{{=fromJSON(inputs.parameters.kafkaConfig)['caSecretName']}}"
+                  },
+                  {
                     "name": "podReplicas",
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.replayerOptions))}}"
                   },
@@ -143,7 +213,7 @@
                   },
                   {
                     "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.dict(\"targetUri\", fromJSON(inputs.parameters.targetConfig)['endpoint'], \"insecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig))), (('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"sigv4AuthHeaderServiceRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service']+','+fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ({}))) : ({}))), sprig.omit(fromJSON(inputs.parameters.replayerOptions), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.dict(\"kafkaTrafficBrokers\", ((!(inputs.parameters.resolvedKafkaConnection == '')) ? (inputs.parameters.resolvedKafkaConnection) : (fromJSON(inputs.parameters.kafkaConfig)['kafkaConnection'])), \"kafkaTrafficTopic\", fromJSON(inputs.parameters.kafkaConfig)['kafkaTopic'], \"kafkaTrafficGroupId\", inputs.parameters.kafkaGroupId, \"kafkaTrafficListenerName\", ((!(inputs.parameters.resolvedKafkaListenerName == '')) ? (inputs.parameters.resolvedKafkaListenerName) : (fromJSON(inputs.parameters.kafkaConfig)['listenerName'])), \"kafkaTrafficAuthType\", ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.kafkaConfig)['authType'])), \"kafkaTrafficSecretName\", fromJSON(inputs.parameters.kafkaConfig)['secretName'], \"kafkaTrafficUserName\", fromJSON(inputs.parameters.kafkaConfig)['kafkaUserName'])))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.dict(\"targetUri\", fromJSON(inputs.parameters.targetConfig)['endpoint'], \"insecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig))), (('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"sigv4AuthHeaderServiceRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service']+','+fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ({}))) : ({}))), sprig.omit(fromJSON(inputs.parameters.replayerOptions), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources')), sprig.dict(\"kafkaTrafficBrokers\", ((!(inputs.parameters.resolvedKafkaConnection == '')) ? (inputs.parameters.resolvedKafkaConnection) : (fromJSON(inputs.parameters.kafkaConfig)['kafkaConnection'])), \"kafkaTrafficTopic\", fromJSON(inputs.parameters.kafkaConfig)['kafkaTopic'], \"kafkaTrafficGroupId\", inputs.parameters.kafkaGroupId, \"kafkaTrafficPropertyFile\", ((((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.kafkaConfig)['authType'])) == 'scram-sha-512') ? ('/config/kafka-auth/client.properties') : ('')), \"kafkaTrafficListenerName\", ((!(inputs.parameters.resolvedKafkaListenerName == '')) ? (inputs.parameters.resolvedKafkaListenerName) : (fromJSON(inputs.parameters.kafkaConfig)['listenerName'])), \"kafkaTrafficAuthType\", ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.kafkaConfig)['authType'])), \"kafkaTrafficSecretName\", fromJSON(inputs.parameters.kafkaConfig)['secretName'], \"kafkaTrafficUserName\", fromJSON(inputs.parameters.kafkaConfig)['kafkaUserName'])))}}"
                   },
                   {
                     "name": "resources",

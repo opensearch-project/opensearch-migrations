@@ -181,6 +181,7 @@ function buildKafkaClientConfig(
             listenerName: "",
             authType: auth.type,
             secretName: "secretName" in auth ? auth.secretName : "",
+            caSecretName: "caSecretName" in auth ? auth.caSecretName : "",
             kafkaUserName: "kafkaUserName" in auth ? (auth.kafkaUserName ?? "") : "",
             label: kafkaClusterKey
         };
@@ -197,6 +198,7 @@ function buildKafkaClientConfig(
         listenerName,
         authType: auth.type,
         secretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
+        caSecretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-cluster-ca-cert` : "",
         kafkaUserName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
         label: kafkaClusterKey
     };
