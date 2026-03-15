@@ -39,5 +39,5 @@ record TestCaseDefinition(
 ) {
     /** A per-path assertion rule controlling how diffs are handled. */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record AssertionRule(String path, String rule, String expected, String reason) {}
+    record AssertionRule(String path, String rule, String expected, Integer skip, String reason) {}
 }
