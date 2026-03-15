@@ -1,8 +1,7 @@
 # Kafka Implementation Plan
 
-This document describes the intended end state for Kafka setup and connectivity
-in `orchestrationSpecs`, and the current implementation gaps that need to be
-closed to get there.
+This document describes the intended Kafka setup and connectivity model for
+`orchestrationSpecs`, and the implementation work needed to reach that state.
 
 It is written as an implementation reference for developers and agents.
 
@@ -10,33 +9,152 @@ It is written as an implementation reference for developers and agents.
 
 The intended end state is:
 
-1. Users configure Kafka resources using Strimzi-shaped `spec` fragments.
-2. The migration configuration is validated against one unified JSON Schema.
-3. The unified schema is built from live Strimzi CRDs when available.
-4. The workflow creates or references Kafka resources.
-5. The workflow discovers Kafka connectivity from deployed Strimzi resources.
-6. Proxy, replayer, and console are configured from a normalized connection
+1. Users configure Kafka resources using a Strimzi-shaped model.
+2. The workflow provides sane defaults based on a baseline Strimzi `0.50`
+   contract.
+3. User overrides are deep-merged into those defaults.
+4. The merged Kafka config is validated against a unified JSON Schema.
+5. The preferred unified schema is built from live Strimzi CRDs in the target
+   environment.
+6. The workflow creates or references Kafka resources.
+7. The workflow discovers Kafka connectivity from deployed Strimzi resources.
+8. Proxy, replayer, and console are configured from a normalized connection
    profile derived from those resources.
 
 The workflow should still own resource names and migration-specific wiring, but
-it should not rely on fixed bootstrap strings or duplicated user-entered Kafka
-client settings.
+users should not need to duplicate Kafka connectivity or auth settings in a
+second migration-specific format.
+
+## Baseline Versioning Model
+
+The code should use Strimzi `0.50` as its baseline model.
+
+That means:
+
+- workflow defaults are authored against the Strimzi `0.50` shape
+- the typed/defaulted config model in code is based on that baseline
+- `0.50` is the minimum supported version
+
+Higher Strimzi versions may still work, but validation should ultimately be
+driven by the live CRDs deployed in the target environment.
+
+This gives the workflow a concrete baseline for:
+
+- defaults
+- deep-merge behavior
+- workflow-owned invariant paths
+
+without pretending that the code statically models every future Strimzi field.
 
 ## User-Facing Kafka Contract
 
 The primary user-facing Kafka inputs for auto-created clusters should be:
 
+- `kafkaClusterConfiguration.<name>.autoCreate.auth`
 - `kafkaClusterConfiguration.<name>.autoCreate.clusterSpecOverrides`
 - `kafkaClusterConfiguration.<name>.autoCreate.nodePoolSpecOverrides`
 - `kafkaClusterConfiguration.<name>.autoCreate.topicSpecOverrides`
 
-These map to:
+These correspond to:
 
 - `Kafka.spec`
 - `KafkaNodePool.spec`
 - `KafkaTopic.spec`
 
-These should remain the main user-controlled Kafka configuration surface.
+`autoCreate.auth` is workflow-owned rather than raw Strimzi passthrough. It
+defines the managed auth contract for migration applications and currently
+supports `none` and `scram-sha-512`.
+
+The important implementation goal is that these inputs should behave like other
+compound resource settings in the repo:
+
+- the workflow provides defaults
+- users provide partial overrides
+- the final object is deep-merged
+
+This is preferable to treating Kafka config as an opaque black box.
+
+## Defaults Model
+
+The intended UX is that users should not need to spell out every Kafka setting
+just to get a reasonable cluster.
+
+Kafka settings that should be defaulted by the workflow include, at minimum:
+
+- node pool roles
+- basic storage shape
+- replication defaults
+- min in-sync replica settings
+- entity operator enablement
+- workflow-required listener/auth structure
+
+These defaults should be merged with user overrides before validation and
+rendering.
+
+The workflow should only own defaults for fields whose paths and semantics it is
+willing to support across compatible Strimzi versions.
+
+### Illustrative defaults shape
+
+The exact implementation may evolve, but the intended Zod-side defaults model
+should look roughly like this:
+
+```ts
+const DEFAULT_AUTO_CREATE_KAFKA = {
+  auth: {
+    type: "none",
+  },
+  clusterSpecOverrides: {
+    kafka: {
+      config: {
+        "auto.create.topics.enable": false,
+        "offsets.topic.replication.factor": 1,
+        "transaction.state.log.replication.factor": 1,
+        "transaction.state.log.min.isr": 1,
+        "default.replication.factor": 1,
+        "min.insync.replicas": 1,
+      },
+    },
+    entityOperator: {
+      topicOperator: {},
+      userOperator: {},
+    },
+  },
+  nodePoolSpecOverrides: {
+    replicas: 1,
+    roles: ["controller", "broker"],
+    storage: {
+      type: "persistent-claim",
+      size: "1Gi",
+      deleteClaim: true,
+    },
+  },
+  topicSpecOverrides: {
+    partitions: 1,
+    replicas: 1,
+    config: {
+      "retention.ms": 604800000,
+      "segment.bytes": 1073741824,
+    },
+  },
+};
+
+const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
+  value => deepmerge(DEFAULT_AUTO_CREATE_KAFKA, value ?? {}),
+  z.object({
+    auth: KAFKA_AUTO_CREATE_AUTH_CONFIG,
+    clusterSpecOverrides: STRIMZI_KAFKA_SPEC_PARTIAL,
+    nodePoolSpecOverrides: STRIMZI_KAFKA_NODE_POOL_SPEC_PARTIAL,
+    topicSpecOverrides: STRIMZI_KAFKA_TOPIC_SPEC_PARTIAL,
+  })
+);
+```
+
+The important point is:
+
+- defaults live in code against the Strimzi `0.50` baseline
+- users provide partial overrides
+- the merged result is what gets validated and rendered
 
 ## Schema Work
 
@@ -45,32 +163,76 @@ These should remain the main user-controlled Kafka configuration surface.
 The unified JSON Schema should include:
 
 - orchestration config definitions
-- Strimzi-derived definitions for the Kafka pass-through fields
+- Strimzi-derived definitions for the Kafka sections
 
-The schema should be generated from live Strimzi CRDs for release/deployment,
-with a checked-in fallback for development.
+Validation should follow this order:
+
+1. baseline typed/defaulted config model in code
+2. deep merge of workflow defaults plus user overrides
+3. validation of the merged result against the unified JSON Schema
+
+The preferred schema should be generated from live Strimzi CRDs for
+release/deployment, with a checked-in fallback for development.
 
 ### Current implementation
 
-The current unified schema builder already exists in:
+The current unified schema builder exists in:
 
 - [packages/schemas/src/unifiedSchemaBuilder.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/schemas/src/unifiedSchemaBuilder.ts)
 
 It currently:
 
 - builds the base migration schema
-- injects Strimzi-derived definitions for Kafka `spec` fragments when provided
-  with a Strimzi OpenAPI file
-- falls back to a generic checked-in schema artifact when no Strimzi schema is
+- injects Strimzi-derived definitions for Kafka sections when provided with a
+  Strimzi OpenAPI file
+- falls back to a checked-in generic schema artifact when no Strimzi schema is
   available
 
 ### Remaining work
 
+- move the Kafka config model from broad “opaque passthrough” semantics toward a
+  baseline typed/defaulted partial-overrides model
+- ensure workflow defaults are merged before schema validation
 - wire release/deployment automation to fetch live CRDs and build the unified
   schema artifact
 - publish that schema into the target cluster in a ConfigMap
 - make runtime tools prefer the live/release-built schema artifact
 - treat the checked-in fallback as a development-only path
+
+## Templating Model
+
+### End state
+
+Kafka manifests should be rendered from:
+
+- a workflow-owned baseline shape
+- user partial overrides
+- workflow-owned invariant patches/final overlays
+
+The workflow should avoid injecting one giant dynamic `Kafka.spec` object into
+Argo when a more static manifest shape can be preserved.
+
+### Current implementation
+
+The current `Kafka` render path in:
+
+- [packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts)
+
+still builds a highly dynamic merged `Kafka.spec` object and injects it through
+Argo resource templating.
+
+This is currently causing a live rendering bug in the generated Argo template:
+
+- `Kafka.spec` is being serialized as a string instead of an object
+
+### Remaining work
+
+- reduce the dynamic surface of the `Kafka` manifest
+- prefer a mostly static manifest shape with smaller injected subtrees
+- or use apply-then-patch resource templates so workflow-owned overrides are
+  layered after the user/baseline resource is applied
+- add regression tests that assert `Kafka.spec` is rendered as an object-valued
+  manifest field, not a quoted string expression
 
 ## Connectivity Discovery Work
 
@@ -83,7 +245,6 @@ The normalized connection profile should include at least:
 
 - selected listener name
 - bootstrap servers
-- transport mode
 - auth mode
 - credential secret reference
 - trust material reference, if required
@@ -92,48 +253,39 @@ That normalized profile should be what proxy, replayer, and console consume.
 
 ### Current implementation
 
-There are hard-coded assumptions that need to be removed:
+What is already in place:
+
+- the normalized Kafka profile in orchestration carries:
+  - `managedByWorkflow`
+  - `listenerName`
+  - `authType`
+  - `secretName`
+  - `kafkaUserName`
+- existing Kafka clusters use an explicit auth block instead of relying on the
+  workflow to infer secret references
+- auto-created Kafka clusters expose an explicit workflow-owned
+  `autoCreate.auth` block for managed auth selection
+- workflow-managed Kafka clusters are re-read at workflow runtime before proxy
+  and replayer setup
+- proxy and replayer setup prefer runtime-resolved bootstrap/listener/auth
+  values over the transformer's placeholder values
+
+What is still transitional:
 
 - [packages/config-processor/src/migrationConfigTransformer.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/config-processor/src/migrationConfigTransformer.ts)
-  assumes auto-created Kafka is reachable at `<cluster>-kafka-bootstrap:9092`
-- [packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts)
-  reads bootstrap output from `status.listeners[?(@.name=='plain')]`
-- [packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts)
-  forces workflow-owned listener values into the rendered `Kafka` resource
-
-Those shortcuts prevent the workflow from fully respecting discovered Strimzi
-listener configuration.
-
-### Required changes
-
-1. Stop generating a fixed bootstrap string in the config transformer for
-   auto-created Kafka clusters.
-2. Ensure Kafka workflow templates export enough listener/status information to
-   support connection-profile resolution.
-3. Build a connection-profile resolver that reads the deployed Kafka resource
-   status/spec and produces the app-facing client configuration.
-4. Replace direct `:9092` assumptions in proxy/replayer/console wiring with the
-   resolved connection profile.
-
-## Listener Selection Policy
-
-### End state
-
-When multiple listeners are available, the workflow should pick one
-deterministically.
-
-The current intended selection rule is:
-
-- choose the first usable listener
-
-There may later be an explicit escape hatch for a user to provide a literal
-Kafka client override string when automatic selection is not sufficient.
+  still emits placeholder bootstrap values for workflow-managed clusters so the
+  pre-runtime config shape remains complete
+- [packages/migration-workflow-templates/src/workflowTemplates/resourceManagement.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/resourceManagement.ts)
+  currently selects the first listener exposed by the `Kafka` resource
 
 ### Remaining work
 
-- define "usable" concretely
-- codify that rule in the connection-profile resolver
-- expose the override only as an escape hatch, not the primary path
+- remove the transformer's placeholder bootstrap values once all consumers use
+  runtime-resolved Kafka profiles exclusively
+- refine the “first usable listener” rule into something more explicit if the
+  workflow needs to distinguish between multiple valid listeners
+- extend console-side Kafka discovery so it consumes the same normalized
+  profile semantics as proxy and replayer
 
 ## Authentication And Credentials
 
@@ -151,53 +303,39 @@ The intended identity strategy is:
 4. the workflow resolves and passes that secret reference to migration
    applications
 
-The initial simplification is:
+### Current implementation
 
-- one Kubernetes-backed Kafka principal is acceptable initially
+What is already in place:
 
-That allows the workflow to:
+- deterministic managed principal naming:
+  - `<cluster>-migration-app`
+- that naming is reflected in the normalized Kafka profile
+- the workflow now creates the matching `KafkaUser` resource for managed SCRAM
+  clusters
 
-1. create a `KafkaUser`
-2. let Strimzi generate the credential secret
-3. resolve the resulting secret reference
-4. pass the secret to proxy, replayer, and console
+### Remaining work
 
-### What this avoids
+- wire listener auth in `setupKafka` so SCRAM-capable listeners and
+  `KafkaUser` resources are aligned in the final rendered manifest shape
+- update proxy/replayer/container startup to consume resolved secret-backed
+  Kafka auth material, most likely through generated Kafka client property files
+- extend `migrationConsole` so standard Kafka can operate with secret-backed
+  SCRAM config instead of only unauthenticated standard mode or MSK IAM
+- remove remaining placeholder/no-auth assumptions once the clients consume
+  resolved auth material end-to-end
 
-- users manually duplicating Kafka credentials in migration config
-- separate auth configuration for each migration application
-- drift between deployed Kafka auth and client-side config
+## Existing Kafka Clusters
 
-### Secret federation strategy
+Existing Kafka clusters should remain explicit.
 
-For auto-created Kafka clusters:
+For existing clusters:
 
-- the workflow should choose deterministic `KafkaUser` names
-- the workflow should treat the resulting secret name as part of the resolved
-  connection profile
-- applications should consume the resolved secret reference rather than each
-  application independently inferring the secret name
-
-Recommended initial naming pattern:
-
-- shared principal: `<cluster>-migration-app`
-
-Possible future expansion:
-
-- `<cluster>-proxy`
-- `<cluster>-replayer`
-- `<cluster>-console`
-
-For existing Kafka clusters:
-
-- the workflow should not infer the Kafka user or secret name
+- the workflow should not infer Kafka user names
+- the workflow should not infer secret names
 - the user should provide the explicit secret reference for the desired
   principal
 
-This keeps workflow-managed clusters deterministic and externally managed
-clusters explicit.
-
-The recommended existing-cluster config shape is:
+Conceptually:
 
 ```yaml
 kafkaClusterConfiguration:
@@ -210,49 +348,72 @@ kafkaClusterConfiguration:
         secretName: existing-kafka-user-secret
 ```
 
-This should be treated as explicit user intent. No discovery or naming
-convention should override it for existing clusters.
+This should be treated as explicit user intent.
 
-### Normalized connection profile
+## Example User Configs
 
-The implementation should introduce a normalized internal connection profile
-shape that all migration applications consume.
+### Minimal auto-created Kafka config
 
-Recommended initial shape:
+This is the intended “I just want a working Kafka cluster” experience:
 
-```json
-{
-  "cluster": "default",
-  "listenerName": "tls",
-  "bootstrapServers": "default-kafka-bootstrap:9093",
-  "authType": "scram-sha-512",
-  "kafkaUserName": "default-migration-app",
-  "secretName": "default-migration-app"
-}
+```yaml
+kafkaClusterConfiguration:
+  default:
+    autoCreate: {}
 ```
 
-Required semantics:
+The workflow should fill in the baseline defaults for:
 
-- `cluster`: workflow Kafka cluster label
-- `listenerName`: selected listener after discovery/policy resolution
-- `bootstrapServers`: final client bootstrap string for applications
-- `authType`: auth mode the application must use
-- `kafkaUserName`: chosen Kafka principal for workflow-managed clusters, or the
-  explicit principal if provided for an existing cluster
-- `secretName`: Kubernetes secret holding the client auth material
+- auth mode
+- node pool roles and storage
+- broker replication defaults
+- entity operator
+- topic defaults
 
-Proxy, replayer, and console wiring should all consume this normalized object
-instead of reading raw cluster config or independently reconstructing Strimzi
-resource naming.
+### Auto-created Kafka with targeted overrides
 
-### Remaining work
+This is the intended “use the defaults, but change a few meaningful things”
+experience:
 
-- decide where `KafkaUser` creation lives in the workflow
-- add deterministic `KafkaUser` naming rules for auto-created clusters
-- define how the chosen principal and resolved secret name are represented in
-  the normalized connection profile
-- update consumers to read credentials from the resolved secret reference
-- define the explicit user-provided secret path for existing Kafka clusters
+```yaml
+kafkaClusterConfiguration:
+  default:
+    autoCreate:
+      auth:
+        type: scram-sha-512
+      nodePoolSpecOverrides:
+        replicas: 3
+        storage:
+          type: jbod
+          volumes:
+            - id: 0
+              type: persistent-claim
+              size: 100Gi
+            - id: 1
+              type: persistent-claim
+              size: 100Gi
+      clusterSpecOverrides:
+        kafka:
+          config:
+            min.insync.replicas: 2
+            message.max.bytes: 2097152
+          template:
+            pod:
+              metadata:
+                labels:
+                  workload-tier: migration
+      topicSpecOverrides:
+        partitions: 12
+        config:
+          cleanup.policy: compact
+```
+
+In that example:
+
+- the user does not need to restate the baseline listeners
+- the user does not need to restate the entity operator block
+- the user does not need to restate every replication default
+- only the meaningful deviations from the baseline are provided
 
 ## Workflow-Owned Values
 
@@ -261,6 +422,7 @@ Even after the refactor, the workflow should continue to own:
 - resource names
 - required labels and annotations
 - migration topic naming
+- listener/auth invariants required by migration applications
 - app-specific config translation from the normalized Kafka connection profile
 
 The workflow should avoid owning deeper Strimzi internals unless those values
@@ -268,14 +430,17 @@ are needed to preserve the migration stack's connectivity contract.
 
 ## Recommended Implementation Sequence
 
-1. Finish the unified-schema release/deployment path around live Strimzi CRDs.
-2. Remove fixed bootstrap assumptions from config transformation.
-3. Expand `setupKafka` outputs so that connection discovery can be based on
-   deployed resources instead of hard-coded listener names.
-4. Introduce a normalized Kafka connection profile object.
-5. Update proxy, replayer, and console wiring to consume that normalized
-   profile.
-6. Add or integrate Kubernetes-backed Kafka user/auth handling.
+1. Move Kafka config handling to a baseline-defaults-plus-partial-overrides
+   model based on Strimzi `0.50`.
+2. Fix the `Kafka` manifest render path so workflow runs are no longer masked by
+   pre-existing Strimzi resources.
+3. Finish the unified-schema release/deployment path around live Strimzi CRDs.
+4. Add secret-backed SCRAM client property generation/mounting for proxy and
+   replayer.
+5. Extend `migrationConsole` to understand the same resolved secret-backed
+   Kafka auth mode.
+6. Remove placeholder bootstrap/auth defaults from the transformer once all
+   consumers use runtime-resolved connection profiles.
 7. Reduce workflow-owned Kafka overrides to the smallest set still needed for
    migration correctness.
 
@@ -284,10 +449,12 @@ are needed to preserve the migration stack's connectivity contract.
 This work is done when all of the following are true:
 
 - a user can configure Kafka in Strimzi terms through the migration config
-- that config is validated against a unified schema built from the target
-  Strimzi version
-- the workflow does not assume a fixed bootstrap service/port for auto-created
-  Kafka
+  without restating every default
+- the workflow deep-merges baseline defaults with user Kafka overrides
+- that merged config is validated against a unified schema built from the
+  target Strimzi version
+- the workflow does not rely on a giant dynamic `Kafka.spec` injection that can
+  serialize incorrectly in Argo
 - migration applications derive their Kafka client settings from resolved
   Strimzi resource state
 - users do not need to duplicate Kafka connectivity/auth settings in a second

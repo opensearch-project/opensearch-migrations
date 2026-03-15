@@ -4,6 +4,42 @@ exports[`unified schema builder merges Strimzi definitions from a static OpenAPI
 "{
   "mode": "full",
   "autoCreate": {
+    "auth": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "none"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "scram-sha-512"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      ],
+      "default": {
+        "type": "none"
+      },
+      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. This controls the managed listener/auth contract used by migration applications."
+    },
     "clusterSpecOverrides": {
       "$ref": "#/$defs/StrimziKafkaSpec",
       "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."

@@ -150,6 +150,31 @@ describe('MigrationConfigTransformer validation', () => {
         }).not.toThrow();
     });
 
+    it('should derive managed Kafka auth profile for auto-created SCRAM clusters', async () => {
+        const configWithScramKafka = {
+            ...baseConfig,
+            kafkaClusterConfiguration: {
+                default: {
+                    autoCreate: {
+                        auth: {
+                            type: "scram-sha-512"
+                        }
+                    }
+                }
+            }
+        };
+
+        const result = await transformer.processFromObject(configWithScramKafka);
+        expect(result.trafficReplays?.[0]?.kafkaConfig).toMatchObject({
+            managedByWorkflow: true,
+            listenerName: "tls",
+            authType: "scram-sha-512",
+            secretName: "default-migration-app",
+            kafkaUserName: "default-migration-app",
+            kafkaConnection: "default-kafka-bootstrap:9093",
+        });
+    });
+
     it('should attach a derived proxy route onto the transformed source config', async () => {
         const result = await transformer.processFromObject(baseConfig);
         expect(result.snapshots?.[0]?.sourceConfig).toMatchObject({

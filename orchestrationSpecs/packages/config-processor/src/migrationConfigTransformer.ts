@@ -185,16 +185,19 @@ function buildKafkaClientConfig(
             label: kafkaClusterKey
         };
     }
-    // autoCreate — Strimzi creates a deterministic bootstrap service: <clusterName>-kafka-bootstrap:9092
+    const auth = cluster.autoCreate.auth ?? {type: "none" as const};
+    const listenerName = auth.type === "scram-sha-512" ? "tls" : "plain";
+    const listenerPort = auth.type === "scram-sha-512" ? 9093 : 9092;
+    // autoCreate — Strimzi creates a deterministic bootstrap service for the selected internal listener.
     return {
         enableMSKAuth: false,
-        kafkaConnection: `${kafkaClusterKey}-kafka-bootstrap:9092`,
+        kafkaConnection: `${kafkaClusterKey}-kafka-bootstrap:${listenerPort}`,
         kafkaTopic: topic,
         managedByWorkflow: true,
-        listenerName: "plain",
-        authType: "none",
-        secretName: "",
-        kafkaUserName: "",
+        listenerName,
+        authType: auth.type,
+        secretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
+        kafkaUserName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
         label: kafkaClusterKey
     };
 }

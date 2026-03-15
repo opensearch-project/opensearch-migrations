@@ -75,6 +75,8 @@ function makeProxyParamsDict(
         resolvedKafkaAuthType,
         expr.getLoose(kafkaConfig, "authType")
     );
+    const effectiveKafkaSecretName = expr.getLoose(kafkaConfig, "secretName");
+    const effectiveKafkaUserName = expr.getLoose(kafkaConfig, "kafkaUserName");
     return expr.mergeDicts(
         expr.omit(expr.get(config, "proxyConfig"), ...ARGO_PROXY_WORKFLOW_OPTION_KEYS),
         expr.mergeDicts(
@@ -90,6 +92,8 @@ function makeProxyParamsDict(
                 kafkaTopic: expr.jsonPathStrict(proxyConfig, "kafkaConfig", "kafkaTopic"),
                 kafkaListenerName: effectiveKafkaListenerName,
                 kafkaAuthType: effectiveKafkaAuthType,
+                kafkaSecretName: effectiveKafkaSecretName,
+                kafkaUserName: effectiveKafkaUserName,
             })
         )
     );

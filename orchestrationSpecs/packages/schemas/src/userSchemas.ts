@@ -142,6 +142,15 @@ export const KAFKA_EXISTING_AUTH_CONFIG = z.discriminatedUnion("type", [
     }),
 ]);
 
+export const KAFKA_AUTO_CREATE_AUTH_CONFIG = z.discriminatedUnion("type", [
+    z.object({
+        type: z.literal("none"),
+    }),
+    z.object({
+        type: z.literal("scram-sha-512"),
+    }),
+]);
+
 export const KAFKA_EXISTING_CLUSTER_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional(),
     kafkaConnection: z.string()
@@ -427,6 +436,9 @@ export const USER_RFS_OPTIONS = z.object({
 });
 
 export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
+    auth: KAFKA_AUTO_CREATE_AUTH_CONFIG.default({type: "none"}).optional()
+        .describe("Workflow-owned Kafka client auth for auto-created Strimzi clusters. "
+            + "This controls the managed listener/auth contract used by migration applications."),
     clusterSpecOverrides: GENERIC_JSON_OBJECT.optional()
         .describe("Optional overrides merged into the generated Strimzi Kafka.spec. " +
             "Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."),

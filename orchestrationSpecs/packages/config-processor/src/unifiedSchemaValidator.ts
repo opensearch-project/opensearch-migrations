@@ -36,6 +36,7 @@ export function validateInputAgainstUnifiedSchema(data: unknown): void {
 
     const ajv = new Ajv({
         allErrors: true,
+        strict: false,
     });
     const validate = ajv.compile(loaded.schema);
     if (validate(strippedData)) {

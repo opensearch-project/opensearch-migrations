@@ -71,6 +71,8 @@ function makeReplayerParamsDict(
         resolvedKafkaAuthType,
         expr.getLoose(deserializedKafkaConfig, "authType")
     );
+    const effectiveKafkaSecretName = expr.getLoose(deserializedKafkaConfig, "secretName");
+    const effectiveKafkaUserName = expr.getLoose(deserializedKafkaConfig, "kafkaUserName");
     return expr.mergeDicts(
         expr.mergeDicts(
             makeReplayerTargetParamDict(targetConfig),
@@ -82,6 +84,8 @@ function makeReplayerParamsDict(
             kafkaTrafficGroupId: kafkaGroupId,
             kafkaTrafficListenerName: effectiveKafkaListenerName,
             kafkaTrafficAuthType: effectiveKafkaAuthType,
+            kafkaTrafficSecretName: effectiveKafkaSecretName,
+            kafkaTrafficUserName: effectiveKafkaUserName,
         })
     );
 }

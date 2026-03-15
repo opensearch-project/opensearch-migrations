@@ -124,23 +124,14 @@ older generated schema are still correct.
 For local development and bootstrapping, there is also a checked-in fallback
 artifact at
 [packages/schemas/generated/workflowMigration.schema.json](/Users/schohn/dev/m2/orchestrationSpecs/packages/schemas/generated/workflowMigration.schema.json).
-That fallback is intentionally generic in the Strimzi sections.  It exists so
-that developers can:
+That fallback is a checked-in unified schema artifact built from a known
+Strimzi schema source. It exists so that developers can:
 
 - inspect the overall config shape
 - generate samples
 - run editor tooling before a cluster is available
-- bootstrap tests that do not require full Strimzi fidelity
-
-Because that generic fallback does not provide full CRD-level validation,
-runtime validation treats it as a degraded mode.  By default, the runtime
-validator errors when only the generic schema is available.  Developers can
-opt into that degraded mode by setting:
-
-- `ALLOW_GENERIC_UNIFIED_SCHEMA=true`
-
-That environment variable should be used only for local development, tests, or
-early bootstrapping.  It is not the desired release path.
+- bootstrap tests against the same merged schema contract used by runtime
+  validation
 
 #### Where the runtime schema comes from
 
@@ -166,18 +157,21 @@ The fallback schema is not meant to be hand-edited.  It should be regenerated
 with the unified schema builder and checked in as an artifact.  In practice:
 
 - release automation should prefer a schema generated from live Strimzi CRDs
-- local development can regenerate the generic artifact with `--generic`
+- local development can regenerate the checked-in artifact from a local Strimzi
+  cluster or another compatible OpenAPI source
 - if the orchestration config model changes, regenerate the fallback artifact
   so the checked-in schema continues to match the current config shape
 
-Today the generic fallback can be refreshed with:
+Today the checked-in fallback artifact can be refreshed with:
 
 ```shell
-npm run -w @opensearch-migrations/schemas build-unified-schema -- --generic
+npm run -w @opensearch-migrations/schemas build-unified-schema -- \
+  --strimzi-openapi /path/to/kafka.strimzi.io-v1-schema.json
 ```
 
-That command updates the checked-in fallback artifact but does not replace the
-preferred release-time step of generating a schema from live CRDs.
+That command updates the checked-in fallback artifact. Release automation should
+still prefer generating the schema directly from the live CRDs of the deployed
+Strimzi version.
 
 #### Why this is one merged schema instead of bespoke validation logic
 
@@ -245,24 +239,39 @@ targetClusters:
 
 ### Kafka Settings
 
-`kafkaClusterConfiguration.<cluster>.autoCreate` accepts Strimzi-shaped
-pass-through sections that are merged into the generated resources:
+`kafkaClusterConfiguration.<cluster>.autoCreate` is intended to behave like the
+other compound resource settings in migration config: the workflow provides
+baseline defaults, the user specifies only the Kafka settings they care about,
+and the final Kafka configuration is a deep merge of defaults plus overrides.
 
+The baseline model is intended to track Strimzi `0.50`.  The primary user
+inputs are:
+
+- `auth` for the workflow-owned managed Kafka auth contract
 - `clusterSpecOverrides` for `Kafka.spec`
 - `nodePoolSpecOverrides` for `KafkaNodePool.spec`
 - `topicSpecOverrides` for `KafkaTopic.spec`
 
-These sections are validated by the unified JSON Schema, using Strimzi-derived
-definitions when a live or release-built Strimzi schema is available.  The
-workflow still owns the resource names and Kafka access contract.  In
-particular, workflow-managed listeners, auth wiring, and other invariants may
-be overwritten so that proxy, replayer, and console connectivity remains
-stable.
+These sections are validated by the unified JSON Schema after defaults and user
+overrides are merged.  The preferred schema uses Strimzi-derived definitions
+from the live or release-built target environment.  The workflow still owns the
+resource names and Kafka access contract.  In particular, workflow-managed
+listeners, auth wiring, and other invariants may be overwritten so that proxy,
+replayer, and console connectivity remains stable.
 
 For `kafkaClusterConfiguration.<cluster>.existing`, the user should provide the
 explicit connection and auth material that migration applications must use.  In
 particular, existing Kafka clusters should use an explicit auth block rather
 than relying on the workflow to infer secret names.
+
+For workflow-managed Kafka clusters, the orchestration layer now also carries a
+normalized Kafka connection profile that includes runtime-resolved listener and
+auth metadata, and the workflow creates deterministic `KafkaUser` resources for
+managed SCRAM clusters.  The remaining gap is secret-backed SCRAM client
+consumption in the application containers and console tooling.  The current
+Kafka manifest render path is also still being refactored away from a single
+highly dynamic `Kafka.spec` injection toward a safer baseline-plus-overrides
+shape.
 
 ### Updating template and configuration models
 

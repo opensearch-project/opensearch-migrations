@@ -17,7 +17,7 @@
     "schema": "tsx src/showUserSchema.ts",
     "argo-schema": "tsx src/showArgoSchema.ts",
     "make-sample": "tsx src/makeSample.ts",
-    "test": "ALLOW_GENERIC_UNIFIED_SCHEMA=true jest"
+    "test": "jest"
   },
   "dependencies": {
     "ajv": "^8.17.1",

@@ -20,6 +20,9 @@ const validConfig = {
     kafkaClusterConfiguration: {
         default: {
             autoCreate: {
+                auth: {
+                    type: "scram-sha-512",
+                },
                 clusterSpecOverrides: {
                     kafka: {
                         config: {

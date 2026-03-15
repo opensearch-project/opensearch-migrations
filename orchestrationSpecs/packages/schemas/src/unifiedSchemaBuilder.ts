@@ -6,13 +6,12 @@ import {zodSchemaToJsonSchema} from "./getSchemaFromZod";
 
 export const UNIFIED_SCHEMA_CONFIGMAP_NAME = "migration-configuration-schema";
 export const UNIFIED_SCHEMA_CONFIGMAP_KEY = "workflowMigration.schema.json";
-export const ALLOW_GENERIC_UNIFIED_SCHEMA_ENV = "ALLOW_GENERIC_UNIFIED_SCHEMA";
 export const UNIFIED_SCHEMA_PATH_ENV = "MIGRATION_UNIFIED_SCHEMA_PATH";
 export const UNIFIED_SCHEMA_CONFIGMAP_ENV = "MIGRATION_UNIFIED_SCHEMA_CONFIGMAP";
 export const UNIFIED_SCHEMA_CONFIGMAP_NAMESPACE_ENV = "MIGRATION_UNIFIED_SCHEMA_NAMESPACE";
 export const UNIFIED_SCHEMA_CONFIGMAP_KEY_ENV = "MIGRATION_UNIFIED_SCHEMA_KEY";
 
-export type UnifiedSchemaMode = "full" | "generic";
+export type UnifiedSchemaMode = "full";
 export type UnifiedSchemaSource = "file" | "configmap" | "fallback-artifact" | "generated";
 
 export interface LoadedUnifiedSchema {
@@ -24,7 +23,6 @@ export interface LoadedUnifiedSchema {
 
 export interface UnifiedSchemaBuildOptions {
     strimziSchemaPath?: string;
-    fallbackToGeneric?: boolean;
 }
 
 function packageRoot(...segments: string[]) {
@@ -51,48 +49,6 @@ function addSchemaMetadata(schema: Record<string, unknown>, mode: UnifiedSchemaM
     schema["x-orchestration-specs-strimzi-schema-mode"] = mode;
     schema["x-orchestration-specs-strimzi-schema-detail"] = detail;
     return schema;
-}
-
-function buildGenericStrimziDefs() {
-    return {
-        StrimziKafkaSpec: {
-            type: "object",
-            description: "Fallback generic schema for Strimzi Kafka.spec. " +
-                "Use a release-built schema artifact for full validation.",
-            properties: {
-                kafka: {
-                    type: "object",
-                    description: "Broker-level Strimzi Kafka settings. Workflow-managed listener/auth fields may be overwritten.",
-                    additionalProperties: true,
-                },
-                entityOperator: {
-                    type: "object",
-                    additionalProperties: true,
-                },
-            },
-            additionalProperties: true,
-        },
-        StrimziKafkaNodePoolSpec: {
-            type: "object",
-            description: "Fallback generic schema for Strimzi KafkaNodePool.spec.",
-            properties: {
-                replicas: {type: "integer"},
-                roles: {type: "array", items: {type: "string"}},
-                storage: {type: "object", additionalProperties: true},
-            },
-            additionalProperties: true,
-        },
-        StrimziKafkaTopicSpec: {
-            type: "object",
-            description: "Fallback generic schema for Strimzi KafkaTopic.spec.",
-            properties: {
-                partitions: {type: "integer"},
-                replicas: {type: "integer"},
-                config: {type: "object", additionalProperties: true},
-            },
-            additionalProperties: true,
-        },
-    };
 }
 
 function findSchemaKeyByKind(definitions: Record<string, unknown>, kind: string) {
@@ -235,9 +191,8 @@ function buildBaseUnifiedSchema() {
 }
 
 export function buildUnifiedSchema(options: UnifiedSchemaBuildOptions = {}): LoadedUnifiedSchema {
-    const base = buildBaseUnifiedSchema();
-    const fallbackToGeneric = options.fallbackToGeneric ?? true;
     if (options.strimziSchemaPath && fs.existsSync(options.strimziSchemaPath)) {
+        const base = buildBaseUnifiedSchema();
         const openApi = JSON.parse(fs.readFileSync(options.strimziSchemaPath, "utf-8"));
         const fullSchema = injectStrimziRefs(base, extractStrimziDefsFromOpenApi(openApi));
         return {
@@ -247,17 +202,19 @@ export function buildUnifiedSchema(options: UnifiedSchemaBuildOptions = {}): Loa
             detail: options.strimziSchemaPath,
         };
     }
-    if (!fallbackToGeneric) {
-        throw new Error("No Strimzi schema path was provided and generic fallback is disabled");
+
+    const fallbackPath = getFallbackUnifiedSchemaPath();
+    if (fs.existsSync(fallbackPath)) {
+        const schema = JSON.parse(fs.readFileSync(fallbackPath, "utf-8"));
+        return {
+            schema,
+            mode: (schema["x-orchestration-specs-strimzi-schema-mode"] as UnifiedSchemaMode) ?? "full",
+            source: "fallback-artifact",
+            detail: fallbackPath,
+        };
     }
 
-    const genericSchema = injectStrimziRefs(base, buildGenericStrimziDefs());
-    return {
-        schema: addSchemaMetadata(genericSchema, "generic", "generated generic fallback"),
-        mode: "generic",
-        source: "generated",
-        detail: "generated generic fallback",
-    };
+    throw new Error("No Strimzi schema path was provided and no fallback unified schema artifact was found");
 }
 
 function readSchemaFromConfigMap(name: string, namespace: string | undefined, key: string) {
@@ -303,7 +260,7 @@ export function loadUnifiedSchema(): LoadedUnifiedSchema {
         const schema = JSON.parse(fs.readFileSync(fallbackPath, "utf-8"));
         return {
             schema,
-            mode: (schema["x-orchestration-specs-strimzi-schema-mode"] as UnifiedSchemaMode) ?? "generic",
+            mode: (schema["x-orchestration-specs-strimzi-schema-mode"] as UnifiedSchemaMode) ?? "full",
             source: "fallback-artifact",
             detail: fallbackPath,
         };
@@ -313,11 +270,8 @@ export function loadUnifiedSchema(): LoadedUnifiedSchema {
 }
 
 export function assertUnifiedSchemaIsUsable(loaded: LoadedUnifiedSchema) {
-    if (loaded.mode === "generic" && process.env[ALLOW_GENERIC_UNIFIED_SCHEMA_ENV] !== "true") {
-        throw new Error(
-            `The migration config validator is using a generic fallback unified schema (${loaded.detail}). ` +
-            `Generate and provide a full unified schema artifact or set ${ALLOW_GENERIC_UNIFIED_SCHEMA_ENV}=true to opt out locally.`
-        );
+    if (loaded.mode !== "full") {
+        throw new Error(`The migration config validator requires a full unified schema, got '${loaded.mode}' from ${loaded.detail}`);
     }
 }
 
