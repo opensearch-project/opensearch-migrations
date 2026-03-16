@@ -22,6 +22,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "config": {
                   "type": "object",
+                  "nullable": true,
                   "properties": {
                     "auth": {
                       "oneOf": [
@@ -56,7 +57,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "default": {
                         "type": "none"
-                      }
+                      },
+                      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. This controls the managed listener/auth contract used by migration applications."
                     },
                     "clusterSpecOverrides": {
                       "type": "object",
@@ -91,7 +93,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               "required": [
                 "name",
                 "version",
-                "config",
                 "topics"
               ]
             },
