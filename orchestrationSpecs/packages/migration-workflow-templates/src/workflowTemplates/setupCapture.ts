@@ -91,20 +91,24 @@ function makeProxyParamsDict(
                     kafkaConnection: effectiveKafkaConnection
                 })
             ),
-            expr.makeDict({
-                destinationUri: expr.get(config, "sourceEndpoint"),
-                insecureDestination: expr.get(config, "sourceAllowInsecure"),
-                kafkaTopic: expr.jsonPathStrict(proxyConfig, "kafkaConfig", "kafkaTopic"),
-                kafkaPropertyFile: expr.ternary(
+            expr.mergeDicts(
+                expr.makeDict({
+                    destinationUri: expr.get(config, "sourceEndpoint"),
+                    insecureDestination: expr.get(config, "sourceAllowInsecure"),
+                    kafkaTopic: expr.jsonPathStrict(proxyConfig, "kafkaConfig", "kafkaTopic"),
+                    kafkaListenerName: effectiveKafkaListenerName,
+                    kafkaAuthType: effectiveKafkaAuthType,
+                    kafkaSecretName: effectiveKafkaSecretName,
+                    kafkaUserName: effectiveKafkaUserName,
+                }),
+                expr.ternary(
                     shouldUseScram,
-                    expr.literal(KAFKA_AUTH_CONFIG_FILE_PATH),
-                    expr.literal("")
-                ),
-                kafkaListenerName: effectiveKafkaListenerName,
-                kafkaAuthType: effectiveKafkaAuthType,
-                kafkaSecretName: effectiveKafkaSecretName,
-                kafkaUserName: effectiveKafkaUserName,
-            })
+                    expr.makeDict({
+                        kafkaPropertyFile: expr.literal(KAFKA_AUTH_CONFIG_FILE_PATH),
+                    }),
+                    expr.literal({})
+                )
+            )
         )
     );
 }

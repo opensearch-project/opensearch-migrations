@@ -154,6 +154,41 @@ export const KAFKA_AUTO_CREATE_AUTH_CONFIG = z.discriminatedUnion("type", [
     }),
 ]);
 
+const DEFAULT_AUTO_CREATE_KAFKA = {
+    auth: {type: "none" as const},
+    clusterSpecOverrides: {
+        kafka: {
+            config: {
+                "auto.create.topics.enable": false,
+                "offsets.topic.replication.factor": 1,
+                "transaction.state.log.replication.factor": 1,
+                "transaction.state.log.min.isr": 1,
+                "default.replication.factor": 1,
+                "min.insync.replicas": 1,
+            }
+        }
+    },
+    nodePoolSpecOverrides: {
+        replicas: 1,
+        roles: ["controller", "broker"],
+        storage: {
+            type: "persistent-claim",
+            size: "1Gi",
+            deleteClaim: true,
+        }
+    },
+    topicSpecOverrides: {
+        partitions: 1,
+        replicas: 1,
+        config: {
+            "retention.ms": 604800000,
+            "segment.bytes": 1073741824,
+        }
+    },
+};
+
+const replaceArrayMerge = (_destinationArray: unknown[], sourceArray: unknown[]) => sourceArray;
+
 export const KAFKA_EXISTING_CLUSTER_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional(),
     kafkaConnection: z.string()
@@ -438,19 +473,22 @@ export const USER_RFS_OPTIONS = z.object({
         );
 });
 
-export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
-    auth: KAFKA_AUTO_CREATE_AUTH_CONFIG.default({type: "none"}).optional()
-        .describe("Workflow-owned Kafka client auth for auto-created Strimzi clusters. "
-            + "This controls the managed listener/auth contract used by migration applications."),
-    clusterSpecOverrides: GENERIC_JSON_OBJECT.optional()
-        .describe("Optional overrides merged into the generated Strimzi Kafka.spec. " +
-            "Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."),
-    nodePoolSpecOverrides: GENERIC_JSON_OBJECT.optional()
-        .describe("Optional overrides merged into the generated Strimzi KafkaNodePool.spec. " +
-            "Workflow-managed fields such as cluster labels may be overwritten by the workflow."),
-    topicSpecOverrides: GENERIC_JSON_OBJECT.optional()
-        .describe("Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics."),
-});
+export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
+    (value) => deepmerge(DEFAULT_AUTO_CREATE_KAFKA, (value ?? {}), {arrayMerge: replaceArrayMerge}),
+    z.object({
+        auth: KAFKA_AUTO_CREATE_AUTH_CONFIG.default({type: "none"}).optional()
+            .describe("Workflow-owned Kafka client auth for auto-created Strimzi clusters. "
+                + "This controls the managed listener/auth contract used by migration applications."),
+        clusterSpecOverrides: GENERIC_JSON_OBJECT.optional()
+            .describe("Optional overrides merged into the generated Strimzi Kafka.spec. " +
+                "Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."),
+        nodePoolSpecOverrides: GENERIC_JSON_OBJECT.optional()
+            .describe("Optional overrides merged into the generated Strimzi KafkaNodePool.spec. " +
+                "Workflow-managed fields such as cluster labels may be overwritten by the workflow."),
+        topicSpecOverrides: GENERIC_JSON_OBJECT.optional()
+            .describe("Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics."),
+    })
+);
 
 export const KAFKA_CLUSTER_CONFIG = z.union([
     z.object({autoCreate: KAFKA_CLUSTER_CREATION_CONFIG}),

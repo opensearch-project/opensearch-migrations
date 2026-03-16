@@ -91,6 +91,17 @@ export function setNamesInUserConfig(userConfig: InputConfig): InputConfig {
     };
 }
 
+function buildUnifiedValidationInput(rawData: unknown, parsedData: InputConfig): unknown {
+    if (typeof rawData !== "object" || rawData === null || Array.isArray(rawData)) {
+        return parsedData;
+    }
+    return {
+        ...rawData,
+        kafkaClusterConfiguration: parsedData.kafkaClusterConfiguration,
+        snapshotMigrationConfigs: parsedData.snapshotMigrationConfigs,
+    };
+}
+
 function makeProxyServiceEndpoint(proxyName: string, listenPort: number, hasTls: boolean): string {
     return `${hasTls ? "https" : "http"}://${proxyName}:${listenPort}`;
 }
@@ -218,10 +229,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     validateInput(data: unknown): InputConfig {
         // First pass: normal schema validation (including refinements)
-        const obj = super.validateInput(data);
+        const obj = setNamesInUserConfig(super.validateInput(data));
 
         // Second pass: unified schema validation for embedded Strimzi passthrough sections
-        validateInputAgainstUnifiedSchema(data);
+        validateInputAgainstUnifiedSchema(buildUnifiedValidationInput(data, obj));
 
         // Second pass: check for extra keys
         validateNoExtraKeys(data, OVERALL_MIGRATION_CONFIG);

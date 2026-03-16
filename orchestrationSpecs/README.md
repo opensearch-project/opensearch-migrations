@@ -114,8 +114,8 @@ The intended release/deployment flow is:
 2. Read the live Kafka CRD/OpenAPI schema from that cluster.
 3. Run `build-unified-schema` against those live definitions.
 4. Save the resulting `workflowMigration.schema.json` as a release artifact.
-5. Publish the same schema into the cluster in a ConfigMap so that runtime
-   tools validate against the same contract.
+5. Use that same schema artifact for validation in environments that target
+   that Strimzi deployment.
 
 That gives one schema that matches the Strimzi version actually present in the
 environment, instead of assuming that the checked-in TypeScript types or an
@@ -135,21 +135,16 @@ Strimzi schema source. It exists so that developers can:
 
 #### Where the runtime schema comes from
 
-The runtime validator looks for the unified schema in this order:
+The initializer and validator now prefer:
 
-1. A file path from `MIGRATION_UNIFIED_SCHEMA_PATH`
-2. A ConfigMap reference from:
-   - `MIGRATION_UNIFIED_SCHEMA_CONFIGMAP`
-   - `MIGRATION_UNIFIED_SCHEMA_NAMESPACE`
-   - `MIGRATION_UNIFIED_SCHEMA_KEY`
+1. Live Strimzi CRD/OpenAPI schema fetched from the target cluster
+2. A file path from `MIGRATION_UNIFIED_SCHEMA_PATH`
 3. The checked-in fallback artifact in `packages/schemas/generated`
 
-The config processor writes that schema into the migration bundle as a
-ConfigMap named `migration-configuration-schema`, and
-`createMigrationWorkflowFromUserConfiguration.sh` applies it alongside the
-other generated resources.  The intent is for `migrationInitializer`,
-`migrationConfigTransformer`, CLI-driven validation, and any future editor or
-agent integrations to all consume the same unified artifact.
+The default initialization path no longer generates or applies a schema
+ConfigMap during workflow submission. Instead, it validates directly against
+the live cluster schema when available and falls back to the checked-in unified
+artifact only when a live Strimzi schema is not being used.
 
 #### How the fallback is maintained
 
@@ -266,12 +261,13 @@ than relying on the workflow to infer secret names.
 
 For workflow-managed Kafka clusters, the orchestration layer now also carries a
 normalized Kafka connection profile that includes runtime-resolved listener and
-auth metadata, and the workflow creates deterministic `KafkaUser` resources for
-managed SCRAM clusters.  The remaining gap is secret-backed SCRAM client
-consumption in the application containers and console tooling.  The current
-Kafka manifest render path is also still being refactored away from a single
-highly dynamic `Kafka.spec` injection toward a safer baseline-plus-overrides
-shape.
+auth metadata, the workflow creates deterministic `KafkaUser` resources for
+managed SCRAM clusters, and proxy/replayer now consume secret-backed SCRAM
+client configuration from mounted Strimzi secrets and generated Kafka client
+property files. The remaining gap is console-side SCRAM support. The current
+Kafka manifest render path has already been fixed to avoid the earlier quoted
+`Kafka.spec` serialization bug, but it is still being refactored toward a
+cleaner baseline-plus-overrides shape.
 
 ### Updating template and configuration models
 

@@ -172,7 +172,8 @@ Validation should follow this order:
 3. validation of the merged result against the unified JSON Schema
 
 The preferred schema should be generated from live Strimzi CRDs for
-release/deployment, with a checked-in fallback for development.
+release/deployment, with a checked-in fallback built from the baseline schema
+source.
 
 ### Current implementation
 
@@ -185,8 +186,8 @@ It currently:
 - builds the base migration schema
 - injects Strimzi-derived definitions for Kafka sections when provided with a
   Strimzi OpenAPI file
-- falls back to a checked-in generic schema artifact when no Strimzi schema is
-  available
+- falls back to a checked-in unified schema artifact when no live Strimzi
+  schema is available
 
 ### Remaining work
 
@@ -195,9 +196,8 @@ It currently:
 - ensure workflow defaults are merged before schema validation
 - wire release/deployment automation to fetch live CRDs and build the unified
   schema artifact
-- publish that schema into the target cluster in a ConfigMap
 - make runtime tools prefer the live/release-built schema artifact
-- treat the checked-in fallback as a development-only path
+- keep the checked-in fallback aligned with the supported baseline schema source
 
 ## Templating Model
 
@@ -221,17 +221,18 @@ The current `Kafka` render path in:
 still builds a highly dynamic merged `Kafka.spec` object and injects it through
 Argo resource templating.
 
-This is currently causing a live rendering bug in the generated Argo template:
-
-- `Kafka.spec` is being serialized as a string instead of an object
+This previously caused a live rendering bug where `Kafka.spec` was serialized
+as a string instead of an object. That specific bug is now fixed by moving the
+workflow-managed cluster render path back to explicit object-shaped `spec`
+rendering.
 
 ### Remaining work
 
-- reduce the dynamic surface of the `Kafka` manifest
+- continue reducing the dynamic surface of the `Kafka` manifest
 - prefer a mostly static manifest shape with smaller injected subtrees
 - or use apply-then-patch resource templates so workflow-owned overrides are
   layered after the user/baseline resource is applied
-- add regression tests that assert `Kafka.spec` is rendered as an object-valued
+- keep regression tests that assert `Kafka.spec` is rendered as an object-valued
   manifest field, not a quoted string expression
 
 ## Connectivity Discovery Work
@@ -269,6 +270,8 @@ What is already in place:
   and replayer setup
 - proxy and replayer setup prefer runtime-resolved bootstrap/listener/auth
   values over the transformer's placeholder values
+- proxy and replayer now consume runtime-resolved SCRAM secret and CA material
+  via generated Kafka client property files
 
 What is still transitional:
 
@@ -312,16 +315,14 @@ What is already in place:
 - that naming is reflected in the normalized Kafka profile
 - the workflow now creates the matching `KafkaUser` resource for managed SCRAM
   clusters
+- proxy and replayer now mount the generated user password secret and cluster
+  CA secret and use them for SCRAM client configuration
 
 ### Remaining work
 
-- wire listener auth in `setupKafka` so SCRAM-capable listeners and
-  `KafkaUser` resources are aligned in the final rendered manifest shape
-- update proxy/replayer/container startup to consume resolved secret-backed
-  Kafka auth material, most likely through generated Kafka client property files
 - extend `migrationConsole` so standard Kafka can operate with secret-backed
   SCRAM config instead of only unauthenticated standard mode or MSK IAM
-- remove remaining placeholder/no-auth assumptions once the clients consume
+- remove remaining placeholder/no-auth assumptions once all consumers use
   resolved auth material end-to-end
 
 ## Existing Kafka Clusters
@@ -435,13 +436,11 @@ are needed to preserve the migration stack's connectivity contract.
 2. Fix the `Kafka` manifest render path so workflow runs are no longer masked by
    pre-existing Strimzi resources.
 3. Finish the unified-schema release/deployment path around live Strimzi CRDs.
-4. Add secret-backed SCRAM client property generation/mounting for proxy and
-   replayer.
-5. Extend `migrationConsole` to understand the same resolved secret-backed
+4. Extend `migrationConsole` to understand the same resolved secret-backed
    Kafka auth mode.
-6. Remove placeholder bootstrap/auth defaults from the transformer once all
+5. Remove placeholder bootstrap/auth defaults from the transformer once all
    consumers use runtime-resolved connection profiles.
-7. Reduce workflow-owned Kafka overrides to the smallest set still needed for
+6. Reduce workflow-owned Kafka overrides to the smallest set still needed for
    migration correctness.
 
 ## Exit Criteria

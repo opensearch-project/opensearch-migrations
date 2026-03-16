@@ -83,20 +83,24 @@ function makeReplayerParamsDict(
             makeReplayerTargetParamDict(targetConfig),
             expr.omit(expr.deserializeRecord(options), ...ARGO_REPLAYER_WORKFLOW_OPTION_KEYS)
         ),
-        expr.makeDict({
-            kafkaTrafficBrokers: effectiveKafkaConnection,
-            kafkaTrafficTopic: expr.get(deserializedKafkaConfig, "kafkaTopic"),
-            kafkaTrafficGroupId: kafkaGroupId,
-            kafkaTrafficPropertyFile: expr.ternary(
+        expr.mergeDicts(
+            expr.makeDict({
+                kafkaTrafficBrokers: effectiveKafkaConnection,
+                kafkaTrafficTopic: expr.get(deserializedKafkaConfig, "kafkaTopic"),
+                kafkaTrafficGroupId: kafkaGroupId,
+                kafkaTrafficListenerName: effectiveKafkaListenerName,
+                kafkaTrafficAuthType: effectiveKafkaAuthType,
+                kafkaTrafficSecretName: effectiveKafkaSecretName,
+                kafkaTrafficUserName: effectiveKafkaUserName,
+            }),
+            expr.ternary(
                 shouldUseScram,
-                expr.literal(KAFKA_AUTH_CONFIG_FILE_PATH),
-                expr.literal("")
-            ),
-            kafkaTrafficListenerName: effectiveKafkaListenerName,
-            kafkaTrafficAuthType: effectiveKafkaAuthType,
-            kafkaTrafficSecretName: effectiveKafkaSecretName,
-            kafkaTrafficUserName: effectiveKafkaUserName,
-        })
+                expr.makeDict({
+                    kafkaTrafficPropertyFile: expr.literal(KAFKA_AUTH_CONFIG_FILE_PATH),
+                }),
+                expr.literal({})
+            )
+        )
     );
 }
 

@@ -44,8 +44,11 @@ driven by the live CRDs deployed in the target environment.
 
 ## Current Status
 
-The implementation is currently between the older static Kafka approach and the
-target baseline-plus-dynamic-schema model.
+The workflow-managed Kafka path now works for both:
+
+- unauthenticated internal Kafka
+- SCRAM-protected internal Kafka backed by Strimzi-managed `KafkaUser`
+  credentials
 
 Implemented today:
 
@@ -55,15 +58,20 @@ Implemented today:
 - runtime listener/bootstrap/auth discovery for workflow-managed clusters
 - normalized internal Kafka profile fields carried through orchestration
 - workflow-managed `KafkaUser` creation for auto-created SCRAM clusters
+- secret-backed SCRAM client configuration for proxy and replayer
+- end-to-end minikube validation of:
+  - `proxyWithoutTls.wf.yaml`
+  - `proxyWithoutTlsScram.wf.yaml`
 
-Not complete yet:
+Still incomplete:
 
 - baseline Kafka defaults are not yet consistently modeled as typed partial
-  defaults merged into Strimzi-shaped user config
-- the `Kafka` manifest render path is still too dynamic and currently has a
-  serialization bug in Argo template rendering
-- automatic secret-backed SCRAM client configuration in proxy/replayer
-- console support for secret-backed standard Kafka auth
+  defaults merged into Strimzi-shaped user config before rendering
+- console-side secret-backed SCRAM support still needs to be wired in
+- the deployment success condition currently uses `status.readyReplicas > 0`
+  for workflow-managed proxy and replayer Deployments; that is correct for the
+  current single-replica flows but is intentionally conservative rather than a
+  full multi-replica readiness contract
 
 ## What You Configure
 
@@ -199,7 +207,8 @@ The intended release/deployment flow is:
 2. fetch the live Strimzi CRD/OpenAPI schema
 3. build the unified migration schema from that live schema
 4. publish that schema as a release artifact
-5. store the same schema in the cluster for runtime validation
+5. use that same schema artifact for validation in the environments that target
+   that Strimzi deployment
 
 For local development and bootstrap scenarios, a checked-in fallback unified
 schema may still be used.
@@ -284,8 +293,10 @@ name:
 
 Today, the deterministic managed principal naming is already represented in the
 resolved Kafka profile for workflow-managed clusters, and the workflow now
-creates the matching `KafkaUser` resource for managed SCRAM clusters. The
-remaining work is wiring the resulting secret into the application containers.
+creates the matching `KafkaUser` resource for managed SCRAM clusters. For
+proxy and replayer, the resulting password secret and cluster CA secret are now
+mounted into the containers and used to build Kafka client properties
+automatically.
 
 ## Existing Kafka Clusters
 
@@ -333,6 +344,7 @@ That resolved profile should include:
 - auth type
 - Kafka user name
 - secret name containing credentials
+- CA secret name for trust material when required
 
 A normalized internal profile should look roughly like this:
 
@@ -343,7 +355,8 @@ A normalized internal profile should look roughly like this:
   "bootstrapServers": "default-kafka-bootstrap:9093",
   "authType": "scram-sha-512",
   "kafkaUserName": "default-migration-app",
-  "secretName": "default-migration-app"
+  "secretName": "default-migration-app",
+  "caSecretName": "default-cluster-ca-cert"
 }
 ```
 
