@@ -1,11 +1,13 @@
 import { describe, it, expect } from '@jest/globals';
 import { MigrationConfigTransformer, MigrationInitializer } from "../src";
+import {OVERALL_MIGRATION_CONFIG} from "@opensearch-migrations/schemas";
+import {z} from "zod";
 
 describe('semaphore configuration', () => {
     const transformer = new MigrationConfigTransformer();
 
     it('generates shared semaphore key for legacy versions (multiple snapshots)', async () => {
-        const config = {
+        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 legacy_source: {
                     endpoint: "https://legacy.example.com",
@@ -16,13 +18,28 @@ describe('semaphore configuration', () => {
                             secretName: "legacy-creds"
                         }
                     },
-                    snapshotRepos: {
-                        default: {
-                            awsRegion: "us-east-2",
-                            s3RepoPathUri: "s3://bucket/path"
+                    snapshotInfo: {
+                        repos: {
+                            default: {
+                                awsRegion: "us-east-2",
+                                s3RepoPathUri: "s3://bucket/path"
+                            }
+                        },
+                        snapshots: {
+                            snap1: {
+                                repoName: "default",
+                                config: {
+                                    createSnapshotConfig: { snapshotPrefix: "snap1" }
+                                }
+                            },
+                            snap2: {
+                                repoName: "default",
+                                config: {
+                                    createSnapshotConfig: { snapshotPrefix: "snap2" }
+                                }
+                            }
                         }
-                    },
-                    proxy: {}
+                    }
                 }
             },
             targetClusters: {
@@ -36,51 +53,31 @@ describe('semaphore configuration', () => {
                     }
                 }
             },
-            migrationConfigs: [
+            snapshotMigrationConfigs: [
                 {
                     fromSource: "legacy_source",
                     toTarget: "target",
-                    snapshotExtractAndLoadConfigs: [
-                        {
-                            snapshotConfig: {
-                                snapshotNameConfig: {
-                                    snapshotNamePrefix: "snap1"
-                                }
-                            },
-                            createSnapshotConfig: {},
-                            migrations: [
-                                {
-                                    metadataMigrationConfig: {
-                                        skipEvaluateApproval: true,
-                                        skipMigrateApproval: true
-                                    }
-                                }
-                            ]
-                        },
-                        {
-                            snapshotConfig: {
-                                snapshotNameConfig: {
-                                    snapshotNamePrefix: "snap2"
-                                }
-                            },
-                            createSnapshotConfig: {},
-                            migrations: [
-                                {
-                                    metadataMigrationConfig: {
-                                        skipEvaluateApproval: true,
-                                        skipMigrateApproval: true
-                                    }
-                                }
-                            ]
-                        }
-                    ]
+                    perSnapshotConfig: {
+                        "snap1": [{
+                            metadataMigrationConfig: {
+                                skipEvaluateApproval: true,
+                                skipMigrateApproval: true
+                            }
+                        }],
+                        "snap2": [{
+                            metadataMigrationConfig: {
+                                skipEvaluateApproval: true,
+                                skipMigrateApproval: true
+                            }
+                        }]
+                    }
                 }
             ]
         };
 
         const result = await transformer.processFromObject(config);
-        const semaphoreKeys = result[0].snapshotExtractAndLoadConfigArray!.map(
-            config => config.createSnapshotConfig!.semaphoreKey
+        const semaphoreKeys = result.snapshots!.flatMap(ss =>
+            ss.createSnapshotConfig.map(config => config.semaphoreKey)
         );
         const uniqueKeys = new Set(semaphoreKeys);
         
@@ -88,7 +85,7 @@ describe('semaphore configuration', () => {
     });
 
     it('generates unique semaphore keys for modern versions (multiple snapshots)', async () => {
-        const config = {
+        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 modern_source: {
                     endpoint: "https://modern.example.com",
@@ -99,13 +96,28 @@ describe('semaphore configuration', () => {
                             secretName: "modern-creds"
                         }
                     },
-                    snapshotRepos: {
-                        default: {
-                            awsRegion: "us-east-2",
-                            s3RepoPathUri: "s3://bucket/path"
+                    snapshotInfo: {
+                        repos: {
+                            default: {
+                                awsRegion: "us-east-2",
+                                s3RepoPathUri: "s3://bucket/path"
+                            }
+                        },
+                        snapshots: {
+                            snap1: {
+                                repoName: "default",
+                                config: {
+                                    createSnapshotConfig: {snapshotPrefix: "snap1"}
+                                }
+                            },
+                            snap2: {
+                                repoName: "default",
+                                config: {
+                                    createSnapshotConfig: {snapshotPrefix: "snap2"}
+                                }
+                            }
                         }
-                    },
-                    proxy: {}
+                    }
                 }
             },
             targetClusters: {
@@ -119,51 +131,31 @@ describe('semaphore configuration', () => {
                     }
                 }
             },
-            migrationConfigs: [
+            snapshotMigrationConfigs: [
                 {
                     fromSource: "modern_source",
                     toTarget: "target",
-                    snapshotExtractAndLoadConfigs: [
-                        {
-                            snapshotConfig: {
-                                snapshotNameConfig: {
-                                    snapshotNamePrefix: "snap1"
-                                }
-                            },
-                            createSnapshotConfig: {},
-                            migrations: [
-                                {
-                                    metadataMigrationConfig: {
-                                        skipEvaluateApproval: true,
-                                        skipMigrateApproval: true
-                                    }
-                                }
-                            ]
-                        },
-                        {
-                            snapshotConfig: {
-                                snapshotNameConfig: {
-                                    snapshotNamePrefix: "snap2"
-                                }
-                            },
-                            createSnapshotConfig: {},
-                            migrations: [
-                                {
-                                    metadataMigrationConfig: {
-                                        skipEvaluateApproval: true,
-                                        skipMigrateApproval: true
-                                    }
-                                }
-                            ]
-                        }
-                    ]
+                    perSnapshotConfig: {
+                        "snap1": [{
+                            metadataMigrationConfig: {
+                                skipEvaluateApproval: true,
+                                skipMigrateApproval: true
+                            }
+                        }],
+                        "snap2": [{
+                            metadataMigrationConfig: {
+                                skipEvaluateApproval: true,
+                                skipMigrateApproval: true
+                            }
+                        }]
+                    }
                 }
             ]
         };
 
         const result = await transformer.processFromObject(config);
-        const semaphoreKeys = result[0].snapshotExtractAndLoadConfigArray!.map(
-            config => config.createSnapshotConfig!.semaphoreKey
+        const semaphoreKeys = result.snapshots!.flatMap(ss => ss
+            .createSnapshotConfig.map(config => config.semaphoreKey)
         );
         const uniqueKeys = new Set(semaphoreKeys);
         
@@ -171,7 +163,7 @@ describe('semaphore configuration', () => {
     });
 
     it('generates correct ConfigMap YAML with semaphore keys', async () => {
-        const config = {
+        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 legacy_source: {
                     endpoint: "https://legacy.example.com",
@@ -182,13 +174,22 @@ describe('semaphore configuration', () => {
                             secretName: "legacy-creds"
                         }
                     },
-                    snapshotRepos: {
-                        default: {
-                            awsRegion: "us-east-2",
-                            s3RepoPathUri: "s3://bucket/path"
+                    snapshotInfo: {
+                        repos: {
+                            default: {
+                                awsRegion: "us-east-2",
+                                s3RepoPathUri: "s3://bucket/path"
+                            }
+                        },
+                        snapshots: {
+                            snap1: {
+                                repoName: "default",
+                                config: {
+                                    createSnapshotConfig: { snapshotPrefix: "snap1" }
+                                }
+                            }
                         }
-                    },
-                    proxy: {}
+                    }
                 },
                 modern_source: {
                     endpoint: "https://modern.example.com",
@@ -199,13 +200,22 @@ describe('semaphore configuration', () => {
                             secretName: "modern-creds"
                         }
                     },
-                    snapshotRepos: {
-                        default: {
-                            awsRegion: "us-east-2",
-                            s3RepoPathUri: "s3://bucket/path"
+                    snapshotInfo: {
+                        repos: {
+                            default: {
+                                awsRegion: "us-east-2",
+                                s3RepoPathUri: "s3://bucket/path"
+                            }
+                        },
+                        snapshots: {
+                            snap1: {
+                                repoName: "default",
+                                config: {
+                                    createSnapshotConfig: { snapshotPrefix: "snap1" }
+                                }
+                            }
                         }
-                    },
-                    proxy: {}
+                    }
                 }
             },
             targetClusters: {
@@ -219,55 +229,35 @@ describe('semaphore configuration', () => {
                     }
                 }
             },
-            migrationConfigs: [
+            snapshotMigrationConfigs: [
                 {
                     fromSource: "legacy_source",
                     toTarget: "target",
-                    snapshotExtractAndLoadConfigs: [
-                        {
-                            snapshotConfig: {
-                                snapshotNameConfig: {
-                                    snapshotNamePrefix: "snap1"
-                                }
-                            },
-                            createSnapshotConfig: {},
-                            migrations: [
-                                {
-                                    metadataMigrationConfig: {
-                                        skipEvaluateApproval: true,
-                                        skipMigrateApproval: true
-                                    }
-                                }
-                            ]
-                        }
-                    ]
+                    perSnapshotConfig: {
+                        "snap1": [{
+                            metadataMigrationConfig: {
+                                skipEvaluateApproval: true,
+                                skipMigrateApproval: true
+                            }
+                        }]
+                    }
                 },
                 {
                     fromSource: "modern_source",
                     toTarget: "target",
-                    snapshotExtractAndLoadConfigs: [
-                        {
-                            snapshotConfig: {
-                                snapshotNameConfig: {
-                                    snapshotNamePrefix: "snap2"
-                                }
-                            },
-                            createSnapshotConfig: {},
-                            migrations: [
-                                {
-                                    metadataMigrationConfig: {
-                                        skipEvaluateApproval: true,
-                                        skipMigrateApproval: true
-                                    }
-                                }
-                            ]
-                        }
-                    ]
+                    perSnapshotConfig: {
+                        "snap1": [{
+                            metadataMigrationConfig: {
+                                skipEvaluateApproval: true,
+                                skipMigrateApproval: true
+                            }
+                        }]
+                    }
                 }
             ]
         };
 
-        const initializer = new MigrationInitializer({endpoints: ["localhost"]}, 'test-nonce');
+        const initializer = new MigrationInitializer();
         const concurrencyConfigMaps = (initializer as any).generateConcurrencyConfigMaps(config);
         
         const concurrencyConfigMap = concurrencyConfigMaps.items[0];
@@ -285,11 +275,10 @@ describe('semaphore configuration', () => {
         
         // Extract semaphore keys from transformed workflow
         const workflowSemaphoreKeys = new Set();
-        bundle.workflows.forEach(migration => {
-            migration.snapshotExtractAndLoadConfigArray?.forEach(snapConfig => {
-                workflowSemaphoreKeys.add(snapConfig.createSnapshotConfig!.semaphoreKey);
-            });
-        });
+        bundle.workflows.snapshots?.forEach(ss =>
+            ss.createSnapshotConfig.forEach(snapshotConfig =>
+                workflowSemaphoreKeys.add(snapshotConfig.semaphoreKey))
+        );
         
         // Extract semaphore keys from ConfigMap
         const configMapKeys = new Set(Object.keys(bundle.concurrencyConfigMaps.items[0].data));

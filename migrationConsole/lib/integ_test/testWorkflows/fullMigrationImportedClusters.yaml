@@ -16,6 +16,8 @@ spec:
 
   arguments:
     parameters:
+      - name: s3-snapshot-configmap
+        value: "migrations-default-s3-config"
       - name: migration-image-configmap
         value: "migration-image-config"
       - name: monitor-retry-limit
@@ -73,6 +75,30 @@ spec:
           - name: target-config
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
+          - name: s3Region
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: AWS_REGION
+          - name: s3Endpoint
+            default: ""
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: ENDPOINT
+                optional: true
+          - name: s3BucketName
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: BUCKET_NAME
+          - name: snapshotRoleArn
+            default: ""
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: SNAPSHOT_ROLE_ARN
+                optional: true
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
@@ -83,56 +109,108 @@ spec:
             
             SOURCE_CONFIGS='{{inputs.parameters.source-configs}}'
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
-            # Transform Python cluster config to workflow schema:
-            # - version: ES_7.10 -> ES 7.10
+            S3_REGION='{{inputs.parameters.s3Region}}'
+            S3_ENDPOINT='{{inputs.parameters.s3Endpoint}}'
+            S3_BUCKET='{{inputs.parameters.s3BucketName}}'
+            SNAPSHOT_ROLE_ARN='{{inputs.parameters.snapshotRoleArn}}'
+            
+            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+            
+            # Build snapshot repo config (includes s3RoleArn if provided)
+            SNAPSHOT_REPO=$(jq -n \
+              --arg region "$S3_REGION" \
+              --arg endpoint "$S3_ENDPOINT" \
+              --arg bucket "$S3_BUCKET" \
+              --arg suffix "$SUFFIX" \
+              --arg roleArn "$SNAPSHOT_ROLE_ARN" \
+              '{
+                "awsRegion": $region,
+                "endpoint": $endpoint,
+                "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
+              } + (if $roleArn != "" then {"s3RoleArn": $roleArn} else {} end)')
+            
+            # Function to transform cluster config to match workflow schema
+            # - version: ES_7.10 -> ES 7.10 (replace underscore with space)
             # - allow_insecure -> allowInsecure
-            # - sigv4 -> authConfig.sigv4
-            # - basic_auth -> authConfig.basic
-            # - no_auth stripped (workflow schema uses absence of authConfig)
+            # - sigv4 at top level -> authConfig.sigv4
+            transform_cluster_config() {
+              echo "$1" | jq '
+                # Transform version format: ES_7.10 -> ES 7.10
+                .version = (.version | gsub("_"; " "))
+                # Rename allow_insecure to allowInsecure
+                | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+                # Move sigv4 under authConfig
+                | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+              '
+            }
             
             # Build sourceClusters map from source-configs array with schema transformation
-            SOURCE_CLUSTERS=$(echo "$SOURCE_CONFIGS" | jq '
-              reduce to_entries[] as $e ({}; 
+            # Supports both standard (configmap S3 repo) and BYOS (source-provided snapshotRepos)
+            SOURCE_CLUSTERS=$(echo "$SOURCE_CONFIGS" | jq --argjson repo "$SNAPSHOT_REPO" '
+              reduce to_entries[] as $e ({};
                 .["source\($e.key + 1)"] = (
                   $e.value.source
+                  # Transform version format: ES_7.10 -> ES 7.10
                   | .version = (.version | gsub("_"; " "))
+                  # Rename allow_insecure to allowInsecure
                   | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+                  # Move sigv4 under authConfig
                   | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+                  # Move basic_auth under authConfig.basic with secretName
                   | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
+                  # Remove unrecognized fields
                   | del(.no_auth)
+                  # Use source-provided snapshotRepos for BYOS, otherwise use configmap repo
+                  | . + {"snapshotInfo": {
+                      "repos": (if .snapshotRepos then .snapshotRepos else {"default": $repo} end)
+                    }}
+                  | del(.snapshotRepos)
+                  # Add snapshot entries based on snapshot-and-migration-configs
+                  | . as $src | $e.value["snapshot-and-migration-configs"] as $smcs |
+                    if ($smcs[0].snapshotConfig.snapshotNameConfig.externallyManagedSnapshot // null) != null then
+                      # BYOS: externally managed snapshot
+                      ($smcs[0].snapshotConfig.snapshotNameConfig.externallyManagedSnapshot) as $snapName |
+                      .snapshotInfo.snapshots = {
+                        ($snapName): {
+                          "repoName": ($smcs[0].snapshotConfig.repoName // "default"),
+                          "config": {"externallyManagedSnapshot": true}
+                        }
+                      }
+                    else
+                      # Standard: create snapshot with prefix
+                      .snapshotInfo.snapshots = {
+                        "testsnapshot": {
+                          "repoName": "default",
+                          "config": {"createSnapshotConfig": {}}
+                        }
+                      }
+                    end
                 )
               )')
             
             # Transform target config to match schema
             TARGET_TRANSFORMED=$(echo "$TARGET_CONFIG" | jq '
-              if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+              # Target cluster schema does not accept a version field
+              del(.version)
+              # Rename allow_insecure to allowInsecure
+              | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+              # Move sigv4 under authConfig
               | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+              # Move basic_auth under authConfig.basic with secretName
               | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
-              | del(.no_auth)
             ')
             
-            # Build snapshotExtractAndLoadConfigs from snapshot-and-migration-configs
-            # If input provides snapshotConfig (e.g. BYOS with externallyManagedSnapshot), use it as-is.
-            # Otherwise, use defaults (snapshotNamePrefix: testsnapshot, createSnapshotConfig).
-            SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '[
-              .[0]["snapshot-and-migration-configs"][] |
-              if (.snapshotConfig.snapshotNameConfig.externallyManagedSnapshot // null) != null then
-                {
-                  "snapshotConfig": .snapshotConfig,
-                  "migrations": .migrations
-                }
+            # Build perSnapshotConfig: snapshot name -> migrations array
+            # For BYOS: use the externallyManagedSnapshot name as the key
+            # For standard: use "testsnapshot" as the key
+            SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '
+              .[0]["snapshot-and-migration-configs"][0] as $smc |
+              if ($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshot // null) != null then
+                {($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshot): $smc.migrations}
               else
-                {
-                  "snapshotConfig": (.snapshotConfig // {
-                    "snapshotNameConfig": {
-                      "snapshotNamePrefix": "testsnapshot"
-                    }
-                  }),
-                  "createSnapshotConfig": {},
-                  "migrations": .migrations
-                }
+                {"testsnapshot": $smc.migrations}
               end
-            ]')
+            ')
             
             # Build the complete OVERALL_MIGRATION_CONFIG
             MIGRATION_CONFIG=$(jq -n \
@@ -145,10 +223,10 @@ spec:
                 "targetClusters": {
                   "target1": $target
                 },
-                "migrationConfigs": [{
+                "snapshotMigrationConfigs": [{
                   "fromSource": "source1",
                   "toTarget": "target1",
-                  "snapshotExtractAndLoadConfigs": $snapshotConfigs
+                  "perSnapshotConfig": $snapshotConfigs
                 }]
               }')
             

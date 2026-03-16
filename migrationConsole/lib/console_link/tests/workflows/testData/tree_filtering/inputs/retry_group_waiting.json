@@ -1,0 +1,34 @@
+[
+  {
+    "id": "retry-group",
+    "display_name": "deployKafkaNodePoolWithRetry",
+    "phase": "Running",
+    "type": "Steps",
+    "boundary_id": null,
+    "inputs": {"parameters": [{"name": "retryGroupName_view", "value": "KafkaNodePool: default"}]},
+    "children": [
+      {
+        "id": "try1",
+        "display_name": "tryApply",
+        "phase": "Failed",
+        "type": "Pod",
+        "boundary_id": "retry-group",
+        "inputs": {},
+        "outputs": {},
+        "started_at": "2026-01-01T00:00:01Z",
+        "children": []
+      },
+      {
+        "id": "wait1",
+        "display_name": "waitForFix",
+        "phase": "Running",
+        "type": "Suspend",
+        "boundary_id": "retry-group",
+        "inputs": {"parameters": [{"name": "name", "value": "KafkaNodePool"}]},
+        "outputs": {},
+        "started_at": "2026-01-01T00:00:02Z",
+        "children": []
+      }
+    ]
+  }
+]

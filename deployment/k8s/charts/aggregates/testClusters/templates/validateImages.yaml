@@ -1,0 +1,4 @@
+{{- if and .Values.conditionalPackageInstalls.source (contains "MUST_BE_OVERRIDDEN" (toString .Values.source.image)) }}
+  {{ fail `source.image is still set to the placeholder. Override it with --set source.image=<your-ecr-registry>
+All three image references (main, init-es-keystore, refresh-s3-keystore) in valuesEks.yaml must also be updated.` }}
+{{- end }}

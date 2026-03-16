@@ -9,282 +9,643 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
       "items": {
         "type": "object",
         "properties": {
-          "sourceConfig": {
-            "type": "object",
-            "properties": {
-              "endpoint": {
-                "type": "string",
-                "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?)?$",
-                "default": ""
-              },
-              "allowInsecure": {
-                "type": "boolean",
-                "default": false
-              },
-              "authConfig": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "basic": {
-                        "type": "object",
-                        "properties": {
-                          "secretName": {
-                            "type": "string",
-                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
-                          }
-                        },
-                        "required": [
-                          "secretName"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "basic"
-                    ]
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "sigv4": {
-                        "type": "object",
-                        "properties": {
-                          "region": {
-                            "type": "string"
-                          },
-                          "service": {
-                            "type": "string",
-                            "default": "es"
-                          }
-                        },
-                        "required": [
-                          "region"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "sigv4"
-                    ]
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "mtls": {
-                        "type": "object",
-                        "properties": {
-                          "caCert": {
-                            "type": "string"
-                          },
-                          "clientSecretName": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "caCert",
-                          "clientSecretName"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "mtls"
-                    ]
-                  }
-                ]
-              },
-              "version": {
-                "type": "string",
-                "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-              },
-              "snapshotRepos": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "object",
-                  "properties": {
-                    "awsRegion": {
-                      "type": "string",
-                      "description": "The AWS region that the bucket reside in (us-east-2, etc)"
-                    },
-                    "endpoint": {
-                      "type": "string",
-                      "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
-                      "default": "",
-                      "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
-                    },
-                    "s3RepoPathUri": {
-                      "type": "string",
-                      "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                      "description": "s3://BUCKETNAME/PATH"
-                    },
-                    "s3RoleArn": {
-                      "type": "string",
-                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
-                      "default": "",
-                      "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
-                    }
-                  },
-                  "required": [
-                    "awsRegion",
-                    "s3RepoPathUri"
-                  ]
-                },
-                "description": "Keys are the repository names that are managed by the source cluster"
-              },
-              "proxy": {
-                "type": "object",
-                "properties": {
-                  "loggingConfigurationOverrideConfigMap": {
-                    "type": "string",
-                    "default": ""
-                  },
-                  "otelCollectorEndpoint": {
-                    "type": "string",
-                    "default": "http://otel-collector:4317"
-                  },
-                  "setHeaders": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                }
-              },
-              "label": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "version",
-              "label"
-            ]
-          },
-          "targetConfig": {
-            "type": "object",
-            "properties": {
-              "endpoint": {
-                "type": "string",
-                "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?$"
-              },
-              "allowInsecure": {
-                "type": "boolean",
-                "default": false
-              },
-              "authConfig": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "basic": {
-                        "type": "object",
-                        "properties": {
-                          "secretName": {
-                            "type": "string",
-                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
-                          }
-                        },
-                        "required": [
-                          "secretName"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "basic"
-                    ]
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "sigv4": {
-                        "type": "object",
-                        "properties": {
-                          "region": {
-                            "type": "string"
-                          },
-                          "service": {
-                            "type": "string",
-                            "default": "es"
-                          }
-                        },
-                        "required": [
-                          "region"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "sigv4"
-                    ]
-                  },
-                  {
-                    "type": "object",
-                    "properties": {
-                      "mtls": {
-                        "type": "object",
-                        "properties": {
-                          "caCert": {
-                            "type": "string"
-                          },
-                          "clientSecretName": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "caCert",
-                          "clientSecretName"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "mtls"
-                    ]
-                  }
-                ]
-              },
-              "label": {
-                "type": "string",
-                "pattern": "^[a-zA-Z0-9_]+$"
-              }
-            },
-            "required": [
-              "endpoint",
-              "label"
-            ]
-          },
-          "snapshotExtractAndLoadConfigArray": {
+          "kafkaClusters": {
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
-                "createSnapshotConfig": {
+                "name": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                },
+                "config": {
                   "type": "object",
                   "properties": {
-                    "indexAllowlist": {
+                    "replicas": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 1
+                    },
+                    "storage": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "ephemeral"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "persistent-claim"
+                              ]
+                            },
+                            "size": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "size"
+                          ]
+                        }
+                      ],
+                      "default": {
+                        "type": "ephemeral"
+                      }
+                    },
+                    "partitions": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 1
+                    },
+                    "topicReplicas": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 1
+                    }
+                  }
+                },
+                "topics": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name",
+                "version",
+                "config",
+                "topics"
+              ]
+            },
+            "minItems": 1
+          },
+          "proxies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "kafkaConfig": {
+                  "type": "object",
+                  "properties": {
+                    "enableMSKAuth": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "kafkaConnection": {
+                      "type": "string",
+                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                    },
+                    "kafkaTopic": {
+                      "type": "string",
+                      "default": "",
+                      "description": "Empty defaults to the name of the target label"
+                    },
+                    "label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kafkaConnection",
+                    "label"
+                  ]
+                },
+                "sourceEndpoint": {
+                  "type": "string"
+                },
+                "sourceAllowInsecure": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "proxyConfig": {
+                  "type": "object",
+                  "properties": {
+                    "loggingConfigurationOverrideConfigMap": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "internetFacing": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "podReplicas": {
+                      "type": "number",
+                      "default": 1
+                    },
+                    "resources": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "limits": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                            },
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                            }
+                          },
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Resource upper bound for a container"
+                        },
+                        "requests": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                            },
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                            }
+                          },
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Resource lower bound for a container"
+                        }
+                      },
+                      "default": {
+                        "limits": {
+                          "cpu": "3500m",
+                          "memory": "3500Mi"
+                        },
+                        "requests": {
+                          "cpu": "3500m",
+                          "memory": "3500Mi"
+                        }
+                      },
+                      "required": [
+                        "limits",
+                        "requests"
+                      ],
+                      "description": "Resource limits and requests for proxy container."
+                    },
+                    "otelCollectorEndpoint": {
+                      "type": "string",
+                      "default": "http://otel-collector:4317"
+                    },
+                    "setHeader": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "destinationConnectionPoolSize": {
+                      "type": "number",
+                      "default": 0
+                    },
+                    "destinationConnectionPoolTimeout": {
+                      "type": "string",
+                      "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
+                      "default": "PT30S"
+                    },
+                    "kafkaClientId": {
+                      "type": "string",
+                      "default": "HttpCaptureProxyProducer"
+                    },
+                    "listenPort": {
+                      "type": "number"
+                    },
+                    "maxTrafficBufferSize": {
+                      "type": "number",
+                      "default": 1048576
+                    },
+                    "noCapture": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "numThreads": {
+                      "type": "number",
+                      "default": 1
+                    },
+                    "sslConfigFile": {
+                      "type": "string",
+                      "description": "Legacy: YAML config for OpenSearch security SSL. Prefer tls config for K8s deployments."
+                    },
+                    "tls": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "certManager"
+                              ]
+                            },
+                            "issuerRef": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "description": "Name of the cert-manager Issuer or ClusterIssuer."
+                                },
+                                "kind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "Issuer",
+                                    "ClusterIssuer"
+                                  ],
+                                  "default": "ClusterIssuer",
+                                  "description": "Kind of the issuer resource."
+                                },
+                                "group": {
+                                  "type": "string",
+                                  "default": "cert-manager.io",
+                                  "description": "API group of the issuer. Use 'awspca.cert-manager.io' for AWS PCA issuers."
+                                }
+                              },
+                              "required": [
+                                "name"
+                              ]
+                            },
+                            "commonName": {
+                              "type": "string"
+                            },
+                            "dnsNames": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "description": "DNS names for the certificate. Must include the proxy's service DNS name."
+                            },
+                            "duration": {
+                              "type": "string",
+                              "default": "2160h",
+                              "description": "Requested certificate validity duration (default: 90 days)."
+                            },
+                            "renewBefore": {
+                              "type": "string",
+                              "default": "360h",
+                              "description": "How long before expiry to renew (default: 15 days)."
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "issuerRef",
+                            "dnsNames"
+                          ],
+                          "description": "Use cert-manager to provision a TLS certificate for the proxy."
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "existingSecret"
+                              ]
+                            },
+                            "secretName": {
+                              "type": "string",
+                              "description": "Name of an existing K8s TLS secret with tls.crt and tls.key."
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "secretName"
+                          ],
+                          "description": "Use a pre-existing K8s TLS secret."
+                        }
+                      ],
+                      "description": "TLS certificate configuration for the proxy. Mutually exclusive with sslConfigFile."
+                    },
+                    "enableMSKAuth": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "suppressCaptureForHeaderMatch": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       },
                       "default": []
                     },
-                    "maxSnapshotRateMbPerNode": {
-                      "type": "number",
-                      "default": 0
-                    },
-                    "jvmArgs": {
+                    "suppressCaptureForMethod": {
                       "type": "string",
                       "default": ""
                     },
-                    "loggingConfigurationOverrideConfigMap": {
+                    "suppressCaptureForUriPath": {
                       "type": "string",
                       "default": ""
                     },
-                    "semaphoreConfigMapName": {
-                      "type": "string"
-                    },
-                    "semaphoreKey": {
-                      "type": "string"
+                    "suppressMethodAndPath": {
+                      "type": "string",
+                      "default": ""
                     }
                   },
                   "required": [
-                    "semaphoreConfigMapName",
-                    "semaphoreKey"
+                    "listenPort"
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "kafkaConfig",
+                "sourceEndpoint",
+                "proxyConfig"
+              ]
+            },
+            "default": []
+          },
+          "snapshots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "createSnapshotConfig": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string"
+                      },
+                      "snapshotPrefix": {
+                        "type": "string"
+                      },
+                      "config": {
+                        "type": "object",
+                        "properties": {
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
+                          "loggingConfigurationOverrideConfigMap": {
+                            "type": "string",
+                            "default": ""
+                          },
+                          "indexAllowlist": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
+                          },
+                          "maxSnapshotRateMbPerNode": {
+                            "type": "number",
+                            "default": 0
+                          }
+                        }
+                      },
+                      "repo": {
+                        "type": "object",
+                        "properties": {
+                          "awsRegion": {
+                            "type": "string",
+                            "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                          },
+                          "endpoint": {
+                            "type": "string",
+                            "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                            "default": ""
+                          },
+                          "s3RepoPathUri": {
+                            "type": "string",
+                            "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                            "description": "s3://BUCKETNAME/PATH"
+                          },
+                          "s3RoleArn": {
+                            "type": "string",
+                            "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                            "default": ""
+                          },
+                          "useLocalStack": {
+                            "type": "boolean",
+                            "default": false
+                          },
+                          "repoName": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "awsRegion",
+                          "s3RepoPathUri",
+                          "repoName"
+                        ]
+                      },
+                      "semaphoreConfigMapName": {
+                        "type": "string"
+                      },
+                      "semaphoreKey": {
+                        "type": "string"
+                      },
+                      "dependsOnProxySetups": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "snapshotPrefix",
+                      "config",
+                      "repo",
+                      "semaphoreConfigMapName",
+                      "semaphoreKey",
+                      "dependsOnProxySetups"
+                    ]
+                  },
+                  "minItems": 1
+                },
+                "sourceConfig": {
+                  "type": "object",
+                  "properties": {
+                    "endpoint": {
+                      "type": "string",
+                      "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?)?$",
+                      "default": ""
+                    },
+                    "allowInsecure": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "authConfig": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "basic": {
+                              "type": "object",
+                              "properties": {
+                                "secretName": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                                }
+                              },
+                              "required": [
+                                "secretName"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "basic"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "sigv4": {
+                              "type": "object",
+                              "properties": {
+                                "region": {
+                                  "type": "string"
+                                },
+                                "service": {
+                                  "type": "string",
+                                  "default": "es"
+                                }
+                              },
+                              "required": [
+                                "region"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "sigv4"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mtls": {
+                              "type": "object",
+                              "properties": {
+                                "caCert": {
+                                  "type": "string"
+                                },
+                                "clientSecretName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "caCert",
+                                "clientSecretName"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "mtls"
+                          ]
+                        }
+                      ]
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "proxy": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "endpoint": {
+                          "type": "string",
+                          "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$"
+                        },
+                        "allowInsecure": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "endpoint"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "label"
+                  ]
+                }
+              },
+              "required": [
+                "createSnapshotConfig",
+                "sourceConfig"
+              ]
+            },
+            "default": []
+          },
+          "snapshotMigrations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "snapshotNameResolution": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "externalSnapshotName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "externalSnapshotName"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "dataSnapshotResourceName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "dataSnapshotResourceName"
+                      ]
+                    }
                   ]
                 },
                 "migrations": {
@@ -298,6 +659,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "metadataMigrationConfig": {
                         "type": "object",
                         "properties": {
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
+                          "loggingConfigurationOverrideConfigMap": {
+                            "type": "string",
+                            "default": ""
+                          },
                           "componentTemplateAllowlist": {
                             "type": "array",
                             "items": {
@@ -326,14 +695,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "clusterAwarenessAttributes": {
                             "type": "number",
                             "default": 1
-                          },
-                          "jvmArgs": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "loggingConfigurationOverrideConfigMap": {
-                            "type": "string",
-                            "default": ""
                           },
                           "multiTypeBehavior": {
                             "anyOf": [
@@ -388,13 +749,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "documentBackfillConfig": {
                         "type": "object",
                         "properties": {
-                          "indexAllowlist": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "default": []
-                          },
                           "podReplicas": {
                             "type": "number",
                             "default": 1
@@ -406,6 +760,79 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "loggingConfigurationOverrideConfigMap": {
                             "type": "string",
                             "default": ""
+                          },
+                          "useTargetClusterForWorkCoordination": {
+                            "type": "boolean",
+                            "default": false,
+                            "description": "When true, uses the target OpenSearch cluster for RFS work coordination. When false, a dedicated single-node OpenSearch coordinator cluster is deployed and managed for the lifetime of the migration, then torn down on completion."
+                          },
+                          "resources": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "limits": {
+                                "type": "object",
+                                "properties": {
+                                  "cpu": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+m$",
+                                    "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                                  },
+                                  "memory": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                    "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                                  },
+                                  "ephemeral-storage": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                    "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                                  }
+                                },
+                                "required": [
+                                  "cpu",
+                                  "memory"
+                                ],
+                                "description": "Resource upper bound for a container"
+                              },
+                              "requests": {
+                                "type": "object",
+                                "properties": {
+                                  "cpu": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+m$",
+                                    "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                                  },
+                                  "memory": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                    "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                                  },
+                                  "ephemeral-storage": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                    "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                                  }
+                                },
+                                "required": [
+                                  "cpu",
+                                  "memory"
+                                ],
+                                "description": "Resource lower bound for a container"
+                              }
+                            },
+                            "required": [
+                              "limits",
+                              "requests"
+                            ],
+                            "description": "Resource limits and requests for RFS container"
+                          },
+                          "indexAllowlist": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
                           },
                           "allowLooseVersionMatching": {
                             "type": "boolean",
@@ -435,72 +862,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "otelCollectorEndpoint": {
                             "type": "string",
                             "default": "http://otel-collector:4317"
-                          },
-                          "useTargetClusterForWorkCoordination": {
-                            "type": "boolean",
-                            "default": false,
-                            "description": "When true, uses the target OpenSearch cluster for RFS work coordination. When false, a dedicated single-node OpenSearch coordinator cluster is deployed and managed for the lifetime of the migration, then torn down on completion."
-                          },
-                          "resources": {
-                            "type": "object",
-                            "nullable": true,
-                            "properties": {
-                              "limits": {
-                                "type": "object",
-                                "properties": {
-                                  "cpu": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+m$",
-                                    "description": "CPU quantity in millicores (e.g., '100m', '500m')"
-                                  },
-                                  "memory": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                                    "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
-                                  },
-                                  "ephemeral-storage": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                                    "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
-                                  }
-                                },
-                                "required": [
-                                  "cpu",
-                                  "memory"
-                                ],
-                                "description": "Resource upper bound for a container"
-                              },
-                              "requests": {
-                                "type": "object",
-                                "properties": {
-                                  "cpu": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+m$",
-                                    "description": "CPU quantity in millicores (e.g., '100m', '500m')"
-                                  },
-                                  "memory": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                                    "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
-                                  },
-                                  "ephemeral-storage": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                                    "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
-                                  }
-                                },
-                                "required": [
-                                  "cpu",
-                                  "memory"
-                                ],
-                                "description": "Resource lower bound for a container"
-                              }
-                            },
-                            "required": [
-                              "limits",
-                              "requests"
-                            ],
-                            "description": "Resource limits and requests for RFS container"
                           }
                         }
                       }
@@ -508,39 +869,111 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "required": [
                       "label"
                     ]
-                  }
+                  },
+                  "minItems": 1
                 },
-                "label": {
+                "sourceVersion": {
                   "type": "string"
                 },
-                "snapshotConfig": {
+                "sourceLabel": {
+                  "type": "string"
+                },
+                "targetConfig": {
                   "type": "object",
                   "properties": {
-                    "snapshotNameConfig": {
+                    "endpoint": {
+                      "type": "string",
+                      "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$"
+                    },
+                    "allowInsecure": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "authConfig": {
                       "anyOf": [
                         {
                           "type": "object",
                           "properties": {
-                            "externallyManagedSnapshot": {
-                              "type": "string"
+                            "basic": {
+                              "type": "object",
+                              "properties": {
+                                "secretName": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                                }
+                              },
+                              "required": [
+                                "secretName"
+                              ]
                             }
                           },
                           "required": [
-                            "externallyManagedSnapshot"
+                            "basic"
                           ]
                         },
                         {
                           "type": "object",
                           "properties": {
-                            "snapshotNamePrefix": {
-                              "type": "string"
+                            "sigv4": {
+                              "type": "object",
+                              "properties": {
+                                "region": {
+                                  "type": "string"
+                                },
+                                "service": {
+                                  "type": "string",
+                                  "default": "es"
+                                }
+                              },
+                              "required": [
+                                "region"
+                              ]
                             }
                           },
                           "required": [
-                            "snapshotNamePrefix"
+                            "sigv4"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mtls": {
+                              "type": "object",
+                              "properties": {
+                                "caCert": {
+                                  "type": "string"
+                                },
+                                "clientSecretName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "caCert",
+                                "clientSecretName"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "mtls"
                           ]
                         }
                       ]
+                    },
+                    "label": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z0-9_]+$"
+                    }
+                  },
+                  "required": [
+                    "endpoint",
+                    "label"
+                  ]
+                },
+                "snapshotConfig": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
                     },
                     "repoConfig": {
                       "type": "object",
@@ -577,125 +1010,334 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "s3RepoPathUri",
                         "repoName"
                       ]
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "repoConfig"
+                  ]
+                }
+              },
+              "required": [
+                "label",
+                "snapshotNameResolution",
+                "migrations",
+                "sourceVersion",
+                "sourceLabel",
+                "targetConfig",
+                "snapshotConfig"
+              ]
+            },
+            "default": []
+          },
+          "trafficReplays": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "dependsOnSnapshotMigrations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "source": {
+                        "type": "string"
+                      },
+                      "snapshot": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "source",
+                      "snapshot"
+                    ]
+                  }
+                },
+                "fromProxy": {
+                  "type": "string"
+                },
+                "kafkaClusterName": {
+                  "type": "string"
+                },
+                "kafkaConfig": {
+                  "type": "object",
+                  "properties": {
+                    "enableMSKAuth": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "kafkaConnection": {
+                      "type": "string",
+                      "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                    },
+                    "kafkaTopic": {
+                      "type": "string",
+                      "default": "",
+                      "description": "Empty defaults to the name of the target label"
                     },
                     "label": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "snapshotNameConfig",
-                    "repoConfig",
+                    "kafkaConnection",
+                    "label"
+                  ]
+                },
+                "replayerConfig": {
+                  "type": "object",
+                  "properties": {
+                    "jvmArgs": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "loggingConfigurationOverrideConfigMap": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "podReplicas": {
+                      "type": "number",
+                      "default": 1
+                    },
+                    "resources": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "limits": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                            },
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                            }
+                          },
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Resource upper bound for a container"
+                        },
+                        "requests": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                            },
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                            }
+                          },
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Resource lower bound for a container"
+                        }
+                      },
+                      "required": [
+                        "limits",
+                        "requests"
+                      ],
+                      "description": "Resource limits and requests for replayer container."
+                    },
+                    "kafkaTrafficEnableMSKAuth": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "kafkaTrafficPropertyFile": {
+                      "type": "string",
+                      "description": "File path for Kafka properties file for additional or overridden Kafka properties."
+                    },
+                    "lookaheadTimeSeconds": {
+                      "type": "number",
+                      "default": 400
+                    },
+                    "maxConcurrentRequests": {
+                      "type": "number",
+                      "default": 10000
+                    },
+                    "numClientThreads": {
+                      "type": "number",
+                      "default": 0
+                    },
+                    "observedPacketConnectionTimeout": {
+                      "type": "number",
+                      "default": 360
+                    },
+                    "otelCollectorEndpoint": {
+                      "type": "string",
+                      "default": "http://otel-collector:4317"
+                    },
+                    "quiescentPeriodMs": {
+                      "type": "number",
+                      "default": 5000
+                    },
+                    "removeAuthHeader": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "speedupFactor": {
+                      "type": "number",
+                      "default": 1.1
+                    },
+                    "targetServerResponseTimeoutSeconds": {
+                      "type": "number",
+                      "default": 150
+                    },
+                    "transformerConfig": {
+                      "type": "string",
+                      "description": "Request transformer configuration as a string or JSON."
+                    },
+                    "transformerConfigEncoded": {
+                      "type": "string",
+                      "description": "Base64-encoded request transformer configuration."
+                    },
+                    "transformerConfigFile": {
+                      "type": "string",
+                      "description": "Path to the JSON configuration file for request transformers."
+                    },
+                    "tupleTransformerConfig": {
+                      "type": "string",
+                      "description": "Tuple transformer configuration as a string or JSON."
+                    },
+                    "tupleTransformerConfigBase64": {
+                      "type": "string",
+                      "description": "Base64-encoded tuple transformer configuration."
+                    },
+                    "tupleTransformerConfigFile": {
+                      "type": "string",
+                      "description": "Path to the JSON configuration file for tuple transformers."
+                    },
+                    "userAgent": {
+                      "type": "string",
+                      "description": "String appended to the user-agent header for requests to the target cluster."
+                    }
+                  }
+                },
+                "toTarget": {
+                  "type": "object",
+                  "properties": {
+                    "endpoint": {
+                      "type": "string",
+                      "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$"
+                    },
+                    "allowInsecure": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "authConfig": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "basic": {
+                              "type": "object",
+                              "properties": {
+                                "secretName": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                                }
+                              },
+                              "required": [
+                                "secretName"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "basic"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "sigv4": {
+                              "type": "object",
+                              "properties": {
+                                "region": {
+                                  "type": "string"
+                                },
+                                "service": {
+                                  "type": "string",
+                                  "default": "es"
+                                }
+                              },
+                              "required": [
+                                "region"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "sigv4"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mtls": {
+                              "type": "object",
+                              "properties": {
+                                "caCert": {
+                                  "type": "string"
+                                },
+                                "clientSecretName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "caCert",
+                                "clientSecretName"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "mtls"
+                          ]
+                        }
+                      ]
+                    },
+                    "label": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z0-9_]+$"
+                    }
+                  },
+                  "required": [
+                    "endpoint",
                     "label"
                   ]
                 }
               },
               "required": [
-                "migrations",
-                "label",
-                "snapshotConfig"
+                "dependsOnSnapshotMigrations",
+                "fromProxy",
+                "kafkaClusterName",
+                "kafkaConfig",
+                "replayerConfig",
+                "toTarget"
               ]
-            }
-          },
-          "replayerConfig": {
-            "type": "object",
-            "properties": {
-              "speedupFactor": {
-                "type": "number",
-                "default": 1.1
-              },
-              "podReplicas": {
-                "type": "number",
-                "default": 1
-              },
-              "authHeaderOverride": {
-                "type": "string",
-                "default": ""
-              },
-              "jvmArgs": {
-                "type": "string",
-                "default": ""
-              },
-              "loggingConfigurationOverrideConfigMap": {
-                "type": "string",
-                "default": ""
-              },
-              "resources": {
-                "type": "object",
-                "properties": {
-                  "limits": {
-                    "type": "object",
-                    "properties": {
-                      "cpu": {
-                        "type": "string",
-                        "pattern": "^[0-9]+m$",
-                        "description": "CPU quantity in millicores (e.g., '100m', '500m')"
-                      },
-                      "memory": {
-                        "type": "string",
-                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                        "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
-                      },
-                      "ephemeral-storage": {
-                        "type": "string",
-                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                        "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
-                      }
-                    },
-                    "required": [
-                      "cpu",
-                      "memory"
-                    ],
-                    "description": "Resource upper bound for a container"
-                  },
-                  "requests": {
-                    "type": "object",
-                    "properties": {
-                      "cpu": {
-                        "type": "string",
-                        "pattern": "^[0-9]+m$",
-                        "description": "CPU quantity in millicores (e.g., '100m', '500m')"
-                      },
-                      "memory": {
-                        "type": "string",
-                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                        "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
-                      },
-                      "ephemeral-storage": {
-                        "type": "string",
-                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                        "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
-                      }
-                    },
-                    "required": [
-                      "cpu",
-                      "memory"
-                    ],
-                    "description": "Resource lower bound for a container"
-                  }
-                },
-                "default": {
-                  "limits": {
-                    "cpu": "3500m",
-                    "memory": "3500Mi"
-                  },
-                  "requests": {
-                    "cpu": "3500m",
-                    "memory": "3500Mi"
-                  }
-                },
-                "required": [
-                  "limits",
-                  "requests"
-                ],
-                "description": "Resource limits and requests for replayer container."
-              }
-            }
+            },
+            "default": []
           }
-        },
-        "required": [
-          "sourceConfig",
-          "targetConfig"
-        ]
+        }
       }
     }
   },
@@ -713,6 +1355,110 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       "type": "boolean",
       "default": false
     },
+    "kafkaClusterConfiguration": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "autoCreate": {
+                "type": "object",
+                "properties": {
+                  "replicas": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1
+                  },
+                  "storage": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "ephemeral"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "persistent-claim"
+                            ]
+                          },
+                          "size": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "size"
+                        ]
+                      }
+                    ],
+                    "default": {
+                      "type": "ephemeral"
+                    }
+                  },
+                  "partitions": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1
+                  },
+                  "topicReplicas": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1
+                  }
+                }
+              }
+            },
+            "required": [
+              "autoCreate"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "existing": {
+                "type": "object",
+                "properties": {
+                  "enableMSKAuth": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "kafkaConnection": {
+                    "type": "string",
+                    "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                  },
+                  "kafkaTopic": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Empty defaults to the name of the target label"
+                  }
+                },
+                "required": [
+                  "kafkaConnection"
+                ]
+              }
+            },
+            "required": [
+              "existing"
+            ]
+          }
+        ]
+      },
+      "default": {}
+    },
     "sourceClusters": {
       "type": "object",
       "additionalProperties": {
@@ -720,7 +1466,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "properties": {
           "endpoint": {
             "type": "string",
-            "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?)?$",
+            "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?)?$",
             "default": ""
           },
           "allowInsecure": {
@@ -801,58 +1547,139 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "type": "string",
             "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
           },
-          "snapshotRepos": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "object",
-              "properties": {
-                "awsRegion": {
-                  "type": "string",
-                  "description": "The AWS region that the bucket reside in (us-east-2, etc)"
-                },
-                "endpoint": {
-                  "type": "string",
-                  "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
-                  "default": "",
-                  "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
-                },
-                "s3RepoPathUri": {
-                  "type": "string",
-                  "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                  "description": "s3://BUCKETNAME/PATH"
-                },
-                "s3RoleArn": {
-                  "type": "string",
-                  "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
-                  "default": "",
-                  "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
-                }
-              },
-              "required": [
-                "awsRegion",
-                "s3RepoPathUri"
-              ]
-            },
-            "description": "Keys are the repository names that are managed by the source cluster"
+          "enabled": {
+            "type": "boolean",
+            "default": true
           },
-          "proxy": {
+          "snapshotInfo": {
             "type": "object",
             "properties": {
-              "loggingConfigurationOverrideConfigMap": {
-                "type": "string",
-                "default": ""
+              "repos": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "awsRegion": {
+                      "type": "string",
+                      "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                    },
+                    "endpoint": {
+                      "type": "string",
+                      "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                      "default": "",
+                      "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
+                    },
+                    "s3RepoPathUri": {
+                      "type": "string",
+                      "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                      "description": "s3://BUCKETNAME/PATH"
+                    },
+                    "s3RoleArn": {
+                      "type": "string",
+                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                      "default": "",
+                      "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
+                    }
+                  },
+                  "required": [
+                    "awsRegion",
+                    "s3RepoPathUri"
+                  ]
+                },
+                "description": "Keys are the repository names that are managed by the source cluster"
               },
-              "otelCollectorEndpoint": {
-                "type": "string",
-                "default": "http://otel-collector:4317"
-              },
-              "setHeaders": {
-                "type": "array",
-                "items": {
-                  "type": "string"
+              "snapshots": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "config": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "externallyManagedSnapshotName": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "externallyManagedSnapshotName"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "createSnapshotConfig": {
+                              "type": "object",
+                              "properties": {
+                                "snapshotPrefix": {
+                                  "type": "string",
+                                  "default": ""
+                                },
+                                "jvmArgs": {
+                                  "type": "string",
+                                  "default": ""
+                                },
+                                "loggingConfigurationOverrideConfigMap": {
+                                  "type": "string",
+                                  "default": ""
+                                },
+                                "indexAllowlist": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "default": []
+                                },
+                                "maxSnapshotRateMbPerNode": {
+                                  "type": "number",
+                                  "default": 0
+                                }
+                              }
+                            },
+                            "requiredForCompleteMigration": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "toTargets": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "toTargets"
+                                  ]
+                                },
+                                {
+                                  "type": "boolean",
+                                  "default": true
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "createSnapshotConfig"
+                          ]
+                        }
+                      ]
+                    },
+                    "repoName": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "config",
+                    "repoName"
+                  ]
                 }
               }
-            }
+            },
+            "required": [
+              "snapshots"
+            ]
           }
         },
         "required": [
@@ -867,7 +1694,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "properties": {
           "endpoint": {
             "type": "string",
-            "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(:\\\\d+)?(\\\\/)?$"
+            "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$"
           },
           "allowInsecure": {
             "type": "boolean",
@@ -942,6 +1769,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 ]
               }
             ]
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true
           }
         },
         "required": [
@@ -949,7 +1780,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         ]
       }
     },
-    "migrationConfigs": {
+    "snapshotMigrationConfigs": {
       "type": "array",
       "items": {
         "type": "object",
@@ -964,414 +1795,242 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "toTarget": {
             "type": "string"
           },
-          "snapshotExtractAndLoadConfigs": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "label": {
-                  "type": "string",
-                  "pattern": "^[a-zA-Z][a-zA-Z0-9]*",
-                  "default": ""
-                },
-                "createSnapshotConfig": {
-                  "type": "object",
-                  "properties": {
-                    "indexAllowlist": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "default": []
-                    },
-                    "maxSnapshotRateMbPerNode": {
-                      "type": "number",
-                      "default": 0
-                    },
-                    "jvmArgs": {
-                      "type": "string",
-                      "default": ""
-                    },
-                    "loggingConfigurationOverrideConfigMap": {
-                      "type": "string",
-                      "default": ""
-                    }
-                  }
-                },
-                "snapshotConfig": {
-                  "type": "object",
-                  "properties": {
-                    "snapshotNameConfig": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "externallyManagedSnapshot": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "externallyManagedSnapshot"
-                          ]
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "snapshotNamePrefix": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "snapshotNamePrefix"
-                          ]
-                        }
-                      ]
-                    },
-                    "repoName": {
-                      "type": "string",
-                      "default": "default"
-                    }
+          "perSnapshotConfig": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z][a-zA-Z0-9]*",
+                    "default": ""
                   },
-                  "required": [
-                    "snapshotNameConfig"
-                  ]
-                },
-                "migrations": {
-                  "type": "array",
-                  "items": {
+                  "metadataMigrationConfig": {
                     "type": "object",
                     "properties": {
-                      "label": {
+                      "jvmArgs": {
                         "type": "string",
-                        "pattern": "^[a-zA-Z][a-zA-Z0-9]*",
                         "default": ""
                       },
-                      "metadataMigrationConfig": {
-                        "type": "object",
-                        "properties": {
-                          "componentTemplateAllowlist": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "default": []
-                          },
-                          "indexAllowlist": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "default": []
-                          },
-                          "indexTemplateAllowlist": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "default": []
-                          },
-                          "allowLooseVersionMatching": {
-                            "type": "boolean",
-                            "default": true
-                          },
-                          "clusterAwarenessAttributes": {
-                            "type": "number",
-                            "default": 1
-                          },
-                          "jvmArgs": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "loggingConfigurationOverrideConfigMap": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "multiTypeBehavior": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "NONE"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "UNION"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "SPLIT"
-                                ]
-                              }
-                            ],
-                            "default": "NONE"
-                          },
-                          "otelCollectorEndpoint": {
-                            "type": "string",
-                            "default": "http://otel-collector:4317"
-                          },
-                          "output": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "HUMAN_READABLE"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "JSON"
-                                ]
-                              }
-                            ],
-                            "default": "HUMAN_READABLE"
-                          },
-                          "transformerConfigBase64": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "skipEvaluateApproval": {
-                            "type": "boolean",
-                            "default": false
-                          },
-                          "skipMigrateApproval": {
-                            "type": "boolean",
-                            "default": false
-                          }
-                        }
+                      "loggingConfigurationOverrideConfigMap": {
+                        "type": "string",
+                        "default": ""
                       },
-                      "documentBackfillConfig": {
+                      "skipEvaluateApproval": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "skipMigrateApproval": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "componentTemplateAllowlist": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "default": []
+                      },
+                      "indexAllowlist": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "default": []
+                      },
+                      "indexTemplateAllowlist": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "default": []
+                      },
+                      "allowLooseVersionMatching": {
+                        "type": "boolean",
+                        "default": true
+                      },
+                      "clusterAwarenessAttributes": {
+                        "type": "number",
+                        "default": 1
+                      },
+                      "multiTypeBehavior": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "NONE"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "UNION"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "SPLIT"
+                            ]
+                          }
+                        ],
+                        "default": "NONE"
+                      },
+                      "otelCollectorEndpoint": {
+                        "type": "string",
+                        "default": "http://otel-collector:4317"
+                      },
+                      "output": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "HUMAN_READABLE"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "JSON"
+                            ]
+                          }
+                        ],
+                        "default": "HUMAN_READABLE"
+                      },
+                      "transformerConfigBase64": {
+                        "type": "string",
+                        "default": ""
+                      }
+                    }
+                  },
+                  "documentBackfillConfig": {
+                    "type": "object",
+                    "properties": {
+                      "podReplicas": {
+                        "type": "number",
+                        "default": 1
+                      },
+                      "jvmArgs": {
+                        "type": "string",
+                        "default": ""
+                      },
+                      "loggingConfigurationOverrideConfigMap": {
+                        "type": "string",
+                        "default": ""
+                      },
+                      "skipApproval": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "useTargetClusterForWorkCoordination": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, uses the target OpenSearch cluster for RFS work coordination. When false, a dedicated single-node OpenSearch coordinator cluster is deployed and managed for the lifetime of the migration, then torn down on completion."
+                      },
+                      "resources": {
                         "type": "object",
+                        "nullable": true,
                         "properties": {
-                          "indexAllowlist": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "default": []
-                          },
-                          "podReplicas": {
-                            "type": "number",
-                            "default": 1
-                          },
-                          "jvmArgs": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "loggingConfigurationOverrideConfigMap": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "allowLooseVersionMatching": {
-                            "type": "boolean",
-                            "default": true,
-                            "description": ""
-                          },
-                          "docTransformerConfigBase64": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "documentsPerBulkRequest": {
-                            "type": "number",
-                            "default": 2147483647
-                          },
-                          "initialLeaseDuration": {
-                            "type": "string",
-                            "default": "PT1H"
-                          },
-                          "maxConnections": {
-                            "type": "number",
-                            "default": 10
-                          },
-                          "maxShardSizeBytes": {
-                            "type": "number",
-                            "default": 85899345920
-                          },
-                          "otelCollectorEndpoint": {
-                            "type": "string",
-                            "default": "http://otel-collector:4317"
-                          },
-                          "skipApproval": {
-                            "type": "boolean",
-                            "default": false
-                          },
-                          "useTargetClusterForWorkCoordination": {
-                            "type": "boolean",
-                            "default": false,
-                            "description": "When true, uses the target OpenSearch cluster for RFS work coordination. When false, a dedicated single-node OpenSearch coordinator cluster is deployed and managed for the lifetime of the migration, then torn down on completion."
-                          },
-                          "resources": {
+                          "limits": {
                             "type": "object",
-                            "nullable": true,
                             "properties": {
-                              "limits": {
-                                "type": "object",
-                                "properties": {
-                                  "cpu": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+m$",
-                                    "description": "CPU quantity in millicores (e.g., '100m', '500m')"
-                                  },
-                                  "memory": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                                    "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
-                                  },
-                                  "ephemeral-storage": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                                    "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
-                                  }
-                                },
-                                "required": [
-                                  "cpu",
-                                  "memory"
-                                ],
-                                "description": "Resource upper bound for a container"
+                              "cpu": {
+                                "type": "string",
+                                "pattern": "^[0-9]+m$",
+                                "description": "CPU quantity in millicores (e.g., '100m', '500m')"
                               },
-                              "requests": {
-                                "type": "object",
-                                "properties": {
-                                  "cpu": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+m$",
-                                    "description": "CPU quantity in millicores (e.g., '100m', '500m')"
-                                  },
-                                  "memory": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                                    "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
-                                  },
-                                  "ephemeral-storage": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                                    "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
-                                  }
-                                },
-                                "required": [
-                                  "cpu",
-                                  "memory"
-                                ],
-                                "description": "Resource lower bound for a container"
+                              "memory": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                              },
+                              "ephemeral-storage": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
                               }
                             },
                             "required": [
-                              "limits",
-                              "requests"
+                              "cpu",
+                              "memory"
                             ],
-                            "description": "Resource limits and requests for RFS container"
+                            "description": "Resource upper bound for a container"
+                          },
+                          "requests": {
+                            "type": "object",
+                            "properties": {
+                              "cpu": {
+                                "type": "string",
+                                "pattern": "^[0-9]+m$",
+                                "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                              },
+                              "memory": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                              },
+                              "ephemeral-storage": {
+                                "type": "string",
+                                "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                                "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                              }
+                            },
+                            "required": [
+                              "cpu",
+                              "memory"
+                            ],
+                            "description": "Resource lower bound for a container"
                           }
-                        }
+                        },
+                        "required": [
+                          "limits",
+                          "requests"
+                        ],
+                        "description": "Resource limits and requests for RFS container"
+                      },
+                      "indexAllowlist": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "default": []
+                      },
+                      "allowLooseVersionMatching": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": ""
+                      },
+                      "docTransformerConfigBase64": {
+                        "type": "string",
+                        "default": ""
+                      },
+                      "documentsPerBulkRequest": {
+                        "type": "number",
+                        "default": 2147483647
+                      },
+                      "initialLeaseDuration": {
+                        "type": "string",
+                        "default": "PT1H"
+                      },
+                      "maxConnections": {
+                        "type": "number",
+                        "default": 10
+                      },
+                      "maxShardSizeBytes": {
+                        "type": "number",
+                        "default": 85899345920
+                      },
+                      "otelCollectorEndpoint": {
+                        "type": "string",
+                        "default": "http://otel-collector:4317"
                       }
                     }
-                  },
-                  "minItems": 1
+                  }
                 }
               },
-              "required": [
-                "snapshotConfig",
-                "migrations"
-              ]
-            },
-            "minItems": 1
-          },
-          "replayerConfig": {
-            "type": "object",
-            "properties": {
-              "speedupFactor": {
-                "type": "number",
-                "default": 1.1
-              },
-              "podReplicas": {
-                "type": "number",
-                "default": 1
-              },
-              "authHeaderOverride": {
-                "type": "string",
-                "default": ""
-              },
-              "jvmArgs": {
-                "type": "string",
-                "default": ""
-              },
-              "loggingConfigurationOverrideConfigMap": {
-                "type": "string",
-                "default": ""
-              },
-              "resources": {
-                "type": "object",
-                "properties": {
-                  "limits": {
-                    "type": "object",
-                    "properties": {
-                      "cpu": {
-                        "type": "string",
-                        "pattern": "^[0-9]+m$",
-                        "description": "CPU quantity in millicores (e.g., '100m', '500m')"
-                      },
-                      "memory": {
-                        "type": "string",
-                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                        "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
-                      },
-                      "ephemeral-storage": {
-                        "type": "string",
-                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                        "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
-                      }
-                    },
-                    "required": [
-                      "cpu",
-                      "memory"
-                    ],
-                    "description": "Resource upper bound for a container"
-                  },
-                  "requests": {
-                    "type": "object",
-                    "properties": {
-                      "cpu": {
-                        "type": "string",
-                        "pattern": "^[0-9]+m$",
-                        "description": "CPU quantity in millicores (e.g., '100m', '500m')"
-                      },
-                      "memory": {
-                        "type": "string",
-                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                        "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
-                      },
-                      "ephemeral-storage": {
-                        "type": "string",
-                        "pattern": "^[0-9]+((E|P|T|G|M)i?|Ki|k)$",
-                        "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
-                      }
-                    },
-                    "required": [
-                      "cpu",
-                      "memory"
-                    ],
-                    "description": "Resource lower bound for a container"
-                  }
-                },
-                "default": {
-                  "limits": {
-                    "cpu": "3500m",
-                    "memory": "3500Mi"
-                  },
-                  "requests": {
-                    "cpu": "3500m",
-                    "memory": "3500Mi"
-                  }
-                },
-                "required": [
-                  "limits",
-                  "requests"
-                ],
-                "description": "Resource limits and requests for replayer container."
-              }
+              "minItems": 1
             }
           }
         },
@@ -1379,14 +2038,496 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "fromSource",
           "toTarget"
         ]
+      }
+    },
+    "traffic": {
+      "type": "object",
+      "properties": {
+        "proxies": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "kafka": {
+                "type": "string",
+                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                "default": "default"
+              },
+              "kafkaTopic": {
+                "type": "string",
+                "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                "default": "",
+                "description": "Kafka topic for captured traffic. Empty defaults to the proxy name."
+              },
+              "source": {
+                "type": "string"
+              },
+              "proxyConfig": {
+                "type": "object",
+                "properties": {
+                  "loggingConfigurationOverrideConfigMap": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "internetFacing": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When true, configures the proxy Service load balancer scheme as internet-facing."
+                  },
+                  "podReplicas": {
+                    "type": "number",
+                    "default": 1
+                  },
+                  "resources": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "limits": {
+                        "type": "object",
+                        "properties": {
+                          "cpu": {
+                            "type": "string",
+                            "pattern": "^[0-9]+m$",
+                            "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                          },
+                          "memory": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                          },
+                          "ephemeral-storage": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                          }
+                        },
+                        "required": [
+                          "cpu",
+                          "memory"
+                        ],
+                        "description": "Resource upper bound for a container"
+                      },
+                      "requests": {
+                        "type": "object",
+                        "properties": {
+                          "cpu": {
+                            "type": "string",
+                            "pattern": "^[0-9]+m$",
+                            "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                          },
+                          "memory": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                          },
+                          "ephemeral-storage": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                          }
+                        },
+                        "required": [
+                          "cpu",
+                          "memory"
+                        ],
+                        "description": "Resource lower bound for a container"
+                      }
+                    },
+                    "default": {
+                      "limits": {
+                        "cpu": "3500m",
+                        "memory": "3500Mi"
+                      },
+                      "requests": {
+                        "cpu": "3500m",
+                        "memory": "3500Mi"
+                      }
+                    },
+                    "required": [
+                      "limits",
+                      "requests"
+                    ],
+                    "description": "Resource limits and requests for proxy container."
+                  },
+                  "otelCollectorEndpoint": {
+                    "type": "string",
+                    "default": "http://otel-collector:4317"
+                  },
+                  "setHeader": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "destinationConnectionPoolSize": {
+                    "type": "number",
+                    "default": 0
+                  },
+                  "destinationConnectionPoolTimeout": {
+                    "type": "string",
+                    "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
+                    "default": "PT30S"
+                  },
+                  "kafkaClientId": {
+                    "type": "string",
+                    "default": "HttpCaptureProxyProducer"
+                  },
+                  "listenPort": {
+                    "type": "number"
+                  },
+                  "maxTrafficBufferSize": {
+                    "type": "number",
+                    "default": 1048576
+                  },
+                  "noCapture": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "numThreads": {
+                    "type": "number",
+                    "default": 1
+                  },
+                  "sslConfigFile": {
+                    "type": "string",
+                    "description": "Legacy: YAML config for OpenSearch security SSL. Prefer tls config for K8s deployments."
+                  },
+                  "tls": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "certManager"
+                            ]
+                          },
+                          "issuerRef": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "description": "Name of the cert-manager Issuer or ClusterIssuer."
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "Issuer",
+                                  "ClusterIssuer"
+                                ],
+                                "default": "ClusterIssuer",
+                                "description": "Kind of the issuer resource."
+                              },
+                              "group": {
+                                "type": "string",
+                                "default": "cert-manager.io",
+                                "description": "API group of the issuer. Use 'awspca.cert-manager.io' for AWS PCA issuers."
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ]
+                          },
+                          "commonName": {
+                            "type": "string"
+                          },
+                          "dnsNames": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "description": "DNS names for the certificate. Must include the proxy's service DNS name."
+                          },
+                          "duration": {
+                            "type": "string",
+                            "default": "2160h",
+                            "description": "Requested certificate validity duration (default: 90 days)."
+                          },
+                          "renewBefore": {
+                            "type": "string",
+                            "default": "360h",
+                            "description": "How long before expiry to renew (default: 15 days)."
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "issuerRef",
+                          "dnsNames"
+                        ],
+                        "description": "Use cert-manager to provision a TLS certificate for the proxy."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "existingSecret"
+                            ]
+                          },
+                          "secretName": {
+                            "type": "string",
+                            "description": "Name of an existing K8s TLS secret with tls.crt and tls.key."
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "secretName"
+                        ],
+                        "description": "Use a pre-existing K8s TLS secret."
+                      }
+                    ],
+                    "description": "TLS certificate configuration for the proxy. Mutually exclusive with sslConfigFile."
+                  },
+                  "enableMSKAuth": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "suppressCaptureForHeaderMatch": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": []
+                  },
+                  "suppressCaptureForMethod": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "suppressCaptureForUriPath": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "suppressMethodAndPath": {
+                    "type": "string",
+                    "default": ""
+                  }
+                },
+                "required": [
+                  "listenPort"
+                ]
+              }
+            },
+            "required": [
+              "source",
+              "proxyConfig"
+            ]
+          }
+        },
+        "replayers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "skipApprovals": {
+                "type": "boolean",
+                "default": false
+              },
+              "fromProxy": {
+                "type": "string"
+              },
+              "toTarget": {
+                "type": "string"
+              },
+              "dependsOnSnapshotMigrations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "string"
+                    },
+                    "snapshot": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "snapshot"
+                  ]
+                },
+                "default": []
+              },
+              "replayerConfig": {
+                "type": "object",
+                "properties": {
+                  "jvmArgs": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "loggingConfigurationOverrideConfigMap": {
+                    "type": "string",
+                    "default": ""
+                  },
+                  "podReplicas": {
+                    "type": "number",
+                    "default": 1
+                  },
+                  "resources": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "limits": {
+                        "type": "object",
+                        "properties": {
+                          "cpu": {
+                            "type": "string",
+                            "pattern": "^[0-9]+m$",
+                            "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                          },
+                          "memory": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                          },
+                          "ephemeral-storage": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                          }
+                        },
+                        "required": [
+                          "cpu",
+                          "memory"
+                        ],
+                        "description": "Resource upper bound for a container"
+                      },
+                      "requests": {
+                        "type": "object",
+                        "properties": {
+                          "cpu": {
+                            "type": "string",
+                            "pattern": "^[0-9]+m$",
+                            "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                          },
+                          "memory": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                          },
+                          "ephemeral-storage": {
+                            "type": "string",
+                            "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                            "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                          }
+                        },
+                        "required": [
+                          "cpu",
+                          "memory"
+                        ],
+                        "description": "Resource lower bound for a container"
+                      }
+                    },
+                    "required": [
+                      "limits",
+                      "requests"
+                    ],
+                    "description": "Resource limits and requests for replayer container."
+                  },
+                  "kafkaTrafficEnableMSKAuth": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enables SASL properties required for connecting to MSK with IAM auth."
+                  },
+                  "kafkaTrafficPropertyFile": {
+                    "type": "string",
+                    "description": "File path for Kafka properties file for additional or overridden Kafka properties."
+                  },
+                  "lookaheadTimeSeconds": {
+                    "type": "number",
+                    "default": 400,
+                    "description": "Number of seconds of data that will be buffered."
+                  },
+                  "maxConcurrentRequests": {
+                    "type": "number",
+                    "default": 10000,
+                    "description": "Maximum number of requests that can be outstanding at a time."
+                  },
+                  "numClientThreads": {
+                    "type": "number",
+                    "default": 0,
+                    "description": "Number of threads to use to send requests from."
+                  },
+                  "observedPacketConnectionTimeout": {
+                    "type": "number",
+                    "default": 360,
+                    "description": "Seconds of inactivity before assuming connections were terminated in the captured stream."
+                  },
+                  "otelCollectorEndpoint": {
+                    "type": "string",
+                    "default": "http://otel-collector:4317",
+                    "description": "Endpoint (host:port) for the OpenTelemetry Collector for metrics forwarding."
+                  },
+                  "quiescentPeriodMs": {
+                    "type": "number",
+                    "default": 5000,
+                    "description": "Milliseconds to delay the first request on a resumed connection after Kafka partition reassignment."
+                  },
+                  "removeAuthHeader": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Remove the authorization header if present without replacing it."
+                  },
+                  "speedupFactor": {
+                    "type": "number",
+                    "default": 1.1,
+                    "description": "Factor to accelerate replayed communications relative to original timing."
+                  },
+                  "targetServerResponseTimeoutSeconds": {
+                    "type": "number",
+                    "default": 150,
+                    "description": "Seconds to wait before timing out a replayed request to the target."
+                  },
+                  "transformerConfig": {
+                    "type": "string",
+                    "description": "Request transformer configuration as a string or JSON."
+                  },
+                  "transformerConfigEncoded": {
+                    "type": "string",
+                    "description": "Base64-encoded request transformer configuration."
+                  },
+                  "transformerConfigFile": {
+                    "type": "string",
+                    "description": "Path to the JSON configuration file for request transformers."
+                  },
+                  "tupleTransformerConfig": {
+                    "type": "string",
+                    "description": "Tuple transformer configuration as a string or JSON."
+                  },
+                  "tupleTransformerConfigBase64": {
+                    "type": "string",
+                    "description": "Base64-encoded tuple transformer configuration."
+                  },
+                  "tupleTransformerConfigFile": {
+                    "type": "string",
+                    "description": "Path to the JSON configuration file for tuple transformers."
+                  },
+                  "userAgent": {
+                    "type": "string",
+                    "description": "String appended to the user-agent header for requests to the target cluster."
+                  }
+                }
+              }
+            },
+            "required": [
+              "fromProxy",
+              "toTarget"
+            ]
+          }
+        }
       },
-      "minItems": 1
+      "required": [
+        "proxies",
+        "replayers"
+      ],
+      "description": "Top-level items are independent of each other but items in the inner-arrays require all snapshot activities across each of the items' sources to finish before any replays in this group can start."
     }
   },
   "required": [
     "sourceClusters",
     "targetClusters",
-    "migrationConfigs"
+    "snapshotMigrationConfigs"
   ]
 }"
 `;

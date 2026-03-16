@@ -34,7 +34,8 @@ def docker_replayer():
 
 
 @pytest.fixture
-def ecs_replayer():
+def ecs_replayer(monkeypatch):
+    monkeypatch.setattr("console_link.models.ecs_service.create_boto3_client", lambda *a, **kw: None)
     config = {
         "ecs": {
             "cluster_name": "migration-aws-integ-ecs-cluster",

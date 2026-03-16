@@ -1,0 +1,64 @@
+{{- if .Values.awsPrivateCA.create }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-pca-via-ack
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "52"
+    helm.sh/hook-delete-policy: hook-succeeded
+spec:
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      serviceAccountName: {{ .Values.argoWorkflowServiceAccountName | default "argo-workflow-executor" }}
+      containers:
+      - name: create-pca-and-issuer
+        image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Creating CertificateAuthority via ACK (retrying until CRD is ready)..."
+          for i in $(seq 1 60); do
+            if cat <<'CAEOF' | kubectl apply -f - 2>&1; then
+          apiVersion: acmpca.services.k8s.aws/v1alpha1
+          kind: CertificateAuthority
+          metadata:
+            name: migration-assistant-pca
+            annotations:
+              services.k8s.aws/deletion-policy: {{ .Values.awsPrivateCA.caConfig.deletionPolicy }}
+          spec:
+            certificateAuthorityConfiguration:
+              keyAlgorithm: {{ .Values.awsPrivateCA.caConfig.keyAlgorithm }}
+              signingAlgorithm: {{ .Values.awsPrivateCA.caConfig.signingAlgorithm }}
+              subject:
+                commonName: {{ .Values.awsPrivateCA.caConfig.subject.commonName | quote }}
+            type: {{ .Values.awsPrivateCA.caConfig.type }}
+          CAEOF
+              echo "CertificateAuthority created. Waiting for ACK sync..."
+              break
+            fi
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+
+          echo "Waiting for PCA to be synced by ACK..."
+          kubectl wait certificateauthority/migration-assistant-pca \
+            --for=condition=ACK.ResourceSynced=True --timeout=300s
+          ARN=$(kubectl get certificateauthority migration-assistant-pca \
+            -o jsonpath='{.status.ackResourceMetadata.arn}')
+          echo "PCA ARN: $ARN"
+
+          cat <<EOF | kubectl apply -f -
+          apiVersion: awspca.cert-manager.io/v1beta1
+          kind: AWSPCAClusterIssuer
+          metadata:
+            name: aws-pca-issuer
+          spec:
+            arn: $ARN
+            region: {{ .Values.awsPrivateCA.region }}
+          EOF
+          echo "AWSPCAClusterIssuer created from ACK-managed PCA."
+      restartPolicy: Never
+  backoffLimit: 3
+{{- end }}

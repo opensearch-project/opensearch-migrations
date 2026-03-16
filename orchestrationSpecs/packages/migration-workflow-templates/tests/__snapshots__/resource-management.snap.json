@@ -1,0 +1,238 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "resource-management"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "waitforkafkatopic",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "kubectl"
+          ],
+          "args": [
+            "wait",
+            "--for=create",
+            "{{=''+inputs.parameters.resourceName}}",
+            "--timeout=31536000s"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "50m",
+              "memory": "32Mi"
+            },
+            "requests": {
+              "cpu": "50m",
+              "memory": "32Mi"
+            }
+          }
+        },
+        "activeDeadlineSeconds": "31536000",
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "waitforcapturedtraffic",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
+          "action": "get",
+          "successCondition": "status.phase == Ready"
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "waitfordatasnapshot",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
+          "action": "get",
+          "successCondition": "status.phase == Ready"
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "waitforsnapshotmigration",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
+          "action": "get",
+          "successCondition": "status.phase == Ready"
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchcapturedtrafficready",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Ready\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchdatasnapshotready",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "snapshotName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Ready\n  snapshotName: \"{{inputs.parameters.snapshotName}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchsnapshotmigrationready",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Ready\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "readdatasnapshotname",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
+          "action": "get"
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "snapshotName",
+              "valueFrom": {
+                "jsonPath": "{.status.snapshotName}"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -54,6 +54,8 @@ vpc_id=""
 subnet_ids=""
 eks_access_principal_arn=""
 skip_cfn_deploy=false
+tls_mode="none"
+pca_arn=""
 build_chart_and_dashboards=false
 version=""
 create_vpc_endpoints=""
@@ -101,6 +103,8 @@ while [[ $# -gt 0 ]]; do
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
     --skip-test-images) skip_test_images=true; shift 1 ;;
     --image-tag) image_tag="$2"; shift 2 ;;
+    --tls-mode) tls_mode="$2"; shift 2 ;;
+    --pca-arn) pca_arn="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
@@ -175,6 +179,15 @@ while [[ $# -gt 0 ]]; do
       echo "                                            release artifacts. Required when mixing --build-* flags (e.g."
       echo "                                            --build-cfn without --build-images) to avoid accidental"
       echo "                                            version mismatches between built and downloaded components."
+      echo ""
+      echo "TLS / Certificate options:"
+      echo "  --tls-mode <mode>                         TLS certificate strategy for the capture proxy."
+      echo "                                            none         - No TLS (default)"
+      echo "                                            self-signed  - Use cert-manager self-signed issuer"
+      echo "                                            pca-existing - Use an existing AWS Private CA"
+      echo "                                            pca-create   - Create a new AWS Private CA via ACK"
+      echo "  --pca-arn <arn>                           ARN of existing AWS Private CA"
+      echo "                                            (required with --tls-mode pca-existing)"
       echo ""
       echo "Examples:"
       echo "  # Deploy new infrastructure with a new VPC and bootstrap:"
@@ -327,6 +340,19 @@ validate_args() {
     echo "Error: --create-vpc-endpoints is only valid with --deploy-import-vpc-cfn." >&2
     exit 1
   fi
+  # Validate TLS mode
+  case "$tls_mode" in
+    none|self-signed) ;;
+    pca-existing)
+      if [[ -z "$pca_arn" ]]; then
+        echo "Error: --pca-arn is required with --tls-mode pca-existing." >&2
+        exit 1
+      fi ;;
+    pca-create) ;;
+    *)
+      echo "Error: Unknown --tls-mode: $tls_mode (expected: none, self-signed, pca-existing, pca-create)" >&2
+      exit 1 ;;
+  esac
 }
 
 validate_args
@@ -911,8 +937,6 @@ if [[ "$ignore_checks" != "true" && -n "${VPC_ID:-}" ]]; then
   fi
 fi
 
-kubectl --context="${KUBE_CONTEXT}" get namespace "$namespace" >/dev/null 2>&1 || kubectl --context="${KUBE_CONTEXT}" create namespace "$namespace"
-kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null 2>&1
 
 
 # --- mirror public images to private ECR (optional) ---
@@ -1095,6 +1119,83 @@ fi
 
 check_existing_ma_release "$namespace" "$namespace"
 
+# Build TLS-related helm --set flags and create Pod Identity Associations
+TLS_HELM_FLAGS=""
+
+# For any PCA mode, ensure Pod Identity Association exists
+if [[ "$tls_mode" == "pca-existing" || "$tls_mode" == "pca-create" ]]; then
+  echo "Ensuring Pod Identity Association for aws-pca-issuer..."
+  ARGO_ASSOC_ID=$(aws eks list-pod-identity-associations \
+    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --region "${AWS_CFN_REGION}" \
+    --namespace "${namespace}" \
+    --service-account argo-workflow-executor \
+    --query 'associations[0].associationId' --output text 2>/dev/null)
+  PID_ROLE_ARN=""
+  if [[ -n "$ARGO_ASSOC_ID" && "$ARGO_ASSOC_ID" != "None" ]]; then
+    PID_ROLE_ARN=$(aws eks describe-pod-identity-association \
+      --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --region "${AWS_CFN_REGION}" \
+      --association-id "$ARGO_ASSOC_ID" \
+      --query 'association.roleArn' --output text)
+
+    EXISTING=$(aws eks list-pod-identity-associations \
+      --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --region "${AWS_CFN_REGION}" \
+      --namespace "${namespace}" \
+      --service-account aws-pca-issuer \
+      --query 'associations[0].associationId' --output text 2>/dev/null)
+    if [[ -z "$EXISTING" || "$EXISTING" == "None" ]]; then
+      aws eks create-pod-identity-association \
+        --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+        --region "${AWS_CFN_REGION}" \
+        --namespace "${namespace}" \
+        --service-account aws-pca-issuer \
+        --role-arn "$PID_ROLE_ARN" \
+        --query 'association.associationId' --output text
+      echo "Created Pod Identity Association for aws-pca-issuer"
+    else
+      echo "Pod Identity Association for aws-pca-issuer already exists"
+    fi
+  else
+    echo "WARNING: Could not find existing Pod Identity role. aws-pca-issuer may not have AWS credentials." >&2
+  fi
+fi
+
+case "$tls_mode" in
+  pca-existing)
+    TLS_HELM_FLAGS="--set conditionalPackageInstalls.aws-privateca-issuer=true"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.arn=$pca_arn"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.region=${AWS_CFN_REGION}"
+    ;;
+  pca-create)
+    TLS_HELM_FLAGS="--set conditionalPackageInstalls.aws-privateca-issuer=true"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set conditionalPackageInstalls.ack-acmpca-controller=true"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.create=true"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.region=${AWS_CFN_REGION}"
+
+    # Also create Pod Identity for ACK controller
+    if [[ -n "$PID_ROLE_ARN" ]]; then
+      EXISTING_ACK=$(aws eks list-pod-identity-associations \
+        --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+        --region "${AWS_CFN_REGION}" \
+        --namespace "${namespace}" \
+        --service-account ack-acmpca-controller \
+        --query 'associations[0].associationId' --output text 2>/dev/null)
+      if [[ -z "$EXISTING_ACK" || "$EXISTING_ACK" == "None" ]]; then
+        aws eks create-pod-identity-association \
+          --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+          --region "${AWS_CFN_REGION}" \
+          --namespace "${namespace}" \
+          --service-account ack-acmpca-controller \
+          --role-arn "$PID_ROLE_ARN" \
+          --query 'association.associationId' --output text
+        echo "Created Pod Identity Association for ack-acmpca-controller"
+      fi
+    fi
+    ;;
+esac
+
 echo "=== Helm install configuration ==="
 echo "Chart: ${ma_chart_dir}"
 echo "Namespace: ${namespace}"
@@ -1115,6 +1216,8 @@ echo "  aws.account=${AWS_ACCOUNT}"
 echo "  defaultBucketConfiguration.snapshotRoleArn=${SNAPSHOT_ROLE}"
 echo "Image flags:"
 echo "  ${IMAGE_FLAGS}"
+echo "TLS flags:"
+echo "  ${TLS_HELM_FLAGS}"
 echo "=== End helm install configuration ==="
 
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
@@ -1129,7 +1232,8 @@ fi
 helm install "$namespace" "${ma_chart_dir}" \
   --kube-context="${KUBE_CONTEXT}" \
   --namespace $namespace \
-  --timeout 15m \
+  --create-namespace \
+  --timeout 20m \
   $HELM_VALUES_FLAGS \
   $EXTRA_VALUES_FLAGS \
   --set stageName="${STAGE}" \
@@ -1137,7 +1241,10 @@ helm install "$namespace" "${ma_chart_dir}" \
   --set aws.account="${AWS_ACCOUNT}" \
   --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
   $IMAGE_FLAGS \
+  $TLS_HELM_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
+
+kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null 2>&1
 
 echo "Deploying CloudWatch dashboards..."
 deploy_dashboard "CaptureReplay" "${dashboard_dir}/capture-replay-dashboard.json"

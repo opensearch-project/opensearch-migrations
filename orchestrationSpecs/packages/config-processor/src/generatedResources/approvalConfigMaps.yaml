@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: approval-config
+      labels:
+        workflows.argoproj.io/configmap-type: Parameter
+    data:
+      autoApprove: '{"source":{"target":{"snap1":{"migration-0":{"evaluateMetadata":true,"migrateMetadata":true,"documentBackfill":true}}}}}'

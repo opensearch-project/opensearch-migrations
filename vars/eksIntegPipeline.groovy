@@ -296,6 +296,10 @@ def call(Map config = [:]) {
                                         echo "List resources not removed by helm uninstall:"
                                         sh "kubectl --context=${env.eksKubeContext} get all,pvc,configmap,secret,workflow -n ma -o wide --ignore-not-found || true"
                                         sh "kubectl --context=${env.eksKubeContext} delete namespace ma --ignore-not-found --timeout=60s || true"
+                                        // Wait for namespace to fully terminate so Kubernetes-managed ENIs/LBs are
+                                        // cleaned up before CloudFormation tries to delete the VPC/EKS cluster.
+                                        // Without this, lingering ENIs cause DELETE_FAILED on the CloudFormation stack.
+                                        sh "kubectl --context=${env.eksKubeContext} wait --for=delete namespace/ma --timeout=300s || true"
                                     }
 
                                     // Revoke security group rule added during setup

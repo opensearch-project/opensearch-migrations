@@ -10,6 +10,11 @@ def create_topic(kafka: Kafka, topic_name: str) -> CommandResult:
     return result
 
 
+def list_topics(kafka: Kafka) -> CommandResult:
+    result = kafka.list_topics()
+    return result
+
+
 def delete_topic(kafka: Kafka, topic_name: str) -> CommandResult:
     result = kafka.delete_topic(topic_name=topic_name)
     return result
@@ -17,6 +22,11 @@ def delete_topic(kafka: Kafka, topic_name: str) -> CommandResult:
 
 def describe_consumer_group(kafka: Kafka, group_name: str) -> CommandResult:
     result = kafka.describe_consumer_group(group_name=group_name)
+    return result
+
+
+def list_consumer_groups(kafka: Kafka) -> CommandResult:
+    result = kafka.list_consumer_groups()
     return result
 
 
