@@ -179,7 +179,7 @@ source.
 
 The current unified schema builder exists in:
 
-- [packages/schemas/src/unifiedSchemaBuilder.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/schemas/src/unifiedSchemaBuilder.ts)
+- [packages/schemas/src/unifiedSchemaBuilder.ts](packages/schemas/src/unifiedSchemaBuilder.ts)
 
 It currently:
 
@@ -216,7 +216,7 @@ Argo when a more static manifest shape can be preserved.
 
 The current `Kafka` render path in:
 
-- [packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts)
+- [packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts](packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts)
 
 still builds a highly dynamic merged `Kafka.spec` object and injects it through
 Argo resource templating.
@@ -277,18 +277,18 @@ What is already in place:
 
 What is still transitional:
 
-- [packages/config-processor/src/migrationConfigTransformer.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/config-processor/src/migrationConfigTransformer.ts)
+- [packages/config-processor/src/migrationConfigTransformer.ts](packages/config-processor/src/migrationConfigTransformer.ts)
   still emits placeholder bootstrap values for workflow-managed clusters so the
   pre-runtime config shape remains complete
 - `migrationConsole` currently supports managed SCRAM Kafka, but its workflow
   config reader still derives the managed bootstrap endpoint deterministically
   from the transformed config rather than consuming the workflow runtime's
   `readKafkaConnectionProfile` output
-- [packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts)
+- [packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts](packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts)
   is still being simplified so it relies entirely on the already-merged
   initialization-time Kafka defaults instead of retaining overlapping fallback
   behavior
-- [packages/migration-workflow-templates/src/workflowTemplates/resourceManagement.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/resourceManagement.ts)
+- [packages/migration-workflow-templates/src/workflowTemplates/resourceManagement.ts](packages/migration-workflow-templates/src/workflowTemplates/resourceManagement.ts)
   currently selects the first listener exposed by the `Kafka` resource
 
 ### Remaining work

@@ -74,7 +74,7 @@ rest of the migration stack.
 #### How the merge works
 
 The unified schema builder lives in
-[packages/schemas/src/unifiedSchemaBuilder.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/schemas/src/unifiedSchemaBuilder.ts).
+[packages/schemas/src/unifiedSchemaBuilder.ts](packages/schemas/src/unifiedSchemaBuilder.ts).
 At a high level it does the following:
 
 1. Generates the base migration configuration JSON Schema from the
@@ -123,7 +123,7 @@ older generated schema are still correct.
 
 For local development and bootstrapping, there is also a checked-in fallback
 artifact at
-[packages/schemas/generated/workflowMigration.schema.json](/Users/schohn/dev/m2/orchestrationSpecs/packages/schemas/generated/workflowMigration.schema.json).
+[packages/schemas/generated/workflowMigration.schema.json](packages/schemas/generated/workflowMigration.schema.json).
 That fallback is a checked-in unified schema artifact built from a known
 Strimzi schema source. It exists so that developers can:
 
