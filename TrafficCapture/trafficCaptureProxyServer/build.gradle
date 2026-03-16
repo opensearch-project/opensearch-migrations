@@ -14,7 +14,7 @@ configurations {
 }
 
 dependencies {
-    def openSearch = '2.19.4'
+    def openSearch = '2.19.5.0'
     implementation "org.opensearch:opensearch:${openSearch}"
     implementation "org.opensearch:opensearch-core:${openSearch}"
     implementation "org.opensearch:opensearch-common:${openSearch}"
