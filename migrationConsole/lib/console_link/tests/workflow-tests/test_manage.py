@@ -552,7 +552,7 @@ async def test_live_check_lifecycle_with_group():
                 "group-1": {
                     "id": "group-1", "displayName": "waitingBlock", "type": "StepGroup",
                     "phase": PHASE_RUNNING, "children": ["node-1", "node-2"],
-                    "inputs": {"parameters": [{"name": "groupName", "value": "checks"}]}
+                    "inputs": {"parameters": [{"name": "groupName_view", "value": "checks"}]}
                 },
                 "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": "Failed",
                            "children": [], "startedAt": "2023-01-01T00:01:00Z",

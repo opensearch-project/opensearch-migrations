@@ -157,8 +157,17 @@ spec:
                   | if has("no_auth") then del(.no_auth) else . end
                   | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
                   | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
-                  # Add snapshot repos with default key
-                  | . + {"snapshotRepos": {"default": $repo}}
+                  # Remove unrecognized fields
+                  | del(.no_auth)
+                  | . + {"snapshotInfo": {
+                      "repos": {"default": $repo},
+                      "snapshots": {
+                        "testsnapshot": {
+                          "repoName": "default",
+                          "config": {"createSnapshotConfig": {}}
+                        }
+                      }
+                    }}
                 )
               )')
             
@@ -176,19 +185,10 @@ spec:
               | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
             ')
             
-            # Build snapshotExtractAndLoadConfigs from snapshot-and-migration-configs
-            SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '[
-              .[0]["snapshot-and-migration-configs"][] | {
-                "snapshotConfig": {
-                  "repoName": "default",
-                  "snapshotNameConfig": {
-                    "snapshotNamePrefix": "testsnapshot"
-                  }
-                },
-                "createSnapshotConfig": {},
-                "migrations": .migrations
-              }
-            ]')
+            # Build perSnapshotConfig: snapshot name -> migrations array
+            SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '
+              {"testsnapshot": .[0]["snapshot-and-migration-configs"][0].migrations}
+            ')
             
             # Build the complete OVERALL_MIGRATION_CONFIG
             MIGRATION_CONFIG=$(jq -n \
@@ -201,13 +201,10 @@ spec:
                 "targetClusters": {
                   "target1": $target
                 },
-                "migrationConfigs": [{
+                "snapshotMigrationConfigs": [{
                   "fromSource": "source1",
                   "toTarget": "target1",
-                  "snapshotExtractAndLoadConfigs": $snapshotConfigs,
-                  "replayerConfig": {
-                    "podReplicas": 0
-                  }
+                  "perSnapshotConfig": $snapshotConfigs
                 }]
               }')
             

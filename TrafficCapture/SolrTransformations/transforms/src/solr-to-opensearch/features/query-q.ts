@@ -29,5 +29,11 @@ export const request: MicroTransform<RequestContext> = {
   apply: (ctx) => {
     const q = ctx.params.get('q') || '*:*';
     ctx.body.set('query', parseSolrQuery(q));
+
+    // rows → size, start → from
+    const rows = ctx.params.get('rows');
+    if (rows) ctx.body.set('size', Number.parseInt(rows, 10));
+    const start = ctx.params.get('start');
+    if (start) ctx.body.set('from', Number.parseInt(start, 10));
   },
 };

@@ -1,0 +1,93 @@
+{{- if get .Values.conditionalPackageInstalls "argo-workflows" }}
+# Helm test for ValidatingAdmissionPolicy on Kafka resources
+# Run with: helm test <release-name>
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-test-vap-kafka
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  serviceAccountName: argo-workflow-executor
+  restartPolicy: Never
+  containers:
+  - name: test
+    image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+    imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+    command:
+    - /bin/bash
+    - -c
+    - |
+      set -e
+      echo "=== VAP Test: KafkaNodePool replica scaling ==="
+
+      TEST_POOL="vap-test-pool-$(date +%s)"
+      NAMESPACE="{{ .Release.Namespace }}"
+
+      cleanup() {
+        echo "Cleaning up test resources..."
+        kubectl delete kafkanodepool "$TEST_POOL" -n "$NAMESPACE" --ignore-not-found=true 2>/dev/null || true
+      }
+      trap cleanup EXIT
+
+      echo "Step 1: Create test KafkaNodePool"
+      cat <<EOF | kubectl apply -f -
+      apiVersion: kafka.strimzi.io/v1
+      kind: KafkaNodePool
+      metadata:
+        name: $TEST_POOL
+        namespace: $NAMESPACE
+        labels:
+          strimzi.io/cluster: default
+      spec:
+        replicas: 1
+        roles: ["controller", "broker"]
+        storage:
+          type: ephemeral
+      EOF
+
+      # Wait for resource to be created
+      sleep 2
+
+      echo "Step 2: Try to scale without approval (should fail)"
+      if kubectl patch kafkanodepool "$TEST_POOL" -n "$NAMESPACE" --type=merge -p '{"spec":{"replicas":2}}' 2>&1; then
+        echo "ERROR: Scaling should have been blocked by VAP!"
+        exit 1
+      fi
+      echo "PASS: Scaling was correctly blocked"
+
+      echo "Step 3: Try with WRONG approval value (should fail)"
+      kubectl annotate kafkanodepool "$TEST_POOL" -n "$NAMESPACE" \
+        migrations.opensearch.org/approved-replicas=99 --overwrite
+      if kubectl patch kafkanodepool "$TEST_POOL" -n "$NAMESPACE" --type=merge -p '{"spec":{"replicas":2}}' 2>&1; then
+        echo "ERROR: Scaling with wrong approval value should have been blocked!"
+        exit 1
+      fi
+      echo "PASS: Wrong approval value was correctly rejected"
+
+      echo "Step 4: Add CORRECT approval value and scale (should succeed)"
+      kubectl annotate kafkanodepool "$TEST_POOL" -n "$NAMESPACE" \
+        migrations.opensearch.org/approved-replicas=2 --overwrite
+      kubectl patch kafkanodepool "$TEST_POOL" -n "$NAMESPACE" --type=merge -p '{"spec":{"replicas":2}}'
+
+      REPLICAS=$(kubectl get kafkanodepool "$TEST_POOL" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')
+      if [ "$REPLICAS" != "2" ]; then
+        echo "ERROR: Expected replicas=2, got replicas=$REPLICAS"
+        exit 1
+      fi
+      echo "PASS: Scaling with correct approval succeeded"
+
+      echo "Step 5: Verify auto-reset (old approval shouldn't allow new value)"
+      if kubectl patch kafkanodepool "$TEST_POOL" -n "$NAMESPACE" --type=merge -p '{"spec":{"replicas":5}}' 2>&1; then
+        echo "ERROR: Old approval value should not allow different target!"
+        exit 1
+      fi
+      echo "PASS: Auto-reset working - old approval rejected for new value"
+
+      echo ""
+      echo "=== All VAP tests passed! ==="
+{{- end }}

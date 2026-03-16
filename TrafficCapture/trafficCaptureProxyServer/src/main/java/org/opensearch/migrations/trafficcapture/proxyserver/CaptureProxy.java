@@ -24,6 +24,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.common.settings.Settings;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
+import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.jcommander.NoSplitter;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -48,7 +49,6 @@ import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
 
-import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
@@ -57,6 +57,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.ssl.SslContext;
@@ -90,6 +91,21 @@ public class CaptureProxy {
             arity = 1,
             description = "YAML configuration of the HTTPS settings.  When this is not set, the proxy will not use TLS.")
         public String sslConfigFilePath;
+        @Parameter(required = false,
+            names = { "--sslCertChainFile" },
+            arity = 1,
+            description = "Path to PEM certificate chain file for TLS. Use with --sslKeyFile as an alternative to --sslConfigFile.")
+        public String sslCertChainFilePath;
+        @Parameter(required = false,
+            names = { "--sslKeyFile" },
+            arity = 1,
+            description = "Path to PEM private key file for TLS. Use with --sslCertChainFile.")
+        public String sslKeyFilePath;
+        @Parameter(required = false,
+            names = { "--sslTrustCertFile" },
+            arity = 1,
+            description = "Path to PEM trusted CA certificate file for mutual TLS. Optional, used with --sslCertChainFile.")
+        public String sslTrustCertFilePath;
         @Parameter(required = false,
             names = { "--maxTrafficBufferSize" },
             arity = 1,
@@ -184,9 +200,9 @@ public class CaptureProxy {
 
     static Parameters parseArgs(String[] args) {
         Parameters p = EnvVarParameterPuller.injectFromEnv(new Parameters(), "CAPTURE_PROXY_");
-        JCommander jCommander = new JCommander(p);
+        var parser = JsonCommandLineParser.newBuilder().addObject(p).build();
         try {
-            jCommander.parse(args);
+            parser.parse(args);
             // Exactly one these 3 options are required. See that exactly one is set by summing up their presence
             if (Stream.of(p.traceDirectory, p.kafkaParameters.kafkaConnection, (p.noCapture ? "" : null))
                 .mapToInt(s -> s != null ? 1 : 0)
@@ -199,7 +215,7 @@ public class CaptureProxy {
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
             System.err.println("Got args: " + String.join("; ", args));
-            jCommander.usage();
+            parser.getJCommander().usage();
             System.exit(2);
             return null;
         }
@@ -325,6 +341,21 @@ public class CaptureProxy {
         }
     }
 
+    /**
+     * Load an SSLEngine supplier from PEM files directly via Netty, without requiring the OpenSearch security plugin.
+     * This is the preferred path for K8s deployments where cert-manager provides PEM-encoded secrets.
+     */
+    protected static Supplier<SSLEngine> loadSslEngineFromPem(
+        String certChainPath, String keyPath, String trustCertPath
+    ) throws SSLException {
+        var builder = SslContextBuilder.forServer(new File(certChainPath), new File(keyPath));
+        if (trustCertPath != null && !trustCertPath.isEmpty()) {
+            builder.trustManager(new File(trustCertPath));
+        }
+        var sslContext = builder.build();
+        return () -> sslContext.newEngine(ByteBufAllocator.DEFAULT);
+    }
+
     protected static Map<String, String> convertPairListToMap(List<String> list) {
         if (list == null) {
             return Map.of();
@@ -334,6 +365,51 @@ public class CaptureProxy {
             map.put(list.get(i), list.get(i + 1));
         }
         return map;
+    }
+
+    /**
+     * Build the SSL engine supplier based on the provided parameters.
+     * Supports two mutually exclusive paths:
+     * <ul>
+     *   <li>PEM files (--sslCertChainFile + --sslKeyFile): loads certs directly via Netty, no OpenSearch dependency</li>
+     *   <li>Legacy config (--sslConfigFile): uses OpenSearch's DefaultSecurityKeyStore</li>
+     * </ul>
+     */
+    protected static Supplier<SSLEngine> buildSslEngineSupplier(Parameters params) throws SSLException {
+        boolean hasPemConfig = params.sslCertChainFilePath != null && !params.sslCertChainFilePath.isEmpty();
+        boolean hasLegacyConfig = params.sslConfigFilePath != null && !params.sslConfigFilePath.isEmpty();
+
+        if (hasPemConfig && hasLegacyConfig) {
+            throw new ParameterException(
+                "Cannot specify both --sslCertChainFile and --sslConfigFile. Use one or the other.");
+        }
+
+        if (hasPemConfig) {
+            if (params.sslKeyFilePath == null || params.sslKeyFilePath.isEmpty()) {
+                throw new ParameterException("--sslKeyFile is required when --sslCertChainFile is specified.");
+            }
+            log.info("Loading TLS from PEM files: cert={}, key={}", params.sslCertChainFilePath, params.sslKeyFilePath);
+            return loadSslEngineFromPem(params.sslCertChainFilePath, params.sslKeyFilePath, params.sslTrustCertFilePath);
+        }
+
+        if (hasLegacyConfig) {
+            log.info("Loading TLS from OpenSearch security config: {}", params.sslConfigFilePath);
+            var sksOp = Optional.of(params.sslConfigFilePath)
+                .map(sslConfigFile -> new DefaultSecurityKeyStore(
+                    getSettings(sslConfigFile),
+                    Paths.get(sslConfigFile).toAbsolutePath().getParent()))
+                .filter(sks -> sks.sslHTTPProvider != null);
+            sksOp.ifPresent(DefaultSecurityKeyStore::initHttpSSLConfig);
+            return sksOp.map(sks -> (Supplier<SSLEngine>) () -> {
+                try {
+                    return sks.createHTTPSSLEngine();
+                } catch (Exception e) {
+                    throw Lombok.sneakyThrow(e);
+                }
+            }).orElse(null);
+        }
+
+        return null;
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
@@ -349,13 +425,7 @@ public class CaptureProxy {
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
 
-        var sksOp = Optional.ofNullable(params.sslConfigFilePath)
-            .map(sslConfigFile -> new DefaultSecurityKeyStore(
-                getSettings(sslConfigFile),
-                Paths.get(sslConfigFile).toAbsolutePath().getParent()))
-            .filter(sks -> sks.sslHTTPProvider != null);
-
-        sksOp.ifPresent(DefaultSecurityKeyStore::initHttpSSLConfig);
+        var sslEngineSupplier = buildSslEngineSupplier(params);
         var proxy = new NettyScanningHttpProxy(params.frontsidePort);
         try {
             var pooledConnectionTimeout = params.destinationConnectionPoolSize == 0
@@ -367,13 +437,6 @@ public class CaptureProxy {
                 params.destinationConnectionPoolSize,
                 pooledConnectionTimeout
             );
-            Supplier<SSLEngine> sslEngineSupplier = sksOp.map(sks -> (Supplier<SSLEngine>) () -> {
-                try {
-                    return sks.createHTTPSSLEngine();
-                } catch (Exception e) {
-                    throw Lombok.sneakyThrow(e);
-                }
-            }).orElse(null);
             var headerCapturePredicate = HeaderValueFilteringCapturePredicate.builder()
                 .methodPattern(params.suppressMethod)
                 .pathPattern(params.suppressUriPath)

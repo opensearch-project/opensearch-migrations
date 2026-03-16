@@ -1,12 +1,15 @@
 conditionalPackageInstalls:
   kyverno: false
   # Migration infrastructure components
-  etcd-operator: true           # Aenix etcd operator for workflow coordination
-  cert-manager: true            # needed by etcd-operator and otel operator
-  kube-prometheus-stack: true   # will be needed for auto-scaling
   argo-workflows: true          # orchestrates the steps of a migration
-  strimzi-kafka-operator: true  # Required by capture and replay
+  cert-manager: true            # needed for proxy certificates
   fluent-bit: true
+  kube-prometheus-stack: true   # needed for metric gathering; will be needed for auto-scaling
+  strimzi-kafka-operator: true  # Required by capture and replay
+
+  # TLS certificate infrastructure for capture proxy
+  ack-acmpca-controller: false  # opt-in: manages AWS PCA as K8s resources via ACK
+  aws-privateca-issuer: false   # opt-in: bridges cert-manager to AWS PCA
 
   # Simpler alternative to the opentelemetry-operator.
   # ONLY set up the otel-collector and require manual instrumentation
@@ -25,14 +28,6 @@ conditionalPackageInstalls:
   gatekeeper: false
   grafana: false
   jaeger: true
-
-# etcd cluster configuration (managed by Aenix etcd-operator)
-etcdCluster:
-  replicas: 3
-  storageCapacity: 10Gi
-  storageClass: ""  # Use default storage class
-  cpu: 100m
-  memory: 256Mi
 
 # Kyverno policy toggles (requires conditionalPackageInstalls.kyverno: true)
 kyvernoPolicies:
@@ -222,27 +217,20 @@ otelConfiguration:
           processors:
           exporters: [ debug ]
 
+# AWS Private CA configuration for TLS certificate issuance
+awsPrivateCA:
+  create: false          # true = create PCA via ACK, false = bring your own
+  arn: ""                # PCA ARN (required if create: false and using PCA)
+  region: ""             # AWS region of the PCA
+  caConfig:              # only used when create: true
+    type: SUBORDINATE
+    keyAlgorithm: RSA_2048
+    signingAlgorithm: SHA256WITHRSA
+    subject:
+      commonName: "Migration Assistant CA"
+    deletionPolicy: delete  # or retain (keeps PCA after helm uninstall)
+
 charts:
-  # Aenix etcd-operator - simple and reliable etcd management
-  # Handles node drain gracefully, automatic PDB management
-  # See: https://etcd.aenix.io/docs/v0.4/
-  etcd-operator:
-    version: "0.4.2"
-    repository: "oci://ghcr.io/aenix-io/charts/etcd-operator"
-    namespace: ma
-    dependsOn: cert-manager
-    waitForInstallation: true
-    values:
-      etcdOperator:
-        vpa:
-          enabled: false
-      kubeRbacProxy:
-        image:
-          repository: registry.k8s.io/kubebuilder/kube-rbac-proxy
-        vpa:
-          enabled: false
-
-
   cert-manager:
     version: 1.17.2
     repository: https://charts.jetstack.io
@@ -250,6 +238,36 @@ charts:
     values:
       crds:
         enabled: true
+      resources:
+        requests: { cpu: 50m, memory: 64Mi }
+        limits:   { cpu: 250m, memory: 128Mi }
+      cainjector:
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits:   { cpu: 250m, memory: 128Mi }
+      webhook:
+        resources:
+          requests: { cpu: 50m, memory: 32Mi }
+          limits:   { cpu: 100m, memory: 64Mi }
+
+  aws-privateca-issuer:
+    version: "1.4.0"
+    repository: "https://cert-manager.github.io/aws-privateca-issuer"
+    dependsOn: cert-manager
+    values:
+      serviceAccount:
+        name: aws-pca-issuer
+      resources:
+        requests: { cpu: 25m, memory: 32Mi }
+        limits:   { cpu: 100m, memory: 64Mi }
+
+  ack-acmpca-controller:
+    version: "1.0.16"
+    repository: "oci://public.ecr.aws/aws-controllers-k8s/acmpca-chart"
+    dependsOn: cert-manager
+    values:
+      serviceAccount:
+        name: ack-acmpca-controller
 
   opentelemetry-operator:
     version: "0.86.4"
@@ -271,47 +289,27 @@ charts:
 
 
   strimzi-kafka-operator:
-    version: 0.47.0
+    version: 0.50.0
     repository: "https://strimzi.io/charts/"
     values:
-      replicas: 1
-      storageType: ephemeral
-      storageSize: 100Gi
-      storageDeleteClaim: true
-      dedicatedController:
-        replicas: 1
-        storageSize: 10Gi
+      storageType: ephemeral # strimzi is stateless
+      storageSize: 5Gi
+      resources:
+        requests: { cpu: 250m, memory: 384Mi }
+        limits:   { cpu: 1000m, memory: 512Mi }
 
+      # Increase probe thresholds to prevent unnecessary restarts during high API load.
       readinessProbe:
-        initialDelaySeconds: 5
-        periodSeconds: 2
-        timeoutSeconds: 3
-        failureThreshold: 1
+        initialDelaySeconds: 15
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
       livenessProbe:
-        initialDelaySeconds: 5
-        periodSeconds: 2
-        timeoutSeconds: 3
-        failureThreshold: 1
+        initialDelaySeconds: 15
+        periodSeconds: 15
+        timeoutSeconds: 5
+        failureThreshold: 3
 
-      kafka:
-        template:
-          pod:
-            readinessProbe:
-              initialDelaySeconds: 5
-              periodSeconds: 5
-              timeoutSeconds: 3
-              failureThreshold: 1
-
-        readinessProbe:
-          initialDelaySeconds: 5
-          periodSeconds: 2
-          timeoutSeconds: 3
-          failureThreshold: 1
-        livenessProbe:
-          initialDelaySeconds: 5
-          periodSeconds: 2
-          timeoutSeconds: 3
-          failureThreshold: 1
 
   argo-workflows:
     version: "0.47.1"
@@ -327,6 +325,9 @@ charts:
         pdb:
           enabled: true
           minAvailable: 1  # Ensures at least 1 pod always running
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits:   { cpu: 500m, memory: 256Mi }
         containerSecurityContext:
           runAsNonRoot: true
           allowPrivilegeEscalation: false
@@ -357,6 +358,9 @@ charts:
             value: "1s"
       server:
         replicas: 2
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits:   { cpu: 500m, memory: 256Mi }
         pdb:
           enabled: true
           minAvailable: 1  # Ensures at least 1 pod always running
@@ -386,6 +390,9 @@ charts:
     version: "0.49.0"
     repository: "https://fluent.github.io/helm-charts"
     values:
+      resources:
+        requests: { cpu: 50m, memory: 32Mi }
+        limits:   { cpu: 200m, memory: 64Mi }
       env:
         - name: OUTPUT_FORMAT
           valueFrom:
@@ -453,7 +460,7 @@ charts:
           
           [FILTER]
               Name               parser
-              Match_Regex        ^fluentbit-argo-.*$|^fluentbit-.*-(etcd|run-console|latch|create-rs|delete-rs)-.*$
+              Match_Regex        ^fluentbit-argo-.*$|^fluentbit-.*-(run-console|create-rs|delete-rs)-.*$
               Key_Name           log
               Parser             logfmt_parser
               Preserve_Key       On
@@ -553,6 +560,38 @@ charts:
         enabled: true  # If OpenTelemetry for is handling host metrics, this can be disabled
       kubeStateMetrics:
         enabled: true
+      prometheusOperator:
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits:   { cpu: 250m, memory: 128Mi }
+      kube-state-metrics:
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits:   { cpu: 200m, memory: 128Mi }
+      prometheus-node-exporter:
+        resources:
+          requests: { cpu: 25m, memory: 16Mi }
+          limits:   { cpu: 100m, memory: 32Mi }
+      grafana:
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits:   { cpu: 500m, memory: 256Mi }
+        sidecar:
+          dashboards:
+            resources:
+              requests: { cpu: 50m, memory: 100Mi }
+              limits:   { cpu: 200m, memory: 200Mi }
+          datasources:
+            resources:
+              requests: { cpu: 50m, memory: 100Mi }
+              limits:   { cpu: 200m, memory: 200Mi }
+        additionalDataSources:
+          - name: Jaeger
+            type: jaeger
+            url: http://jaeger-query:16686
+            access: proxy
+            isDefault: false
+            editable: true
       defaultRules:
         create: false
         rules:
@@ -573,14 +612,6 @@ charts:
           node: true
           prometheus: true
           prometheusOperator: true
-      grafana:
-        additionalDataSources:
-          - name: Jaeger
-            type: jaeger
-            url: http://jaeger-query:16686
-            access: proxy
-            isDefault: false
-            editable: true
 
 # OPA Gatekeeper dependency to lock down what images we can spin up - not implemented yet
 #  - name: gatekeeper

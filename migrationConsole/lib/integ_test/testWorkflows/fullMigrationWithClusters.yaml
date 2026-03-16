@@ -36,12 +36,6 @@ spec:
       - name: skip-cleanup
         value: "false"
       # Any references to workflow.parameters must come from top level workflow
-      - name: etcd-endpoints
-        value: "http://etcd.ma.svc.cluster.local:2379"
-      - name: etcd-user
-        value: "root"
-      - name: etcd-password
-        value: "password"
       - name: s3-snapshot-configmap
         value: "migrations-default-s3-config"
       - name: migration-image-configmap
@@ -321,20 +315,21 @@ spec:
             fi
             
             SOURCE_WITH_REPO=$(echo "$SOURCE_CONFIG" | jq --argjson repo "$SNAPSHOT_REPO" '
-              # Add snapshot repos with default key
-              . + {"snapshotRepos": {"default": $repo}}
+              # Add snapshotInfo with repo and snapshot definition
+              . + {"snapshotInfo": {
+                "repos": {"default": $repo},
+                "snapshots": {
+                  "testsnapshot": {
+                    "repoName": "default",
+                    "config": {"createSnapshotConfig": {}}
+                  }
+                }
+              }}
             ')
             
-            SNAPSHOT_EXTRACT_CONFIGS=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '[.[] | {
-              "snapshotConfig": {
-                "repoName": "default",
-                "snapshotNameConfig": {
-                  "snapshotNamePrefix": "testsnapshot"
-                }
-              },
-              "createSnapshotConfig": {},
-              "migrations": .migrations
-            }]')
+            SNAPSHOT_EXTRACT_CONFIGS=$(echo "$SNAPSHOT_MIGRATION_CONFIGS" | jq '
+              {"testsnapshot": .[0].migrations}
+            ')
             
             MIGRATION_CONFIG=$(jq -n \
               --argjson source "$SOURCE_WITH_REPO" \
@@ -348,13 +343,10 @@ spec:
                 "targetClusters": {
                   "target1": $target
                 },
-                "migrationConfigs": [{
+                "snapshotMigrationConfigs": [{
                   "fromSource": "source1",
                   "toTarget": "target1",
-                  "snapshotExtractAndLoadConfigs": $snapshotConfigs,
-                  "replayerConfig": {
-                    "podReplicas": 0
-                  }
+                  "perSnapshotConfig": $snapshotConfigs
                 }]
               }')
             

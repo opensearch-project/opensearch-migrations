@@ -205,7 +205,7 @@ class TestArgoServiceFiltering:
                         "inputs": {
                             "parameters": [
                                 {"name": "configContents", "value": "important-config"},
-                                {"name": "groupName", "value": "my-group"},
+                                {"name": "groupName_view", "value": "my-group"},
                                 {"name": "irrelevantParam", "value": "should-be-filtered"},
                                 {"name": "anotherParam", "value": "also-filtered"}
                             ]
@@ -329,7 +329,7 @@ class TestArgoServiceFiltering:
         node1_inputs = slim_data["status"]["nodes"]["node-1"]["inputs"]["parameters"]
         param_names = {p["name"] for p in node1_inputs}
 
-        assert param_names == {"configContents", "groupName"}
+        assert param_names == {"configContents", "groupName_view"}
         assert "irrelevantParam" not in param_names
         assert "anotherParam" not in param_names
 

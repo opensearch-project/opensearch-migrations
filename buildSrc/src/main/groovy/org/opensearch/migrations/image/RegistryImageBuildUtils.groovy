@@ -6,6 +6,7 @@ import org.gradle.api.tasks.Exec
 import org.opensearch.migrations.common.CommonUtils
 
 class RegistryImageBuildUtils {
+    private static boolean builderWarningShown = false
 
     static class Registry { // Helper object
         final String hostUrl      // For Jib, which runs in the JVM directly (e.g., localhost:5001)
@@ -114,6 +115,12 @@ class RegistryImageBuildUtils {
                             if (targetArch != "multi") dest = "${registryDestination}_${targetArch}"
                             image = dest
 
+                            // For single-arch builds, also tag as the base name (without suffix)
+                            // to match BuildKit behavior and allow local k8s deployments to find images
+                            def tagList = []
+                            if (targetArch != "multi") {
+                                tagList.add(config.imageTag.toString())
+                            }
                             def versionTag = rootProject.findProperty("imageVersion")
                             if (versionTag) {
                                 def suffix = (targetArch != "multi") ? "_${targetArch}" : ""
@@ -122,8 +129,9 @@ class RegistryImageBuildUtils {
                                         config.get("repoName", null)?.toString())[0]
                                 // Extract just the tag portion for Jib's tags list
                                 def formattedTag = versionDest.toString().split(":")[-1]
-                                tags = ["${formattedTag}${suffix}".toString()]
+                                tagList.add("${formattedTag}${suffix}".toString())
                             }
+                            if (tagList) tags = tagList
                         }
                         extraDirectories {
                             paths {
@@ -139,7 +147,14 @@ class RegistryImageBuildUtils {
                             }
                         }
                         allowInsecureRegistries = true
-                        container { entrypoint = ['tail', '-f', '/dev/null'] }
+                        container {
+                            def flags = (List<String>) config.get("jvmFlags", [])
+                            if (flags) {
+                                jvmFlags = flags
+                            }
+                            // mainClass is auto-detected from the application plugin.
+                            // Jib generates: java <jvmFlags> -cp @/app/jib-classpath-file <mainClass>
+                        }
                     }
 
                     // Handle Dependencies
@@ -205,7 +220,10 @@ class RegistryImageBuildUtils {
                 if (context) {
                     // NOTE: This naming convention must match setupK8sBuilders.sh's BUILDER_NAME derivation
                     builder = "builder-" + context.replaceAll("[^a-zA-Z0-9_-]", "-")
-                    project.logger.lifecycle("No -Pbuilder specified, derived '${builder}' from kube context '${context}'")
+                    if (!builderWarningShown) {
+                        project.logger.lifecycle("No -Pbuilder specified, derived '${builder}' from kube context '${context}'")
+                        builderWarningShown = true
+                    }
                 }
             } catch (Exception ignored) {}
             if (!builder) {

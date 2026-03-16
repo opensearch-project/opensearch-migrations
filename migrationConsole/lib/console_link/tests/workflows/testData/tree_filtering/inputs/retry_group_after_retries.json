@@ -1,0 +1,78 @@
+[
+  {
+    "id": "retry-group",
+    "display_name": "deployKafkaNodePoolWithRetry",
+    "phase": "Succeeded",
+    "type": "Steps",
+    "boundary_id": null,
+    "inputs": {"parameters": [{"name": "retryGroupName_view", "value": "KafkaNodePool: default"}]},
+    "children": [
+      {
+        "id": "try1",
+        "display_name": "tryApply",
+        "phase": "Failed",
+        "type": "Pod",
+        "boundary_id": "retry-group",
+        "inputs": {},
+        "outputs": {},
+        "started_at": "2026-01-01T00:00:01Z",
+        "children": []
+      },
+      {
+        "id": "wait1",
+        "display_name": "waitForFix",
+        "phase": "Succeeded",
+        "type": "Suspend",
+        "boundary_id": "retry-group",
+        "inputs": {},
+        "outputs": {},
+        "started_at": "2026-01-01T00:00:02Z",
+        "children": []
+      },
+      {
+        "id": "loop1",
+        "display_name": "retryLoop",
+        "phase": "Succeeded",
+        "type": "Steps",
+        "boundary_id": "retry-group",
+        "inputs": {"parameters": [{"name": "retryGroupName_view", "value": "KafkaNodePool: default"}]},
+        "started_at": "2026-01-01T00:00:03Z",
+        "children": [
+          {
+            "id": "try2",
+            "display_name": "tryApply",
+            "phase": "Succeeded",
+            "type": "Pod",
+            "boundary_id": "loop1",
+            "inputs": {},
+            "outputs": {},
+            "started_at": "2026-01-01T00:00:04Z",
+            "children": []
+          },
+          {
+            "id": "wait2",
+            "display_name": "waitForFix",
+            "phase": "Skipped",
+            "type": "Skipped",
+            "boundary_id": "loop1",
+            "inputs": {},
+            "outputs": {},
+            "started_at": "2026-01-01T00:00:05Z",
+            "children": []
+          },
+          {
+            "id": "loop2",
+            "display_name": "retryLoop",
+            "phase": "Skipped",
+            "type": "Skipped",
+            "boundary_id": "loop1",
+            "inputs": {},
+            "outputs": {},
+            "started_at": "2026-01-01T00:00:05Z",
+            "children": []
+          }
+        ]
+      }
+    ]
+  }
+]

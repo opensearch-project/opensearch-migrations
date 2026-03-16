@@ -6,7 +6,6 @@ A Helm chart for deploying the OpenSearch Migration Assistant with Argo Workflow
 
 This chart deploys the Migration Assistant along with its supporting infrastructure components including:
 - Argo Workflows for migration orchestration
-- etcd for workflow coordination
 - Kafka (via Strimzi operator) for capture and replay
 - OpenTelemetry for observability
 - Prometheus stack for metrics
