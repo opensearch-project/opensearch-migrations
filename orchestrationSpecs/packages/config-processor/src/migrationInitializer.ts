@@ -1,18 +1,9 @@
 import {StreamSchemaParser} from "./streamSchemaTransformer";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {
-    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN,
-    PARAMETERIZED_MIGRATION_CONFIG,
-    PARAMETERIZED_MIGRATION_CONFIG_ARRAYS
+    ARGO_MIGRATION_CONFIG,
+    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN
 } from "@opensearch-migrations/schemas";
-import { Etcd3, isRecoverableError } from "etcd3";
-import {
-    handleWhen,
-    retry,
-    circuitBreaker,
-} from "cockatiel";
-import { ExponentialBackoff } from "cockatiel/dist/backoff/ExponentialBackoff"; // path may vary
-import {z} from "zod";
 import {stringify} from "yaml";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -20,96 +11,14 @@ import {scrapeApprovals} from "./formatApprovals";
 import {setNamesInUserConfig} from "./migrationConfigTransformer";
 import { generateSemaphoreKey } from './semaphoreUtils';
 
-/** etcd connection options */
-export interface EtcdOptions {
-    endpoints: string[];           // e.g., "http://127.0.0.1:2379" or array
-    auth?: {
-        username: string;
-        password: string;
-    }
-}
-
 export class MigrationInitializer {
-    readonly client: Etcd3;
-    readonly loader: StreamSchemaParser<typeof PARAMETERIZED_MIGRATION_CONFIG_ARRAYS>;
+    readonly loader: StreamSchemaParser<typeof ARGO_MIGRATION_CONFIG>;
     readonly transformer: MigrationConfigTransformer;
-    constructor(etcdSettings: EtcdOptions, public readonly uniqueRunNonce: string) {
-        if (!K8S_NAMING_PATTERN.test(uniqueRunNonce)) {
-            throw new Error(`Illegal uniqueRunNonce argument.  Must match regex pattern ${K8S_NAMING_PATTERN}.`);
-        }
-        console.log("Initializing with " + JSON.stringify(etcdSettings));
-        const recoverable = handleWhen((err) => isRecoverableError(err as any));
+    constructor() {
         // this is an interactive process meant to be used at the beginning of a workflow -
         // no reason to try excessively.  Modest retries and then the user can resubmit or investigate.
-        this.client = new Etcd3({
-            hosts: etcdSettings.endpoints,
-            auth: etcdSettings.auth,
-            faultHandling: {
-                global: retry(recoverable, {
-                    maxAttempts: 4,
-                    backoff: new ExponentialBackoff({
-                        initialDelay: 100, // ms
-                        maxDelay: 2_000    // ms
-                    } as any),
-                })
-            }
-        });
-        this.loader = new StreamSchemaParser(PARAMETERIZED_MIGRATION_CONFIG_ARRAYS);
+        this.loader = new StreamSchemaParser(ARGO_MIGRATION_CONFIG);
         this.transformer = new MigrationConfigTransformer();
-    }
-
-    private calculateProcessorCount(targetMigrations: z.infer<typeof PARAMETERIZED_MIGRATION_CONFIG>[]): number {
-        let count = 0;
-        let hasReplayersConfigured = false;
-        for (const c of targetMigrations) {
-            if (c.replayerConfig !== undefined) {
-                hasReplayersConfigured = true;
-            }
-
-            for (const snapshots of c.snapshotExtractAndLoadConfigArray??[]) {
-                for (const m of snapshots.migrations) {
-                    count += 1;
-                }
-            }
-        }
-
-        return hasReplayersConfigured ? count : 0;
-    }
-
-    async initializeWorkflow(workflows: ARGO_WORKFLOW_SCHEMA): Promise<void> {
-        try {
-            // Store workflow metadata
-            await this.client.put(`/${this.uniqueRunNonce}/workflow/info/prefix`).value(this.uniqueRunNonce);
-            await this.client.put(`/${this.uniqueRunNonce}/workflow/info/started`).value(
-                Math.floor(Date.now() / 1000).toString()
-            );
-
-            const targetsMap =
-                Object.groupBy(workflows, w=> w.targetConfig.label);
-
-            // Initialize target latches
-            for (const [targetLabel, list] of Object.entries(targetsMap)) {
-                const processorCount = list ? this.calculateProcessorCount(list) : 0;
-                console.log(`Total processor count: ${processorCount}`);
-
-                await this.client.put(`/${this.uniqueRunNonce}/workflow/targets/${targetLabel}/latch`)
-                    .value(processorCount.toString());
-
-                console.log(`Target ${targetLabel} latch initialized with count ${processorCount}`);
-            }
-
-            console.log(`Etcd keys initialized with prefix: ${this.uniqueRunNonce}`);
-        } catch (error) {
-            console.error('Error initializing workflow:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Close etcd client connection
-     */
-    async close(): Promise<void> {
-        await this.client.close();
     }
 
     /**
@@ -130,11 +39,13 @@ export class MigrationInitializer {
         // Generate ConfigMaps
         const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
         const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
+        const crdResources = this.generateCRDResources(workflows);
         
         return {
             workflows,
             approvalConfigMaps,
-            concurrencyConfigMaps
+            concurrencyConfigMaps,
+            crdResources
         };
     }
 
@@ -155,6 +66,10 @@ export class MigrationInitializer {
         // 3. Write concurrency config maps
         const concurrencyPath = path.join(outputDir, 'concurrencyConfigMaps.yaml');
         await fs.writeFile(concurrencyPath, stringify(bundle.concurrencyConfigMaps));
+
+        // 4. Write CRD resources
+        const crdPath = path.join(outputDir, 'crdResources.yaml');
+        await fs.writeFile(crdPath, stringify(bundle.crdResources));
     }
 
     private generateApprovalConfigMaps(userConfig: any) {
@@ -213,25 +128,64 @@ export class MigrationInitializer {
         };
     }
 
-    private generateSemaphoreKeys(userConfig: any): string[] {
-        if (!userConfig?.migrationConfigs) {
-            return [];
+    private makeCrdName(...labels: string[]): string {
+        return labels.join('-');
+    }
+
+    private generateCRDResources(workflows: ARGO_WORKFLOW_SCHEMA) {
+        const CRD_API_VERSION = 'migrations.opensearch.org/v1alpha1';
+        const items: any[] = [];
+
+        // CapturedTraffic resources from proxies
+        for (const proxy of workflows.proxies ?? []) {
+            items.push({
+                apiVersion: CRD_API_VERSION,
+                kind: 'CapturedTraffic',
+                metadata: { name: proxy.name },
+                spec: {},
+                status: { phase: 'Initialized' }
+            });
         }
 
-        const semaphoreKeys: string[] = [];
-
-        for (const migrationConfig of userConfig.migrationConfigs) {
-            const sourceName = migrationConfig.fromSource;
-            const sourceCluster = userConfig.sourceClusters?.[sourceName];
-            
-            if (!sourceCluster || !migrationConfig.snapshotExtractAndLoadConfigs) {
-                continue;
+        // DataSnapshot resources from snapshots
+        for (const snapshot of workflows.snapshots ?? []) {
+            for (const item of snapshot.createSnapshotConfig) {
+                items.push({
+                    apiVersion: CRD_API_VERSION,
+                    kind: 'DataSnapshot',
+                    metadata: { name: this.makeCrdName(snapshot.sourceConfig.label, item.label) },
+                    spec: {},
+                    status: { phase: 'Initialized' }
+                });
             }
+        }
 
+        // SnapshotMigration resources from snapshotMigrations
+        for (const migration of workflows.snapshotMigrations ?? []) {
+            items.push({
+                apiVersion: CRD_API_VERSION,
+                kind: 'SnapshotMigration',
+                metadata: { name: this.makeCrdName(migration.sourceLabel, migration.targetConfig.label, migration.label) },
+                spec: {},
+                status: { phase: 'Initialized' }
+            });
+        }
+
+        return {
+            apiVersion: 'v1',
+            kind: 'List',
+            items
+        };
+    }
+
+    private generateSemaphoreKeys(userConfig: any): string[] {
+        const semaphoreKeys: string[] = [];
+        const sourceClusters = userConfig?.sourceClusters || {};
+
+        for (const [sourceName, sourceCluster] of Object.entries<any>(sourceClusters)) {
             const sourceVersion = sourceCluster.version || "";
-            
-            for (const snapshotConfig of migrationConfig.snapshotExtractAndLoadConfigs) {
-                const key = generateSemaphoreKey(sourceVersion, sourceName, snapshotConfig.snapshotConfig);
+            for (const snapshotName of Object.keys(sourceCluster.snapshotInfo?.snapshots || {})) {
+                const key = generateSemaphoreKey(sourceVersion, sourceName, snapshotName);
                 if (!semaphoreKeys.includes(key)) {
                     semaphoreKeys.push(key);
                 }

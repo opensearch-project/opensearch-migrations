@@ -49,6 +49,18 @@ class TestTreeFiltering:
     def test_rfs_coordinator_retry(self, input_dir, expected_dir):
         """Leaf-only retries are collapsed; retries with statusOutput/groupName children are preserved."""
         self._test_filtering('rfs_coordinator_retry.json', input_dir, expected_dir)
+
+    def test_retry_group_success(self, input_dir, expected_dir):
+        """Retry group with success on first try collapses to single node."""
+        self._test_filtering('retry_group_success.json', input_dir, expected_dir)
+
+    def test_retry_group_waiting(self, input_dir, expected_dir):
+        """Retry group waiting for fix shows as suspended."""
+        self._test_filtering('retry_group_waiting.json', input_dir, expected_dir)
+
+    def test_retry_group_after_retries(self, input_dir, expected_dir):
+        """Retry group that succeeded after retries shows attempt count."""
+        self._test_filtering('retry_group_after_retries.json', input_dir, expected_dir)
     
     def _test_filtering(self, filename, input_dir, expected_dir):
         """Test filtering for a specific file."""

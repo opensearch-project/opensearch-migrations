@@ -4,7 +4,7 @@ import tempfile
 import pytest
 import yaml
 from console_link.environment import Environment
-from console_link.models.cluster import Cluster
+from console_link.models.cluster import SourceCluster
 from tests.search_containers import SearchContainer, Version
 
 
@@ -53,6 +53,6 @@ def env_with_source_container(request):
                          indirect=["env_with_source_container"])
 def test_get_version_searchcontainer(env_with_source_container, version_string):
     assert env_with_source_container.source_cluster is not None
-    assert type(env_with_source_container.source_cluster) is Cluster
+    assert type(env_with_source_container.source_cluster) is SourceCluster
     resp = env_with_source_container.source_cluster.call_api("/")
     assert resp.json()["version"]["number"] == version_string

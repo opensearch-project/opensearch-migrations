@@ -1,0 +1,13 @@
+[
+  {
+    "id": "try2",
+    "display_name": "KafkaNodePool: default (attempt 2)",
+    "phase": "Succeeded",
+    "type": "Pod",
+    "boundary_id": "loop1",
+    "inputs": {},
+    "outputs": {},
+    "started_at": "2026-01-01T00:00:04Z",
+    "children": []
+  }
+]

@@ -371,7 +371,7 @@ class LiveCheckProcessor:
             node_name = display_name.split('(')[0] if '(' in display_name else display_name
 
             node['check_type'] = 'snapshot' if node_name == 'createSnapshot' else 'backfill'
-            node['check_group'] = get_node_input_parameter(intermediate_node, 'groupName') or 'default'
+            node['check_group'] = get_node_input_parameter(intermediate_node, 'groupName_view') or 'default'
             return node
 
         # Pipeline: find intermediate -> map to most recent status -> filter/annotate
