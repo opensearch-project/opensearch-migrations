@@ -1,6 +1,7 @@
 import path from "node:path";
+import childProcess from "node:child_process";
 import Ajv from "ajv";
-import {buildUnifiedSchema} from "../src";
+import {buildUnifiedSchema, loadUnifiedSchema, PREFER_LIVE_UNIFIED_SCHEMA_ENV} from "../src";
 
 const strimziFixturePath = path.resolve(__dirname, "fixtures", "strimzi", "minimal-openapi.json");
 
@@ -130,5 +131,18 @@ describe("unified schema builder", () => {
             expect.stringMatching(/nodePoolSpecOverrides.*roles/),
             expect.stringMatching(/topicSpecOverrides.*cleanup\.policy/),
         ]));
+    });
+
+    it("does not probe the live cluster by default when loading the unified schema", () => {
+        const execSpy = jest.spyOn(childProcess, "execFileSync");
+
+        try {
+            delete process.env[PREFER_LIVE_UNIFIED_SCHEMA_ENV];
+            const loaded = loadUnifiedSchema();
+            expect(loaded.source).toBe("fallback-artifact");
+            expect(execSpy).not.toHaveBeenCalled();
+        } finally {
+            execSpy.mockRestore();
+        }
     });
 });

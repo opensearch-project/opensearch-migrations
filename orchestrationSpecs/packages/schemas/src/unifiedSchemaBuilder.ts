@@ -11,6 +11,7 @@ export const UNIFIED_SCHEMA_PATH_ENV = "MIGRATION_UNIFIED_SCHEMA_PATH";
 export const UNIFIED_SCHEMA_CONFIGMAP_ENV = "MIGRATION_UNIFIED_SCHEMA_CONFIGMAP";
 export const UNIFIED_SCHEMA_CONFIGMAP_NAMESPACE_ENV = "MIGRATION_UNIFIED_SCHEMA_NAMESPACE";
 export const UNIFIED_SCHEMA_CONFIGMAP_KEY_ENV = "MIGRATION_UNIFIED_SCHEMA_KEY";
+export const PREFER_LIVE_UNIFIED_SCHEMA_ENV = "MIGRATION_PREFER_LIVE_UNIFIED_SCHEMA";
 
 export type UnifiedSchemaMode = "full";
 export type UnifiedSchemaSource = "file" | "live-cluster" | "configmap" | "fallback-artifact" | "generated";
@@ -284,20 +285,6 @@ export function loadUnifiedSchema(): LoadedUnifiedSchema {
         };
     }
 
-    try {
-        const base = buildBaseUnifiedSchema();
-        const openApi = readStrimziOpenApiFromCluster();
-        const fullSchema = injectStrimziRefs(base, extractStrimziDefsFromOpenApi(openApi));
-        return {
-            schema: addSchemaMetadata(fullSchema, "full", STRIMZI_OPENAPI_API_PATH),
-            mode: "full",
-            source: "live-cluster",
-            detail: STRIMZI_OPENAPI_API_PATH,
-        };
-    } catch {
-        // Fall through to explicit legacy configmap / checked-in baseline resolution.
-    }
-
     const configMapName = process.env[UNIFIED_SCHEMA_CONFIGMAP_ENV];
     if (configMapName) {
         const key = process.env[UNIFIED_SCHEMA_CONFIGMAP_KEY_ENV] ?? UNIFIED_SCHEMA_CONFIGMAP_KEY;
@@ -320,6 +307,22 @@ export function loadUnifiedSchema(): LoadedUnifiedSchema {
             source: "fallback-artifact",
             detail: fallbackPath,
         };
+    }
+
+    if (process.env[PREFER_LIVE_UNIFIED_SCHEMA_ENV] === "true") {
+        try {
+            const base = buildBaseUnifiedSchema();
+            const openApi = readStrimziOpenApiFromCluster();
+            const fullSchema = injectStrimziRefs(base, extractStrimziDefsFromOpenApi(openApi));
+            return {
+                schema: addSchemaMetadata(fullSchema, "full", STRIMZI_OPENAPI_API_PATH),
+                mode: "full",
+                source: "live-cluster",
+                detail: STRIMZI_OPENAPI_API_PATH,
+            };
+        } catch {
+            // Fall through to the standard missing-schema error below.
+        }
     }
 
     return buildUnifiedSchema();
