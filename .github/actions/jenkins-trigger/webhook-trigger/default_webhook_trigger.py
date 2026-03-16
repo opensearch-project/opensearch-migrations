@@ -248,8 +248,8 @@ def main() -> None:
     parser.add_argument("--job_params", type=parse_key_value_pairs, required=False, default={},
                         help='Job parameters as comma-separated key=value pairs, e.g. '
                              '"GIT_REPO_URL=https://github.com/example/repo.git,GIT_BRANCH=main"')
-    parser.add_argument("--job_timeout_minutes", default=60, type=int,
-                        help="Max time (minutes) to wait for completion. Default is 60 minutes")
+    parser.add_argument("--job_timeout_minutes", default=120, type=int,
+                        help="Max time (minutes) to wait for completion. Default is 120 minutes")
 
     args = parser.parse_args()
     config = JenkinsConfig(

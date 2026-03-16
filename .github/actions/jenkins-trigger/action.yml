@@ -19,7 +19,7 @@ inputs:
   job_timeout_minutes:
     description: 'Max time (minutes) to wait for completion'
     required: false
-    default: "60"
+    default: "120"
 runs:
   using: "composite"
   steps:
