@@ -11,7 +11,7 @@ export const UNIFIED_SCHEMA_PATH_ENV = "MIGRATION_UNIFIED_SCHEMA_PATH";
 export const UNIFIED_SCHEMA_CONFIGMAP_ENV = "MIGRATION_UNIFIED_SCHEMA_CONFIGMAP";
 export const UNIFIED_SCHEMA_CONFIGMAP_NAMESPACE_ENV = "MIGRATION_UNIFIED_SCHEMA_NAMESPACE";
 export const UNIFIED_SCHEMA_CONFIGMAP_KEY_ENV = "MIGRATION_UNIFIED_SCHEMA_KEY";
-export const PREFER_LIVE_UNIFIED_SCHEMA_ENV = "MIGRATION_PREFER_LIVE_UNIFIED_SCHEMA";
+export const ALLOW_FALLBACK_UNIFIED_SCHEMA_ENV = "MIGRATION_ALLOW_FALLBACK_UNIFIED_SCHEMA";
 
 export type UnifiedSchemaMode = "full";
 export type UnifiedSchemaSource = "file" | "live-cluster" | "configmap" | "fallback-artifact" | "generated";
@@ -237,15 +237,17 @@ export function buildUnifiedSchema(options: UnifiedSchemaBuildOptions = {}): Loa
         };
     }
 
-    const fallbackPath = findFallbackUnifiedSchemaPath();
-    if (fallbackPath) {
-        const schema = JSON.parse(fs.readFileSync(fallbackPath, "utf-8"));
-        return {
-            schema,
-            mode: (schema["x-orchestration-specs-strimzi-schema-mode"] as UnifiedSchemaMode) ?? "full",
-            source: "fallback-artifact",
-            detail: fallbackPath,
-        };
+    if (process.env[ALLOW_FALLBACK_UNIFIED_SCHEMA_ENV] === "true") {
+        const fallbackPath = findFallbackUnifiedSchemaPath();
+        if (fallbackPath) {
+            const schema = JSON.parse(fs.readFileSync(fallbackPath, "utf-8"));
+            return {
+                schema,
+                mode: (schema["x-orchestration-specs-strimzi-schema-mode"] as UnifiedSchemaMode) ?? "full",
+                source: "fallback-artifact",
+                detail: fallbackPath,
+            };
+        }
     }
 
     throw new Error("No Strimzi schema path was provided and no fallback unified schema artifact was found");
@@ -298,30 +300,30 @@ export function loadUnifiedSchema(): LoadedUnifiedSchema {
         };
     }
 
-    const fallbackPath = findFallbackUnifiedSchemaPath();
-    if (fallbackPath) {
-        const schema = JSON.parse(fs.readFileSync(fallbackPath, "utf-8"));
+    try {
+        const base = buildBaseUnifiedSchema();
+        const openApi = readStrimziOpenApiFromCluster();
+        const fullSchema = injectStrimziRefs(base, extractStrimziDefsFromOpenApi(openApi));
         return {
-            schema,
-            mode: (schema["x-orchestration-specs-strimzi-schema-mode"] as UnifiedSchemaMode) ?? "full",
-            source: "fallback-artifact",
-            detail: fallbackPath,
+            schema: addSchemaMetadata(fullSchema, "full", STRIMZI_OPENAPI_API_PATH),
+            mode: "full",
+            source: "live-cluster",
+            detail: STRIMZI_OPENAPI_API_PATH,
         };
+    } catch {
+        // Fall through to explicit opt-in fallback resolution below.
     }
 
-    if (process.env[PREFER_LIVE_UNIFIED_SCHEMA_ENV] === "true") {
-        try {
-            const base = buildBaseUnifiedSchema();
-            const openApi = readStrimziOpenApiFromCluster();
-            const fullSchema = injectStrimziRefs(base, extractStrimziDefsFromOpenApi(openApi));
+    if (process.env[ALLOW_FALLBACK_UNIFIED_SCHEMA_ENV] === "true") {
+        const fallbackPath = findFallbackUnifiedSchemaPath();
+        if (fallbackPath) {
+            const schema = JSON.parse(fs.readFileSync(fallbackPath, "utf-8"));
             return {
-                schema: addSchemaMetadata(fullSchema, "full", STRIMZI_OPENAPI_API_PATH),
-                mode: "full",
-                source: "live-cluster",
-                detail: STRIMZI_OPENAPI_API_PATH,
+                schema,
+                mode: (schema["x-orchestration-specs-strimzi-schema-mode"] as UnifiedSchemaMode) ?? "full",
+                source: "fallback-artifact",
+                detail: fallbackPath,
             };
-        } catch {
-            // Fall through to the standard missing-schema error below.
         }
     }
 

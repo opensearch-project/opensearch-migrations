@@ -1,7 +1,14 @@
 import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
 import childProcess from "node:child_process";
 import Ajv from "ajv";
-import {buildUnifiedSchema, loadUnifiedSchema, PREFER_LIVE_UNIFIED_SCHEMA_ENV} from "../src";
+import {
+    ALLOW_FALLBACK_UNIFIED_SCHEMA_ENV,
+    buildUnifiedSchema,
+    loadUnifiedSchema,
+    UNIFIED_SCHEMA_PATH_ENV,
+} from "../src";
 
 const strimziFixturePath = path.resolve(__dirname, "fixtures", "strimzi", "minimal-openapi.json");
 
@@ -133,15 +140,31 @@ describe("unified schema builder", () => {
         ]));
     });
 
-    it("does not probe the live cluster by default when loading the unified schema", () => {
+    it("does not probe the live cluster when an explicit schema path is configured", () => {
         const execSpy = jest.spyOn(childProcess, "execFileSync");
+        const previousSchemaPath = process.env[UNIFIED_SCHEMA_PATH_ENV];
+        const previousAllowFallback = process.env[ALLOW_FALLBACK_UNIFIED_SCHEMA_ENV];
+        const explicitSchemaPath = path.join(os.tmpdir(), "orchestrationSpecs-unified-schema-test.json");
 
         try {
-            delete process.env[PREFER_LIVE_UNIFIED_SCHEMA_ENV];
+            const {schema} = buildUnifiedSchema({strimziSchemaPath: strimziFixturePath});
+            fs.writeFileSync(explicitSchemaPath, JSON.stringify(schema, null, 2) + "\n");
+            process.env[UNIFIED_SCHEMA_PATH_ENV] = explicitSchemaPath;
+            delete process.env[ALLOW_FALLBACK_UNIFIED_SCHEMA_ENV];
             const loaded = loadUnifiedSchema();
-            expect(loaded.source).toBe("fallback-artifact");
+            expect(loaded.source).toBe("file");
             expect(execSpy).not.toHaveBeenCalled();
         } finally {
+            if (previousSchemaPath === undefined) {
+                delete process.env[UNIFIED_SCHEMA_PATH_ENV];
+            } else {
+                process.env[UNIFIED_SCHEMA_PATH_ENV] = previousSchemaPath;
+            }
+            if (previousAllowFallback === undefined) {
+                delete process.env[ALLOW_FALLBACK_UNIFIED_SCHEMA_ENV];
+            } else {
+                process.env[ALLOW_FALLBACK_UNIFIED_SCHEMA_ENV] = previousAllowFallback;
+            }
             execSpy.mockRestore();
         }
     });

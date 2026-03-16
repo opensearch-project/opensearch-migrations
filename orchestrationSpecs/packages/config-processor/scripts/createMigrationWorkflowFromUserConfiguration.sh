@@ -18,7 +18,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default command, can be overridden by setting INITIALIZE_CMD environment variable
 : ${INITIALIZE_CMD:="$NODEJS $SCRIPT_DIR/index.js initialize"}
-: ${MIGRATION_PREFER_LIVE_UNIFIED_SCHEMA:=true}
 
 # Create a temporary directory for output files
 TEMP_DIR=$(mktemp -d)
@@ -29,8 +28,7 @@ trap "rm -rf $TEMP_DIR" EXIT
 UUID="$(date +%s)"
 echo "Generated unique uniqueRunNonce: $UUID"
 echo "Running configuration conversion..."
-MIGRATION_PREFER_LIVE_UNIFIED_SCHEMA="$MIGRATION_PREFER_LIVE_UNIFIED_SCHEMA" \
-  $INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR $@
+$INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR $@
 
 echo "Applying Kubernetes resources..."
 
