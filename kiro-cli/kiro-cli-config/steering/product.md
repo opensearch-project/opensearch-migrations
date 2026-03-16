@@ -20,6 +20,7 @@ cd opensearch-migrations.wiki && git pull
 Read specific docs with:
 ```bash
 cat opensearch-migrations.wiki/Home.md                      # Overview, version identification, Migration Console orientation
+cat opensearch-migrations.wiki/What-Is-A-Migration.md       # Migration concepts, RFS, Capture and Replay, iterative workflows
 cat opensearch-migrations.wiki/Architecture.md              # Mental model, error recovery, approval gates
 cat opensearch-migrations.wiki/Migration-Paths.md           # Version compatibility, how to determine source version
 cat opensearch-migrations.wiki/Deploying-to-EKS.md          # Bootstrap script, STAGE explanation, verification, snapshot config
