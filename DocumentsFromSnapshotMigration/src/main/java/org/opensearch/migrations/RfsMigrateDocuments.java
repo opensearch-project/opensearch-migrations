@@ -119,7 +119,7 @@ public class RfsMigrateDocuments {
 
     public static class Args {
         /** Default maximum documents per bulk batch. */
-        static final int DEFAULT_MAX_DOCS_PER_BATCH = 1000;
+        static final int DEFAULT_MAX_DOCS_PER_BATCH = Integer.MAX_VALUE;
         /** Default maximum bytes per bulk batch (10 MiB). */
         static final long DEFAULT_MAX_BYTES_PER_BATCH = 10L * 1024 * 1024;
         /** Default number of concurrent batches in flight. */
