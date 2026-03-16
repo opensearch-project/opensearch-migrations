@@ -280,6 +280,10 @@ What is still transitional:
 - [packages/config-processor/src/migrationConfigTransformer.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/config-processor/src/migrationConfigTransformer.ts)
   still emits placeholder bootstrap values for workflow-managed clusters so the
   pre-runtime config shape remains complete
+- `migrationConsole` currently supports managed SCRAM Kafka, but its workflow
+  config reader still derives the managed bootstrap endpoint deterministically
+  from the transformed config rather than consuming the workflow runtime's
+  `readKafkaConnectionProfile` output
 - [packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts)
   is still being simplified so it relies entirely on the already-merged
   initialization-time Kafka defaults instead of retaining overlapping fallback
@@ -295,6 +299,9 @@ What is still transitional:
   workflow needs to distinguish between multiple valid listeners
 - keep the console workflow schema aligned with the shared `KAFKA_CLIENT_CONFIG`
   contract as Kafka client fields evolve
+- decide whether console should continue deriving workflow-managed bootstrap
+  endpoints deterministically or move to a runtime-resolved Kafka connection
+  profile source
 
 ## Authentication And Credentials
 

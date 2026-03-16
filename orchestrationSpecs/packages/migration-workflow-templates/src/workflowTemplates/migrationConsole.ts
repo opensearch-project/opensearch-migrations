@@ -40,7 +40,7 @@ export const configComponentParameters = {
     }),
     kafkaInfo: defineParam({
         expression: expr.cast(expr.literal("")).to<z.infer<typeof KAFKA_CLIENT_CONFIG>>(),
-        description: "Snapshot configuration information (JSON)"
+        description: "Kafka client configuration information (JSON)"
     }),
     sourceConfig: defineParam({
         expression: expr.cast(expr.literal("")).to<z.infer<typeof CONSOLE_SOURCE_CLUSTER_CONFIG>>(),
