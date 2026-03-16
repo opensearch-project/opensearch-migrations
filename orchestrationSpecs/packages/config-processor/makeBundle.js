@@ -103,14 +103,19 @@ async function bundle() {
         }
     }
 
-    // Copy the checked-in unified schema fallback artifact so the bundled
-    // initializer can validate configs without requiring a live Strimzi schema.
+    // Optionally copy a prebuilt baseline unified schema artifact into the bundle.
+    // This is a generated fallback, not the preferred live-cluster schema source.
     const fallbackSchemaSrc = path.join(__dirname, '..', 'schemas', 'generated', 'workflowMigration.schema.json');
     const fallbackSchemaDest = path.join(outputDir, 'generated', 'workflowMigration.schema.json');
     if (fs.existsSync(fallbackSchemaSrc)) {
         fs.mkdirSync(path.dirname(fallbackSchemaDest), { recursive: true });
         fs.copyFileSync(fallbackSchemaSrc, fallbackSchemaDest);
         console.log(`Copied fallback unified schema to ${fallbackSchemaDest}`);
+    } else if (process.env.REQUIRE_BASELINE_UNIFIED_SCHEMA === 'true') {
+        throw new Error(
+            `Baseline unified schema artifact not found at ${fallbackSchemaSrc}. ` +
+            `Generate it first with 'npm run build:unified-schema -- --strimzi-openapi <path>'.`
+        );
     }
 
     // Make the bundle executable
