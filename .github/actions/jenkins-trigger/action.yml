@@ -1,0 +1,27 @@
+name: 'Jenkins Job Trigger and Monitor'
+description: 'A Github Action to trigger Jenkins jobs and monitor for completion'
+inputs:
+  jenkins_url:
+    description: 'Jenkins URL including http/https protocol'
+    required: true
+  api_token:
+    description: 'The token for authenticating with the Jenkins generic webhook'
+    required: true
+  job_name:
+    description: 'The job name to trigger in Jenkins'
+    required: true
+  job_params:
+    description: 'Job parameters, separated by a comma, to provide to a Jenkins workflow, e.g. "GIT_REPO_URL=https://github.com/lewijacn/opensearch-migrations.git,GIT_BRANCH=main". Job name will automatically be added as a parameter.'
+    required: false
+    default: ""
+  job_timeout_minutes:
+    description: 'Max time (minutes) this Github Action will wait for completion'
+    required: false
+    default: "60"
+runs:
+  using: "docker"
+  image: "Dockerfile"
+
+branding:
+  icon: 'check-circle'
+  color: 'green'

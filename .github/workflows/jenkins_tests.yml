@@ -30,8 +30,9 @@ jobs:
       group: ${{ github.workflow }}-full-es68-e2e-aws-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
+      - uses: actions/checkout@v4
       - name: Jenkins Job Trigger and Monitor
-        uses: jugal-chauhan/jenkins-trigger@1.0.6
+        uses: ./.github/actions/jenkins-trigger
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: ${{ github.event_name == 'push' && 'main-full-es68source-e2e-test' || 'pr-full-es68source-e2e-test' }}
@@ -46,8 +47,9 @@ jobs:
       group: ${{ github.workflow }}-elasticsearch-5x-k8s-local-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
+      - uses: actions/checkout@v4
       - name: Jenkins Job Trigger and Monitor
-        uses: jugal-chauhan/jenkins-trigger@1.0.6
+        uses: ./.github/actions/jenkins-trigger
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: ${{ github.event_name == 'push' && 'main-elasticsearch-5x-k8s-local-test' || 'pr-elasticsearch-5x-k8s-local-test' }}
@@ -67,8 +69,9 @@ jobs:
       group: ${{ github.workflow }}-eks-integ-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
+      - uses: actions/checkout@v4
       - name: Jenkins Job Trigger and Monitor
-        uses: jugal-chauhan/jenkins-trigger@1.0.6
+        uses: ./.github/actions/jenkins-trigger
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: ${{ github.event_name == 'push' && 'main-eks-integ-test' || 'pr-eks-integ-test' }}
