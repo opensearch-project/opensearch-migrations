@@ -127,36 +127,7 @@ public class SnapshotShardUnpacker {
                 // Use Flux to process files in parallel with controlled concurrency.
                 // Use CountDownLatch instead of blockLast()/block() to avoid Reactor's
                 // blocking detection when called from non-blocking scheduler threads.
-                var latch = new java.util.concurrent.CountDownLatch(1);
-                var error = new java.util.concurrent.atomic.AtomicReference<Throwable>();
-                Flux.fromIterable(filesToUnpack)
-                    .flatMap(
-                        fileMetadata -> unpackFile(primaryDirectory, fileMetadata)
-                            .doOnSuccess(v -> {
-                                int done = ++completedFiles[0];
-                                if (done % 5 == 0 || done == totalFiles) {
-                                    log.info("Shard {} unpack progress: {}/{} files", shardId, done, totalFiles);
-                                }
-                            })
-                            .subscribeOn(Schedulers.boundedElastic()),
-                        MAX_CONCURRENT_EXTRACTIONS
-                    )
-                    .subscribe(
-                        v -> {},
-                        t -> { error.set(t); latch.countDown(); },
-                        latch::countDown
-                    );
-                try {
-                    latch.await();
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new CouldNotUnpackShard("Interrupted while unpacking shard " + shardId, ie);
-                }
-                if (error.get() != null) {
-                    var cause = error.get();
-                    if (cause instanceof RuntimeException) throw (RuntimeException) cause;
-                    throw new CouldNotUnpackShard("File unpacking failed for shard " + shardId, (Exception) cause);
-                }
+                unpackFilesInParallel(primaryDirectory, completedFiles, totalFiles);
 
                 log.atInfo()
                     .setMessage("Successfully unpacked {} files for shard {}")
@@ -168,6 +139,39 @@ public class SnapshotShardUnpacker {
         } catch (Exception e) {
             String errorMessage = "Could not unpack shard: Index " + indexId + ", Shard " + shardId;
             throw new CouldNotUnpackShard(errorMessage, e);
+        }
+    }
+
+    private void unpackFilesInParallel(FSDirectory primaryDirectory, int[] completedFiles, int totalFiles) {
+        var latch = new java.util.concurrent.CountDownLatch(1);
+        var error = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        Flux.fromIterable(filesToUnpack)
+            .flatMap(
+                fileMetadata -> unpackFile(primaryDirectory, fileMetadata)
+                    .doOnSuccess(v -> {
+                        int done = ++completedFiles[0];
+                        if (done % 5 == 0 || done == totalFiles) {
+                            log.info("Shard {} unpack progress: {}/{} files", shardId, done, totalFiles);
+                        }
+                    })
+                    .subscribeOn(Schedulers.boundedElastic()),
+                MAX_CONCURRENT_EXTRACTIONS
+            )
+            .subscribe(
+                v -> {},
+                t -> { error.set(t); latch.countDown(); },
+                latch::countDown
+            );
+        try {
+            latch.await();
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new CouldNotUnpackShard("Interrupted while unpacking shard " + shardId, ie);
+        }
+        if (error.get() != null) {
+            var cause = error.get();
+            if (cause instanceof RuntimeException) throw (RuntimeException) cause;
+            throw new CouldNotUnpackShard("File unpacking failed for shard " + shardId, (Exception) cause);
         }
     }
 
