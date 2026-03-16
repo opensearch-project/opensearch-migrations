@@ -25,6 +25,8 @@ export interface EKSInfraProps {
     migrationsServiceAccountName?: string;
     migrationConsoleServiceAccountName?: string;
     otelCollectorServiceAccountName?: string;
+    enablePCA?: boolean;
+    enableACKPCA?: boolean;
 }
 
 export class EKSInfra extends Construct {
@@ -130,6 +132,26 @@ export class EKSInfra extends Construct {
         migrationsPodIdentityAssociation.node.addDependency(this.cluster)
         migrationConsolePodIdentityAssociation.node.addDependency(this.cluster)
         otelCollectorPodIdentityAssociation.node.addDependency(this.cluster)
+
+        // PCA Pod Identity Associations — conditional on enablePCA/enableACKPCA
+        if (props.enablePCA) {
+            const pcaIssuerPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'PcaIssuerPodIdentityAssociation', {
+                clusterName: props.clusterName,
+                namespace: namespace,
+                serviceAccount: 'aws-pca-issuer',
+                roleArn: podIdentityRole.roleArn,
+            });
+            pcaIssuerPodIdentityAssociation.node.addDependency(this.cluster)
+        }
+        if (props.enableACKPCA) {
+            const ackAcmpcaPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'AckAcmpcaPodIdentityAssociation', {
+                clusterName: props.clusterName,
+                namespace: namespace,
+                serviceAccount: 'ack-acmpca-controller',
+                roleArn: podIdentityRole.roleArn,
+            });
+            ackAcmpcaPodIdentityAssociation.node.addDependency(this.cluster)
+        }
     }
 
     createDefaultPodIdentityRole(clusterName: string) {
@@ -233,6 +255,21 @@ export class EKSInfra extends Construct {
                 effect: Effect.ALLOW,
                 actions: ['iam:PassRole'],
                 resources: [`arn:${Aws.PARTITION}:iam::${Stack.of(this).account}:role/*`]
+            }),
+            // ACM PCA permissions for TLS certificate issuance via cert-manager
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    'acm-pca:IssueCertificate',
+                    'acm-pca:GetCertificate',
+                    'acm-pca:DescribeCertificateAuthority',
+                    'acm-pca:ListCertificateAuthorities',
+                    'acm-pca:CreateCertificateAuthority',
+                    'acm-pca:DeleteCertificateAuthority',
+                    'acm-pca:UpdateCertificateAuthority',
+                    'acm-pca:TagCertificateAuthority',
+                ],
+                resources: ['*'],
             })
         );
         return podIdentityRole

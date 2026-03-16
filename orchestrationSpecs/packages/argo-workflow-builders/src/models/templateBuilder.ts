@@ -37,10 +37,14 @@ import {DeepWiden, PlainObject} from "./plainObject";
 import {DagBuilder} from "./dagBuilder";
 import {K8sResourceBuilder} from "./k8sResourceBuilder";
 import {SuspendTemplateBuilder, DurationInSeconds} from "./suspendTemplateBuilder";
+import {
+    WaitForExistingResourceBuilder,
+    WaitForExistingResourceDefinition, WaitForNewResourceBuilder, WaitForNewResourceDefinition
+} from "./waitForResourceBuilder";
 import {AllowLiteralOrExpression, expr, isExpression} from "./expression";
 import {typeToken, TypeToken} from "./sharedTypes";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
-import { Container } from "../kubernetesResourceTypes/kubernetesTypes";
+import { Container } from "@opensearch-migrations/k8s-types";
 import { SetRequired } from "../utils";
 
 /**
@@ -287,6 +291,30 @@ export class TemplateBuilder<
             {},
             undefined
         );
+    }
+
+    addWaitForNewResource<
+        FinalBody extends WaitForNewResourceDefinition,
+        FinalOut extends OutputParametersRecord
+    >(
+        builderFn: ScopeIsEmptyConstraint<BodyScope, (
+            b: WaitForNewResourceBuilder<ParentWorkflowScope, InputParamsScope, {}, {}>
+        ) => WaitForNewResourceBuilder<ParentWorkflowScope, InputParamsScope, FinalBody, FinalOut>>
+    ): WaitForNewResourceBuilder<ParentWorkflowScope, InputParamsScope, FinalBody, FinalOut> {
+        const fn = builderFn as any;
+        return fn(new WaitForNewResourceBuilder(this.parentWorkflowScope, this.inputScope, {}, {}, undefined));
+    }
+
+    addWaitForExistingResource<
+        FinalBody extends WaitForExistingResourceDefinition,
+        FinalOut extends OutputParametersRecord
+    >(
+        builderFn: ScopeIsEmptyConstraint<BodyScope, (
+            b: WaitForExistingResourceBuilder<ParentWorkflowScope, InputParamsScope, {}, {}>
+        ) => WaitForExistingResourceBuilder<ParentWorkflowScope, InputParamsScope, FinalBody, FinalOut>>
+    ): WaitForExistingResourceBuilder<ParentWorkflowScope, InputParamsScope, FinalBody, FinalOut> {
+        const fn = builderFn as any;
+        return fn(new WaitForExistingResourceBuilder(this.parentWorkflowScope, this.inputScope, {}, {}, undefined));
     }
 
     getTemplateSignatureScope(): InputParamsScope {

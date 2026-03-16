@@ -40,7 +40,7 @@
         ],
         "inputs": {
           "parameters": [
-            {"name": "groupName", "value": "rootgroup"}
+            {"name": "groupName_view", "value": "rootgroup"}
           ]
         },
         "outputs": {},

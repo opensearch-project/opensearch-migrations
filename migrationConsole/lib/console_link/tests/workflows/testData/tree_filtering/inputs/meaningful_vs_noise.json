@@ -22,7 +22,7 @@
             "inputs": {
               "parameters": [
                 {
-                  "name": "groupName",
+                  "name": "groupName_view",
                   "value": "meaningful_work"
                 }
               ]

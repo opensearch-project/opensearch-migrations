@@ -1,4 +1,3 @@
-
 import {z} from "zod";
 import {
     AllowLiteralOrExpression,
@@ -16,10 +15,10 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {
     CLUSTER_CONFIG,
+    CONSOLE_SOURCE_CLUSTER_CONFIG,
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
     DEFAULT_RESOURCES,
-    KAFKA_SERVICES_CONFIG,
     ResourceRequirementsType,
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
@@ -39,16 +38,26 @@ export const CONSOLE_BACKFILL_INFO = z.object({
 });
 
 export const configComponentParameters = {
-    backfillSession: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof CONSOLE_BACKFILL_INFO>>(),
-        description: "The metadata about the deployment performing the RFS backfill"}),
-    kafkaInfo: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof CONSOLE_KAFKA_SERVICES_CONFIG>>(),
-        description: "Snapshot configuration information (JSON)"}),
-    sourceConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof CLUSTER_CONFIG>>(),
-        description: "Source cluster configuration (JSON)"}),
-    snapshotConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
-        description: "Snapshot configuration information (JSON)"}),
-    targetConfig: defineParam({ expression: expr.cast(expr.literal("")).to<z.infer<typeof TARGET_CLUSTER_CONFIG>>(),
-        description: "Target cluster configuration (JSON)"})
+    backfillSession: defineParam({
+        expression: expr.cast(expr.literal("")).to<z.infer<typeof CONSOLE_BACKFILL_INFO>>(),
+        description: "The metadata about the deployment performing the RFS backfill"
+    }),
+    kafkaInfo: defineParam({
+        expression: expr.cast(expr.literal("")).to<z.infer<typeof CONSOLE_KAFKA_SERVICES_CONFIG>>(),
+        description: "Snapshot configuration information (JSON)"
+    }),
+    sourceConfig: defineParam({
+        expression: expr.cast(expr.literal("")).to<z.infer<typeof CONSOLE_SOURCE_CLUSTER_CONFIG>>(),
+        description: "Source cluster configuration (JSON)"
+    }),
+    snapshotConfig: defineParam({
+        expression: expr.cast(expr.literal("")).to<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
+        description: "Snapshot configuration information (JSON)"
+    }),
+    targetConfig: defineParam({
+        expression: expr.cast(expr.literal("")).to<z.infer<typeof TARGET_CLUSTER_CONFIG>>(),
+        description: "Target cluster configuration (JSON)"
+    })
 };
 
 // TODO - once the migration console can load secrets from env variables,
@@ -104,8 +113,8 @@ export const MigrationConsole = WorkflowBuilder.create({
             expr.recordToString(expr.mergeDicts(
                     expr.mergeDicts(
                         expr.mergeDicts(
-                            makeOptionalDict("kafka", expr.asString(c.inputs.kafkaInfo), typeToken<z.infer<typeof KAFKA_SERVICES_CONFIG>>()),
-                            makeOptionalDict("source_cluster", expr.asString(c.inputs.sourceConfig), typeToken<z.infer<typeof CLUSTER_CONFIG>>())
+                            makeOptionalDict("kafka", expr.asString(c.inputs.kafkaInfo), typeToken<z.infer<typeof CONSOLE_KAFKA_SERVICES_CONFIG>>()),
+                            makeOptionalDict("source_cluster", expr.asString(c.inputs.sourceConfig), typeToken<z.infer<typeof CONSOLE_SOURCE_CLUSTER_CONFIG>>())
                         ),
                         expr.mergeDicts(
                             makeOptionalDict("target_cluster", expr.asString(c.inputs.targetConfig), typeToken<z.infer<typeof TARGET_CLUSTER_CONFIG>>()),
@@ -121,7 +130,8 @@ export const MigrationConsole = WorkflowBuilder.create({
                                 }),
                                 "backfill_session_name": expr.get(expr.deserializeRecord(c.inputs.backfillSession), "sessionName")
                             })
-                        })}))
+                        })
+                    }))
                 )
             )
         )
@@ -142,9 +152,9 @@ export const MigrationConsole = WorkflowBuilder.create({
             .addImageInfo(c.inputs.imageMigrationConsoleLocation, c.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/sh", "-c"])
             .addEnvVarsFromRecord(getSourceHttpAuthCreds(
-                expr.dig(expr.deserializeRecord(c.inputs.configContents), ["source_cluster","authConfig","basic","secretName"], "")))
+                expr.dig(expr.deserializeRecord(c.inputs.configContents), ["source_cluster", "authConfig", "basic", "secretName"], "")))
             .addEnvVarsFromRecord(getTargetHttpAuthCreds(
-                expr.dig(expr.deserializeRecord(c.inputs.configContents), ["target_cluster","authConfig","basic","secretName"], "")))
+                expr.dig(expr.deserializeRecord(c.inputs.configContents), ["target_cluster", "authConfig", "basic", "secretName"], "")))
             .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
             .addArgs([
                 expr.fillTemplate(SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE, {
@@ -152,7 +162,7 @@ export const MigrationConsole = WorkflowBuilder.create({
                     "COMMAND": c.inputs.command
                 })]
             )
-            .addPodMetadata(({ inputs }) => ({
+            .addPodMetadata(({inputs}) => ({
                 labels: {
                     'migrations.opensearch.org/source': inputs.sourceK8sLabel,
                     'migrations.opensearch.org/target': inputs.targetK8sLabel,
@@ -183,7 +193,6 @@ export const MigrationConsole = WorkflowBuilder.create({
                 }))
         )
     )
-
 
 
     .getFullScope();

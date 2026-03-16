@@ -8,7 +8,7 @@ import yaml
 import pytest
 
 from console_link.environment import Environment
-from console_link.models.cluster import Cluster, HttpMethod
+from console_link.models.cluster import Cluster, HttpMethod, SourceCluster
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
 from tests.search_containers import SearchContainer, Version, CLUSTER_SNAPSHOT_DIR
 import console_link.middleware.clusters as clusters_
@@ -107,7 +107,7 @@ def env_with_source_container(request):
                          indirect=["env_with_source_container"])
 def test_cluster_cat_indices(env_with_source_container: Environment, json: bool):
     env = env_with_source_container
-    assert type(env.source_cluster) is Cluster
+    assert type(env.source_cluster) is SourceCluster
     # First, test with refresh enabled.
     result = clusters_.cat_indices(env.source_cluster, refresh=True, as_json=json)
     if not json:
@@ -126,7 +126,7 @@ def test_cluster_cat_indices(env_with_source_container: Environment, json: bool)
 @pytest.mark.parametrize("env_with_source_container", SUPPORTED_SOURCE_CLUSTERS, indirect=True)
 def test_connection_check(env_with_source_container: Environment):
     env = env_with_source_container
-    assert type(env.source_cluster) is Cluster
+    assert type(env.source_cluster) is SourceCluster
     result = clusters_.connection_check(env.source_cluster)
     assert result.connection_established
 
@@ -137,7 +137,7 @@ def test_connection_check(env_with_source_container: Environment):
                          indirect=["env_with_source_container"])
 def test_snapshot_status(env_with_source_container: Environment, deep_status_check: bool):
     env = env_with_source_container
-    assert type(env.source_cluster) is Cluster
+    assert type(env.source_cluster) is SourceCluster
     result = snapshot_.status(env.snapshot, deep_status_check=True)
     print(result)
     assert result.success

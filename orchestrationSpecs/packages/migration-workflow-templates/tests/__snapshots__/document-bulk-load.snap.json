@@ -1,0 +1,742 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "document-bulk-load"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "stophistoricalbackfill",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n",
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found"
+          ]
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "waitforcompletioninternal",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "configContents"
+            },
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "sourceK8sLabel"
+            },
+            {
+              "name": "targetK8sLabel"
+            },
+            {
+              "name": "snapshotK8sLabel"
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel"
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "reindexFromSnapshotStatusCheck"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "runmigrationcommandforstatus",
+                "name": "migration-console"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configContents",
+                    "value": "{{inputs.parameters.configContents}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}"
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}"
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}"
+                  },
+                  {
+                    "name": "taskK8sLabel",
+                    "value": "{{inputs.parameters.taskK8sLabel}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "command",
+                    "value": "\nset -e -x\ntouch /tmp/status-output.txt\ntouch /tmp/phase-output.txt\n\nstatus=$(console --config-file=/config/migration_services.yaml backfill status --deep-check)\n\n# Check if initializing\nif [[ \"$status\" == \"Shards are initializing\" ]]; then\n    echo \"Shards are initializing\" > /tmp/status-output.txt\nelse\n    # Format detailed status\n    echo \"$status\" | awk '\n    /^Backfill status:/ { status = $3 }\n    /^Backfill percentage_completed:/ { pct = $3 }\n    /^Backfill eta_ms:/ { eta = $3 }\n    /^Backfill shard_total:/ { total = $3 }\n    /^Backfill shard_complete:/ { complete = $3 }\n    /^Backfill shard_in_progress:/ { progress = $3 }\n    /^Backfill shard_waiting:/ { waiting = $3 }\n\n    END {\n        gsub(/^[^.]+\\./, \"\", status)\n        eta_str = (eta == \"\" || eta == \"None\") ? \"unknown\" : int(eta/1000) \"s\"\n        printf \"complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d\\n\", \n               pct, eta_str, progress, waiting, complete, total\n    }\n    ' > /tmp/status-output.txt\nfi\n\n# Check completion status - exit 0 only if complete, otherwise exit 1\necho \"$status\" | awk '\n/^Backfill shard_total:/ {total=$3} \n/^Backfill shard_complete:/ {complete=$3} \nEND {\n  if(total > 0 && total==complete) {\n    exit 0\n  } else {\n    exit 1\n  }\n}' || (echo Checked > /tmp/phase-output.txt && exit 1)\n"
+                  }
+                ]
+              },
+              "name": "checkBackfillStatus"
+            }
+          ]
+        ],
+        "retryStrategy": {
+          "limit": "200",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "5",
+            "factor": "2",
+            "cap": "300"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "waitforcompletion",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "configContents"
+            },
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "sourceK8sLabel"
+            },
+            {
+              "name": "targetK8sLabel"
+            },
+            {
+              "name": "snapshotK8sLabel"
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel"
+            },
+            {
+              "name": "groupName",
+              "value": "checks"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "waitforcompletioninternal",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configContents",
+                    "value": "{{inputs.parameters.configContents}}"
+                  },
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}"
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}"
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  }
+                ]
+              },
+              "name": "runStatusChecks"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "starthistoricalbackfill",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "rfsJsonConfig"
+            },
+            {
+              "name": "targetBasicCredsSecretNameOrEmpty"
+            },
+            {
+              "name": "coordinatorBasicCredsSecretNameOrEmpty"
+            },
+            {
+              "name": "podReplicas"
+            },
+            {
+              "name": "loggingConfigurationOverrideConfigMap"
+            },
+            {
+              "name": "useLocalStack",
+              "description": "Only used for local testing"
+            },
+            {
+              "name": "resources"
+            },
+            {
+              "name": "sourceK8sLabel"
+            },
+            {
+              "name": "targetK8sLabel"
+            },
+            {
+              "name": "snapshotK8sLabel"
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel"
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "reindexFromSnapshot"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceK8sLabel}}\"\n    migrations.opensearch.org/target: \"{{inputs.parameters.targetK8sLabel}}\"\n    migrations.opensearch.org/snapshot: \"{{inputs.parameters.snapshotK8sLabel}}\"\n    migrations.opensearch.org/from-snapshot-migration: \"{{inputs.parameters.fromSnapshotMigrationK8sLabel}}\"\n    migrations.opensearch.org/task: \"{{inputs.parameters.taskK8sLabel}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  strategy:\n    type: RollingUpdate\n    rollingUpdate:\n      maxUnavailable: 1\n      maxSurge: 1\n  selector:\n    matchLabels:\n      app: bulk-loader\n      deployment-name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n  template:\n    metadata:\n      labels:\n        app: bulk-loader\n        deployment-name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n        workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n        migrations.opensearch.org/source: \"{{inputs.parameters.sourceK8sLabel}}\"\n        migrations.opensearch.org/target: \"{{inputs.parameters.targetK8sLabel}}\"\n        migrations.opensearch.org/snapshot: \"{{inputs.parameters.snapshotK8sLabel}}\"\n        migrations.opensearch.org/from-snapshot-migration: \"{{inputs.parameters.fromSnapshotMigrationK8sLabel}}\"\n        migrations.opensearch.org/task: \"{{inputs.parameters.taskK8sLabel}}\"\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: bulk-loader\n          image: \"{{inputs.parameters.imageReindexFromSnapshotLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}\"\n          command:\n            - /rfs-app/runJavaWithClasspathWithRepeat.sh\n          args:\n            - org.opensearch.migrations.RfsMigrateDocuments\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.rfsJsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: TARGET_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}\"\n                  key: username\n                  optional: true\n            - name: TARGET_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}\"\n                  key: password\n                  optional: true\n            - name: COORDINATOR_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}\"\n                  key: username\n                  optional: true\n            - name: COORDINATOR_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}\"\n                  key: password\n                  optional: true\n            - name: FAILED_REQUESTS_LOGGER_LEVEL\n              value: \"OFF\"\n            - name: CONSOLE_LOG_FORMAT\n              value: json\n            - name: JAVA_OPTS\n              value: \"{{=' ' + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}\"\n            - name: AWS_SHARED_CREDENTIALS_FILE\n              value: \"{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials/configuration') : (''))}}\"\n          volumeMounts:\n            - name: log4j-configuration\n              mountPath: /config/logConfiguration\n              readOnly: true\n            - name: localstack-test-creds\n              mountPath: /config/credentials\n              readOnly: true\n      volumes:\n        - name: log4j-configuration\n          configMap:\n            name: \"{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}\"\n            optional: {{=!(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)))}}\n        - name: localstack-test-creds\n          configMap:\n            name: localstack-test-creds\n            optional: {{=!(fromJSON(inputs.parameters.useLocalStack))}}\n",
+          "action": "create",
+          "setOwnerReference": true,
+          "successCondition": "status.readyReplicas > 0"
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "starthistoricalbackfillfromconfig",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "sourceVersion"
+            },
+            {
+              "name": "sourceLabel"
+            },
+            {
+              "name": "snapshotConfig"
+            },
+            {
+              "name": "targetConfig"
+            },
+            {
+              "name": "rfsCoordinatorConfig"
+            },
+            {
+              "name": "documentBackfillConfig"
+            },
+            {
+              "name": "migrationLabel"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "starthistoricalbackfill",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "podReplicas",
+                    "value": "{{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.documentBackfillConfig))}}"
+                  },
+                  {
+                    "name": "targetBasicCredsSecretNameOrEmpty",
+                    "value": "{{=sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))}}"
+                  },
+                  {
+                    "name": "coordinatorBasicCredsSecretNameOrEmpty",
+                    "value": "{{=sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.rfsCoordinatorConfig))}}"
+                  },
+                  {
+                    "name": "loggingConfigurationOverrideConfigMap",
+                    "value": "{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.documentBackfillConfig))}}"
+                  },
+                  {
+                    "name": "useLocalStack",
+                    "value": "{{=sprig.dig('repoConfig', 'useLocalStack', false, fromJSON(inputs.parameters.snapshotConfig))}}"
+                  },
+                  {
+                    "name": "rfsJsonConfig",
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorAwsServiceSigningName\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['service'], \"coordinatorAwsRegion\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorCaCert\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? (sprig.dict(\"coordinatorHost\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['endpoint'])) : ({}))), sprig.dict(\"coordinatorInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.rfsCoordinatorConfig))))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources', 'useTargetClusterForWorkCoordination')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion, \"sessionName\", inputs.parameters.sessionName, \"luceneDir\", '/tmp', \"cleanLocalDirs\", true), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))))}}"
+                  },
+                  {
+                    "name": "resources",
+                    "value": "{{=toJSON(jsonpath(inputs.parameters.documentBackfillConfig, '$.resources'))}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}"
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.targetConfig, '$.label')}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}"
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}"
+                  }
+                ]
+              },
+              "name": "startHistoricalBackfill"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "runbulkload",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceVersion"
+            },
+            {
+              "name": "sourceLabel"
+            },
+            {
+              "name": "targetConfig"
+            },
+            {
+              "name": "rfsCoordinatorConfig"
+            },
+            {
+              "name": "snapshotConfig"
+            },
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "indices",
+              "value": "[]"
+            },
+            {
+              "name": "documentBackfillConfig"
+            },
+            {
+              "name": "migrationLabel"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "starthistoricalbackfillfromconfig",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "sourceVersion",
+                    "value": "{{inputs.parameters.sourceVersion}}"
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}"
+                  },
+                  {
+                    "name": "rfsCoordinatorConfig",
+                    "value": "{{inputs.parameters.rfsCoordinatorConfig}}"
+                  },
+                  {
+                    "name": "documentBackfillConfig",
+                    "value": "{{inputs.parameters.documentBackfillConfig}}"
+                  },
+                  {
+                    "name": "migrationLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  }
+                ]
+              },
+              "name": "startHistoricalBackfillFromConfig"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "getconsoleconfig",
+                "name": "migration-console"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.rfsCoordinatorConfig}}"
+                  },
+                  {
+                    "name": "backfillSession",
+                    "value": "{{=toJSON(sprig.dict(\"sessionName\", inputs.parameters.sessionName, \"deploymentName\", inputs.parameters.sessionName+'-rfs'))}}"
+                  }
+                ]
+              },
+              "name": "setupWaitForCompletion"
+            }
+          ],
+          [
+            {
+              "template": "waitforcompletion",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "configContents",
+                    "value": "{{steps.setupWaitForCompletion.outputs.parameters.configContents}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}"
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.targetConfig, '$.label')}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.label')}}"
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}"
+                  }
+                ]
+              },
+              "name": "waitForCompletion"
+            }
+          ],
+          [
+            {
+              "template": "stophistoricalbackfill",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  }
+                ]
+              },
+              "name": "stopHistoricalBackfill"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "donothing",
+        "inputs": {
+          "parameters": []
+        },
+        "steps": [
+          []
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "setupandrunbulkload",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceVersion"
+            },
+            {
+              "name": "sourceLabel"
+            },
+            {
+              "name": "targetConfig"
+            },
+            {
+              "name": "snapshotConfig"
+            },
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "indices",
+              "value": "[]"
+            },
+            {
+              "name": "documentBackfillConfig"
+            },
+            {
+              "name": "migrationLabel"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "createrfscoordinator",
+                "name": "rfs-coordinator-cluster"
+              },
+              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}"
+                  }
+                ]
+              },
+              "name": "createRfsCoordinator"
+            }
+          ],
+          [
+            {
+              "template": "runbulkload",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sourceVersion",
+                    "value": "{{inputs.parameters.sourceVersion}}"
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "indices",
+                    "value": "{{inputs.parameters.indices}}"
+                  },
+                  {
+                    "name": "documentBackfillConfig",
+                    "value": "{{inputs.parameters.documentBackfillConfig}}"
+                  },
+                  {
+                    "name": "migrationLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "rfsCoordinatorConfig",
+                    "value": "{{=((!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])) ? (toJSON(sprig.dict(\"endpoint\", 'https://'+inputs.parameters.sessionName+'-rfs-coordinator'+':9200', \"label\", inputs.parameters.sessionName+'-rfs-coordinator', \"allowInsecure\", true, \"authConfig\", sprig.dict(\"basic\", sprig.dict(\"secretName\", inputs.parameters.sessionName+'-rfs-coordinator'+'-creds'))))) : (inputs.parameters.targetConfig))}}"
+                  }
+                ]
+              },
+              "name": "runBulkLoad"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "deleterfscoordinator",
+                "name": "rfs-coordinator-cluster"
+              },
+              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}"
+                  }
+                ]
+              },
+              "name": "cleanupRfsCoordinator"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}

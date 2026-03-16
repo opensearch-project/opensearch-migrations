@@ -53,6 +53,49 @@ export const testCases: TestCase[] = [
     },
   }),
 
+  solrTest('rows-limits-returned-documents', {
+    documents: [
+      { id: '1', title: 'first doc', content: 'alpha' },
+      { id: '2', title: 'second doc', content: 'beta' },
+      { id: '3', title: 'third doc', content: 'gamma' },
+    ],
+    requestPath: '/solr/testcollection/select?q=*:*&rows=2&wt=json',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        content: { type: 'text_general' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        content: { type: 'text' },
+      },
+    },
+  }),
+
+  solrTest('rows-with-start-pagination', {
+    documents: [
+      { id: '1', title: 'first doc', content: 'alpha' },
+      { id: '2', title: 'second doc', content: 'beta' },
+      { id: '3', title: 'third doc', content: 'gamma' },
+      { id: '4', title: 'fourth doc', content: 'delta' },
+    ],
+    requestPath: '/solr/testcollection/select?q=*:*&rows=2&start=2&wt=json',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        content: { type: 'text_general' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        content: { type: 'text' },
+      },
+    },
+  }),
+
   // ───────────────────────────────────────────────────────────
   // Facet tests — JSON Facet API (json.facet)
   // ───────────────────────────────────────────────────────────

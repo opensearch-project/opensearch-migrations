@@ -136,7 +136,8 @@ export class WorkflowBuilder<
     > {
         const templateScope = {
             workflowParameters: this.inputsScope,
-            templates: this.templateSigScope
+            templates: this.templateSigScope,
+            currentTemplateName: name as string
         };
 
         // workaround type warning/breakage that I'm creating in the signature w/ `as any`

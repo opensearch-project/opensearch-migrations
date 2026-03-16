@@ -2,7 +2,7 @@ import { z, ZodTypeAny } from 'zod';
 import {parse} from "yaml";
 import * as fs from "node:fs";
 import {
-    NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, NORMALIZED_SNAPSHOT_MIGRATION_CONFIG,
+    NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
     OVERALL_MIGRATION_CONFIG,
     zodSchemaToJsonSchema
 } from "@opensearch-migrations/schemas";
@@ -29,33 +29,34 @@ function hasDefinedList<K, V>(
 }
 
 type ConfigWithSnapshot = z.infer<typeof NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG> & {
-    snapshotExtractAndLoadConfigs: z.infer<typeof NORMALIZED_SNAPSHOT_MIGRATION_CONFIG>[]
+    perSnapshotConfig: NonNullable<z.infer<typeof NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG>['perSnapshotConfig']>
 };
 
 export function scrapeApprovalsForSnapshotConfigs(
-    perSnapshotCfgs: z.infer<typeof NORMALIZED_SNAPSHOT_MIGRATION_CONFIG>[],
+    perSnapshotConfig: ConfigWithSnapshot['perSnapshotConfig'],
     globalSkipApprovals: boolean,
     perMigrationSkipApprovals: boolean
 ) {
     const skipAll = globalSkipApprovals || perMigrationSkipApprovals;
     return Object.fromEntries(
-        perSnapshotCfgs.map(snapshotCfg=>[snapshotCfg.label,
-            Object.fromEntries(
-                snapshotCfg.migrations.map(migrationCfg =>
-                    [migrationCfg.label, {
-                    ...( (skipAll || migrationCfg.metadataMigrationConfig?.skipEvaluateApproval) ? { evaluateMetadata: true } : {}),
-                    ...( (skipAll || migrationCfg.metadataMigrationConfig?.skipMigrateApproval) ? { migrateMetadata: true } : {}),
-                    ...( (skipAll || migrationCfg.documentBackfillConfig?.skipApproval) ? { documentBackfill: true } : {}),
-                }])
-            )
-        ])
+        Object.entries(perSnapshotConfig).map(([snapshotName, migrations]) =>
+            [snapshotName,
+                Object.fromEntries(
+                    migrations.map((migrationCfg, idx) =>
+                        [migrationCfg.label || `migration-${idx}`, {
+                            ...( (skipAll || migrationCfg.metadataMigrationConfig?.skipEvaluateApproval) ? { evaluateMetadata: true } : {}),
+                            ...( (skipAll || migrationCfg.metadataMigrationConfig?.skipMigrateApproval) ? { migrateMetadata: true } : {}),
+                            ...( (skipAll || migrationCfg.documentBackfillConfig?.skipApproval) ? { documentBackfill: true } : {}),
+                        }])
+                )
+            ])
     );
 }
 
 export function scrapeApprovals(userConfig: z.infer<typeof OVERALL_MIGRATION_CONFIG>) {
     const globalSkipApprovals = userConfig.skipApprovals ?? false;
     return Object.fromEntries(
-        Object.entries(Object.groupBy(userConfig.migrationConfigs, m=>m.fromSource))
+        Object.entries(Object.groupBy(userConfig.snapshotMigrationConfigs, m=>m.fromSource))
             .filter(hasDefinedList)
             .map(([source,topConfigs])=>
                 [source, Object.fromEntries(
@@ -63,11 +64,11 @@ export function scrapeApprovals(userConfig: z.infer<typeof OVERALL_MIGRATION_CON
                         .filter(hasDefinedList)
                         .filter(([_,v])=>v.length > 0)
                         .filter((entry): entry is [string, ConfigWithSnapshot[]] =>
-                            entry[1][0].snapshotExtractAndLoadConfigs !== undefined)
+                            entry[1][0].perSnapshotConfig !== undefined)
                         .map(([target,cfgs])=>
                             cfgs.flatMap(c=>
                                 [target, scrapeApprovalsForSnapshotConfigs(
-                                    c.snapshotExtractAndLoadConfigs,
+                                    c.perSnapshotConfig,
                                     globalSkipApprovals,
                                     c.skipApprovals ?? false
                                 )]

@@ -1,0 +1,79 @@
+{{- if index .Values.conditionalPackageInstalls "cert-manager" }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-migrations-ca
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "50"
+    helm.sh/hook-delete-policy: hook-succeeded
+spec:
+  activeDeadlineSeconds: 600
+  template:
+    spec:
+      serviceAccountName: {{ .Values.argoWorkflowServiceAccountName | default "argo-workflow-executor" }}
+      containers:
+      - name: create-ca
+        image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Setting up migrations CA chain (retrying until cert-manager is ready)..."
+          for i in $(seq 1 60); do
+            if cat <<'EOF' | kubectl apply -f - 2>&1; then
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: migrations-selfsigned-bootstrap
+          spec:
+            selfSigned: {}
+          ---
+          apiVersion: cert-manager.io/v1
+          kind: Certificate
+          metadata:
+            name: migrations-root-ca
+            namespace: {{ .Release.Namespace }}
+          spec:
+            isCA: true
+            commonName: "Migration Assistant CA"
+            secretName: migrations-root-ca-secret
+            duration: 87600h
+            renewBefore: 8760h
+            privateKey:
+              algorithm: RSA
+              size: 2048
+            issuerRef:
+              name: migrations-selfsigned-bootstrap
+              kind: ClusterIssuer
+          ---
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: migrations-ca
+          spec:
+            ca:
+              secretName: migrations-root-ca-secret
+          EOF
+              echo "Waiting for CA certificate to be ready..."
+              for j in $(seq 1 30); do
+                STATUS=$(kubectl get certificate migrations-root-ca -n {{ .Release.Namespace }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+                if [ "$STATUS" = "True" ]; then
+                  echo "Migrations CA chain created successfully."
+                  echo "  - ClusterIssuer 'migrations-selfsigned-bootstrap' (bootstrap only)"
+                  echo "  - Certificate 'migrations-root-ca' (root CA)"
+                  echo "  - ClusterIssuer 'migrations-ca' (use this for proxy certs)"
+                  exit 0
+                fi
+                sleep 5
+              done
+              echo "WARNING: CA certificate not ready after 150s, but resources were created."
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "ERROR: Failed to create CA chain after 60 attempts"
+          exit 1
+      restartPolicy: Never
+  backoffLimit: 3
+{{- end }}
