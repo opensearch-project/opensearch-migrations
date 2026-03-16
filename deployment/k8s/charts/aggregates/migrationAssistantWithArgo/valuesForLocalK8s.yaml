@@ -2,11 +2,6 @@
 
 conditionalPackageInstalls:
   kyverno: true
-  # Disable components not needed for local integration testing
-  kube-prometheus-stack: false
-  otel-collector-daemonset: false
-  jaeger: false
-  fluent-bit: false
 
 # Kyverno policy toggles (requires kyverno to be installed)
 kyvernoPolicies:
