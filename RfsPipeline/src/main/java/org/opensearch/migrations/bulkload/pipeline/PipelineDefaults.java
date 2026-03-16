@@ -15,7 +15,7 @@ public final class PipelineDefaults {
 
     /** @deprecated Use CLI-layer defaults instead. */
     @Deprecated(forRemoval = true)
-    public static final int MAX_DOCS_PER_BATCH = 1000;
+    public static final int MAX_DOCS_PER_BATCH = Integer.MAX_VALUE;
 
     /** @deprecated Use CLI-layer defaults instead. */
     @Deprecated(forRemoval = true)
