@@ -2,7 +2,7 @@
 
 ## What is this tool?
 
-This tool exposes the underlying Reindex-From-Snapshot (RFS) core library in an executable that will migrate the documents from a specified snapshot to a target cluster.  Very briefly, the application will parse the contents of the specified snapshot, pick a shard from the snapshot, then extract the documents from the shard and move them to the target cluster.  After moving the contents of the shard, the application exits.  It is intended to be run iteratively until there are no more shards left to migrate.  The application keeps track of which shards have been moved by storing metadata in a special index on a coordinator cluster.  By default, a dedicated single-node OpenSearch cluster is deployed for this purpose, isolating coordination traffic from the target.  Alternatively, the target cluster itself can be used for coordination by setting `useTargetClusterForWorkCoordination: true` in the workflow config, or by omitting `--coordinator-host` when running the tool directly.  This metadata enables many instances of the application to run simultaneously, determining which instance migrates which shard, reducing duplicated work, and retrying failures.  You can read a lot more about this in [the RFS Design Doc](../RFS/docs/DESIGN.md).
+This tool exposes the underlying Reindex-From-Snapshot (RFS) core library in an executable that will migrate the documents from a specified snapshot to a target cluster.  Very briefly, the application will parse the contents of the specified snapshot, pick a shard from the snapshot, then extract the documents from the shard and move them to the target cluster.  After moving the contents of the shard, the application exits.  It is intended to be run iteratively until there are no more shards left to migrate.  The application keeps track of which shards have been moved by storing metadata in a special index on a coordinator cluster.  By default (when `--coordinator-host` is not provided), the target cluster is used for coordination.  When `--coordinator-host` is specified, a separate cluster handles coordination, isolating that traffic from the target.  This metadata enables many instances of the application to run simultaneously, determining which instance migrates which shard, reducing duplicated work, and retrying failures.  You can read a lot more about this in [the RFS Design Doc](../RFS/docs/DESIGN.md).
 
 The snapshot the application extracts the documents from can be local or in S3.  You'll need network access to the target cluster because the application uses the standard REST API on the cluster to ingest the extracted documents.
 
@@ -116,24 +116,7 @@ These arguments should be carefully considered before setting, can include exper
 
 These settings apply to coordinator work-item completion retries only and do not change target bulk indexing retry behavior. They are intended for transient coordinator outages such as pod restarts or evictions.
 
-The coordinator can be:
-- A dedicated single-node OpenSearch cluster deployed and managed for the lifetime of the migration (default, `useTargetClusterForWorkCoordination: false`). The dedicated coordinator is torn down automatically on migration completion. When running RFS outside the workflow, use `--coordinator-host` (plus optional coordinator auth/TLS/SigV4 flags) to point to a separate coordinator.
-- The target cluster (`useTargetClusterForWorkCoordination: true`). Simpler setup with fewer resources, suitable for small migrations where the coordination index overhead on the target is acceptable.
-
-#### Work Coordination Mode
-
-The `useTargetClusterForWorkCoordination` option in `documentBackfillConfig` controls where RFS
-stores work coordination state (lease tracking, shard assignments, completion status).
-
-| Value | Behavior                                                                                                         | Default |
-|-------|------------------------------------------------------------------------------------------------------------------|---------|
-| `false` | Deploys a dedicated single-node OpenSearch coordinator cluster, managed automatically for the migration lifetime | ✔️ |
-| `true` | Uses the user's target OpenSearch cluster for work coordination                                                  | |
-
-The dedicated coordinator (`false`) isolates coordination traffic from the target cluster,
-preventing work-coordination writes from competing with bulk indexing. Set to `true` when
-the overhead is acceptable on the user's target OpenSearch cluster.
-
+When `--coordinator-host` is provided, the tool uses that cluster for coordination. When omitted, the target cluster is used. Either way, the retry behavior below applies to the configured coordinator.
 
 When RFS finishes migrating documents for a shard, it marks the work item as completed on the coordinator cluster. If the coordinator is temporarily unavailable during this step, RFS retries with exponential backoff (2x multiplier). With defaults (7 retries = 8 total executions, 1000ms initial delay, 64s max delay), the backoff sleep sequence is: 1s, 2s, 4s, 8s, 16s, 32s, 64s (~127s total sleep). Actual elapsed time can be longer due to request timeouts and latency.
 
@@ -142,6 +125,21 @@ When RFS finishes migrating documents for a shard, it marks the work item as com
 - **Non-retryable errors**: Fail immediately without retrying.
 
 **Tuning**: Increase `--coordinator-retry-max-retries` or `--coordinator-retry-initial-delay-ms` for environments with longer coordinator restart times. Decrease for faster failure detection. Longer settings trade off resilience for slower failure detection and Argo retry.
+
+#### Work Coordination Mode (Orchestration)
+
+When run via the migration workflow, the `useTargetClusterForWorkCoordination` option in `documentBackfillConfig` controls whether the orchestration deploys a dedicated coordinator cluster and passes `--coordinator-host` to this tool automatically.
+
+| Value | Behavior                                                                                                         | Default |
+|-------|------------------------------------------------------------------------------------------------------------------|---------|
+| `false` | Deploys a dedicated single-node OpenSearch coordinator cluster, managed automatically for the migration lifetime. The orchestration passes `--coordinator-host` to this tool and tears down the coordinator on completion. | ✔️ |
+| `true` | Uses the target OpenSearch cluster for work coordination (no `--coordinator-host` is passed).                    | |
+
+The dedicated coordinator (`false`) isolates coordination traffic from the target cluster,
+preventing work-coordination writes from competing with bulk indexing. Set to `true` when
+the overhead is acceptable on the target cluster.
+
+See the [orchestrationSpecs schema](../orchestrationSpecs/packages/schemas/src/userSchemas.ts) for the full configuration reference.
 
 #### Early Checkpoint Before Lease Expiry
 
