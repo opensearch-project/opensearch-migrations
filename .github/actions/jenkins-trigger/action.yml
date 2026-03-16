@@ -1,5 +1,7 @@
+# Forked from jugal-chauhan/jenkins-trigger@1.0.6
+# Added cancellation support: SIGTERM/SIGINT abort the upstream Jenkins build
 name: 'Jenkins Job Trigger and Monitor'
-description: 'A Github Action to trigger Jenkins jobs and monitor for completion'
+description: 'Trigger a Jenkins job via generic webhook and monitor for completion. Cancels the Jenkins build if the workflow is cancelled.'
 inputs:
   jenkins_url:
     description: 'Jenkins URL including http/https protocol'
@@ -11,17 +13,25 @@ inputs:
     description: 'The job name to trigger in Jenkins'
     required: true
   job_params:
-    description: 'Job parameters, separated by a comma, to provide to a Jenkins workflow, e.g. "GIT_REPO_URL=https://github.com/lewijacn/opensearch-migrations.git,GIT_BRANCH=main". Job name will automatically be added as a parameter.'
+    description: 'Job parameters, separated by a comma, e.g. "KEY1=val1,KEY2=val2"'
     required: false
     default: ""
   job_timeout_minutes:
-    description: 'Max time (minutes) this Github Action will wait for completion'
+    description: 'Max time (minutes) to wait for completion'
     required: false
     default: "60"
 runs:
-  using: "docker"
-  image: "Dockerfile"
-
-branding:
-  icon: 'check-circle'
-  color: 'green'
+  using: "composite"
+  steps:
+    - name: Install dependencies
+      shell: bash
+      run: pip install requests
+    - name: Trigger and monitor Jenkins job
+      shell: bash
+      run: |
+        exec python3 ${{ github.action_path }}/webhook-trigger/default_webhook_trigger.py \
+          --jenkins_url="${{ inputs.jenkins_url }}" \
+          --pipeline_token="${{ inputs.api_token }}" \
+          --job_name="${{ inputs.job_name }}" \
+          --job_params="${{ inputs.job_params }}" \
+          --job_timeout_minutes="${{ inputs.job_timeout_minutes }}"
