@@ -272,12 +272,18 @@ What is already in place:
   values over the transformer's placeholder values
 - proxy and replayer now consume runtime-resolved SCRAM secret and CA material
   via generated Kafka client property files
+- initialization now materializes the baseline `autoCreate` Kafka defaults
+  before workflow generation
 
 What is still transitional:
 
 - [packages/config-processor/src/migrationConfigTransformer.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/config-processor/src/migrationConfigTransformer.ts)
   still emits placeholder bootstrap values for workflow-managed clusters so the
   pre-runtime config shape remains complete
+- [packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts)
+  is still being simplified so it relies entirely on the already-merged
+  initialization-time Kafka defaults instead of retaining overlapping fallback
+  behavior
 - [packages/migration-workflow-templates/src/workflowTemplates/resourceManagement.ts](/Users/schohn/dev/m2/orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/resourceManagement.ts)
   currently selects the first listener exposed by the `Kafka` resource
 
@@ -287,8 +293,8 @@ What is still transitional:
   runtime-resolved Kafka profiles exclusively
 - refine the “first usable listener” rule into something more explicit if the
   workflow needs to distinguish between multiple valid listeners
-- extend console-side Kafka discovery so it consumes the same normalized
-  profile semantics as proxy and replayer
+- keep the console workflow schema aligned with the shared `KAFKA_CLIENT_CONFIG`
+  contract as Kafka client fields evolve
 
 ## Authentication And Credentials
 

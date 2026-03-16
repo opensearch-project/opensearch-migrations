@@ -19,6 +19,7 @@ import {
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
     DEFAULT_RESOURCES,
+    KAFKA_CLIENT_CONFIG,
     ResourceRequirementsType,
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
@@ -26,11 +27,6 @@ import {
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
-
-export const CONSOLE_KAFKA_SERVICES_CONFIG = z.object({
-    broker_endpoints: z.string(),
-    standard: z.string()
-});
 
 export const CONSOLE_BACKFILL_INFO = z.object({
     sessionName: z.string(),
@@ -43,7 +39,7 @@ export const configComponentParameters = {
         description: "The metadata about the deployment performing the RFS backfill"
     }),
     kafkaInfo: defineParam({
-        expression: expr.cast(expr.literal("")).to<z.infer<typeof CONSOLE_KAFKA_SERVICES_CONFIG>>(),
+        expression: expr.cast(expr.literal("")).to<z.infer<typeof KAFKA_CLIENT_CONFIG>>(),
         description: "Snapshot configuration information (JSON)"
     }),
     sourceConfig: defineParam({
@@ -113,7 +109,7 @@ export const MigrationConsole = WorkflowBuilder.create({
             expr.recordToString(expr.mergeDicts(
                     expr.mergeDicts(
                         expr.mergeDicts(
-                            makeOptionalDict("kafka", expr.asString(c.inputs.kafkaInfo), typeToken<z.infer<typeof CONSOLE_KAFKA_SERVICES_CONFIG>>()),
+                            makeOptionalDict("kafka", expr.asString(c.inputs.kafkaInfo), typeToken<z.infer<typeof KAFKA_CLIENT_CONFIG>>()),
                             makeOptionalDict("source_cluster", expr.asString(c.inputs.sourceConfig), typeToken<z.infer<typeof CONSOLE_SOURCE_CLUSTER_CONFIG>>())
                         ),
                         expr.mergeDicts(

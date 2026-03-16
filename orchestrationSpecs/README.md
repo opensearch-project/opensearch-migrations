@@ -264,10 +264,11 @@ normalized Kafka connection profile that includes runtime-resolved listener and
 auth metadata, the workflow creates deterministic `KafkaUser` resources for
 managed SCRAM clusters, and proxy/replayer now consume secret-backed SCRAM
 client configuration from mounted Strimzi secrets and generated Kafka client
-property files. The remaining gap is console-side SCRAM support. The current
-Kafka manifest render path has already been fixed to avoid the earlier quoted
-`Kafka.spec` serialization bug, but it is still being refactored toward a
-cleaner baseline-plus-overrides shape.
+property files. The console services config in this repo now uses the shared
+Kafka client schema as well, and the current Kafka manifest render path has
+already been fixed to avoid the earlier quoted `Kafka.spec` serialization bug.
+The remaining cleanup is around making initialization-time Kafka defaults the
+single source of truth all the way through rendering.
 
 ### Updating template and configuration models
 

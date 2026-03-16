@@ -65,9 +65,9 @@ Implemented today:
 
 Still incomplete:
 
-- baseline Kafka defaults are not yet consistently modeled as typed partial
-  defaults merged into Strimzi-shaped user config before rendering
-- console-side secret-backed SCRAM support still needs to be wired in
+- initialization now materializes the baseline auto-created Kafka defaults, but
+  the rendering path is still being cleaned up so those merged values become
+  the single source of truth end to end
 - the deployment success condition currently uses `status.readyReplicas > 0`
   for workflow-managed proxy and replayer Deployments; that is correct for the
   current single-replica flows but is intentionally conservative rather than a
