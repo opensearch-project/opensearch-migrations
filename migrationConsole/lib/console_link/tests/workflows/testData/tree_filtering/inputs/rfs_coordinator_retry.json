@@ -1,0 +1,70 @@
+[
+  {
+    "id": "root",
+    "display_name": "workflow",
+    "phase": "Succeeded",
+    "type": "Steps",
+    "boundary_id": null,
+    "children": [
+      {
+        "id": "rfs-retry",
+        "display_name": "createRfsCoordinatorStatefulSet",
+        "phase": "Succeeded",
+        "type": "Retry",
+        "boundary_id": "root",
+        "children": [
+          {
+            "id": "rfs-attempt-1",
+            "display_name": "createRfsCoordinatorStatefulSet(1)",
+            "phase": "Succeeded",
+            "type": "Pod",
+            "boundary_id": "rfs-retry",
+            "started_at": "2023-01-01T10:01:00Z",
+            "finished_at": "2023-01-01T10:02:00Z",
+            "children": []
+          },
+          {
+            "id": "rfs-attempt-0",
+            "display_name": "createRfsCoordinatorStatefulSet(0)",
+            "phase": "Error",
+            "type": "Pod",
+            "boundary_id": "rfs-retry",
+            "started_at": "2023-01-01T10:00:00Z",
+            "finished_at": "2023-01-01T10:00:30Z",
+            "children": []
+          }
+        ]
+      },
+      {
+        "id": "backfill-retry",
+        "display_name": "waitForCompletionInternal",
+        "phase": "Running",
+        "type": "Retry",
+        "boundary_id": "root",
+        "children": [
+          {
+            "id": "backfill-attempt-1",
+            "display_name": "waitForCompletionInternal(1)",
+            "phase": "Running",
+            "type": "Pod",
+            "boundary_id": "backfill-retry",
+            "started_at": "2023-01-01T10:03:00Z",
+            "children": [],
+            "outputs": {"parameters": [{"name": "statusOutput", "value": "checking..."}]}
+          },
+          {
+            "id": "backfill-attempt-0",
+            "display_name": "waitForCompletionInternal(0)",
+            "phase": "Failed",
+            "type": "Pod",
+            "boundary_id": "backfill-retry",
+            "started_at": "2023-01-01T10:02:00Z",
+            "finished_at": "2023-01-01T10:02:30Z",
+            "children": [],
+            "outputs": {"parameters": [{"name": "statusOutput", "value": "checking..."}]}
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -409,10 +409,12 @@ async def test_live_check_lifecycle(mock_workflow_with_two_pods):
             assert await wait_until(pilot, lambda: mock_check.call_count > prev_count, timeout=3.0), \
                 "Status check not called again while expanded"
 
-            # Collapse and verify no more calls
+            # Collapse and verify no more calls.
+            # Allow any in-flight check to finish before capturing the baseline.
             live_node.collapse()
+            await pilot.pause(0.5)
             count_after_collapse = mock_check.call_count
-            await pilot.pause(0.3)
+            await pilot.pause(0.5)
             assert mock_check.call_count == count_after_collapse, \
                 f"Status check called while collapsed: {mock_check.call_count} > {count_after_collapse}"
 
@@ -550,7 +552,7 @@ async def test_live_check_lifecycle_with_group():
                 "group-1": {
                     "id": "group-1", "displayName": "waitingBlock", "type": "StepGroup",
                     "phase": PHASE_RUNNING, "children": ["node-1", "node-2"],
-                    "inputs": {"parameters": [{"name": "groupName", "value": "checks"}]}
+                    "inputs": {"parameters": [{"name": "groupName_view", "value": "checks"}]}
                 },
                 "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod", "phase": "Failed",
                            "children": [], "startedAt": "2023-01-01T00:01:00Z",

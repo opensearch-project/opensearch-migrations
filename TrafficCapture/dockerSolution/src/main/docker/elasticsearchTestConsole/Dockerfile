@@ -1,5 +1,9 @@
+# Global ARGs (must be before first FROM to be usable in FROM lines)
+ARG BUILDER_IMAGE=docker.io/library/amazonlinux:2023
+ARG RUNTIME_IMAGE=docker.io/library/amazonlinux:2023
+
 # ---------- 1) Builder ----------
-FROM docker.io/library/amazonlinux:2023 AS builder
+FROM ${BUILDER_IMAGE} AS builder
 
 # Build deps (toolchain + headers)
 RUN dnf install -y \
@@ -36,7 +40,7 @@ COPY Pipfile Pipfile.lock ./
 RUN pipenv install --deploy
 
 # ---------- 2) Runtime ----------
-FROM docker.io/library/amazonlinux:2023
+FROM ${RUNTIME_IMAGE}
 
 ENV PIP_ROOT_USER_ACTION=ignore
 ENV LANG=C.UTF-8

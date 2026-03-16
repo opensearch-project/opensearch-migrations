@@ -119,7 +119,7 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
         runner = ScriptRunner()
 
         # Get config data as YAML
-        config_yaml = config.to_yaml()
+        config_yaml = config.raw_yaml
 
         # Get etcd_endpoints from environment variable or use default
         etcd_endpoints = os.getenv('ETCD_ENDPOINTS')
@@ -131,13 +131,7 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
         # Step 2: Submit workflow to Kubernetes
         click.echo(f"Submitting workflow to namespace: {namespace}")
         try:
-            # Construct arguments for the submission script
-            args = [
-                f"--prefix {namespace}",
-                f"--etcd-endpoints {etcd_endpoints}"
-            ]
-
-            submit_result = runner.submit_workflow(config_yaml, args)
+            submit_result = runner.submit_workflow(config_yaml, [])
 
             workflow_name = submit_result.get('workflow_name', 'unknown')
 

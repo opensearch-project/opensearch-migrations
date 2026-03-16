@@ -1,0 +1,14 @@
+{
+  "sourceClusters": {
+    "source": { "version": "ES 7.10.2", "endpoint": "http://source:9200" }
+  },
+  "targetClusters": {
+    "target": { "endpoint": "http://target:9200" }
+  },
+  "snapshotMigrationConfigs": [
+    {
+      "fromSource": "does-not-exist",
+      "toTarget": "target"
+    }
+  ]
+}

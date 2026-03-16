@@ -11,6 +11,7 @@ ENV CLASSPATH=/root/kafka-tools/kafkaCommandLineFormatter.jar
 # Copy Java applications
 COPY staging/CreateSnapshot /root/createSnapshot
 COPY staging/MetadataMigration /root/metadataMigration
+COPY staging/kafkaUtils /root/kafkaUtils
 
 # Copy VERSION file
 COPY VERSION /root/VERSION

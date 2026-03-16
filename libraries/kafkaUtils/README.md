@@ -1,6 +1,6 @@
-# Kafka Utils
+# Kafka Loader From File
 
-This package contains utilities for working with Kafka in relation to the Migration Assistant.
+This package contains a utility to load captured traffic records from a file into a Kafka topic.
 
 
 ## Setting up an environment to load Kafka records from an export

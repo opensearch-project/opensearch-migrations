@@ -443,6 +443,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+
+    # Handle report summary early — no K8s access needed
+    if args.output_reports_summary_only:
+        if not args.test_reports_dir:
+            raise ValueError("The '--test-reports-dir' arg must be provided when using '--output-reports-summary-only")
+        # Create a minimal TestRunner without K8sService for summary-only mode
+        test_runner = TestRunner(k8s_service=None,
+                                 unique_id=args.unique_id,
+                                 test_ids=[],
+                                 ma_chart_path="",
+                                 combinations=[])
+        return test_runner.collect_reports_and_print_summary(reports_dir=args.test_reports_dir)
+
     k8s_service = K8sService(kube_context=args.kube_context)
     helm_k8s_base_path = "../../deployment/k8s"
     helm_charts_base_path = f"{helm_k8s_base_path}/charts"
@@ -466,10 +479,6 @@ def main() -> None:
         return test_runner.cleanup_deployment()
     if args.delete_clusters_only:
         return test_runner.cleanup_clusters()
-    if args.output_reports_summary_only:
-        if not args.test_reports_dir:
-            raise ValueError("The '--test-reports-dir' arg must be provided when using '--output-reports-summary-only")
-        return test_runner.collect_reports_and_print_summary(reports_dir=args.test_reports_dir)
     skip_delete = args.skip_delete
     keep_workflows = args.keep_workflows
     reuse_clusters = args.reuse_clusters

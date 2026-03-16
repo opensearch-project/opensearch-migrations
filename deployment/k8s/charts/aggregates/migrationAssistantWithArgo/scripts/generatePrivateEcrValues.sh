@@ -54,6 +54,9 @@ charts:
       kafka:
         image:
           registry: "${M}/quay.io"
+      buildah:
+        image:
+          registry: "${M}/quay.io"
 
   argo-workflows:
     repository: "oci://${ECR}/charts/argo-workflows"
@@ -130,16 +133,6 @@ charts:
             repository: "${M}/mirror.gcr.io/bats/bats"
             tag: "v1.4.1"
 
-  etcd-operator:
-    repository: "oci://${ECR}/charts/etcd-operator"
-    values:
-      etcdOperator:
-        image:
-          repository: "${M}/ghcr.io/aenix-io/etcd-operator"
-      kubeRbacProxy:
-        image:
-          repository: "${M}/gcr.io/kubebuilder/kube-rbac-proxy"
-
   opentelemetry-operator:
     repository: "oci://${ECR}/charts/opentelemetry-operator"
     values:
@@ -211,8 +204,4 @@ images:
   coordinatorCluster:
     repository: "${M}/mirror.gcr.io/opensearchproject/opensearch"
     tag: "3.1.0"
-
-# --- Etcd data image (used by etcd-operator CRD) ---
-etcdCluster:
-  image: "${M}/quay.io/coreos/etcd:v3.5.12"
 EOF

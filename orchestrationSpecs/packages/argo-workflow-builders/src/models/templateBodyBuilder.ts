@@ -12,7 +12,7 @@ import {
 } from "./scopeConstraints";
 import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {PlainObject} from "./plainObject";
-import {AllowLiteralOrExpression, toExpression} from "./expression";
+import {AllowLiteralOrExpression, BaseExpression, isExpression, toExpression} from "./expression";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
 import {SynchronizationConfig} from "./synchronization";
 
@@ -91,6 +91,9 @@ type ReplaceOutputTypedMembers<
         ExpressionBuilderContext
     >;
 
+type OutputValueFromBuilderReturn<V extends PlainObject | BaseExpression<any, any>> =
+    V extends BaseExpression<infer U, any> ? U : V extends PlainObject ? V : never;
+
 export abstract class TemplateBodyBuilder<
     ParentWorkflowScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
@@ -157,31 +160,34 @@ export abstract class TemplateBodyBuilder<
     }
 
     public addExpressionOutput<
-        T extends PlainObject,
-        Name extends string
+        Name extends string,
+        F extends (b: ExpressionBuilderContext) => (PlainObject | BaseExpression<any, any>)
     >(
         name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>,
         expressionBuilder: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope,
-            (b: ExpressionBuilderContext) => AllowLiteralOrExpression<T>>,
+            F>,
         descriptionValue?: string
     ): ReplaceOutputTypedMembers<
         ParentWorkflowScope,
         InputParamsScope,
         BodyScope,
-        ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>,
+        ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<OutputValueFromBuilderReturn<ReturnType<F>>> }>,
         Self,
         BodyBound,
         ExpressionBuilderContext
     > {
-        const fn = expressionBuilder as (b: ExpressionBuilderContext) => AllowLiteralOrExpression<T>;
+        const fn = expressionBuilder as F;
+        const outputValue = fn(this.getExpressionBuilderContext());
         const newOutputs = {
             ...this.outputsScope,
             [name as string]: {
                 fromWhere: "expression" as const,
-                expression: toExpression(fn(this.getExpressionBuilderContext())),
+                expression: isExpression(outputValue)
+                    ? outputValue
+                    : toExpression(outputValue as AllowLiteralOrExpression<OutputValueFromBuilderReturn<ReturnType<F>>>),
                 description: descriptionValue
             }
-        } as ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>;
+        } as ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<OutputValueFromBuilderReturn<ReturnType<F>>> }>;
 
         return this.rebind(
             this.parentWorkflowScope,

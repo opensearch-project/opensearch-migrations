@@ -13,7 +13,7 @@ if [[ -n "${KUBE_CONTEXT:-}" ]]; then
 fi
 
 echo "Installing buildImages helm chart for nodepool..."
-if ! helm "${HELM_CONTEXT_ARGS[@]}" list -n buildkit 2>/dev/null | grep -q buildkit; then
+if ! helm ${HELM_CONTEXT_ARGS[@]+"${HELM_CONTEXT_ARGS[@]}"} list -n buildkit 2>/dev/null | grep -q buildkit; then
   # Detect if we're on EKS (cloud) vs local K8s
   if [[ -n "${KUBE_CONTEXT:-}" ]]; then
     CONTEXT="${KUBE_CONTEXT}"
@@ -30,7 +30,7 @@ if ! helm "${HELM_CONTEXT_ARGS[@]}" list -n buildkit 2>/dev/null | grep -q build
 
   # shellcheck disable=SC2086
   helm install buildkit "${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/charts/components/buildImages" \
-    "${HELM_CONTEXT_ARGS[@]}" \
+    ${HELM_CONTEXT_ARGS[@]+"${HELM_CONTEXT_ARGS[@]}"} \
     --create-namespace \
     -n buildkit \
     --set skipBuildJob=true \
@@ -46,17 +46,17 @@ fi
 
 if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
   echo "Setting up a local registry"
-  if ! kubectl "${CONTEXT_ARGS[@]}" get deployment docker-registry -n buildkit >/dev/null 2>&1; then
-    kubectl "${CONTEXT_ARGS[@]}" apply -f "${MIGRATIONS_REPO_ROOT_DIR}/buildImages/docker-registry.yaml" -n buildkit
+  if ! kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get deployment docker-registry -n buildkit >/dev/null 2>&1; then
+    kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} apply -f "${MIGRATIONS_REPO_ROOT_DIR}/buildImages/docker-registry.yaml" -n buildkit
   else
     echo "docker-registry already exists, skipping apply"
   fi
 
   echo "Waiting for docker-registry deployment to be available..."
-  kubectl "${CONTEXT_ARGS[@]}" rollout status deployment/docker-registry -n buildkit --timeout=120s
+  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} rollout status deployment/docker-registry -n buildkit --timeout=120s
 
   if ! pgrep -f "kubectl port-forward.*docker-registry.*5001:5000" >/dev/null; then
-    nohup kubectl "${CONTEXT_ARGS[@]}" port-forward -n buildkit svc/docker-registry 5001:5000 --address 0.0.0.0 > /tmp/registry-forward.log 2>&1 &
+    nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} port-forward -n buildkit svc/docker-registry 5001:5000 > /tmp/registry-forward.log 2>&1 &
   else
     echo "registry port-forward already running"
   fi

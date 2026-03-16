@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BUILDER_NAME="local-remote-builder"
-
 # Use KUBE_CONTEXT env var if set, for explicit context targeting
 CONTEXT_ARGS=()
 if [[ -n "${KUBE_CONTEXT:-}" ]]; then
+  CONTEXT="${KUBE_CONTEXT}"
   CONTEXT_ARGS=("--context=${KUBE_CONTEXT}")
+else
+  CONTEXT=$(kubectl config current-context 2>/dev/null)
 fi
+
+# Derive builder name from context so each cluster gets its own builder
+# NOTE: This naming convention must match RegistryImageBuildUtils.groovy's builder name derivation
+BUILDER_NAME="builder-${CONTEXT//[^a-zA-Z0-9_-]/-}"
 
 # Check if builder already exists and is healthy
 if docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
@@ -22,11 +27,6 @@ docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
 NAMESPACE="${BUILDKIT_NAMESPACE:-buildkit}"
 
 # Detect cloud vs local K8s
-if [[ -n "${KUBE_CONTEXT:-}" ]]; then
-  CONTEXT="${KUBE_CONTEXT}"
-else
-  CONTEXT=$(kubectl config current-context 2>/dev/null)
-fi
 if [[ "$CONTEXT" =~ (eks:|gke_|aks-|migration-eks-) ]]; then
   echo "Detected cloud K8s, using kubernetes driver with native multi-arch builds"
   
@@ -55,12 +55,12 @@ else
   
   # Wait for buildkitd pod
   echo "Waiting for buildkitd pod..."
-  kubectl "${CONTEXT_ARGS[@]}" wait --for=condition=ready pod -l app=buildkitd -n "$NAMESPACE" --timeout=120s
+  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} wait --for=condition=ready pod -l app=buildkitd -n "$NAMESPACE" --timeout=120s
   
   # Set up port-forward if not running
   if ! pgrep -f "kubectl port-forward.*buildkitd.*1234:1234" >/dev/null; then
     echo "Starting buildkit port-forward..."
-    nohup kubectl "${CONTEXT_ARGS[@]}" port-forward -n "$NAMESPACE" svc/buildkitd 1234:1234 --address 0.0.0.0 > /tmp/buildkit-forward.log 2>&1 &
+    nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} port-forward -n "$NAMESPACE" svc/buildkitd 1234:1234 > /tmp/buildkit-forward.log 2>&1 &
     sleep 2
   else
     echo "buildkit port-forward already running"
@@ -73,5 +73,6 @@ else
 fi
 
 docker buildx use "$BUILDER_NAME"
+echo "BUILDX_BUILDER=${BUILDER_NAME}"
 echo "Bootstrapping builder..."
 docker buildx inspect --bootstrap

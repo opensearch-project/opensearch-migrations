@@ -31,6 +31,7 @@ data:
                 value:
                   - migration-console-access-role
                   - argo-workflow-executor
+                  - build-images-service-account
           mutate:
             patchStrategicMerge:
               metadata:

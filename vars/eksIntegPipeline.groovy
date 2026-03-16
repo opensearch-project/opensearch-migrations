@@ -27,6 +27,7 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             choice(
                     name: 'SOURCE_VERSION',
@@ -64,6 +65,7 @@ def call(Map config = [:]) {
                     genericVariables: [
                             [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
                             [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                            [key: 'GIT_COMMIT', value: '$.GIT_COMMIT'],
                             [key: 'job_name', value: '$.job_name']
                     ],
                     tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
@@ -76,7 +78,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
+                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }
 
@@ -295,6 +297,10 @@ def call(Map config = [:]) {
                                         echo "List resources not removed by helm uninstall:"
                                         sh "kubectl --context=${env.eksKubeContext} get all,pvc,configmap,secret,workflow -n ma -o wide --ignore-not-found || true"
                                         sh "kubectl --context=${env.eksKubeContext} delete namespace ma --ignore-not-found --timeout=60s || true"
+                                        // Wait for namespace to fully terminate so Kubernetes-managed ENIs/LBs are
+                                        // cleaned up before CloudFormation tries to delete the VPC/EKS cluster.
+                                        // Without this, lingering ENIs cause DELETE_FAILED on the CloudFormation stack.
+                                        sh "kubectl --context=${env.eksKubeContext} wait --for=delete namespace/ma --timeout=300s || true"
                                     }
 
                                     // Revoke security group rule added during setup

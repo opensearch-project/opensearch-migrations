@@ -52,7 +52,6 @@ These operators pull images at runtime that don't appear in `helm template`:
 | Operator | Runtime images | How to find |
 |----------|---------------|-------------|
 | strimzi | kafka, kafka-bridge, kaniko-executor, maven-builder | `helm template` → grep `STRIMZI_` env vars |
-| etcd-operator | `quay.io/coreos/etcd:v3.5.12` | Hardcoded in operator, check etcd-operator release notes |
 | prometheus-operator | thanos sidecar | Check `thanosRuler` in kube-prometheus-stack values |
 | kube-prometheus-stack | grafana sidecar (`kiwigrid/k8s-sidecar`) | In grafana sub-chart values |
 
@@ -123,7 +122,7 @@ Add it, re-mirror, and retry until all pods are Running.
 
 ## Common Mistakes
 
-1. Forgetting runtime images (strimzi kafka, etcd data, thanos sidecar)
+1. Forgetting runtime images (strimzi kafka, thanos sidecar)
 2. Using full URL in `repository` when chart expects `registry` + `repository` split
 3. Not updating the OCI chart version override for cert-manager (`v` prefix)
 4. Missing the `docker.io/` prefix — images like `busybox:latest` are actually `docker.io/library/busybox:latest`
