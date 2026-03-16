@@ -110,7 +110,9 @@ helm uninstall -n ma ma
 kubectl delete namespace ma
 ```
 
-## Full Documentation
+## Wiki References
+The wiki's Deploying-to-EKS page now explains STAGE selection and includes verification steps for each deployment phase.
+
 ```bash
 cat opensearch-migrations.wiki/Deploying-to-EKS.md
 cat opensearch-migrations.wiki/Deploying-to-Kubernetes.md

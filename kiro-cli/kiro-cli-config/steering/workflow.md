@@ -581,7 +581,9 @@ Real-world example (1M docs, 4.2 GB, 1 × m6g.large target):
 4. **Template conflicts** → metadata migration fails on indices
 5. **Not verifying doc counts** after migration → silent data loss
 
-## Full Documentation
+## Wiki References
+The wiki now covers error recovery and retry procedures in detail. Use `workflow configure sample` as the canonical way to discover the config schema.
+
 ```bash
 cat opensearch-migrations.wiki/Workflow-CLI-Overview.md
 cat opensearch-migrations.wiki/Workflow-CLI-Getting-Started.md

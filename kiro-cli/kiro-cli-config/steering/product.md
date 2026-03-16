@@ -19,13 +19,13 @@ cd opensearch-migrations.wiki && git pull
 
 Read specific docs with:
 ```bash
-cat opensearch-migrations.wiki/Home.md
-cat opensearch-migrations.wiki/Architecture.md
-cat opensearch-migrations.wiki/Migration-Paths.md
-cat opensearch-migrations.wiki/Workflow-CLI-Overview.md
-cat opensearch-migrations.wiki/Workflow-CLI-Getting-Started.md
-cat opensearch-migrations.wiki/Backfill-Workflow.md
-cat opensearch-migrations.wiki/Deploying-to-EKS.md
-cat opensearch-migrations.wiki/Deploying-to-Kubernetes.md
-cat opensearch-migrations.wiki/Troubleshooting.md
+cat opensearch-migrations.wiki/Home.md                      # Overview, version identification, Migration Console orientation
+cat opensearch-migrations.wiki/Architecture.md              # Mental model, error recovery, approval gates
+cat opensearch-migrations.wiki/Migration-Paths.md           # Version compatibility, how to determine source version
+cat opensearch-migrations.wiki/Deploying-to-EKS.md          # Bootstrap script, STAGE explanation, verification, snapshot config
+cat opensearch-migrations.wiki/Deploying-to-Kubernetes.md   # Generic K8s deployment with Helm
+cat opensearch-migrations.wiki/Workflow-CLI-Overview.md     # Concepts, command reference, manage TUI, error recovery
+cat opensearch-migrations.wiki/Workflow-CLI-Getting-Started.md  # Version check → sample → edit → secrets → submit → monitor
+cat opensearch-migrations.wiki/Backfill-Workflow.md         # Mental model, config categories, verification with console clusters curl
+cat opensearch-migrations.wiki/Troubleshooting.md           # Connectivity, auth, workflow failures, pods, config, performance
 ```
