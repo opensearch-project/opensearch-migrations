@@ -121,9 +121,9 @@ That gives one schema that matches the Strimzi version actually present in the
 environment, instead of assuming that the checked-in TypeScript types or an
 older generated schema are still correct.
 
-For local development and bootstrapping, there is also a checked-in fallback
+For local development and bootstrapping, there is also a generated fallback
 artifact at
-[packages/schemas/generated/workflowMigration.schema.json](packages/schemas/generated/workflowMigration.schema.json).
+`packages/schemas/generated/workflowMigration.schema.json` (produced by the build).
 That fallback is a checked-in unified schema artifact built from a known
 Strimzi schema source. It exists so that developers can:
 

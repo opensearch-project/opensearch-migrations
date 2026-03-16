@@ -30,30 +30,25 @@ The workflow does **not** automatically inject approval annotations on the first
 
 ```mermaid
 flowchart TB
+    subgraph K8s["Kubernetes API Server"]
+        API[API Server]
+        VAP[ValidatingAdmissionPolicy]
+        API -->|intercept| VAP
+    end
+
     subgraph Workflow["Argo Workflow"]
-        A[Apply Resource Manifest] -->|success| B[Wait for Ready/Complete]
-        A -->|403 Forbidden| C{Parse Error}
+        Start(( )) --> A
+        A[Submit kubectl apply] -.->|request| API
+        VAP -->|allowed| R[Apply Succeeds]
+        VAP -->|"403 Forbidden"| C{Parse Error}
+        R --> B[Wait for Ready/Complete]
         C -->|"Gated Change"| D[Suspend & Wait in Argo-Workflows]
         C -->|"Impossible / Lock Violation"| E[Fail workflow - unrecoverable]
         C -->|"Other Error"| F[Fail - real error]
         
-        D -->|"User clicks 'Resume/Approve' in Argo-Workflows"| G[Auto-Patch Resource with Workflow UID]
-        G --> H[Recursively re-attempt same apply]
-        H -->|success| B
-        H -->|still blocked| D
+        D -->|"User clicks 'Resume/Approve'"| G[Auto-Patch Resource with Workflow UID]
+        G --> A
     end
-
-    subgraph K8s["Kubernetes API Server"]
-        VAP[ValidatingAdmissionPolicy]
-        API[API Server]
-    end
-
-    A -.->|kubectl apply| API
-    H -.->|kubectl apply| API
-    API -->|intercept| VAP
-    VAP -->|allowed| API
-    VAP -->|rejected| A
-
 ```
 
 **Key Concept: The API Rejection is Absolute.** If a VAP rejects a change, the entire `kubectl apply` request is aborted. The existing object in `etcd`, including its state and status, remains 100% unchanged.
@@ -62,11 +57,13 @@ flowchart TB
 
 ## Field Classification
 
-Changes to resources fall into three categories. The VAP enforces these rules universally, regardless of the resource's current state.
+Changes to resources fall into three categories.
 
 1. **Impossible:** Cannot be done — must delete & recreate the resource. This branch of the workflow cannot be advanced.
 2. **Gated:** Requires explicit approval annotation (injected via the Workflow) to proceed.
 3. **Safe:** Low-risk, allowed dynamically without approval.
+
+For terminal resources in `Completed` state, the [Lock-on-Complete](#the-lock-on-complete-pattern-terminal-resources-only) pattern overrides all categories — every spec change becomes Impossible.
 
 ### CaptureProxy (`migrations.opensearch.org/ProxyConfig`)
 
@@ -107,13 +104,13 @@ Migration CRD resources follow a common lifecycle tracked natively in the `.stat
 
 | State | Meaning | Used By |
 | --- | --- | --- |
-| *(empty)* | Placeholder — created by the initialization process but not yet acted upon. | All |
+| `Initialized` | Placeholder — created by the initialization process but not yet acted upon. | All |
 | `Running` | Work is in progress (deployment rolling out, snapshot copying). | All |
 | `Ready` | Infrastructure is healthy, operational, and serving traffic. | **Long-Lived** (Proxy, Kafka) |
 | `Completed` | A finite task has finished successfully. The output is immutable. | **Terminal** (Snapshots) |
 | `Error` | Execution failed. The resource is "poisoned". | All |
 
-Empty placeholder resources are created during the migration initialization step (before the Argo workflow starts) so that downstream `waitFor` steps can find them. The initializer creates each CRD resource with an empty `spec: {}` and `status.phase: Initialized`.
+Empty placeholder resources are created during the migration initialization step (before the Argo workflow starts) so that downstream `waitFor` steps can find them. The initializer creates each CRD resource with an empty `spec: {}` and `status.phase: Initialized`. The workflow's first apply populates the spec with real parameters.
 
 ### The "Fail Forward / Poison Resource" Principle
 
@@ -135,7 +132,7 @@ We tie approvals directly to the specific Argo Workflow execution requesting the
 5. **The Retry:** The workflow loops back and attempts the exact same `kubectl apply`.
 6. **The Pass:** The VAP sees the gated change, but evaluates `object.metadata.annotations['...approved-by-run'] == object.metadata.labels['workflows.argoproj.io/run-uid']`. The change is allowed.
 
-**CEL Implementation Example:**
+**CEL Implementation Example** *(abbreviated — full policy covers all Gated fields from the classification table)*:
 
 ```yaml
 validations:
@@ -161,10 +158,8 @@ validations:
 
 This pattern strictly applies to **completed work products** (e.g., `DataSnapshot`). It freezes the resource's `.spec` to guarantee provenance and enables safe subgraph skipping in Argo.
 
-**The Logic:** When the VAP sees that the existing resource's status is `Completed`, it rejects *any* `.spec` change (even a 'Safe' one) with a 403.
-
-* **Idempotent Run:** If a user re-runs a workflow against a completed snapshot with the exact same parameters, K8s treats it as a `200 OK` No-Op. Argo sees the `status.phase == Completed` and safely skips the subgraph.
-* **Stale Run:** If a user changes *any* parameter and re-runs it, silently accepting the change would break provenance (the `.spec` would no longer reflect the historical execution). The VAP hard-fails, forcing the user to delete the stale artifact to run a new job.
+* **Idempotent Run:** If a user re-runs a workflow against a completed snapshot with the exact same parameters, K8s treats it as a `200 OK` No-Op. Argo sees `status.phase == Completed` and safely skips the subgraph.
+* **Changed Parameters:** If a user changes *any* parameter (even a "Safe" one) and re-runs, the VAP rejects the update with a 403. Silently accepting the change would break provenance — the `.spec` would no longer reflect the historical execution. The user must delete the stale artifact to run a new job with different parameters.
 
 *(Note: Because the Kubernetes API passes the fully populated `oldObject` to the VAP during a spec update, we read `.status` directly. No dual-metadata tracking or annotations are required for state locking).*
 
@@ -199,11 +194,12 @@ To prevent VAPs from breaking when a CRD is upgraded (e.g., a new optional field
 
 ## Efficient Argo Execution
 
-To avoid blind sleeps, we rely on server-side applies and Argo's `resource` template.
+To avoid blind sleeps, we rely on Argo's `resource` template getting a 
+quick-result that the resource already matched and was complete.
 
 1. **Phase 1: Apply / Assert**
-* Workflow executes `kubectl apply --server-side`.
-* If the spec matches etcd exactly, K8s treats it as a `200 OK` No-Op.
+* Workflow executes `kubectl apply` via Argo's `resource` template.
+* If the spec matches etcd exactly, K8s treats it as a No-Op.
 * If a VAP rejects it, the recursive UI-approval loop handles it.
 
 
