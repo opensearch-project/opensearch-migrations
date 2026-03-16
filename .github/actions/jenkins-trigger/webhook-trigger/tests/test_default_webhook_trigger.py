@@ -1,14 +1,14 @@
 import unittest
-from unittest import mock
 from unittest.mock import patch
 
 import default_webhook_trigger
 
-JENKINS_URL="https://www.fake-jenkins.com"
-JENKINS_JOB_NAME="unit-test-job"
-JENKINS_QUEUE_URL="queue/item/123"
-JENKINS_WORKFLOW_URL=f"{JENKINS_URL}/job/{JENKINS_JOB_NAME}/22/"
-JENKINS_WEBHOOK_TOKEN="fakeToken"
+JENKINS_URL = "https://www.fake-jenkins.com"
+JENKINS_JOB_NAME = "unit-test-job"
+JENKINS_QUEUE_URL = "queue/item/123"
+JENKINS_WORKFLOW_URL = f"{JENKINS_URL}/job/{JENKINS_JOB_NAME}/22/"
+JENKINS_WEBHOOK_TOKEN = "fakeToken"
+
 
 class DefaultWebhookTriggerTest(unittest.TestCase):
 
@@ -45,7 +45,9 @@ class DefaultWebhookTriggerTest(unittest.TestCase):
                         '--pipeline_token', JENKINS_WEBHOOK_TOKEN,
                         '--jenkins_url', JENKINS_URL,
                         '--job_name', JENKINS_JOB_NAME,
-                        '--job_params', 'GIT_REPO_URL=https://github.com/opensearch-project/OpenSearch.git,GIT_BRANCH=main,STAGE=dev',
+                        '--job_params',
+                        'GIT_REPO_URL=https://github.com/opensearch-project/OpenSearch.git,'
+                        'GIT_BRANCH=main,STAGE=dev',
                         '--job_timeout_minutes', '10']
         with unittest.mock.patch('sys.argv', command_args):
             default_webhook_trigger.main()

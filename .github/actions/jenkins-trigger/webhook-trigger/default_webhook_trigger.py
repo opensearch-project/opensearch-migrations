@@ -211,7 +211,7 @@ def trigger_and_wait_for_job(config: JenkinsConfig) -> None:
         else:
             response.raise_for_status()
 
-    except requests.exceptions.RequestException as request_exception:
+    except requests.exceptions.RequestException:
         response_body: object = "{}"
         if response is not None:
             try:
