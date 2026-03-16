@@ -59,6 +59,9 @@ Implemented today:
 - normalized internal Kafka profile fields carried through orchestration
 - workflow-managed `KafkaUser` creation for auto-created SCRAM clusters
 - secret-backed SCRAM client configuration for proxy and replayer
+- console SCRAM support for workflow-managed Kafka, with the current console
+  workflow-config reader deriving the managed bootstrap endpoint
+  deterministically from the workflow config
 - end-to-end minikube validation of:
   - `proxyWithoutTls.wf.yaml`
   - `proxyWithoutTlsScram.wf.yaml`
