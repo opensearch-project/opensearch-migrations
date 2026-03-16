@@ -23,6 +23,8 @@ class JenkinsConfig:
     job_name: str
     job_params: dict[str, str]
     job_timeout_minutes: int
+    jenkins_user: str = ""
+    jenkins_api_token: str = ""
 
     def __post_init__(self) -> None:
         if not self.jenkins_url:
@@ -35,6 +37,10 @@ class JenkinsConfig:
             raise ValueError("job_timeout_minutes must be positive")
         # Strip trailing slash for consistent URL construction
         self.jenkins_url = self.jenkins_url.rstrip("/")
+
+    @property
+    def has_api_auth(self) -> bool:
+        return bool(self.jenkins_user and self.jenkins_api_token)
 
     @property
     def webhook_url(self) -> str:
@@ -76,10 +82,13 @@ def _cancel_jenkins_build(signum: int, frame: object) -> None:
     sig_name = signal.Signals(signum).name
     logging.warning(f"Received {sig_name}, cancelling Jenkins build...")
     if _active_build_url and _active_config:
+        if not _active_config.has_api_auth:
+            logging.warning("No jenkins_user/jenkins_api_token configured — cannot cancel Jenkins build")
+            sys.exit(1)
         try:
             stop_url = f"{_active_build_url}stop"
-            headers = {"Authorization": f"Bearer {_active_config.pipeline_token}"}
-            response = requests.post(stop_url, headers=headers)
+            auth = (_active_config.jenkins_user, _active_config.jenkins_api_token)
+            response = requests.post(stop_url, auth=auth)
             logging.info(f"Sent stop request to {stop_url}, response: {response.status_code}")
         except Exception as e:
             logging.error(f"Failed to cancel Jenkins build: {e}")
@@ -250,6 +259,10 @@ def main() -> None:
                              '"GIT_REPO_URL=https://github.com/example/repo.git,GIT_BRANCH=main"')
     parser.add_argument("--job_timeout_minutes", default=120, type=int,
                         help="Max time (minutes) to wait for completion. Default is 120 minutes")
+    parser.add_argument("--jenkins_user", type=str, default="",
+                        help="Jenkins username for API auth (required for cancellation)")
+    parser.add_argument("--jenkins_api_token", type=str, default="",
+                        help="Jenkins API token for API auth (required for cancellation)")
 
     args = parser.parse_args()
     config = JenkinsConfig(
@@ -258,6 +271,8 @@ def main() -> None:
         job_name=args.job_name,
         job_params=args.job_params,
         job_timeout_minutes=args.job_timeout_minutes,
+        jenkins_user=args.jenkins_user,
+        jenkins_api_token=args.jenkins_api_token,
     )
     logging.info(f"Using following payload for workflow trigger: {config.payload}")
     trigger_and_wait_for_job(config)

@@ -20,6 +20,14 @@ inputs:
     description: 'Max time (minutes) to wait for completion'
     required: false
     default: "120"
+  jenkins_user:
+    description: 'Jenkins username for API auth (required for cancellation support)'
+    required: false
+    default: ""
+  jenkins_api_token:
+    description: 'Jenkins API token for API auth (required for cancellation support)'
+    required: false
+    default: ""
 runs:
   using: "composite"
   steps:
@@ -34,4 +42,6 @@ runs:
           --pipeline_token="${{ inputs.api_token }}" \
           --job_name="${{ inputs.job_name }}" \
           --job_params="${{ inputs.job_params }}" \
-          --job_timeout_minutes="${{ inputs.job_timeout_minutes }}"
+          --job_timeout_minutes="${{ inputs.job_timeout_minutes }}" \
+          --jenkins_user="${{ inputs.jenkins_user }}" \
+          --jenkins_api_token="${{ inputs.jenkins_api_token }}"

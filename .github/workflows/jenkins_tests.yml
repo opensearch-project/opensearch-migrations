@@ -39,6 +39,8 @@ jobs:
           job_name: ${{ github.event_name == 'push' && 'main-full-es68source-e2e-test' || 'pr-full-es68source-e2e-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
 
   elasticsearch-5x-k8s-local-test:
     needs: [get-require-approval, sanitize-input]
@@ -56,6 +58,8 @@ jobs:
           job_name: ${{ github.event_name == 'push' && 'main-elasticsearch-5x-k8s-local-test' || 'pr-elasticsearch-5x-k8s-local-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
 
   eks-integ-test:
     if: |
@@ -78,4 +82,6 @@ jobs:
           job_name: ${{ github.event_name == 'push' && 'main-eks-integ-test' || 'pr-eks-integ-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
           job_timeout_minutes: "120"
