@@ -29,7 +29,7 @@ class Test0001SingleDocumentBackfill(MATestBase):
             (ElasticsearchV7_X, OpensearchV3_X),
         ]
         migrations_required = [MigrationType.BACKFILL]
-        description = "Performs backfill migration for a single document."
+        description = "Performs backfill migration for a single document (target cluster as coordinator)."
         super().__init__(user_args=user_args,
                          description=description,
                          migrations_required=migrations_required,
@@ -39,6 +39,17 @@ class Test0001SingleDocumentBackfill(MATestBase):
         self.doc_type = "sample_type"
         self.source_cluster = None
         self.target_cluster = None
+
+    def prepare_workflow_snapshot_and_migration_config(self):
+        snapshot_and_migration_configs = [{
+            "migrations": [{
+                "metadataMigrationConfig": {},
+                "documentBackfillConfig": {
+                    "useTargetClusterForWorkCoordination": True
+                }
+            }]
+        }]
+        self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs
 
     def prepare_clusters(self):
         # Create single document
@@ -73,7 +84,7 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
             (ElasticsearchV7_X, OpensearchV3_X),
         ]
         migrations_required = [MigrationType.BACKFILL]
-        description = "Performs backfill migration with dedicated coordinator cluster."
+        description = "Performs backfill migration for a single document (default coordinator)."
         super().__init__(user_args=user_args,
                          description=description,
                          migrations_required=migrations_required,
@@ -83,17 +94,6 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
         self.doc_type = "sample_type"
         self.source_cluster = None
         self.target_cluster = None
-
-    def prepare_workflow_snapshot_and_migration_config(self):
-        snapshot_and_migration_configs = [{
-            "migrations": [{
-                "metadataMigrationConfig": {},
-                "documentBackfillConfig": {
-                    "useTargetClusterForWorkCoordination": False
-                }
-            }]
-        }]
-        self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs
 
     def prepare_clusters(self):
         # Create single document

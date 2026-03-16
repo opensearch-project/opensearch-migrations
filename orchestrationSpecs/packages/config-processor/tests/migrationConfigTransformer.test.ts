@@ -35,6 +35,6 @@ describe('errorsArePrintedSuccinctly', () => {
             `Invalid input: expected string, received undefined... at:\n` +
             `  sourceClusters.source1.version\n` +
             `Invalid input: expected array, received undefined... at:\n` +
-            `  migrationConfigs`);
+            `  snapshotMigrationConfigs`);
     });
 });

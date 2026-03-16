@@ -27,6 +27,14 @@ tasks.register('buildTransforms', NpmTask) {
     outputs.dir("${projectDir}/transforms/dist")
 }
 
+tasks.register('testTransforms', NpmTask) {
+    description = 'Run vitest tests for TypeScript transforms'
+    args = ['run', 'test:nocov']
+    dependsOn installTransformDeps
+    inputs.dir("${projectDir}/transforms/src")
+    inputs.file("${projectDir}/transforms/package.json")
+}
+
 tasks.register('copyTransforms', Copy) {
     description = 'Copy built JS transforms to test resources'
     from "${projectDir}/transforms/dist"
@@ -35,6 +43,7 @@ tasks.register('copyTransforms', Copy) {
 }
 
 processTestResources.dependsOn copyTransforms
+test.dependsOn testTransforms
 
 dependencies {
     implementation project(':TrafficCapture:transformationShim')
