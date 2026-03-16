@@ -63,11 +63,6 @@ function makeDeployKafkaNodePool(args: {
     clusterConfig: BaseExpression<Serialized<KafkaConfig>>,
 }): Record<string, any> {
     const config = expr.deserializeRecord(args.clusterConfig);
-    const baseSpec = expr.makeDict({
-        replicas: expr.literal(1),
-        roles: expr.literal(["controller", "broker"]),
-        storage: expr.makeDict({type: "persistent-claim", size: "1Gi", deleteClaim: true})
-    });
     return {
         apiVersion: "kafka.strimzi.io/v1",
         kind: "KafkaNodePool",
@@ -75,10 +70,7 @@ function makeDeployKafkaNodePool(args: {
             name: "dual-role", // TODO - make this a user setting!
             labels: {"strimzi.io/cluster": args.clusterName}
         },
-        spec: makeDirectTypeProxy(expr.mergeDicts(
-            baseSpec,
-            expr.dig(config, ["nodePoolSpecOverrides"], expr.literal({}))
-        ))
+        spec: makeDirectTypeProxy(expr.dig(config, ["nodePoolSpecOverrides"], expr.literal({})))
     };
 }
 
@@ -88,17 +80,8 @@ function makeDeployKafkaClusterKraftNoAuthManifest(args: {
     clusterConfig: BaseExpression<Serialized<KafkaConfig>>,
 }): Record<string, any> {
     const config = expr.deserializeRecord(args.clusterConfig);
-    const mergedKafkaConfig = expr.mergeDicts(
-        expr.literal({
-            "auto.create.topics.enable": false,
-            "offsets.topic.replication.factor": 1,
-            "transaction.state.log.replication.factor": 1,
-            "transaction.state.log.min.isr": 1,
-            "default.replication.factor": 1,
-            "min.insync.replicas": 1
-        }),
-        expr.dig(config, ["clusterSpecOverrides", "kafka", "config"], expr.literal({}))
-    );
+    const clusterSpecOverrides = expr.dig(config, ["clusterSpecOverrides"], expr.literal({}));
+    const kafkaSpecOverrides = expr.dig(config, ["clusterSpecOverrides", "kafka"], expr.literal({}));
 
     return {
         apiVersion: "kafka.strimzi.io/v1",
@@ -110,20 +93,26 @@ function makeDeployKafkaClusterKraftNoAuthManifest(args: {
                 "strimzi.io/kraft": "enabled"
             }
         },
-        spec: {
-            kafka: {
-                version: args.version,
-                metadataVersion: "4.0-IV3",
-                readinessProbe: {initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 1},
-                livenessProbe: {initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 2},
-                listeners: [
-                    {name: "plain", port: 9092, type: "internal", tls: false},
-                    {name: "tls", port: 9093, type: "internal", tls: true}
-                ],
-                config: makeDirectTypeProxy(mergedKafkaConfig)
-            },
-            entityOperator: {topicOperator: {}, userOperator: {}}
-        }
+        spec: makeDirectTypeProxy(expr.mergeDicts(
+            clusterSpecOverrides,
+            expr.makeDict({
+                kafka: expr.mergeDicts(
+                    kafkaSpecOverrides,
+                    expr.makeDict({
+                        version: args.version,
+                        metadataVersion: "4.0-IV3",
+                        readinessProbe: expr.literal({initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 1}),
+                        livenessProbe: expr.literal({initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 2}),
+                        listeners: expr.literal([
+                            {name: "plain", port: 9092, type: "internal", tls: false},
+                            {name: "tls", port: 9093, type: "internal", tls: true}
+                        ]),
+                        config: expr.dig(config, ["clusterSpecOverrides", "kafka", "config"], expr.literal({}))
+                    })
+                ),
+                entityOperator: expr.literal({topicOperator: {}, userOperator: {}})
+            })
+        ))
     };
 }
 
@@ -133,17 +122,8 @@ function makeDeployKafkaClusterKraftScramManifest(args: {
     clusterConfig: BaseExpression<Serialized<KafkaConfig>>,
 }): Record<string, any> {
     const config = expr.deserializeRecord(args.clusterConfig);
-    const mergedKafkaConfig = expr.mergeDicts(
-        expr.literal({
-            "auto.create.topics.enable": false,
-            "offsets.topic.replication.factor": 1,
-            "transaction.state.log.replication.factor": 1,
-            "transaction.state.log.min.isr": 1,
-            "default.replication.factor": 1,
-            "min.insync.replicas": 1
-        }),
-        expr.dig(config, ["clusterSpecOverrides", "kafka", "config"], expr.literal({}))
-    );
+    const clusterSpecOverrides = expr.dig(config, ["clusterSpecOverrides"], expr.literal({}));
+    const kafkaSpecOverrides = expr.dig(config, ["clusterSpecOverrides", "kafka"], expr.literal({}));
 
     return {
         apiVersion: "kafka.strimzi.io/v1",
@@ -155,19 +135,25 @@ function makeDeployKafkaClusterKraftScramManifest(args: {
                 "strimzi.io/kraft": "enabled"
             }
         },
-        spec: {
-            kafka: {
-                version: args.version,
-                metadataVersion: "4.0-IV3",
-                readinessProbe: {initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 1},
-                livenessProbe: {initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 2},
-                listeners: [
-                    {name: "tls", port: 9093, type: "internal", tls: true, authentication: {type: "scram-sha-512"}}
-                ],
-                config: makeDirectTypeProxy(mergedKafkaConfig)
-            },
-            entityOperator: {topicOperator: {}, userOperator: {}}
-        }
+        spec: makeDirectTypeProxy(expr.mergeDicts(
+            clusterSpecOverrides,
+            expr.makeDict({
+                kafka: expr.mergeDicts(
+                    kafkaSpecOverrides,
+                    expr.makeDict({
+                        version: args.version,
+                        metadataVersion: "4.0-IV3",
+                        readinessProbe: expr.literal({initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 1}),
+                        livenessProbe: expr.literal({initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 2}),
+                        listeners: expr.literal([
+                            {name: "tls", port: 9093, type: "internal", tls: true, authentication: {type: "scram-sha-512"}}
+                        ]),
+                        config: expr.dig(config, ["clusterSpecOverrides", "kafka", "config"], expr.literal({}))
+                    })
+                ),
+                entityOperator: expr.literal({topicOperator: {}, userOperator: {}})
+            })
+        ))
     };
 }
 
@@ -181,11 +167,6 @@ function makeKafkaTopicManifest(args: {
     clusterConfig: BaseExpression<Serialized<KafkaConfig>>,
 }): Record<string, any> {
     const config = expr.deserializeRecord(args.clusterConfig);
-    const baseSpec = expr.makeDict({
-        partitions: expr.literal(1),
-        replicas: expr.literal(1),
-        config: expr.literal({"retention.ms": 604800000, "segment.bytes": 1073741824})
-    });
     return {
         apiVersion: "kafka.strimzi.io/v1",
         kind: "KafkaTopic",
@@ -193,10 +174,7 @@ function makeKafkaTopicManifest(args: {
             name: args.topicName,
             labels: {"strimzi.io/cluster": args.clusterName}
         },
-        spec: makeDirectTypeProxy(expr.mergeDicts(
-            baseSpec,
-            expr.dig(config, ["topicSpecOverrides"], expr.literal({}))
-        ))
+        spec: makeDirectTypeProxy(expr.dig(config, ["topicSpecOverrides"], expr.literal({})))
     };
 }
 
