@@ -31,17 +31,6 @@ images:
 charts:
   kyverno:
     values:
-      cleanupJobs:
-        admissionReports:
-          image:
-            registry: ""
-            repository: localhost:5000/migrations/migration_console
-            tag: latest
-        clusterAdmissionReports:
-          image:
-            registry: ""
-            repository: localhost:5000/migrations/migration_console
-            tag: latest
       webhooksCleanup:
         image:
           registry: ""
