@@ -132,4 +132,31 @@ export const testCases: TestCase[] = [
       { path: '$.response', rule: 'ignore', reason: 'Facet test — only validating $.facets, not hits' },
     ],
   }),
+
+  // ───────────────────────────────────────────────────────────
+  // Field list (fl) tests — _source filtering
+  // ───────────────────────────────────────────────────────────
+
+  solrTest('field-list-param', {
+    description: 'fl parameter with mixed comma/space separators and glob pattern (na*)',
+    documents: [
+      { id: '1', name: 'Alice', name_full: 'Alice Smith', price: 100 },
+      { id: '2', name: 'Bob', name_full: 'Bob Jones', price: 200 },
+    ],
+    requestPath: '/solr/testcollection/select?q=*:*&fl=id,na*%20price&wt=json',
+    solrSchema: {
+      fields: {
+        name: { type: 'text_general' },
+        name_full: { type: 'text_general' },
+        price: { type: 'pint' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        name: { type: 'text' },
+        name_full: { type: 'text' },
+        price: { type: 'integer' },
+      },
+    },
+  }),
 ];
