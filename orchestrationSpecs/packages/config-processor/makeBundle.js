@@ -103,11 +103,11 @@ async function bundle() {
         }
     }
 
-    // Optionally copy a prebuilt baseline unified schema artifact into the bundle.
-    // This is a generated fallback, not the preferred live-cluster schema source.
+    // Optionally copy a generated local fallback unified schema artifact into the bundle.
+    // This is only for explicitly enabled fallback flows, not the default live-cluster path.
     const fallbackSchemaSrc = path.join(__dirname, '..', 'schemas', 'generated', 'workflowMigration.schema.json');
     const fallbackSchemaDest = path.join(outputDir, 'generated', 'workflowMigration.schema.json');
-    if (fs.existsSync(fallbackSchemaSrc)) {
+    if (process.env.ALLOW_FALLBACK_UNIFIED_SCHEMA === 'true' && fs.existsSync(fallbackSchemaSrc)) {
         fs.mkdirSync(path.dirname(fallbackSchemaDest), { recursive: true });
         fs.copyFileSync(fallbackSchemaSrc, fallbackSchemaDest);
         console.log(`Copied fallback unified schema to ${fallbackSchemaDest}`);

@@ -213,8 +213,9 @@ The intended release/deployment flow is:
 5. use that same schema artifact for validation in the environments that target
    that Strimzi deployment
 
-For local development and bootstrap scenarios, a checked-in fallback unified
-schema may still be used.
+For local development and bootstrap scenarios, a generated local fallback
+unified schema may still be used, but only when the fallback path is explicitly
+enabled.
 
 That fallback should be treated as:
 

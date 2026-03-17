@@ -4,17 +4,12 @@ import childProcess from "node:child_process";
 import {OVERALL_MIGRATION_CONFIG} from "./userSchemas";
 import {zodSchemaToJsonSchema} from "./getSchemaFromZod";
 
-export const UNIFIED_SCHEMA_CONFIGMAP_NAME = "migration-configuration-schema";
-export const UNIFIED_SCHEMA_CONFIGMAP_KEY = "workflowMigration.schema.json";
 export const STRIMZI_OPENAPI_API_PATH = "/openapi/v3/apis/kafka.strimzi.io/v1";
 export const UNIFIED_SCHEMA_PATH_ENV = "MIGRATION_UNIFIED_SCHEMA_PATH";
-export const UNIFIED_SCHEMA_CONFIGMAP_ENV = "MIGRATION_UNIFIED_SCHEMA_CONFIGMAP";
-export const UNIFIED_SCHEMA_CONFIGMAP_NAMESPACE_ENV = "MIGRATION_UNIFIED_SCHEMA_NAMESPACE";
-export const UNIFIED_SCHEMA_CONFIGMAP_KEY_ENV = "MIGRATION_UNIFIED_SCHEMA_KEY";
 export const ALLOW_FALLBACK_UNIFIED_SCHEMA_ENV = "MIGRATION_ALLOW_FALLBACK_UNIFIED_SCHEMA";
 
 export type UnifiedSchemaMode = "full";
-export type UnifiedSchemaSource = "file" | "live-cluster" | "configmap" | "fallback-artifact" | "generated";
+export type UnifiedSchemaSource = "file" | "live-cluster" | "fallback-artifact" | "generated";
 
 export interface LoadedUnifiedSchema {
     schema: Record<string, unknown>;
@@ -65,6 +60,11 @@ function addSchemaMetadata(schema: Record<string, unknown>, mode: UnifiedSchemaM
     schema["x-orchestration-specs-strimzi-schema-mode"] = mode;
     schema["x-orchestration-specs-strimzi-schema-detail"] = detail;
     return schema;
+}
+
+function normalizeSchemaDetail(detail: string) {
+    const relative = path.relative(process.cwd(), detail);
+    return relative && !relative.startsWith("..") ? relative : detail;
 }
 
 function findSchemaKeyByKind(definitions: Record<string, unknown>, kind: string) {
@@ -230,10 +230,10 @@ export function buildUnifiedSchema(options: UnifiedSchemaBuildOptions = {}): Loa
         const openApi = JSON.parse(fs.readFileSync(options.strimziSchemaPath, "utf-8"));
         const fullSchema = injectStrimziRefs(base, extractStrimziDefsFromOpenApi(openApi));
         return {
-            schema: addSchemaMetadata(fullSchema, "full", options.strimziSchemaPath),
+            schema: addSchemaMetadata(fullSchema, "full", normalizeSchemaDetail(options.strimziSchemaPath)),
             mode: "full",
             source: "file",
-            detail: options.strimziSchemaPath,
+            detail: normalizeSchemaDetail(options.strimziSchemaPath),
         };
     }
 
@@ -251,19 +251,6 @@ export function buildUnifiedSchema(options: UnifiedSchemaBuildOptions = {}): Loa
     }
 
     throw new Error("No Strimzi schema path was provided and no fallback unified schema artifact was found");
-}
-
-function readSchemaFromConfigMap(name: string, namespace: string | undefined, key: string) {
-    const nsArg = namespace ? ["-n", namespace] : [];
-    const output = childProcess.execFileSync("kubectl", [
-        ...nsArg,
-        "get",
-        "configmap",
-        name,
-        "-o",
-        `jsonpath={.data.${key.replace(/\./g, "\\.")}}`,
-    ], {encoding: "utf-8"});
-    return JSON.parse(output);
 }
 
 function readStrimziOpenApiFromCluster() {
@@ -284,19 +271,6 @@ export function loadUnifiedSchema(): LoadedUnifiedSchema {
             mode: (schema["x-orchestration-specs-strimzi-schema-mode"] as UnifiedSchemaMode) ?? "full",
             source: "file",
             detail: explicitPath,
-        };
-    }
-
-    const configMapName = process.env[UNIFIED_SCHEMA_CONFIGMAP_ENV];
-    if (configMapName) {
-        const key = process.env[UNIFIED_SCHEMA_CONFIGMAP_KEY_ENV] ?? UNIFIED_SCHEMA_CONFIGMAP_KEY;
-        const namespace = process.env[UNIFIED_SCHEMA_CONFIGMAP_NAMESPACE_ENV];
-        const schema = readSchemaFromConfigMap(configMapName, namespace, key);
-        return {
-            schema,
-            mode: (schema["x-orchestration-specs-strimzi-schema-mode"] as UnifiedSchemaMode) ?? "full",
-            source: "configmap",
-            detail: `${configMapName}${namespace ? `/${namespace}` : ""}:${key}`,
         };
     }
 
@@ -334,17 +308,4 @@ export function assertUnifiedSchemaIsUsable(loaded: LoadedUnifiedSchema) {
     if (loaded.mode !== "full") {
         throw new Error(`The migration config validator requires a full unified schema, got '${loaded.mode}' from ${loaded.detail}`);
     }
-}
-
-export function makeUnifiedSchemaConfigMap(schema: Record<string, unknown>) {
-    return {
-        apiVersion: "v1",
-        kind: "ConfigMap",
-        metadata: {
-            name: UNIFIED_SCHEMA_CONFIGMAP_NAME,
-        },
-        data: {
-            [UNIFIED_SCHEMA_CONFIGMAP_KEY]: JSON.stringify(schema, null, 2),
-        }
-    };
 }

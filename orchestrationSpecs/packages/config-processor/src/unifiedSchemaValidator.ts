@@ -34,10 +34,10 @@ export function validateInputAgainstUnifiedSchema(data: unknown): void {
     const loaded = loadUnifiedSchema();
     assertUnifiedSchemaIsUsable(loaded);
 
-    const ajv = new Ajv({
+    const ajv = new Ajv(({
         allErrors: true,
         strict: false,
-    });
+    } as unknown) as ConstructorParameters<typeof Ajv>[0]);
     const validate = ajv.compile(loaded.schema);
     if (validate(strippedData)) {
         return;

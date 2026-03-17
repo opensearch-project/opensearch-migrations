@@ -103,7 +103,7 @@ describe("unified schema builder", () => {
         const {schema} = buildUnifiedSchema({
             strimziSchemaPath: strimziFixturePath,
         });
-        const ajv = new Ajv({allErrors: true, strict: false});
+        const ajv = new Ajv(({allErrors: true, strict: false} as unknown) as ConstructorParameters<typeof Ajv>[0]);
         const validate = ajv.compile(schema);
 
         expect(validate(validConfig)).toBe(true);

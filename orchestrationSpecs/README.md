@@ -118,20 +118,8 @@ The intended release/deployment flow is:
    that Strimzi deployment.
 
 That gives one schema that matches the Strimzi version actually present in the
-environment, instead of assuming that the checked-in TypeScript types or an
-older generated schema are still correct.
-
-For local development and bootstrapping, there is also a generated fallback
-artifact at
-`packages/schemas/generated/workflowMigration.schema.json` (produced by the build).
-That fallback is a checked-in unified schema artifact built from a known
-Strimzi schema source. It exists so that developers can:
-
-- inspect the overall config shape
-- generate samples
-- run editor tooling before a cluster is available
-- bootstrap tests against the same merged schema contract used by runtime
-  validation
+environment, instead of assuming that older generated schema artifacts are
+still correct.
 
 #### Where the runtime schema comes from
 
@@ -139,33 +127,34 @@ The initializer and validator now prefer:
 
 1. Live Strimzi CRD/OpenAPI schema fetched from the target cluster
 2. A file path from `MIGRATION_UNIFIED_SCHEMA_PATH`
-3. The checked-in fallback artifact in `packages/schemas/generated`
+3. A generated local fallback artifact only when
+   `MIGRATION_ALLOW_FALLBACK_UNIFIED_SCHEMA=true` is set
 
 The default initialization path no longer generates or applies a schema
 ConfigMap during workflow submission. Instead, it validates directly against
-the live cluster schema when available and falls back to the checked-in unified
-artifact only when a live Strimzi schema is not being used.
+the live cluster schema when available and falls back only when explicitly
+configured to do so.
 
 #### How the fallback is maintained
 
-The fallback schema is not meant to be hand-edited.  It should be regenerated
-with the unified schema builder and checked in as an artifact.  In practice:
+The fallback schema is not meant to be hand-edited. It should be regenerated
+with the unified schema builder as a local or release artifact. In practice:
 
 - release automation should prefer a schema generated from live Strimzi CRDs
-- local development can regenerate the checked-in artifact from a local Strimzi
+- local development can regenerate a fallback artifact from a local Strimzi
   cluster or another compatible OpenAPI source
 - if the orchestration config model changes, regenerate the fallback artifact
-  so the checked-in schema continues to match the current config shape
+  before using it again
 
-Today the checked-in fallback artifact can be refreshed with:
+Today a local fallback artifact can be generated with:
 
 ```shell
 npm run -w @opensearch-migrations/schemas build-unified-schema -- \
   --strimzi-openapi /path/to/kafka.strimzi.io-v1-schema.json
 ```
 
-That command updates the checked-in fallback artifact. Release automation should
-still prefer generating the schema directly from the live CRDs of the deployed
+That command writes a local fallback artifact. Release automation should still
+prefer generating the schema directly from the live CRDs of the deployed
 Strimzi version.
 
 #### Why this is one merged schema instead of bespoke validation logic
@@ -182,13 +171,10 @@ contract:
 That is more useful than "some fields validated by Zod, some fields validated
 by custom code, some fields validated only by Strimzi after deployment."
 
-The runtime validator can be pointed at a schema artifact or cluster ConfigMap
-via:
+The runtime validator can be pointed at a schema artifact via:
 
 - `MIGRATION_UNIFIED_SCHEMA_PATH`
-- `MIGRATION_UNIFIED_SCHEMA_CONFIGMAP`
-- `MIGRATION_UNIFIED_SCHEMA_NAMESPACE`
-- `MIGRATION_UNIFIED_SCHEMA_KEY`
+- `MIGRATION_ALLOW_FALLBACK_UNIFIED_SCHEMA`
 
 To generate a sample yaml file from the schema, including descriptions
 of fields and the types of the scalars, run
