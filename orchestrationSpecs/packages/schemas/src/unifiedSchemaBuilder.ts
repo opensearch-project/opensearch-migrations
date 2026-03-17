@@ -261,7 +261,7 @@ function readSchemaFromConfigMap(name: string, namespace: string | undefined, ke
         "configmap",
         name,
         "-o",
-        `jsonpath={.data.${key.replace(/\./g, "\\.")}}`,
+        `jsonpath={.data.${key.replace(/\\/g, "\\\\").replace(/\./g, "\\.")}}`,
     ], {encoding: "utf-8"});
     return JSON.parse(output);
 }
