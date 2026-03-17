@@ -155,17 +155,26 @@ spec:
           env:
             - name: MIGRATIONS_CLI_CONSOLE_DISABLE_LEGACY_COMMANDS
               value: "true"
+            - name: MIGRATION_UNIFIED_SCHEMA_PATH
+              value: "/root/schema/workflowMigration.schema.json"
+            - name: MIGRATION_SAMPLE_CONFIG_PATH
+              value: "/root/schema/sample.yaml"
           command:
             - "/bin/sh"
             - "-c"
             - |
               /root/start-console.sh
           volumeMounts:
+            - name: workflow-schema
+              mountPath: /root/schema
     {{- if $sharedLogsVolumeEnabled }}
             - name: shared-logs
               mountPath: /shared-logs-output
     {{- end }}
       volumes:
+        - name: workflow-schema
+          configMap:
+            name: {{ .Release.Name }}-workflow-schema
     {{- if $sharedLogsVolumeEnabled  }}
         - name: shared-logs
           persistentVolumeClaim:
