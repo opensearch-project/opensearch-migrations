@@ -2671,7 +2671,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           }
         },
         "storage": {
-          "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.JbodStorage"
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.Storage"
         }
       },
       "additionalProperties": false
@@ -2696,12 +2696,28 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "delete",
                 "compact"
               ]
+            },
+            "retention.ms": {
+              "type": "integer"
+            },
+            "segment.bytes": {
+              "type": "integer"
             }
           },
           "additionalProperties": false
         }
       },
       "additionalProperties": false
+    },
+    "io.strimzi.api.kafka.model.storage.Storage": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.JbodStorage"
+        },
+        {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.PersistentClaimStorage"
+        }
+      ]
     },
     "io.strimzi.api.kafka.model.storage.JbodStorage": {
       "type": "object",
@@ -2731,6 +2747,9 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         },
         "size": {
           "type": "string"
+        },
+        "deleteClaim": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -2741,7 +2760,22 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "config": {
           "type": "object",
           "properties": {
+            "auto.create.topics.enable": {
+              "type": "boolean"
+            },
             "offsets.topic.replication.factor": {
+              "type": "integer"
+            },
+            "transaction.state.log.replication.factor": {
+              "type": "integer"
+            },
+            "transaction.state.log.min.isr": {
+              "type": "integer"
+            },
+            "default.replication.factor": {
+              "type": "integer"
+            },
+            "min.insync.replicas": {
               "type": "integer"
             },
             "log.message.format.version": {

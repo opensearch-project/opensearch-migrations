@@ -59,7 +59,22 @@
           "config": {
             "type": "object",
             "properties": {
+              "auto.create.topics.enable": {
+                "type": "boolean"
+              },
               "offsets.topic.replication.factor": {
+                "type": "integer"
+              },
+              "transaction.state.log.replication.factor": {
+                "type": "integer"
+              },
+              "transaction.state.log.min.isr": {
+                "type": "integer"
+              },
+              "default.replication.factor": {
+                "type": "integer"
+              },
+              "min.insync.replicas": {
                 "type": "integer"
               },
               "log.message.format.version": {
@@ -142,10 +157,20 @@
             }
           },
           "storage": {
-            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.storage.JbodStorage"
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.storage.Storage"
           }
         },
         "additionalProperties": false
+      },
+      "io.strimzi.api.kafka.model.storage.Storage": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.storage.JbodStorage"
+          },
+          {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.storage.PersistentClaimStorage"
+          }
+        ]
       },
       "io.strimzi.api.kafka.model.storage.JbodStorage": {
         "type": "object",
@@ -179,10 +204,12 @@
           },
           "size": {
             "type": "string"
+          },
+          "deleteClaim": {
+            "type": "boolean"
           }
         },
         "required": [
-          "id",
           "type",
           "size"
         ],
@@ -208,6 +235,12 @@
                   "delete",
                   "compact"
                 ]
+              },
+              "retention.ms": {
+                "type": "integer"
+              },
+              "segment.bytes": {
+                "type": "integer"
               }
             },
             "additionalProperties": false
