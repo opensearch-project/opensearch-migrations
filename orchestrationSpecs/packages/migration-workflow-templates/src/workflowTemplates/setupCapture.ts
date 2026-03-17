@@ -560,6 +560,11 @@ export const SetupCapture = WorkflowBuilder.create({
                 b.inputs.resolvedKafkaAuthType,
                 expr.getLoose(kafkaConfig, "authType")
             );
+            const topicSpecOverrides = expr.cast(expr.get(kafkaConfig as any, "topicSpecOverrides")).to<{
+                partitions: number;
+                replicas: number;
+                config: Record<string, any>;
+            }>();
             const kafkaAuthConfigMapName = expr.concat(b.inputs.proxyName, expr.literal("-kafka-auth"));
             // Issuer fields for cert provisioning
             const issuerRef = expr.get(tlsBlock, "issuerRef") as any;
@@ -570,21 +575,9 @@ export const SetupCapture = WorkflowBuilder.create({
                         ...selectInputsForRegister(b, c),
                         clusterName: b.inputs.kafkaClusterName,
                         topicName: b.inputs.kafkaTopicName,
-                        partitions: expr.dig(
-                            expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "kafkaConfig"),
-                            ["topicSpecOverrides", "partitions"],
-                            1
-                        ),
-                        replicas: expr.dig(
-                            expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "kafkaConfig"),
-                            ["topicSpecOverrides", "replicas"],
-                            1
-                        ),
-                        topicConfig: expr.dig(
-                            expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "kafkaConfig"),
-                            ["topicSpecOverrides", "config"],
-                            {}
-                        ),
+                        partitions: expr.get(topicSpecOverrides, "partitions"),
+                        replicas: expr.get(topicSpecOverrides, "replicas"),
+                        topicConfig: expr.serialize(expr.get(topicSpecOverrides, "config")),
                         retryGroupName_view: expr.concat(expr.literal("KafkaTopic: "), b.inputs.kafkaTopicName),
                     })
                 )

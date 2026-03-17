@@ -487,15 +487,15 @@
                   },
                   {
                     "name": "partitions",
-                    "value": "{{=sprig.dig('topicSpecOverrides', 'partitions', 1, fromJSON(inputs.parameters.proxyConfig)['kafkaConfig'])}}"
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['topicSpecOverrides']['partitions']}}"
                   },
                   {
                     "name": "replicas",
-                    "value": "{{=sprig.dig('topicSpecOverrides', 'replicas', 1, fromJSON(inputs.parameters.proxyConfig)['kafkaConfig'])}}"
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['topicSpecOverrides']['replicas']}}"
                   },
                   {
                     "name": "topicConfig",
-                    "value": "{{=sprig.dig('topicSpecOverrides', 'config', {}, fromJSON(inputs.parameters.proxyConfig)['kafkaConfig'])}}"
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['topicSpecOverrides']['config'])}}"
                   },
                   {
                     "name": "retryGroupName_view",
