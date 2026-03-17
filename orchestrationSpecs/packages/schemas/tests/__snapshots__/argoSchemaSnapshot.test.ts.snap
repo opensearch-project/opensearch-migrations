@@ -2845,6 +2845,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
   "$id": "https://opensearch.org/schemas/workflowMigration.schema.json",
   "title": "OpenSearch Migration Workflow Configuration",
   "x-orchestration-specs-strimzi-schema-mode": "full",
-  "x-orchestration-specs-strimzi-schema-detail": "/Users/schohn/dev/m2/orchestrationSpecs/packages/schemas/tests/fixtures/strimzi/minimal-openapi.json"
+  "x-orchestration-specs-strimzi-schema-detail": "tests/fixtures/strimzi/minimal-openapi.json"
 }"
 `;

@@ -186,8 +186,8 @@ It currently:
 - builds the base migration schema
 - injects Strimzi-derived definitions for Kafka sections when provided with a
   Strimzi OpenAPI file
-- falls back to a checked-in unified schema artifact when no live Strimzi
-  schema is available
+- can optionally use a generated fallback artifact when
+  `MIGRATION_ALLOW_FALLBACK_UNIFIED_SCHEMA=true` is set
 
 ### Remaining work
 
