@@ -514,13 +514,21 @@ export const SetupKafka = WorkflowBuilder.create({
                 }),
                 {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
             )
+            .addStep("patchApproval", ResourceManagement, "patchApprovalAnnotation", c =>
+                c.register({
+                    resourceApiVersion: expr.literal("kafka.strimzi.io/v1"),
+                    resourceKind: expr.literal("KafkaUser"),
+                    resourceName: expr.concat(b.inputs.clusterName, expr.literal("-migration-app")),
+                }),
+                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
+            )
             .addStepToSelf("retryLoop", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
-                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
+                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
             )
         )
     )

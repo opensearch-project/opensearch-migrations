@@ -778,8 +778,34 @@
           ],
           [
             {
-              "template": "createkafkauserwithretry",
+              "templateRef": {
+                "template": "patchapprovalannotation",
+                "name": "resource-management"
+              },
               "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceApiVersion",
+                    "value": "kafka.strimzi.io/v1"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "KafkaUser"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{=inputs.parameters.clusterName+'-migration-app'}}"
+                  }
+                ]
+              },
+              "name": "patchApproval"
+            }
+          ],
+          [
+            {
+              "template": "createkafkauserwithretry",
+              "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
