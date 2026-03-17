@@ -131,6 +131,8 @@ export const KAFKA_CLIENT_CONFIG = z.object({
         .describe("Resolved Kubernetes secret containing the Kafka cluster CA certificate for TLS trust."),
     kafkaUserName: z.string().default("").optional()
         .describe("Resolved Kafka principal name used by migration applications."),
+    topicSpecOverrides: GENERIC_JSON_OBJECT.default({}).optional()
+        .describe("Resolved Strimzi KafkaTopic.spec overrides used when the workflow creates the topic resource."),
 });
 
 export const KAFKA_EXISTING_AUTH_CONFIG = z.discriminatedUnion("type", [

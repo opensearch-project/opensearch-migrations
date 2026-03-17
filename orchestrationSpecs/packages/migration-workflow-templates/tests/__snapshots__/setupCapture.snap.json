@@ -486,8 +486,16 @@
                     "value": "{{inputs.parameters.kafkaTopicName}}"
                   },
                   {
-                    "name": "clusterConfig",
-                    "value": "{{=toJSON({})}}"
+                    "name": "partitions",
+                    "value": "{{=sprig.dig('topicSpecOverrides', 'partitions', 1, fromJSON(inputs.parameters.proxyConfig)['kafkaConfig'])}}"
+                  },
+                  {
+                    "name": "replicas",
+                    "value": "{{=sprig.dig('topicSpecOverrides', 'replicas', 1, fromJSON(inputs.parameters.proxyConfig)['kafkaConfig'])}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{=sprig.dig('topicSpecOverrides', 'config', {}, fromJSON(inputs.parameters.proxyConfig)['kafkaConfig'])}}"
                   },
                   {
                     "name": "retryGroupName_view",

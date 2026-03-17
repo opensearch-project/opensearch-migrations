@@ -194,6 +194,7 @@ function buildKafkaClientConfig(
             secretName: "secretName" in auth ? auth.secretName : "",
             caSecretName: "caSecretName" in auth ? auth.caSecretName : "",
             kafkaUserName: "kafkaUserName" in auth ? (auth.kafkaUserName ?? "") : "",
+            topicSpecOverrides: {},
             label: kafkaClusterKey
         };
     }
@@ -211,6 +212,7 @@ function buildKafkaClientConfig(
         secretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
         caSecretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-cluster-ca-cert` : "",
         kafkaUserName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
+        topicSpecOverrides: cluster.autoCreate.topicSpecOverrides ?? {},
         label: kafkaClusterKey
     };
 }

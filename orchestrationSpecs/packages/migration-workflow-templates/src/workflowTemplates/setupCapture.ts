@@ -570,7 +570,21 @@ export const SetupCapture = WorkflowBuilder.create({
                         ...selectInputsForRegister(b, c),
                         clusterName: b.inputs.kafkaClusterName,
                         topicName: b.inputs.kafkaTopicName,
-                        clusterConfig: expr.serialize(expr.literal({})),
+                        partitions: expr.dig(
+                            expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "kafkaConfig"),
+                            ["topicSpecOverrides", "partitions"],
+                            1
+                        ),
+                        replicas: expr.dig(
+                            expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "kafkaConfig"),
+                            ["topicSpecOverrides", "replicas"],
+                            1
+                        ),
+                        topicConfig: expr.dig(
+                            expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "kafkaConfig"),
+                            ["topicSpecOverrides", "config"],
+                            {}
+                        ),
                         retryGroupName_view: expr.concat(expr.literal("KafkaTopic: "), b.inputs.kafkaTopicName),
                     })
                 )
