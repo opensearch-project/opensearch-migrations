@@ -153,7 +153,7 @@ export const FullMigration = WorkflowBuilder.create({
                     )
                 }
             })
-            .addStep("setupProxy", SetupCapture, "setupProxy", c =>
+            .addStep("setupProxy", SetupCapture, "setupProxyWithLifecycle", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     proxyConfig: b.inputs.proxyConfig,
@@ -165,11 +165,6 @@ export const FullMigration = WorkflowBuilder.create({
                     resolvedKafkaConnection: c.steps.readKafkaConnectionProfile.outputs.bootstrapServers,
                     resolvedKafkaListenerName: c.steps.readKafkaConnectionProfile.outputs.listenerName,
                     resolvedKafkaAuthType: c.steps.readKafkaConnectionProfile.outputs.authType,
-                })
-            )
-            .addStep("patchCapturedTraffic", ResourceManagement, "patchCapturedTrafficReady", c =>
-                c.register({
-                    resourceName: b.inputs.proxyName,
                 })
             )
         )

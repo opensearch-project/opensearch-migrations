@@ -183,7 +183,7 @@
           [
             {
               "templateRef": {
-                "template": "setupproxy",
+                "template": "setupproxywithlifecycle",
                 "name": "setup-capture"
               },
               "arguments": {
@@ -235,23 +235,6 @@
                 ]
               },
               "name": "setupProxy"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "patchcapturedtrafficready",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.proxyName}}"
-                  }
-                ]
-              },
-              "name": "patchCapturedTraffic"
             }
           ]
         ],

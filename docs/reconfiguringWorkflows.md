@@ -61,36 +61,73 @@ Changes to resources fall into three categories.
 
 1. **Impossible:** Cannot be done — must delete & recreate the resource. This branch of the workflow cannot be advanced.
 2. **Gated:** Requires explicit approval annotation (injected via the Workflow) to proceed.
-3. **Safe:** Low-risk, allowed dynamically without approval.
+3. **Safe:** Low-risk, allowed dynamically without approval. Safe fields require no VAP expressions — they are included in the classification tables for coverage tracking only.
 
 For terminal resources in `Completed` state, the [Lock-on-Complete](#the-lock-on-complete-pattern-terminal-resources-only) pattern overrides all categories — every spec change becomes Impossible.
 
 ### CaptureProxy (`migrations.opensearch.org/ProxyConfig`)
 
-| Field | Category | Rationale | Restart Required? |
-| --- | --- | --- | --- |
+| Field | Category   | Rationale | Restart Required? |
+| --- |------------| --- | --- |
 | `spec.listenPort` | Impossible | Changing breaks all client connections | N/A |
-| `spec.noCapture` | **Gated** | Fundamentally changes proxy behavior | Yes (rolling) |
-| `spec.enableMSKAuth` | **Gated** | Auth mode change is destructive | Yes (rolling) |
-| `spec.tls.mode` | **Gated** | TLS mode switch requires cert/secret changes | Yes (rolling) |
-| `spec.podReplicas` | Safe | Scaling is safe, Deployment handles rolling | No |
-| `spec.resources` | Safe | Resource limits/requests | Yes (rolling) |
+| `spec.noCapture` | **Gated**  | Fundamentally changes proxy behavior | Yes (rolling) |
+| `spec.enableMSKAuth` | **Gated**  | Auth mode change is destructive | Yes (rolling) |
+| `spec.tls.mode` | **Gated**  | TLS mode switch requires cert/secret changes | Yes (rolling) |
+| `spec.podReplicas` | Safe       | Scaling is safe, Deployment handles rolling | No |
+| `spec.resources` | Safe       | Resource limits/requests | Yes (rolling) |
 | `spec.internetFacing` | Impossible | Changes load balancer scheme; recreate Service | N/A |
-| `spec.loggingConfigurationOverrideConfigMap` | Safe | Logging config swap | Yes (rolling) |
-| `spec.otelCollectorEndpoint` | Safe | Observability config | Yes (rolling) |
-| `spec.setHeader` | Safe | Header injection tweaks | Yes (rolling) |
-| `spec.destinationConnectionPoolSize` | Safe | Connection tuning | Yes (rolling) |
-| `spec.destinationConnectionPoolTimeout` | Safe | Connection tuning | Yes (rolling) |
-| `spec.kafkaClientId` | Safe | Client identity change | Yes (rolling) |
-| `spec.maxTrafficBufferSize` | Safe | Performance tuning | Yes (rolling) |
-| `spec.numThreads` | Safe | Performance tuning | Yes (rolling) |
-| `spec.sslConfigFile` | Safe | Legacy SSL config path | Yes (rolling) |
-| `spec.suppressCaptureForHeaderMatch` | **Gated** | Traffic filtering changes | Yes (rolling) |
-| `spec.suppressCaptureForMethod` | **Gated** | Traffic filtering changes | Yes (rolling) |
-| `spec.suppressCaptureForUriPath` | **Gated** | Traffic filtering changes | Yes (rolling) |
-| `spec.suppressMethodAndPath` | **Gated** | Traffic filtering changes | Yes (rolling) |
+| `spec.loggingConfigurationOverrideConfigMap` | Safe       | Logging config swap | Yes (rolling) |
+| `spec.otelCollectorEndpoint` | Safe       | Observability config | Yes (rolling) |
+| `spec.setHeader` | Gated      | Header injection tweaks | Yes (rolling) |
+| `spec.destinationConnectionPoolSize` | Safe       | Connection tuning | Yes (rolling) |
+| `spec.destinationConnectionPoolTimeout` | Safe       | Connection tuning | Yes (rolling) |
+| `spec.kafkaClientId` | Safe       | Client identity change | Yes (rolling) |
+| `spec.maxTrafficBufferSize` | Gated       | Performance tuning | Yes (rolling) |
+| `spec.numThreads` | Safe       | Performance tuning | Yes (rolling) |
+| `spec.sslConfigFile` | Safe       | Legacy SSL config path | Yes (rolling) |
+| `spec.suppressCaptureForHeaderMatch` | **Gated**  | Traffic filtering changes | Yes (rolling) |
+| `spec.suppressCaptureForMethod` | **Gated**  | Traffic filtering changes | Yes (rolling) |
+| `spec.suppressCaptureForUriPath` | **Gated**  | Traffic filtering changes | Yes (rolling) |
+| `spec.suppressMethodAndPath` | **Gated**  | Traffic filtering changes | Yes (rolling) |
 
 *(Note: Kafka and KafkaNodePool resources follow similar matrices established in Phase 1).*
+
+### DataSnapshot (`migrations.opensearch.org/DataSnapshot`)
+
+Terminal resource that is created with what is effectively a job.
+This transitions to `Completed`. 
+Lock-on-Complete freezes the entire spec once done.
+All fields here are impossible to edit.  If a user wanted to change a snapshot
+in-progress, they would need to delete the existing snapshot and redrive.
+
+### SnapshotMigration (`migrations.opensearch.org/SnapshotMigration`)
+
+Terminal resource — transitions to `Completed`. Lock-on-Complete freezes the entire spec once done. A SnapshotMigration contains one or more sub-tasks, each optionally including metadata migration and/or document backfill (RFS).
+
+**Metadata migration fields:**
+
+This transitions to 'Completed'.
+Lock-on-Complete freezes the entire spec once done.
+All fields here are impossible to edit.  If a user wanted to change a snapshot
+in-progress, they would need to delete the existing snapshot and redrive.
+
+**Document backfill (RFS) fields:**
+
+| Field | Category   | Rationale |
+| --- |------------| --- |
+| `spec.documentBackfillConfig.indexAllowlist` | Impossible | |
+| `spec.documentBackfillConfig.podReplicas` | Safe       | |
+| `spec.documentBackfillConfig.allowLooseVersionMatching` | Impossible | |
+| `spec.documentBackfillConfig.docTransformerConfigBase64` | Impossible | |
+| `spec.documentBackfillConfig.documentsPerBulkRequest` | Safe       | |
+| `spec.documentBackfillConfig.initialLeaseDuration` | Gated      | |
+| `spec.documentBackfillConfig.maxConnections` | Gated      | |
+| `spec.documentBackfillConfig.maxShardSizeBytes` | Gated      | |
+| `spec.documentBackfillConfig.otelCollectorEndpoint` | Safe       | |
+| `spec.documentBackfillConfig.useTargetClusterForWorkCoordination` |  Safe          | |
+| `spec.documentBackfillConfig.jvmArgs` |  Safe          | |
+| `spec.documentBackfillConfig.loggingConfigurationOverrideConfigMap` |   Safe         | |
+| `spec.documentBackfillConfig.resources` |    Safe        | |
 
 ---
 

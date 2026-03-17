@@ -33,11 +33,14 @@
             },
             {
               "name": "clusterConfig"
+            },
+            {
+              "name": "workflowUid"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=sprig.dig('nodePoolSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig))}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\nspec: {{=sprig.dig('nodePoolSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig))}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -66,11 +69,14 @@
             },
             {
               "name": "clusterConfig"
+            },
+            {
+              "name": "workflowUid"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec: {{=sprig.merge(sprig.dig('clusterSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig)), sprig.dict(\"kafka\", sprig.merge(sprig.dig('clusterSpecOverrides', 'kafka', {}, fromJSON(inputs.parameters.clusterConfig)), sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"readinessProbe\", {\"initialDelaySeconds\":1,\"periodSeconds\":2,\"timeoutSeconds\":2,\"failureThreshold\":1}, \"livenessProbe\", {\"initialDelaySeconds\":1,\"periodSeconds\":2,\"timeoutSeconds\":2,\"failureThreshold\":2}, \"listeners\", [{\"name\":\"plain\",\"port\":9092,\"type\":\"internal\",\"tls\":false},{\"name\":\"tls\",\"port\":9093,\"type\":\"internal\",\"tls\":true}], \"config\", sprig.dig('clusterSpecOverrides', 'kafka', 'config', {}, fromJSON(inputs.parameters.clusterConfig)))), \"entityOperator\", {\"topicOperator\":{},\"userOperator\":{}}))}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  labels:\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec: {{=sprig.merge(sprig.dig('clusterSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig)), sprig.dict(\"kafka\", sprig.merge(sprig.dig('clusterSpecOverrides', 'kafka', {}, fromJSON(inputs.parameters.clusterConfig)), sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"readinessProbe\", {\"initialDelaySeconds\":1,\"periodSeconds\":2,\"timeoutSeconds\":2,\"failureThreshold\":1}, \"livenessProbe\", {\"initialDelaySeconds\":1,\"periodSeconds\":2,\"timeoutSeconds\":2,\"failureThreshold\":2}, \"listeners\", [{\"name\":\"plain\",\"port\":9092,\"type\":\"internal\",\"tls\":false},{\"name\":\"tls\",\"port\":9093,\"type\":\"internal\",\"tls\":true}], \"config\", sprig.dig('clusterSpecOverrides', 'kafka', 'config', {}, fromJSON(inputs.parameters.clusterConfig)))), \"entityOperator\", {\"topicOperator\":{},\"userOperator\":{}}))}}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.listeners"
@@ -107,11 +113,14 @@
             },
             {
               "name": "clusterConfig"
+            },
+            {
+              "name": "workflowUid"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec: {{=sprig.merge(sprig.dig('clusterSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig)), sprig.dict(\"kafka\", sprig.merge(sprig.dig('clusterSpecOverrides', 'kafka', {}, fromJSON(inputs.parameters.clusterConfig)), sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"readinessProbe\", {\"initialDelaySeconds\":1,\"periodSeconds\":2,\"timeoutSeconds\":2,\"failureThreshold\":1}, \"livenessProbe\", {\"initialDelaySeconds\":1,\"periodSeconds\":2,\"timeoutSeconds\":2,\"failureThreshold\":2}, \"listeners\", [{\"name\":\"tls\",\"port\":9093,\"type\":\"internal\",\"tls\":true,\"authentication\":{\"type\":\"scram-sha-512\"}}], \"config\", sprig.dig('clusterSpecOverrides', 'kafka', 'config', {}, fromJSON(inputs.parameters.clusterConfig)))), \"entityOperator\", {\"topicOperator\":{},\"userOperator\":{}}))}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  labels:\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec: {{=sprig.merge(sprig.dig('clusterSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig)), sprig.dict(\"kafka\", sprig.merge(sprig.dig('clusterSpecOverrides', 'kafka', {}, fromJSON(inputs.parameters.clusterConfig)), sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"readinessProbe\", {\"initialDelaySeconds\":1,\"periodSeconds\":2,\"timeoutSeconds\":2,\"failureThreshold\":1}, \"livenessProbe\", {\"initialDelaySeconds\":1,\"periodSeconds\":2,\"timeoutSeconds\":2,\"failureThreshold\":2}, \"listeners\", [{\"name\":\"tls\",\"port\":9093,\"type\":\"internal\",\"tls\":true,\"authentication\":{\"type\":\"scram-sha-512\"}}], \"config\", sprig.dig('clusterSpecOverrides', 'kafka', 'config', {}, fromJSON(inputs.parameters.clusterConfig)))), \"entityOperator\", {\"topicOperator\":{},\"userOperator\":{}}))}}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.listeners"
@@ -148,6 +157,9 @@
             },
             {
               "name": "clusterConfig"
+            },
+            {
+              "name": "workflowUid"
             }
           ]
         },
@@ -169,6 +181,10 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{inputs.parameters.workflowUid}}"
                   }
                 ]
               },
@@ -192,6 +208,10 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{inputs.parameters.workflowUid}}"
                   }
                 ]
               },
@@ -222,11 +242,14 @@
             },
             {
               "name": "clusterConfig"
+            },
+            {
+              "name": "workflowUid"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=sprig.dig('topicSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig))}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\nspec: {{=sprig.dig('topicSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig))}}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.topicName"
@@ -260,11 +283,14 @@
             },
             {
               "name": "clusterConfig"
+            },
+            {
+              "name": "workflowUid"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaUser\nmetadata:\n  name: \"{{=inputs.parameters.clusterName+'-migration-app'}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=sprig.dict(\"authentication\", sprig.dict(\"type\", sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig))))}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaUser\nmetadata:\n  name: \"{{=inputs.parameters.clusterName+'-migration-app'}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\nspec: {{=sprig.dict(\"authentication\", sprig.dict(\"type\", sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig))))}}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.conditions"
@@ -325,6 +351,10 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{workflow.uid}}"
                   }
                 ]
               },
@@ -351,8 +381,34 @@
           ],
           [
             {
-              "template": "deploykafkanodepoolwithretry",
+              "templateRef": {
+                "template": "patchapprovalannotation",
+                "name": "resource-management"
+              },
               "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceApiVersion",
+                    "value": "kafka.strimzi.io/v1"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "KafkaNodePool"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "dual-role"
+                  }
+                ]
+              },
+              "name": "patchApproval"
+            }
+          ],
+          [
+            {
+              "template": "deploykafkanodepoolwithretry",
+              "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -413,6 +469,10 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{workflow.uid}}"
                   }
                 ]
               },
@@ -439,8 +499,34 @@
           ],
           [
             {
-              "template": "deploykafkaclusterkraftwithretry",
+              "templateRef": {
+                "template": "patchapprovalannotation",
+                "name": "resource-management"
+              },
               "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceApiVersion",
+                    "value": "kafka.strimzi.io/v1"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "Kafka"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "patchApproval"
+            }
+          ],
+          [
+            {
+              "template": "deploykafkaclusterkraftwithretry",
+              "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -512,6 +598,10 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{workflow.uid}}"
                   }
                 ]
               },
@@ -538,8 +628,34 @@
           ],
           [
             {
-              "template": "createkafkatopicwithretry",
+              "templateRef": {
+                "template": "patchapprovalannotation",
+                "name": "resource-management"
+              },
               "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceApiVersion",
+                    "value": "kafka.strimzi.io/v1"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "KafkaTopic"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.topicName}}"
+                  }
+                ]
+              },
+              "name": "patchApproval"
+            }
+          ],
+          [
+            {
+              "template": "createkafkatopicwithretry",
+              "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -604,6 +720,10 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{workflow.uid}}"
                   }
                 ]
               },

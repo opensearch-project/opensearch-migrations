@@ -1,6 +1,7 @@
 import {
     expr,
     INTERNAL,
+    makeStringTypeProxy,
     selectInputsForRegister,
     typeToken,
     WorkflowBuilder
@@ -217,6 +218,53 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }
             })
             .addJsonPathOutput("snapshotName", "{.status.snapshotName}", typeToken<string>()))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    // ── Generic phase patch template ────────────────────────────────────
+
+    .addTemplate("patchResourcePhase", t => t
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("phase", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: makeStringTypeProxy(b.inputs.resourceKind),
+                    metadata: { name: b.inputs.resourceName },
+                    status: { phase: makeStringTypeProxy(b.inputs.phase) }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    // ── Workflow UID approval annotation patch ───────────────────────────
+
+    .addTemplate("patchApprovalAnnotation", t => t
+        .addRequiredInput("resourceApiVersion", typeToken<string>())
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge"],
+                manifest: {
+                    apiVersion: makeStringTypeProxy(b.inputs.resourceApiVersion),
+                    kind: makeStringTypeProxy(b.inputs.resourceKind),
+                    metadata: {
+                        name: b.inputs.resourceName,
+                        annotations: {
+                            "migrations.opensearch.org/approved-by-run":
+                                makeStringTypeProxy(expr.getWorkflowValue("uid"))
+                        }
+                    }
+                }
+            }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
