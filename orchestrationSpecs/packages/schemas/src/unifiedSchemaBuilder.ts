@@ -4,7 +4,6 @@ import childProcess from "node:child_process";
 import {OVERALL_MIGRATION_CONFIG} from "./userSchemas";
 import {zodSchemaToJsonSchema} from "./getSchemaFromZod";
 
-export const UNIFIED_SCHEMA_CONFIGMAP_KEY = "workflowMigration.schema.json";
 export const STRIMZI_OPENAPI_API_PATH = "/openapi/v3/apis/kafka.strimzi.io/v1";
 export const UNIFIED_SCHEMA_PATH_ENV = "MIGRATION_UNIFIED_SCHEMA_PATH";
 export const ALLOW_FALLBACK_UNIFIED_SCHEMA_ENV = "MIGRATION_ALLOW_FALLBACK_UNIFIED_SCHEMA";

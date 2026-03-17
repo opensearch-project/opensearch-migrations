@@ -172,8 +172,8 @@ Validation should follow this order:
 3. validation of the merged result against the unified JSON Schema
 
 The preferred schema should be generated from live Strimzi CRDs for
-release/deployment, with a checked-in fallback built from the baseline schema
-source.
+release/deployment. A generated local fallback may still be used when the
+fallback path is explicitly enabled.
 
 ### Current implementation
 
@@ -197,7 +197,7 @@ It currently:
 - wire release/deployment automation to fetch live CRDs and build the unified
   schema artifact
 - make runtime tools prefer the live/release-built schema artifact
-- keep the checked-in fallback aligned with the supported baseline schema source
+- keep any generated fallback aligned with the supported baseline schema source
 
 ## Templating Model
 
