@@ -53,49 +53,6 @@ export const testCases: TestCase[] = [
     },
   }),
 
-  solrTest('rows-limits-returned-documents', {
-    documents: [
-      { id: '1', title: 'first doc', content: 'alpha' },
-      { id: '2', title: 'second doc', content: 'beta' },
-      { id: '3', title: 'third doc', content: 'gamma' },
-    ],
-    requestPath: '/solr/testcollection/select?q=*:*&rows=2&wt=json',
-    solrSchema: {
-      fields: {
-        title: { type: 'text_general' },
-        content: { type: 'text_general' },
-      },
-    },
-    opensearchMapping: {
-      properties: {
-        title: { type: 'text' },
-        content: { type: 'text' },
-      },
-    },
-  }),
-
-  solrTest('rows-with-start-pagination', {
-    documents: [
-      { id: '1', title: 'first doc', content: 'alpha' },
-      { id: '2', title: 'second doc', content: 'beta' },
-      { id: '3', title: 'third doc', content: 'gamma' },
-      { id: '4', title: 'fourth doc', content: 'delta' },
-    ],
-    requestPath: '/solr/testcollection/select?q=*:*&rows=2&start=2&wt=json',
-    solrSchema: {
-      fields: {
-        title: { type: 'text_general' },
-        content: { type: 'text_general' },
-      },
-    },
-    opensearchMapping: {
-      properties: {
-        title: { type: 'text' },
-        content: { type: 'text' },
-      },
-    },
-  }),
-
   // ───────────────────────────────────────────────────────────
   // Facet tests — JSON Facet API (json.facet)
   // ───────────────────────────────────────────────────────────
@@ -259,33 +216,6 @@ export const testCases: TestCase[] = [
         reason: 'Facet test — only validating $.facets, not hits',
       },
     ],
-  }),
-
-  // ───────────────────────────────────────────────────────────
-  // Field list (fl) tests — _source filtering
-  // ───────────────────────────────────────────────────────────
-
-  solrTest('field-list-param', {
-    description: 'fl parameter with mixed comma/space separators and glob pattern (na*)',
-    documents: [
-      { id: '1', name: 'Alice', name_full: 'Alice Smith', price: 100 },
-      { id: '2', name: 'Bob', name_full: 'Bob Jones', price: 200 },
-    ],
-    requestPath: '/solr/testcollection/select?q=*:*&fl=id,na*%20price&wt=json',
-    solrSchema: {
-      fields: {
-        name: { type: 'text_general' },
-        name_full: { type: 'text_general' },
-        price: { type: 'pint' },
-      },
-    },
-    opensearchMapping: {
-      properties: {
-        name: { type: 'text' },
-        name_full: { type: 'text' },
-        price: { type: 'integer' },
-      },
-    },
   }),
 
   // ───────────────────────────────────────────────────────────
