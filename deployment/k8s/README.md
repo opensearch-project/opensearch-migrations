@@ -122,12 +122,13 @@ chart consists of:
 * Strimzi (to create Kafka clusters)
 * Observability services - Prometheus, Jaeger, and Grafana
 
-During install and upgrade, the chart also runs a `workflow-schema-generator`
-job after the Strimzi operator is available. That job reads the live Strimzi
-OpenAPI schema from the cluster, builds the unified migration workflow schema,
-and writes the resulting `workflowMigration.schema.json` and `sample.yaml`
-into the `<release>-workflow-schema` ConfigMap. The migration console mounts
-that ConfigMap and uses it for workflow-config validation.
+During startup, the migration console pod runs a `workflow-schema-generator`
+init container after the Strimzi operator is available. That init container
+reads the live Strimzi OpenAPI schema from the cluster, builds the unified
+migration workflow schema, and writes the resulting
+`workflowMigration.schema.json` and `sample.yaml` into a shared in-pod volume.
+The main migration console container then uses those generated files for
+workflow-config validation.
 
 Run this to install this chart to a new K8s namespace named 'ma'
 
