@@ -169,7 +169,7 @@ For detailed examples of both output formats and how to use them in different sc
 
 Metadata migration supports Amazon OpenSearch Serverless collections as a target. When the target is detected as Serverless, the following transformations are automatically applied:
 
-- `knn_vector` fields are converted to Faiss HNSW for Serverless compatibility (Lucene/NMSLIB engines, IVF methods, PQ encoders, and unsupported space types are converted)
+- `knn_vector` fields are [converted to Faiss HNSW](../transformation/standardJavascriptTransforms/src/knn-to-serverless-metadata.js) for Serverless compatibility (Lucene/NMSLIB engines, IVF methods, PQ encoders, and unsupported space types are converted)
 - `model_id` references are removed (Serverless does not support training APIs)
 
 Serverless collections must be pre-created via the AWS API. Index creation within a collection is handled by the metadata migration tool via the standard OpenSearch API.

@@ -35,7 +35,6 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
   - **Multi-Version Upgrade**: Easily migrate across major versions (e.g., from Elasticsearch 6.8 to OpenSearch 2.15), skipping intermediate upgrades and reducing time and risk.
   - **Downgrade Support**: Downgrade to an earlier version if needed (e.g., from Elasticsearch 7.17 to 7.10.2).
   - **Existing Data Migration with [Reindex-from-Snapshot](RFS/docs/DESIGN.md)**: Migrate indices and documents using snapshots, updating your data to the latest Lucene version quickly without impacting the target cluster.
-  - **Dedicated RFS Work Coordinator**: Document backfill uses a dedicated single-node OpenSearch cluster for work coordination by default, isolating coordination traffic from the target cluster. This is required for targets that don't support coordination workloads (e.g., Amazon OpenSearch Serverless) and recommended for all migrations to avoid impacting target cluster performance.
   - **Live Traffic Capture with [Capture-and-Replay](docs/TrafficCaptureAndReplayDesign.md)**: Capture live traffic from the source cluster and replay it on the target cluster for validation. This ensures the target cluster can handle real-world traffic patterns before fully migrating.
   
 - **Zero-Downtime Migration with [Live Traffic Routing](docs/ClientTrafficSwinging.md)**: Tools to seamlessly switch client traffic between clusters while keeping services fully operational.
@@ -85,8 +84,7 @@ Note that testing is done on specific minor versions, but any minor versions wit
 | Amazon OpenSearch Serverless | ✗ | ✓ |
 | Elastic Cloud | ✓ | ✓ |
 
-> **Note:** Amazon OpenSearch Serverless requires a dedicated RFS work coordinator cluster (deployed automatically).
-> TIMESERIES and VECTOR collection types use server-generated document IDs; SEARCH collections preserve source IDs.
+> **Note:** Amazon OpenSearch Serverless TIMESERIES and VECTOR collection types use server-generated document IDs; SEARCH collections preserve source IDs.
 
 ### Performance Limitations
 A performance test was performed on 03/10/25 alongside [PR 1337](https://github.com/opensearch-project/opensearch-migrations/pull/1337)
