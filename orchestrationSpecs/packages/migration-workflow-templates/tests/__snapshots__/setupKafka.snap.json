@@ -70,7 +70,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=sprig.merge(sprig.dig('clusterSpecOverrides', 'kafka', {}, fromJSON(inputs.parameters.clusterConfig)), sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"readinessProbe\", {\"initialDelaySeconds\":1,\"periodSeconds\":2,\"timeoutSeconds\":2,\"failureThreshold\":1}, \"livenessProbe\", {\"initialDelaySeconds\":1,\"periodSeconds\":2,\"timeoutSeconds\":2,\"failureThreshold\":2}, \"listeners\", [{\"name\":\"plain\",\"port\":9092,\"type\":\"internal\",\"tls\":false},{\"name\":\"tls\",\"port\":9093,\"type\":\"internal\",\"tls\":true}], \"config\", sprig.dig('clusterSpecOverrides', 'kafka', 'config', {}, fromJSON(inputs.parameters.clusterConfig))))}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=sprig.merge(sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"listeners\", [{\"name\":\"plain\",\"port\":9092,\"type\":\"internal\",\"tls\":false},{\"name\":\"tls\",\"port\":9093,\"type\":\"internal\",\"tls\":true}]), sprig.dig('clusterSpecOverrides', 'kafka', {}, fromJSON(inputs.parameters.clusterConfig)))}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.listeners"
@@ -111,7 +111,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=sprig.merge(sprig.dig('clusterSpecOverrides', 'kafka', {}, fromJSON(inputs.parameters.clusterConfig)), sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"readinessProbe\", {\"initialDelaySeconds\":1,\"periodSeconds\":2,\"timeoutSeconds\":2,\"failureThreshold\":1}, \"livenessProbe\", {\"initialDelaySeconds\":1,\"periodSeconds\":2,\"timeoutSeconds\":2,\"failureThreshold\":2}, \"listeners\", [{\"name\":\"tls\",\"port\":9093,\"type\":\"internal\",\"tls\":true,\"authentication\":{\"type\":\"scram-sha-512\"}}], \"config\", sprig.dig('clusterSpecOverrides', 'kafka', 'config', {}, fromJSON(inputs.parameters.clusterConfig))))}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=sprig.merge(sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"listeners\", [{\"name\":\"tls\",\"port\":9093,\"type\":\"internal\",\"tls\":true,\"authentication\":{\"type\":\"scram-sha-512\"}}]), sprig.dig('clusterSpecOverrides', 'kafka', {}, fromJSON(inputs.parameters.clusterConfig)))}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.listeners"
@@ -221,12 +221,18 @@
               "name": "topicName"
             },
             {
-              "name": "clusterConfig"
+              "name": "partitions"
+            },
+            {
+              "name": "replicas"
+            },
+            {
+              "name": "topicConfig"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=sprig.dig('topicSpecOverrides', {}, fromJSON(inputs.parameters.clusterConfig))}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec:\n  partitions: {{=fromJSON(inputs.parameters.partitions)}}\n  replicas: {{=fromJSON(inputs.parameters.replicas)}}\n  config: {{=fromJSON(inputs.parameters.topicConfig)}}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.topicName"
@@ -487,7 +493,13 @@
               "name": "topicName"
             },
             {
-              "name": "clusterConfig"
+              "name": "partitions"
+            },
+            {
+              "name": "replicas"
+            },
+            {
+              "name": "topicConfig"
             },
             {
               "name": "retryGroupName_view",
@@ -510,8 +522,16 @@
                     "value": "{{inputs.parameters.topicName}}"
                   },
                   {
-                    "name": "clusterConfig",
-                    "value": "{{inputs.parameters.clusterConfig}}"
+                    "name": "partitions",
+                    "value": "{{inputs.parameters.partitions}}"
+                  },
+                  {
+                    "name": "replicas",
+                    "value": "{{inputs.parameters.replicas}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{inputs.parameters.topicConfig}}"
                   }
                 ]
               },
@@ -551,8 +571,16 @@
                     "value": "{{inputs.parameters.topicName}}"
                   },
                   {
-                    "name": "clusterConfig",
-                    "value": "{{inputs.parameters.clusterConfig}}"
+                    "name": "partitions",
+                    "value": "{{inputs.parameters.partitions}}"
+                  },
+                  {
+                    "name": "replicas",
+                    "value": "{{inputs.parameters.replicas}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{inputs.parameters.topicConfig}}"
                   },
                   {
                     "name": "retryGroupName_view",

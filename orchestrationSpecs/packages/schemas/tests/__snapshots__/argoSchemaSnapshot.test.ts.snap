@@ -150,6 +150,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": ""
                     },
+                    "topicSpecOverrides": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "nullable": true
+                      },
+                      "default": {}
+                    },
                     "label": {
                       "type": "string"
                     }
@@ -1133,6 +1140,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "kafkaUserName": {
                       "type": "string",
                       "default": ""
+                    },
+                    "topicSpecOverrides": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "nullable": true
+                      },
+                      "default": {}
                     },
                     "label": {
                       "type": "string"
@@ -2757,6 +2771,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
     "io.strimzi.api.kafka.model.KafkaClusterSpec": {
       "type": "object",
       "properties": {
+        "readinessProbe": {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.Probe"
+        },
+        "livenessProbe": {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.Probe"
+        },
         "config": {
           "type": "object",
           "properties": {
@@ -2789,6 +2809,24 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "items": {
             "$ref": "#/$defs/io.strimzi.api.kafka.model.GenericKafkaListener"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "io.strimzi.api.kafka.model.Probe": {
+      "type": "object",
+      "properties": {
+        "initialDelaySeconds": {
+          "type": "integer"
+        },
+        "periodSeconds": {
+          "type": "integer"
+        },
+        "timeoutSeconds": {
+          "type": "integer"
+        },
+        "failureThreshold": {
+          "type": "integer"
         }
       },
       "additionalProperties": false

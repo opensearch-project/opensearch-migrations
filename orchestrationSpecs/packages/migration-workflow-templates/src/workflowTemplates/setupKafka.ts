@@ -94,18 +94,15 @@ function makeDeployKafkaClusterKraftNoAuthManifest(args: {
         },
         spec: {
             kafka: makeDirectTypeProxy(expr.mergeDicts(
-                kafkaSpecOverrides,
                 expr.makeDict({
                     version: args.version,
                     metadataVersion: "4.0-IV3",
-                    readinessProbe: expr.literal({initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 1}),
-                    livenessProbe: expr.literal({initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 2}),
                     listeners: expr.literal([
                         {name: "plain", port: 9092, type: "internal", tls: false},
                         {name: "tls", port: 9093, type: "internal", tls: true}
-                    ]),
-                    config: expr.dig(config, ["clusterSpecOverrides", "kafka", "config"], expr.literal({}))
-                })
+                    ])
+                }),
+                kafkaSpecOverrides
             )),
             entityOperator: {topicOperator: {}, userOperator: {}}
         }
@@ -132,17 +129,14 @@ function makeDeployKafkaClusterKraftScramManifest(args: {
         },
         spec: {
             kafka: makeDirectTypeProxy(expr.mergeDicts(
-                kafkaSpecOverrides,
                 expr.makeDict({
                     version: args.version,
                     metadataVersion: "4.0-IV3",
-                    readinessProbe: expr.literal({initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 1}),
-                    livenessProbe: expr.literal({initialDelaySeconds: 1, periodSeconds: 2, timeoutSeconds: 2, failureThreshold: 2}),
                     listeners: expr.literal([
                         {name: "tls", port: 9093, type: "internal", tls: true, authentication: {type: "scram-sha-512"}}
-                    ]),
-                    config: expr.dig(config, ["clusterSpecOverrides", "kafka", "config"], expr.literal({}))
-                })
+                    ])
+                }),
+                kafkaSpecOverrides
             )),
             entityOperator: {topicOperator: {}, userOperator: {}}
         }
@@ -281,7 +275,7 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("topicName", typeToken<string>())
         .addRequiredInput("partitions", typeToken<number>())
         .addRequiredInput("replicas", typeToken<number>())
-        .addRequiredInput("topicConfig", typeToken<Record<string, any>>())
+        .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
 
         .addResourceTask(b => b
             .setDefinition({
@@ -403,7 +397,7 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("topicName", typeToken<string>())
         .addRequiredInput("partitions", typeToken<number>())
         .addRequiredInput("replicas", typeToken<number>())
-        .addRequiredInput("topicConfig", typeToken<Record<string, any>>())
+        .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
         .addSteps(b => b

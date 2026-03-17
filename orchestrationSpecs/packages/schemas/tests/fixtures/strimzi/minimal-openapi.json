@@ -56,6 +56,12 @@
       "io.strimzi.api.kafka.model.KafkaClusterSpec": {
         "type": "object",
         "properties": {
+          "readinessProbe": {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.Probe"
+          },
+          "livenessProbe": {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.Probe"
+          },
           "config": {
             "type": "object",
             "properties": {
@@ -88,6 +94,24 @@
             "items": {
               "$ref": "#/components/schemas/io.strimzi.api.kafka.model.GenericKafkaListener"
             }
+          }
+        },
+        "additionalProperties": false
+      },
+      "io.strimzi.api.kafka.model.Probe": {
+        "type": "object",
+        "properties": {
+          "initialDelaySeconds": {
+            "type": "integer"
+          },
+          "periodSeconds": {
+            "type": "integer"
+          },
+          "timeoutSeconds": {
+            "type": "integer"
+          },
+          "failureThreshold": {
+            "type": "integer"
           }
         },
         "additionalProperties": false

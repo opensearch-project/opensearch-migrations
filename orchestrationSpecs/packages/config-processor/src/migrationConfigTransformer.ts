@@ -1,6 +1,7 @@
 import {
     ARGO_REPLAYER_OPTIONS,
     DENORMALIZED_S3_REPO_CONFIG,
+    DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     OVERALL_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
@@ -194,7 +195,7 @@ function buildKafkaClientConfig(
             secretName: "secretName" in auth ? auth.secretName : "",
             caSecretName: "caSecretName" in auth ? auth.caSecretName : "",
             kafkaUserName: "kafkaUserName" in auth ? (auth.kafkaUserName ?? "") : "",
-            topicSpecOverrides: {},
+            topicSpecOverrides: DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
             label: kafkaClusterKey
         };
     }
@@ -212,7 +213,7 @@ function buildKafkaClientConfig(
         secretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
         caSecretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-cluster-ca-cert` : "",
         kafkaUserName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
-        topicSpecOverrides: cluster.autoCreate.topicSpecOverrides ?? {},
+        topicSpecOverrides: cluster.autoCreate.topicSpecOverrides,
         label: kafkaClusterKey
     };
 }

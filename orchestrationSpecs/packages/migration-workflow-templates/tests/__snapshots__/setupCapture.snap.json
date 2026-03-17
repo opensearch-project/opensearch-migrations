@@ -335,8 +335,16 @@
                     "value": "{{inputs.parameters.kafkaTopicName}}"
                   },
                   {
-                    "name": "clusterConfig",
-                    "value": "{{=toJSON({})}}"
+                    "name": "partitions",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['topicSpecOverrides']['partitions']}}"
+                  },
+                  {
+                    "name": "replicas",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['topicSpecOverrides']['replicas']}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['topicSpecOverrides']['config'])}}"
                   },
                   {
                     "name": "retryGroupName_view",

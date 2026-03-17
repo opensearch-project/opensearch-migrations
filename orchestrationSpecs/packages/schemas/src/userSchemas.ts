@@ -156,10 +156,35 @@ export const KAFKA_AUTO_CREATE_AUTH_CONFIG = z.discriminatedUnion("type", [
     }),
 ]);
 
+export const DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES = {
+    partitions: 1,
+    replicas: 1,
+    config: {
+        "retention.ms": 604800000,
+        "segment.bytes": 1073741824,
+    }
+} as const;
+
+// These defaults are resolved during initialization so workflow templates do not
+// need to invent their own Kafka defaults. That keeps default ownership here,
+// even though some workflow templates currently unpack pieces of the resolved
+// Strimzi objects into explicit fields for Argo rendering safety.
 const DEFAULT_AUTO_CREATE_KAFKA = {
     auth: {type: "none" as const},
     clusterSpecOverrides: {
         kafka: {
+            readinessProbe: {
+                initialDelaySeconds: 1,
+                periodSeconds: 2,
+                timeoutSeconds: 2,
+                failureThreshold: 1,
+            },
+            livenessProbe: {
+                initialDelaySeconds: 1,
+                periodSeconds: 2,
+                timeoutSeconds: 2,
+                failureThreshold: 2,
+            },
             config: {
                 "auto.create.topics.enable": false,
                 "offsets.topic.replication.factor": 1,
@@ -180,12 +205,7 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
         }
     },
     topicSpecOverrides: {
-        partitions: 1,
-        replicas: 1,
-        config: {
-            "retention.ms": 604800000,
-            "segment.bytes": 1073741824,
-        }
+        ...DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES
     },
 };
 
@@ -481,6 +501,18 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
         auth: KAFKA_AUTO_CREATE_AUTH_CONFIG.default({type: "none"}).optional()
             .describe("Workflow-owned Kafka client auth for auto-created Strimzi clusters. "
                 + "This controls the managed listener/auth contract used by migration applications."),
+        // Intended contract: users provide Strimzi-shaped partial Kafka.spec values and
+        // initialization deep-merges them with the baseline defaults above.
+        //
+        // Current limitation: some workflow templates still render selected nested
+        // Strimzi fields explicitly instead of passing the merged subtree through
+        // verbatim, because Argo resource-manifest rendering has proven unreliable
+        // for certain whole-object injections. That means new Strimzi fields may
+        // require workflow-template updates before they can flow end to end.
+        //
+        // Future direction: move Strimzi resource application onto a rendering/apply
+        // path that can preserve full merged subtrees without unpacking them into
+        // explicit Argo parameters, restoring better fidelity as Strimzi evolves.
         clusterSpecOverrides: GENERIC_JSON_OBJECT.optional()
             .describe("Optional overrides merged into the generated Strimzi Kafka.spec. " +
                 "Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."),
