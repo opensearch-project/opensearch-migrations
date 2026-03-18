@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 INDEPENDENT_STACKS = ['MigrationConsole', 'ReindexFromSnapshot', 'TrafficReplayer', 'TargetClusterProxy',
                       'CaptureProxy', 'KafkaBroker', 'OpenSearchContainer', 'CaptureProxyES', 'Elasticsearch']
-CORE_STACKS_ORDERED = ['MigrationInfra', 'OpenSearchDomain', 'NetworkInfra', 'infra-stack', 'network-stack']
+CORE_STACKS_ORDERED = ['MigrationInfra', 'OpenSearch', 'NetworkInfra', 'infra-stack', 'network-stack']
 CFN_INITIAL_STATUS_SKIP = ['DELETE_IN_PROGRESS', 'DELETE_COMPLETE']
 MAX_DELETE_STACK_RETRIES = 3
 MAX_WAIT_MINUTES = 45

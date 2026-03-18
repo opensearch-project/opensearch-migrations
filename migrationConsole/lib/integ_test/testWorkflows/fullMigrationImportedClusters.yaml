@@ -148,7 +148,8 @@ spec:
             SOURCE_CLUSTERS=$(echo "$SOURCE_CONFIGS" | jq --argjson repo "$SNAPSHOT_REPO" '
               reduce to_entries[] as $e ({}; 
                 .["source\($e.key + 1)"] = (
-                  $e.value.source
+                  $e.value as $entry |
+                  $entry.source
                   # Transform version format: ES_7.10 -> ES 7.10
                   | .version = (.version | gsub("_"; " "))
                   # Rename allow_insecure to allowInsecure
@@ -156,16 +157,31 @@ spec:
                   # Move sigv4 under authConfig
                   | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
                   # Remove unrecognized fields
-                  | del(.no_auth)
-                  | . + {"snapshotInfo": {
-                      "repos": {"default": $repo},
-                      "snapshots": {
-                        "testsnapshot": {
-                          "repoName": "default",
-                          "config": {"createSnapshotConfig": {}}
+                  | del(.no_auth) | del(.snapshotRepo)
+                  # Build snapshotInfo based on whether snapshot is externally managed (BYOS) or not
+                  | (($entry["snapshot-and-migration-configs"][0].snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName // null) as $extSnap |
+                    if $extSnap != null then
+                      (($entry.source.snapshotRepo // null) as $srcRepo |
+                      . + {"snapshotInfo": {
+                        "repos": {"default": (if $srcRepo != null then ($repo + {s3RepoPathUri: $srcRepo.s3RepoPathUri, awsRegion: ($srcRepo.awsRegion // $repo.awsRegion)}) else $repo end)},
+                        "snapshots": {
+                          ($extSnap): {
+                            "repoName": "default",
+                            "config": {"externallyManagedSnapshotName": $extSnap}
+                          }
                         }
-                      }
-                    }}
+                      }})
+                    else
+                      . + {"snapshotInfo": {
+                        "repos": {"default": $repo},
+                        "snapshots": {
+                          "testsnapshot": {
+                            "repoName": "default",
+                            "config": {"createSnapshotConfig": {}}
+                          }
+                        }
+                      }}
+                    end)
                 )
               )')
             
@@ -182,8 +198,15 @@ spec:
             ')
             
             # Build perSnapshotConfig: snapshot name -> migrations array
+            # For BYOS (externally managed), use the snapshot name from config;
+            # otherwise default to "testsnapshot"
             SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '
-              {"testsnapshot": .[0]["snapshot-and-migration-configs"][0].migrations}
+              .[0]["snapshot-and-migration-configs"][0] as $smc |
+              if ($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName // null) != null then
+                {($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName): $smc.migrations}
+              else
+                {"testsnapshot": $smc.migrations}
+              end
             ')
             
             # Build the complete OVERALL_MIGRATION_CONFIG
