@@ -1,6 +1,7 @@
 package org.opensearch.migrations.transform;
 
 import java.lang.ref.Cleaner;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 import lombok.extern.slf4j.Slf4j;
@@ -42,8 +43,7 @@ public class ThreadSafeTransformerWrapper implements IJsonTransformer {
     public ThreadSafeTransformerWrapper(Supplier<IJsonTransformer> transformerSupplier) {
         this.threadLocalHolder = ThreadLocal.withInitial(() -> {
             var trackingTransformer = new CloseTrackingTransformer(transformerSupplier.get());
-            // Register the tracking wrapper with the Cleaner. The cleaner will call cleanup() when the ThreadSafeTransformerWrapper is garbage collected
-            FALLBACK_CLEANER.register(this, trackingTransformer::cleanup);
+            trackingTransformer.registerWithCleaner(FALLBACK_CLEANER);
             return trackingTransformer;
         });
     }
@@ -71,39 +71,24 @@ public class ThreadSafeTransformerWrapper implements IJsonTransformer {
      */
     private static class CloseTrackingTransformer implements IJsonTransformer {
         private final IJsonTransformer delegate;
-        // Volatile flag for thread-safe check of the closed state.
-        private volatile boolean closed = false;
+        private final AtomicBoolean closed = new AtomicBoolean(false);
+
+        private Cleaner.Cleanable cleanable;
 
         CloseTrackingTransformer(IJsonTransformer delegate) {
             this.delegate = delegate;
         }
 
-        /**
-         * Invoked by the Cleaner if the transformer is garbage-collected without an explicit close().
-         * This checks whether close() was already called, and if not, performs cleanup.
-         */
-        private void cleanup() {
-            if (!closed) {
-                log.atWarn()
-                    .setMessage("Fallback cleaner used to cleanup transformer {}. Explicit close() was not called.")
-                    .addArgument(delegate)
-                    .log();
-                try {
-                    delegate.close();
-                } catch (Exception e) {
-                    log.atError()
-                        .setMessage("Exception during fallback cleaning of transformer {}.")
-                        .addArgument(delegate)
-                        .setCause(e)
-                        .log();
-                }
-                closed = true;
+        private void registerWithCleaner(Cleaner cleaner) {
+            if (cleanable != null) {
+                return;
             }
+            cleanable = cleaner.register(this, new CleaningState(delegate, closed));
         }
 
         @Override
         public Object transformJson(Object input) {
-            if (closed) {
+            if (closed.get()) {
                 throw new IllegalStateException("Transformer is closed");
             }
             return delegate.transformJson(input);
@@ -114,7 +99,7 @@ public class ThreadSafeTransformerWrapper implements IJsonTransformer {
          */
         @Override
         public synchronized void close() {
-            if (!closed) {
+            if (closed.compareAndSet(false, true)) {
                 try {
                     delegate.close();
                 } catch (Exception e) {
@@ -124,8 +109,41 @@ public class ThreadSafeTransformerWrapper implements IJsonTransformer {
                         .setCause(e)
                         .log();
                 } finally {
-                    closed = true;
+                    if (cleanable != null) {
+                        cleanable.clean();
+                        cleanable = null;
+                    }
                 }
+            }
+        }
+    }
+
+    private static class CleaningState implements Runnable {
+        private final IJsonTransformer delegate;
+        private final AtomicBoolean closed;
+
+        private CleaningState(IJsonTransformer delegate, AtomicBoolean closed) {
+            this.delegate = delegate;
+            this.closed = closed;
+        }
+
+        @Override
+        public void run() {
+            if (!closed.compareAndSet(false, true)) {
+                return;
+            }
+            log.atWarn()
+                .setMessage("Fallback cleaner used to cleanup transformer {}. Explicit close() was not called.")
+                .addArgument(delegate)
+                .log();
+            try {
+                delegate.close();
+            } catch (Exception e) {
+                log.atError()
+                    .setMessage("Exception during fallback cleaning of transformer {}.")
+                    .addArgument(delegate)
+                    .setCause(e)
+                    .log();
             }
         }
     }
