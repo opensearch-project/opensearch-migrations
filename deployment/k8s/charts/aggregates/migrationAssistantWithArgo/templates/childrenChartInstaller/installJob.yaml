@@ -123,6 +123,8 @@ spec:
                         - resources:
                             kinds:
                               - Pod
+                            operations:
+                              - CREATE
                     mutate:
                       patchStrategicMerge:
                         metadata:
