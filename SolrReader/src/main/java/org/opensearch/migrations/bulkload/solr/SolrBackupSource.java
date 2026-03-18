@@ -19,7 +19,6 @@ import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -35,8 +34,6 @@ import reactor.core.scheduler.Schedulers;
  */
 @Slf4j
 public class SolrBackupSource implements DocumentSource {
-
-    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final Path backupDir;
     private final String collectionName;
