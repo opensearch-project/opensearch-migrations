@@ -96,7 +96,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             }]
         }]
 
-    def prepare_workflow_parameters(self, **kwargs):
+    def prepare_workflow_parameters(self, keep_workflows: bool = False):
         """Build workflow parameters for snapshot-only migration."""
         snapshot_repo = {"awsRegion": self.s3_region, "s3RepoPathUri": self.s3_repo_uri}
         if self.s3_endpoint:

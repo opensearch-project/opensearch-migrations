@@ -100,7 +100,9 @@ def run_test_benchmarks(cluster: Cluster):
 
 
 def _ensure_vectorsearch_workload():
-    """Ensure the vectorsearch workload is available in the OSB workload cache."""
+    """Ensure the vectorsearch workload is available in the OSB workload cache.
+    Used by run_aoss_test_benchmarks to pre-stage snapshot data on a source cluster
+    before creating a BYOS snapshot for AOSS vector collection tests."""
     workload_dir = os.path.expanduser("~/.osb/benchmarks/workloads/default/vectorsearch")
     workload_file = os.path.join(workload_dir, "workload.json")
     if os.path.exists(workload_file):
@@ -112,7 +114,8 @@ def _ensure_vectorsearch_workload():
     else:
         logger.info("vectorsearch workload not found, updating OSB workload repo...")
         subprocess.run(["git", "fetch", "origin"], cwd=repo_dir, capture_output=True, check=True)
-        subprocess.run(["git", "checkout", "origin/main", "--", "vectorsearch"], cwd=repo_dir, capture_output=True, check=True)
+        subprocess.run(["git", "checkout", "origin/main", "--", "vectorsearch"],
+                       cwd=repo_dir, capture_output=True, check=True)
     if not os.path.exists(workload_file):
         raise RuntimeError("Failed to fetch vectorsearch workload from OSB workload repo")
     logger.info("vectorsearch workload fetched successfully")
@@ -120,7 +123,11 @@ def _ensure_vectorsearch_workload():
 
 def run_aoss_test_benchmarks(cluster: Cluster, collection_type: str):
     """Run OSB workloads appropriate for a specific AOSS collection type.
-    
+
+    Intended for manually pre-staging snapshot data on a source cluster before
+    creating a BYOS snapshot for AOSS integration tests. The source cluster must
+    use basic auth (not SigV4) since execute_benchmark_workload does not support SigV4.
+
     collection_type: 'search', 'timeseries', or 'vector'
     """
     if collection_type == 'search':

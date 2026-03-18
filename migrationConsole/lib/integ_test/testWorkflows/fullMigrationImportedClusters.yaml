@@ -1,9 +1,9 @@
 # Workflow template for migrations with pre-existing (imported) clusters.
 # Supports both:
 # - Standard migrations: Creates snapshot from source cluster
-# - BYOS migrations: Uses externally managed snapshot (externallyManagedSnapshot)
+# - BYOS migrations: Uses externally managed snapshot (externallyManagedSnapshotName)
 #
-# For BYOS, pass snapshotConfig.snapshotNameConfig.externallyManagedSnapshot
+# For BYOS, pass snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName
 # instead of snapshotNamePrefix to skip snapshot creation.
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate

@@ -109,7 +109,7 @@ class AOSSTestBase(MATestBase):
             }]
         }]
 
-    def prepare_workflow_parameters(self, **kwargs):
+    def prepare_workflow_parameters(self, keep_workflows: bool = False):
         """Build workflow parameters for snapshot-based AOSS migration."""
         source_config = {
             "endpoint": "",
@@ -131,7 +131,8 @@ class AOSSTestBase(MATestBase):
 
     # --- Verification helpers ---
 
-    def _get_nested(self, d, dotted_path):
+    @staticmethod
+    def _get_nested(d, dotted_path):
         for key in dotted_path.split('.'):
             if not isinstance(d, dict):
                 return None
@@ -299,6 +300,8 @@ class Test0022TimeSeriesCollectionMigration(AOSSTestBase):
 class Test0023VectorCollectionMigration(AOSSTestBase):
     aoss_endpoint_env_var = "AOSS_VECTOR_ENDPOINT"
     collection_type = "vector"
+    # vectors_lucene_filtered is excluded: lucene KNN engine was added in OS 2.2
+    # and is not present in the OS 1.3 source snapshot used for these tests.
     expected_indices = ["vectors_faiss"]
 
     mapping_assertions = {

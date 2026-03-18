@@ -45,7 +45,7 @@ class MATestBase:
         self.source_version = ClusterVersion(version_str=user_args.source_version)
         self.target_type = user_args.target_type
         self.target_version = (
-            None if self.target_type == "AOSS"
+            None if self.is_aoss
             else ClusterVersion(version_str=user_args.target_version)
         )
         self.argo_service = ArgoService()
@@ -54,7 +54,7 @@ class MATestBase:
         self.target_cluster = None
         self.imported_clusters = False
 
-        if self.target_type != "AOSS":
+        if not self.is_aoss:
             supported_combo = False
             for (allowed_source, allowed_target) in allow_source_target_combinations:
                 if (is_incoming_version_supported(allowed_source, self.source_version) and
@@ -67,7 +67,7 @@ class MATestBase:
         self.source_argo_cluster_template = (f"{self.source_version.full_cluster_type}-"
                                              f"{self.source_version.major_version}-"
                                              f"{self.source_version.minor_version}-single-node")
-        self.target_argo_cluster_template = None if self.target_type == "AOSS" else (
+        self.target_argo_cluster_template = None if self.is_aoss else (
             f"{self.target_version.full_cluster_type}-"
             f"{self.target_version.major_version}-"
             f"{self.target_version.minor_version}-single-node"
@@ -78,13 +78,17 @@ class MATestBase:
         self.workflow_snapshot_and_migration_config = None
         self.source_operations = get_operations_library_by_version(self.source_version)
         self.target_operations = (
-            None if self.target_type == "AOSS"
+            None if self.is_aoss
             else get_operations_library_by_version(self.target_version)
         )
         self.unique_id = user_args.unique_id
 
+    @property
+    def is_aoss(self):
+        return self.target_type == "AOSS"
+
     def __repr__(self):
-        target_str = self.target_type if self.target_type == "AOSS" else str(self.target_version)
+        target_str = self.target_type if self.is_aoss else str(self.target_version)
         return f"<{self.__class__.__name__}(source={self.source_version},target={target_str})>"
 
     def test_before(self):
