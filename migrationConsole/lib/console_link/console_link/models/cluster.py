@@ -162,10 +162,14 @@ class Cluster:
 
     @property
     def is_serverless(self) -> bool:
-        """Check if this is an Amazon OpenSearch Serverless (AOSS) collection."""
-        return (self.auth_type == AuthMethod.SIGV4 and
+        """Check if this is an Amazon OpenSearch Serverless (AOSS) collection.
+        Detects via SigV4 service=aoss or AOSS endpoint pattern, to handle
+        both authenticated and no-auth (VPC-only) serverless clusters."""
+        if (self.auth_type == AuthMethod.SIGV4 and
                 self.auth_details is not None and
-                self.auth_details.get("service") == "aoss")
+                self.auth_details.get("service") == "aoss"):
+            return True
+        return ".aoss.amazonaws.com" in (self.endpoint or "")
 
     @property
     def display_name(self) -> str:
