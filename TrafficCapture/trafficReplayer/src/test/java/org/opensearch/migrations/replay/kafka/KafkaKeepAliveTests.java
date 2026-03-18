@@ -67,7 +67,9 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
         this.kafkaProperties = KafkaTrafficCaptureSource.buildKafkaProperties(
             embeddedKafkaBroker.getBootstrapServers(),
             TEST_GROUP_CONSUMER_ID,
-            false,
+            "none",
+            null,
+            null,
             null
         );
         Assertions.assertNull(kafkaProperties.get(KafkaTrafficCaptureSource.MAX_POLL_INTERVAL_KEY));

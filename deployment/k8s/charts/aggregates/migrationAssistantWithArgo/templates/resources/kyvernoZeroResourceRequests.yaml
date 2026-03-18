@@ -24,14 +24,6 @@ data:
               - resources:
                   kinds:
                     - Pod
-          preconditions:
-            any:
-              - key: "{{`{{ request.object.spec.serviceAccountName || '' }}`}}"
-                operator: In
-                value:
-                  - migration-console-access-role
-                  - argo-workflow-executor
-                  - build-images-service-account
           mutate:
             patchStrategicMerge:
               metadata:

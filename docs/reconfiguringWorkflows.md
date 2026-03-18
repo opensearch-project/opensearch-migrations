@@ -4,675 +4,257 @@
 
 ## Context
 
-The migration workflow currently operates in an "always create" mode using `kubectl apply`. This works for initial deployments but creates problems when:
+The migration workflow currently operates in an "always create" mode using `kubectl apply`. This works well for initial deployments but creates risks and inefficiencies during subsequent runs:
 
-1. **Re-running workflows** - Should skip creation if resource exists with same config
-2. **Configuration drift** - Some changes (replica count) require careful handling; others (storage type) should be blocked
-3. **Protecting production** - Dangerous changes shouldn't silently apply
+1. **Re-running workflows:** Should skip creation if a resource exists with the exact same configuration (Idempotency).
+2. **Configuration drift:** Some changes (e.g., replica counts) require careful handling; others (e.g., storage type) must be blocked entirely.
+3. **Protecting production:** Dangerous or disruptive changes should never silently apply; they must be gated by human approval.
 
-**First implementation target**: Kafka cluster (`Kafka`), `KafkaNodePool`, and `KafkaTopic` resources from Strimzi. These establish patterns for later resources (CapturedTraffic, DataSnapshot, SnapshotMigration).
+**Implementation Targets:**
+
+* Phase 1 (Completed): Kafka cluster (`Kafka`), `KafkaNodePool`, and `KafkaTopic` from Strimzi.
+* Phase 2 (Current): `CaptureProxy` (long-lived) and `DataSnapshot` / `SnapshotMigration` (finite/terminal).
 
 ### Goals
 
-- Use Kubernetes ValidatingAdmissionPolicies (CEL) to enforce change rules at the API level
-- Route policy rejections to suspend gates where users can fix and retry
-- Keep parallel workflow branches running while one waits for user action
-- Follow existing suspend/approval patterns from `metadataMigration.ts`
+* Use Kubernetes ValidatingAdmissionPolicies (CEL) to enforce change rules at the API level.
+* Route policy rejections to a suspend gate in the Argo UI, allowing users to safely approve changes without dropping into a CLI.
+* Retain native K8s behavior for "stacked rollouts" on long-lived infrastructure.
+* Ensure strict provenance: the parameters in a CRD's `.spec` must *always* perfectly match the actual deployed infrastructure or historical artifact.
 
 ---
 
-## Architecture Overview
+## Architecture Overview: The Argo Retry Model
+
+The workflow does **not** automatically inject approval annotations on the first pass. When a gated change is attempted, the system relies on a "Catch, Suspend, Auto-Patch, and Retry" loop orchestrated entirely within Argo.
 
 ```mermaid
 flowchart TB
-    subgraph Workflow["Argo Workflow"]
-        A[Apply Kafka Resource] -->|success| B[Continue to next step]
-        A -->|403 Forbidden| C{Parse Error}
-        C -->|"Major Change Blocked"| D[Suspend & Wait]
-        C -->|"Immutable Violation"| E[Fail with clear message]
-        C -->|"Other Error"| F[Fail - real error]
-        D -->|"User clicks Resume"| G[Re-attempt same apply]
-        G -->|success| B
-        G -->|still blocked| D
-    end
-
-    subgraph User["User Actions (outside workflow)"]
-        U1[Fix config to match deployed state]
-        U2[OR: kubectl annotate with specific approval flag]
-    end
-
     subgraph K8s["Kubernetes API Server"]
-        VAP[ValidatingAdmissionPolicy]
         API[API Server]
-        Strimzi[Strimzi Operator]
+        VAP[ValidatingAdmissionPolicy]
+        API -->|intercept| VAP
     end
 
-    D -.->|"displays error"| U1
-    D -.->|"displays error"| U2
-    U1 -.->|"then resume"| G
-    U2 -.->|"then resume"| G
-
-    A -.->|kubectl apply| API
-    API -->|intercept| VAP
-    VAP -->|allowed| Strimzi
-    VAP -->|rejected| A
+    subgraph Workflow["Argo Workflow"]
+        Start(( )) --> A
+        A[Submit kubectl apply] -.->|request| API
+        VAP -->|allowed| R[Apply Succeeds]
+        VAP -->|"403 Forbidden"| C{Parse Error}
+        R --> B[Wait for Ready/Complete]
+        C -->|"Gated Change"| D[Suspend & Wait in Argo-Workflows]
+        C -->|"Impossible / Lock Violation"| E[Fail workflow - unrecoverable]
+        C -->|"Other Error"| F[Fail - real error]
+        
+        D -->|"User clicks 'Resume/Approve'"| G[Auto-Patch Resource with Workflow UID]
+        G --> A
+    end
 ```
 
-### Key Design Decision: "Retry" Model
-
-The workflow does **not** automatically inject approval annotations. When a major change is blocked:
-
-1. Workflow suspends and displays the VAP error message
-2. User takes manual action outside the workflow:
-   - **Option A**: Revert their config change to match what's already deployed
-   - **Option B**: Manually `kubectl annotate` the resource with the specific approval flag
-3. User clicks "Resume" in Argo UI
-4. Workflow re-attempts the **same apply** operation - **OR** the user never does and eventually reruns the workflow with different settings.
-5. Either succeeds (user resolved conflict) or fails again (loops back to suspend)
-
-**Important**: Argo's suspend/resume continues from AFTER the suspend step, so we need a **recursive template call** to implement proper retry loops.
+**Key Concept: The API Rejection is Absolute.** If a VAP rejects a change, the entire `kubectl apply` request is aborted. The existing object in `etcd`, including its state and status, remains 100% unchanged.
 
 ---
 
 ## Field Classification
 
-### Kafka Cluster (`kafka.strimzi.io/Kafka`)
+Changes to resources fall into three categories.
 
-| Field | Category | Rationale | Restart Required? |
-|-------|----------|-----------|-------------------|
-| `metadata.name` | Immutable | Cluster identity | N/A |
-| `spec.kafka.version` | **Major** | Version changes need planning | Yes (rolling) |
-| `annotations["strimzi.io/kraft"]` | Immutable | Can't switch KRaft/ZK modes | N/A |
-| `spec.kafka.config.*` | Minor | Safe operational tuning | No (dynamic) |
-| `spec.kafka.listeners` | Minor | Can modify with care | Yes (rolling) |
+1. **Impossible:** Cannot be done — must delete & recreate the resource. This branch of the workflow cannot be advanced.
+2. **Gated:** Requires explicit approval annotation (injected via the Workflow) to proceed.
+3. **Safe:** Low-risk, allowed dynamically without approval. Safe fields require no VAP expressions — they are included in the classification tables for coverage tracking only.
 
-**Note on `spec.kafka.config.*`**: These are Kafka broker configs that can be changed dynamically:
-- `auto.create.topics.enable` - safe
-- `offsets.topic.replication.factor` - safe (only affects new topics)
-- `transaction.state.log.*` - safe
-- `default.replication.factor` - safe (only affects new topics)
-- `min.insync.replicas` - safe
+For terminal resources in `Completed` state, the [Lock-on-Complete](#the-lock-on-complete-pattern-terminal-resources-only) pattern overrides all categories — every spec change becomes Impossible.
 
-**Note on `spec.kafka.listeners`**: These define how clients connect. The workflow doesn't expose these as inputs - they're hardcoded in `makeDeployKafkaClusterKraftManifest()`. If we later expose them, they'd be outputs the user reads, not inputs they configure.
+### CaptureProxy (`migrations.opensearch.org/ProxyConfig`)
 
-### KafkaNodePool (`kafka.strimzi.io/KafkaNodePool`)
+| Field | Category   | Rationale | Restart Required? |
+| --- |------------| --- | --- |
+| `spec.listenPort` | Impossible | Changing breaks all client connections | N/A |
+| `spec.noCapture` | **Gated**  | Fundamentally changes proxy behavior | Yes (rolling) |
+| `spec.enableMSKAuth` | **Gated**  | Auth mode change is destructive | Yes (rolling) |
+| `spec.tls.mode` | **Gated**  | TLS mode switch requires cert/secret changes | Yes (rolling) |
+| `spec.podReplicas` | Safe       | Scaling is safe, Deployment handles rolling | No |
+| `spec.resources` | Safe       | Resource limits/requests | Yes (rolling) |
+| `spec.internetFacing` | Impossible | Changes load balancer scheme; recreate Service | N/A |
+| `spec.loggingConfigurationOverrideConfigMap` | Safe       | Logging config swap | Yes (rolling) |
+| `spec.otelCollectorEndpoint` | Safe       | Observability config | Yes (rolling) |
+| `spec.setHeader` | Gated      | Header injection tweaks | Yes (rolling) |
+| `spec.destinationConnectionPoolSize` | Safe       | Connection tuning | Yes (rolling) |
+| `spec.destinationConnectionPoolTimeout` | Safe       | Connection tuning | Yes (rolling) |
+| `spec.kafkaClientId` | Safe       | Client identity change | Yes (rolling) |
+| `spec.maxTrafficBufferSize` | Gated       | Performance tuning | Yes (rolling) |
+| `spec.numThreads` | Safe       | Performance tuning | Yes (rolling) |
+| `spec.sslConfigFile` | Safe       | Legacy SSL config path | Yes (rolling) |
+| `spec.suppressCaptureForHeaderMatch` | **Gated**  | Traffic filtering changes | Yes (rolling) |
+| `spec.suppressCaptureForMethod` | **Gated**  | Traffic filtering changes | Yes (rolling) |
+| `spec.suppressCaptureForUriPath` | **Gated**  | Traffic filtering changes | Yes (rolling) |
+| `spec.suppressMethodAndPath` | **Gated**  | Traffic filtering changes | Yes (rolling) |
 
-| Field | Category | Rationale | Restart Required? |
-|-------|----------|-----------|-------------------|
-| `spec.replicas` | **Major** | Scaling impacts availability/data | No (Strimzi handles rolling) |
-| `spec.storage.type` | Immutable | ephemeral/persistent can't switch | N/A |
-| `spec.storage.size` | **Major** | Storage expansion depends on CSI | Depends on provider |
-| `spec.roles` | Immutable | Role changes are dangerous | N/A |
+*(Note: Kafka and KafkaNodePool resources follow similar matrices established in Phase 1).*
 
-**Note on replicas**: Strimzi handles replica scaling gracefully with rolling restarts. The "Major" classification is for user awareness, not because it's dangerous.
+### DataSnapshot (`migrations.opensearch.org/DataSnapshot`)
 
-### KafkaTopic (`kafka.strimzi.io/KafkaTopic`)
+Terminal resource that is created with what is effectively a job.
+This transitions to `Completed`. 
+Lock-on-Complete freezes the entire spec once done.
+All fields here are impossible to edit.  If a user wanted to change a snapshot
+in-progress, they would need to delete the existing snapshot and redrive.
 
-| Field | Category | Rationale | Restart Required? |
-|-------|----------|-----------|-------------------|
-| `metadata.labels["strimzi.io/cluster"]` | Immutable | Topic can't move clusters | N/A |
-| `spec.partitions` (decrease) | Blocked | Kafka doesn't allow this | N/A |
-| `spec.partitions` (increase) | Minor | Safe capacity addition | No |
-| `spec.replicas` | **Major** | Replication factor changes | No |
-| `spec.config.*` | Minor | retention, segment.bytes, etc. | No (dynamic) |
+### SnapshotMigration (`migrations.opensearch.org/SnapshotMigration`)
 
-**Note on `spec.config.*`**: Topic configs are dynamically applied without restart:
-- `retention.ms` - safe, immediate
-- `segment.bytes` - safe, affects new segments
-- `cleanup.policy` - safe, immediate
+Terminal resource — transitions to `Completed`. Lock-on-Complete freezes the entire spec once done. A SnapshotMigration contains one or more sub-tasks, each optionally including metadata migration and/or document backfill (RFS).
 
-**Legend:**
-- **Immutable**: Cannot change after creation (hard block)
-- **Major**: Requires explicit approval annotation to proceed
-- **Minor**: Allowed without approval
+**Metadata migration fields:**
 
----
+This transitions to 'Completed'.
+Lock-on-Complete freezes the entire spec once done.
+All fields here are impossible to edit.  If a user wanted to change a snapshot
+in-progress, they would need to delete the existing snapshot and redrive.
 
-## Value-Based Approval Annotations
+**Document backfill (RFS) fields:**
 
-Each VAP check uses a **value-based approval annotation** where the annotation value must match the target value being requested. This prevents race conditions and auto-resets after the change succeeds.
-
-| Check | Approval Annotation | Example |
-|-------|---------------------|---------|
-| KafkaNodePool replicas | `approved-replicas=<target>` | `approved-replicas=3` |
-| KafkaNodePool storage.size | `approved-storage-size=<target>` | `approved-storage-size=10Gi` |
-| Kafka version | `approved-version=<target>` | `approved-version=3.7.0` |
-| KafkaTopic replicas | `approved-topic-replicas=<target>` | `approved-topic-replicas=2` |
-
-**Benefits:**
-- **No race conditions**: Approving `replicas=3` won't accidentally allow `replicas=20`
-- **Auto-reset**: Once the change succeeds, the annotation value no longer matches future changes
-- **Clear audit trail**: Annotation shows exactly what was approved
-
-### skipApprovals Pattern Integration
-
-Following the existing `skipApprovals` pattern from `metadataMigration.ts`, we can:
-1. Add approval flags to the manifest **before** apply (pre-approved)
-2. Use a global `skipAllApprovals` flag with care for dev/test environments
-
-```typescript
-// In workflow, when applying resource with pre-approval:
-const manifest = {
-    ...baseManifest,
-    metadata: {
-        ...baseManifest.metadata,
-        annotations: {
-            ...baseManifest.metadata.annotations,
-            // Add approval annotation if skipApprovals is set
-            ...(skipApprovals ? {
-                'migrations.opensearch.org/approved-replicas': String(baseManifest.spec.replicas),
-                'migrations.opensearch.org/approved-storage-size': baseManifest.spec.storage?.size
-            } : {})
-        }
-    }
-}
-```
+| Field | Category   | Rationale |
+| --- |------------| --- |
+| `spec.documentBackfillConfig.indexAllowlist` | Impossible | |
+| `spec.documentBackfillConfig.podReplicas` | Safe       | |
+| `spec.documentBackfillConfig.allowLooseVersionMatching` | Impossible | |
+| `spec.documentBackfillConfig.docTransformerConfigBase64` | Impossible | |
+| `spec.documentBackfillConfig.documentsPerBulkRequest` | Safe       | |
+| `spec.documentBackfillConfig.initialLeaseDuration` | Gated      | |
+| `spec.documentBackfillConfig.maxConnections` | Gated      | |
+| `spec.documentBackfillConfig.maxShardSizeBytes` | Gated      | |
+| `spec.documentBackfillConfig.otelCollectorEndpoint` | Safe       | |
+| `spec.documentBackfillConfig.useTargetClusterForWorkCoordination` |  Safe          | |
+| `spec.documentBackfillConfig.jvmArgs` |  Safe          | |
+| `spec.documentBackfillConfig.loggingConfigurationOverrideConfigMap` |   Safe         | |
+| `spec.documentBackfillConfig.resources` |    Safe        | |
 
 ---
 
-## Advanced Patterns & Operational Considerations
+## Resource Lifecycle & State Machine
 
-This section covers patterns for CRD lifecycle management, resource locking after completion, and efficient status detection — building on the core VAP + retry architecture above.
+Migration CRD resources follow a common lifecycle tracked natively in the `.status.phase` subresource.
 
-### CRD Upgrade "In-Flight" Handling
+### Terminal vs. Long-Lived Resources
 
-Updating a CRD while resources are being processed is a standard day-to-day operation in Kubernetes, but there are two ways it can go:
+`Ready` and `Completed` are sibling states; a resource will transition to one or the other based on its operational lifespan.
 
-* **Non-Breaking Changes (Additive):** Adding a new optional field is safe — K8s is resilient here.
-    * **The In-Flight Resource:** Existing objects in etcd won't have the new field. Controllers/workflows should treat the absence of the field as a default value.
-    * **The Policy Impact:** If a CEL policy references a field that doesn't exist yet on the `oldObject`, the expression may error out.
-    * **Solution:** Use the CEL `has()` or `?` operator. E.g., `!has(object.spec.newFeature) || object.spec.newFeature == oldObject.spec.newFeature`. This ensures the policy doesn't crash when comparing an old resource to a new manifest. (Note: the Phase 1 VAPs already follow this pattern for annotations and optional fields.)
+| State | Meaning | Used By |
+| --- | --- | --- |
+| `Initialized` | Placeholder — created by the initialization process but not yet acted upon. | All |
+| `Running` | Work is in progress (deployment rolling out, snapshot copying). | All |
+| `Ready` | Infrastructure is healthy, operational, and serving traffic. | **Long-Lived** (Proxy, Kafka) |
+| `Completed` | A finite task has finished successfully. The output is immutable. | **Terminal** (Snapshots) |
+| `Error` | Execution failed. The resource is "poisoned". | All |
 
-* **Breaking Changes (Renames/Deletions):**
-    * **Versioned APIs:** K8s handles this by letting you serve multiple versions (e.g., `v1alpha1` and `v1beta1`).
-    * **Conversion Webhooks:** If you move a field, you'll eventually need a Conversion Webhook to translate between versions. Without one, if you change the storage version, K8s might lose data during the transition.
+Empty placeholder resources are created during the migration initialization step (before the Argo workflow starts) so that downstream `waitFor` steps can find them. The initializer creates each CRD resource with an empty `spec: {}` and `status.phase: Initialized`. The workflow's first apply populates the spec with real parameters.
 
-### "Lock-on-Complete" CEL Pattern (Subgraph Skip & Consistency Guard)
+### The "Fail Forward / Poison Resource" Principle
 
-This pattern is **not** for infrastructure resources like Kafka clusters or node pools. It applies to resources that represent **completed work products** — snapshots, snapshot migrations, and similar artifacts where the resource tracks the outcome of an entire workflow subgraph.
+If infrastructure deployment fails, **we do not attempt a rollback**. The workflow simply updates the CRD's `.status.phase` to `Error` and halts. The resource is considered "poisoned." It is the user's responsibility to push a new, valid configuration through the workflow to overwrite the poisoned state. This guarantees the CRD `.spec` is never artificially manipulated behind the scenes, ensuring strict provenance.
 
-**The problem it solves:** When a user re-runs a workflow, completed subgraphs should be skippable. But skipping is only safe if the parameters that produced the completed artifact match what the user is requesting now. If the user changed their config (e.g., different index filter, different target), the old "done" artifact is stale and the subgraph needs to re-run.
+---
 
-**How it works:** When the workflow completes a subgraph (e.g., snapshot creation), it marks the resource as Complete. On re-run, the workflow attempts to apply the manifest with the user's current parameters. If the spec matches what's already there, the apply is a no-op and the workflow skips the subgraph. If the spec differs, the CEL policy rejects the update instantly (403), signaling that the completed artifact is inconsistent with the new request.
+## The Workflow UID Approval Pattern
 
-> "If the status is 'Complete', then any update to the 'spec' must be exactly equal to the current 'spec'."
+We tie approvals directly to the specific Argo Workflow execution requesting the change.
 
-**Target resources** (future implementation, not Kafka):
-- `DataSnapshot` — a completed snapshot can't be retroactively reconfigured
-- `SnapshotMigration` — a completed migration's parameters are fixed
-- `CapturedTraffic` — a completed capture session's config is immutable
+**The Flow:**
+
+1. **Try Apply:** Argo attempts the update. The incoming manifest natively includes an Argo label: `workflows.argoproj.io/run-uid: {{workflow.uid}}`.
+2. **The Block:** The VAP sees a Gated change, looks for a matching approval annotation, doesn't find it, and returns a `403 Forbidden`.
+3. **The Suspend:** Argo catches the 403 and enters a `Suspend` node with a UI message: *"Gated changes detected. Review and click Resume to approve."*
+4. **Auto-Patch:** When the user clicks Resume, the very next step in Argo runs a targeted patch:
+   `kubectl patch <resource> <name> --type=merge -p '{"metadata":{"annotations":{"migrations.opensearch.org/approved-by-run": "{{workflow.uid}}"}}}'`
+5. **The Retry:** The workflow loops back and attempts the exact same `kubectl apply`.
+6. **The Pass:** The VAP sees the gated change, but evaluates `object.metadata.annotations['...approved-by-run'] == object.metadata.labels['workflows.argoproj.io/run-uid']`. The change is allowed.
+
+**CEL Implementation Example** *(abbreviated — full policy covers all Gated fields from the classification table)*:
 
 ```yaml
 validations:
   - expression: |
-      # If the existing resource is marked as 'Complete'
-      !(oldObject.status.phase == 'Complete') || 
-      # Then the new object's spec must match the old one exactly
-      (object.spec == oldObject.spec)
-    message: "Resource is in 'Complete' state and current parameters don't match. To re-run with different parameters, delete the existing resource first."
+      # Condition 1: No Gated fields changed
+      (object.spec.enableMSKAuth == oldObject.spec.enableMSKAuth &&
+       object.spec.noCapture == oldObject.spec.noCapture) 
+      ||
+      # Condition 2: Workflow UID matches the approval annotation
+      (has(object.metadata.annotations) &&
+       has(object.metadata.annotations['migrations.opensearch.org/approved-by-run']) &&
+       has(object.metadata.labels['workflows.argoproj.io/run-uid']) &&
+       object.metadata.annotations['migrations.opensearch.org/approved-by-run'] == object.metadata.labels['workflows.argoproj.io/run-uid'])
+    message: "Gated changes detected. Workflow UI approval is required to proceed."
+
 ```
 
-> **Note:** For CRDs where the status subresource is enabled, CEL may not see `status` during a standard UPDATE. In that case, reflect the phase into an annotation (e.g., `migrations.opensearch.org/phase=Complete`) and check that instead. See the Gotchas table below.
+---
 
-**Why this is better than a wait-based consistency check:**
-- **Immediate Failure:** The `kubectl apply` fails instantly with a 403 Forbidden — no polling needed. The workflow can immediately branch to "stale artifact" handling.
-- **Atomic Truth:** No race conditions where the workflow thinks it's okay to skip, but someone changed the spec a millisecond later. The API server is the single source of truth.
-- **Subgraph Skip:** On match, the apply is a no-op. The workflow sees the resource is already Complete and skips the entire subgraph — no need to re-deploy, re-run, or re-wait.
+## Advanced Patterns: Provenance & Idempotency
 
-This pattern is complementary to the value-based approval annotations above. Approvals gate *intentional changes* to infrastructure. Lock-on-Complete guards *consistency of completed work products* to enable safe subgraph skipping.
+### The "Lock-on-Complete" Pattern (Terminal Resources Only)
 
-### Efficient "Done" vs. "Consistent" Detection in Argo
+This pattern strictly applies to **completed work products** (e.g., `DataSnapshot`). It freezes the resource's `.spec` to guarantee provenance and enables safe subgraph skipping in Argo.
 
-To avoid blind sleeps when waiting for resource readiness, use the Argo `resource` template with `successCondition` / `failureCondition`:
+* **Idempotent Run:** If a user re-runs a workflow against a completed snapshot with the exact same parameters, K8s treats it as a `200 OK` No-Op. Argo sees `status.phase == Completed` and safely skips the subgraph.
+* **Changed Parameters:** If a user changes *any* parameter (even a "Safe" one) and re-runs, the VAP rejects the update with a 403. Silently accepting the change would break provenance — the `.spec` would no longer reflect the historical execution. The user must delete the stale artifact to run a new job with different parameters.
 
-1. **Check/Apply Step:**
-    * Apply the manifest.
-    * If it fails due to the CEL consistency block (Lock-on-Complete), branch to "Inconsistent/Fail" logic.
-    * If it succeeds, the update was either a no-op or a valid change.
+*(Note: Because the Kubernetes API passes the fully populated `oldObject` to the VAP during a spec update, we read `.status` directly. No dual-metadata tracking or annotations are required for state locking).*
 
-2. **Wait Step:** Use a `resource` template:
-    ```yaml
-    successCondition: status.phase == Complete
-    failureCondition: status.phase == Failed
-    ```
+**CEL Implementation:**
 
-Argo watches the resource and moves forward the instant the controller updates the status — no polling interval needed. This pairs well with the recursive retry loop in Phase 3.
+```yaml
+validations:
+  # Lock-on-Complete: Freeze spec for finished work products natively via status
+  - expression: |
+      !has(oldObject.status) ||
+      !has(oldObject.status.phase) ||
+      oldObject.status.phase != 'Completed' ||
+      (object.spec == oldObject.spec)
+    message: "Consistency Guard: This resource is 'Completed'. The specification is permanently sealed to maintain provenance. Delete the resource to run a new job with these parameters."
 
-### Major Gotchas
+```
 
-| Gotcha | Detail | Mitigation |
-|--------|--------|------------|
-| **Status Subresource** | If your CRD doesn't define `.spec.status: {}`, updates to status will increment `metadata.generation`, triggering unnecessary reconciliation loops. | Ensure all CRDs used with this pattern have the status subresource enabled. |
-| **CEL and Status Visibility** | By default, many ValidatingAdmissionPolicies don't see the `status` field during a standard `UPDATE` if the status subresource is enabled. | Either target the correct subresource in the policy, or have the controller reflect key state into **annotations** (which CEL can always see). This is especially relevant if adopting the Lock-on-Complete pattern above. |
-| **Two-Phase Race** | If the workflow updates status to "Complete" at the very end, cleanup steps in the same workflow could accidentally trigger the Lock-on-Complete policy. | Sequence cleanup steps *before* the status transition to "Complete", or exclude the workflow's service account from the lock policy. |
+*(Note: There is explicitly **no** "Running Guard" in this architecture. Long-lived infrastructure supports native K8s stacked rollouts. If a Proxy is `Running`, the user is free to push a corrective workflow over it immediately, governed purely by the standard Gated/Impossible field checks).*
+
+### CRD Upgrade "In-Flight" Handling
+
+To prevent VAPs from breaking when a CRD is upgraded (e.g., a new optional field is added), always use the CEL `has()` operator for new fields.
+
+```yaml
+- expression: |
+    !has(object.spec.newFeature) || 
+    object.spec.newFeature == oldObject.spec.newFeature
+
+```
+
+---
+
+## Efficient Argo Execution
+
+To avoid blind sleeps, we rely on Argo's `resource` template getting a 
+quick-result that the resource already matched and was complete.
+
+1. **Phase 1: Apply / Assert**
+* Workflow executes `kubectl apply` via Argo's `resource` template.
+* If the spec matches etcd exactly, K8s treats it as a No-Op.
+* If a VAP rejects it, the recursive UI-approval loop handles it.
+
+
+2. **Phase 2: Wait**
+* Use Argo's native waiters to progress the workflow instantly when the controller updates the status:
+```yaml
+# For Proxy (Long-Lived)
+successCondition: status.phase == Ready
+failureCondition: status.phase == Error
+
+```
+
+
+
+
 
 ---
 
 ## Implementation Plan
 
-### Files to Create/Modify
-
-| File | Action | Description |
-|------|--------|-------------|
-| `deployment/.../templates/resources/validatingAdmissionPolicies.yaml` | **CREATE** | VAPs for Kafka, KafkaNodePool, KafkaTopic + bindings |
-| `deployment/.../templates/resources/workflowRbac.yaml` | **MODIFY** | Add ClusterRole for VAP management |
-| `orchestrationSpecs/.../setupKafka.ts` | **MODIFY** | Add reconciliation wrapper with retry loop |
-
-**Note**: No separate `suspendForBlockedChange` template needed - inline the suspend within the retry loop template.
-
----
-
-## Phase 1: Create ValidatingAdmissionPolicies
-
-**New file:** `deployment/k8s/charts/aggregates/migrationAssistantWithArgo/templates/resources/validatingAdmissionPolicies.yaml`
-
-```yaml
-{{- if get .Values.conditionalPackageInstalls "argo-workflows" }}
-# ValidatingAdmissionPolicies for Kafka resources
-# Prevents accidental major changes without explicit approval
-
-# ─────────────────────────────────────────────────────────────
-# KafkaNodePool Policy - replicas, storage type, roles
-# ─────────────────────────────────────────────────────────────
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
-metadata:
-  name: {{ .Release.Namespace }}-kafkanodepool-policy
-spec:
-  failurePolicy: Fail
-  matchConstraints:
-    resourceRules:
-    - apiGroups: ["kafka.strimzi.io"]
-      apiVersions: ["v1", "v1beta2"]
-      operations: ["UPDATE"]
-      resources: ["kafkanodepools"]
-  validations:
-    # Major change: replica scaling requires specific approval
-    - expression: |
-        object.spec.replicas == oldObject.spec.replicas ||
-        (has(object.metadata.annotations) &&
-         has(object.metadata.annotations['migrations.opensearch.org/approved-replicas']) &&
-         object.metadata.annotations['migrations.opensearch.org/approved-replicas'] == string(object.spec.replicas))
-      messageExpression: |
-        "Major Change Blocked [replicas]: NodePool scaling from " +
-        string(oldObject.spec.replicas) + " to " + string(object.spec.replicas) +
-        ". To proceed: kubectl annotate kafkanodepool/" + object.metadata.name +
-        " migrations.opensearch.org/approved-replicas=" + string(object.spec.replicas) + " --overwrite"
-    # Major change: storage size requires specific approval
-    - expression: |
-        !has(object.spec.storage.size) || !has(oldObject.spec.storage.size) ||
-        object.spec.storage.size == oldObject.spec.storage.size ||
-        (has(object.metadata.annotations) &&
-         has(object.metadata.annotations['migrations.opensearch.org/approved-storage-size']) &&
-         object.metadata.annotations['migrations.opensearch.org/approved-storage-size'] == object.spec.storage.size)
-      messageExpression: |
-        "Major Change Blocked [storage.size]: Storage resize from " +
-        oldObject.spec.storage.size + " to " + object.spec.storage.size +
-        ". To proceed: kubectl annotate kafkanodepool/" + object.metadata.name +
-        " migrations.opensearch.org/approved-storage-size=" + object.spec.storage.size + " --overwrite"
-    # Immutable: storage type
-    - expression: |
-        object.spec.storage.type == oldObject.spec.storage.type
-      message: "Immutable: Storage type cannot be changed after creation"
-    # Immutable: roles
-    - expression: |
-        object.spec.roles == oldObject.spec.roles
-      message: "Immutable: Node pool roles cannot be changed after creation"
-
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  name: {{ .Release.Namespace }}-kafkanodepool-binding
-spec:
-  policyName: {{ .Release.Namespace }}-kafkanodepool-policy
-  validationActions: [Deny]
-  matchResources:
-    namespaceSelector:
-      matchExpressions:
-      - key: kubernetes.io/metadata.name
-        operator: In
-        values: ["{{ .Release.Namespace }}"]
-
-# ─────────────────────────────────────────────────────────────
-# Kafka Cluster Policy - version changes
-# ─────────────────────────────────────────────────────────────
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
-metadata:
-  name: {{ .Release.Namespace }}-kafka-policy
-spec:
-  failurePolicy: Fail
-  matchConstraints:
-    resourceRules:
-    - apiGroups: ["kafka.strimzi.io"]
-      apiVersions: ["v1", "v1beta2"]
-      operations: ["UPDATE"]
-      resources: ["kafkas"]
-  validations:
-    - expression: |
-        object.spec.kafka.version == oldObject.spec.kafka.version ||
-        (has(object.metadata.annotations) &&
-         has(object.metadata.annotations['migrations.opensearch.org/approved-version']) &&
-         object.metadata.annotations['migrations.opensearch.org/approved-version'] == object.spec.kafka.version)
-      messageExpression: |
-        "Major Change Blocked [version]: Kafka version change from '" +
-        oldObject.spec.kafka.version + "' to '" + object.spec.kafka.version +
-        "'. To proceed: kubectl annotate kafka/" + object.metadata.name +
-        " migrations.opensearch.org/approved-version=" + object.spec.kafka.version + " --overwrite"
-
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  name: {{ .Release.Namespace }}-kafka-binding
-spec:
-  policyName: {{ .Release.Namespace }}-kafka-policy
-  validationActions: [Deny]
-  matchResources:
-    namespaceSelector:
-      matchExpressions:
-      - key: kubernetes.io/metadata.name
-        operator: In
-        values: ["{{ .Release.Namespace }}"]
-
-# ─────────────────────────────────────────────────────────────
-# KafkaTopic Policy - partition decrease, replica change
-# ─────────────────────────────────────────────────────────────
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
-metadata:
-  name: {{ .Release.Namespace }}-kafkatopic-policy
-spec:
-  failurePolicy: Fail
-  matchConstraints:
-    resourceRules:
-    - apiGroups: ["kafka.strimzi.io"]
-      apiVersions: ["v1", "v1beta2"]
-      operations: ["UPDATE"]
-      resources: ["kafkatopics"]
-  validations:
-    # Blocked: partition decrease (Kafka limitation - cannot be overridden)
-    - expression: |
-        object.spec.partitions >= oldObject.spec.partitions
-      messageExpression: |
-        "Blocked: Partition count cannot decrease (Kafka limitation). " +
-        "Current: " + string(oldObject.spec.partitions) + ", Requested: " + string(object.spec.partitions)
-    # Major change: replica factor
-    - expression: |
-        object.spec.replicas == oldObject.spec.replicas ||
-        (has(object.metadata.annotations) &&
-         has(object.metadata.annotations['migrations.opensearch.org/approved-topic-replicas']) &&
-         object.metadata.annotations['migrations.opensearch.org/approved-topic-replicas'] == string(object.spec.replicas))
-      messageExpression: |
-        "Major Change Blocked [replicas]: Topic replication factor change from " +
-        string(oldObject.spec.replicas) + " to " + string(object.spec.replicas) +
-        ". To proceed: kubectl annotate kafkatopic/" + object.metadata.name +
-        " migrations.opensearch.org/approved-topic-replicas=" + string(object.spec.replicas) + " --overwrite"
-    # Immutable: cluster assignment
-    - expression: |
-        !has(oldObject.metadata.labels) ||
-        !has(oldObject.metadata.labels['strimzi.io/cluster']) ||
-        object.metadata.labels['strimzi.io/cluster'] == oldObject.metadata.labels['strimzi.io/cluster']
-      message: "Immutable: Topic cannot be moved to a different cluster"
-
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  name: {{ .Release.Namespace }}-kafkatopic-binding
-spec:
-  policyName: {{ .Release.Namespace }}-kafkatopic-policy
-  validationActions: [Deny]
-  matchResources:
-    namespaceSelector:
-      matchExpressions:
-      - key: kubernetes.io/metadata.name
-        operator: In
-        values: ["{{ .Release.Namespace }}"]
-
-{{- end }}
-```
-
----
-
-## Phase 2: Add RBAC for ValidatingAdmissionPolicies
-
-**Modify:** `deployment/k8s/charts/aggregates/migrationAssistantWithArgo/templates/resources/workflowRbac.yaml`
-
-VAPs are cluster-scoped resources. Add a new ClusterRole for VAP management:
-
-```yaml
-# Add after existing ClusterRoleBinding (around line 94)
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ .Release.Namespace }}-vap-manager
-rules:
-  - apiGroups: ["admissionregistration.k8s.io"]
-    resources: ["validatingadmissionpolicies", "validatingadmissionpolicybindings"]
-    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ .Release.Namespace }}-vap-manager-binding
-subjects:
-  - kind: ServiceAccount
-    name: argo-workflow-executor
-    namespace: {{ .Release.Namespace }}
-roleRef:
-  kind: ClusterRole
-  name: {{ .Release.Namespace }}-vap-manager
-  apiGroup: rbac.authorization.k8s.io
-```
-
----
-
-## Phase 3: Add Reconciliation Templates to setupKafka.ts
-
-**Modify:** `orchestrationSpecs/packages/migration-workflow-templates/src/workflowTemplates/setupKafka.ts`
-
-Since Argo's suspend/resume continues from AFTER the suspend step, we need a **recursive template** to implement proper retry loops.
-
-### Required: Add `continueOn` to TaskOpts
-
-First, we need to add `continueOn` support to the workflow builder's `TaskOpts` type in `taskBuilder.ts`:
-
-```typescript
-// In taskBuilder.ts, update TaskOpts:
-export type TaskOpts<
-    S extends TasksOutputsScope,
-    Label extends TaskType,
-    LoopT extends PlainObject
-> = {
-    loopWith?: LoopWithUnion<LoopT> | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => LoopWithUnion<LoopT>),
-    when?: WhenCondition | ((tasks: AllTasksAsOutputReferenceableInner<S, Label>) => WhenCondition),
-    continueOn?: { failed?: boolean, error?: boolean }  // NEW
-};
-```
-
-### Retry Loop Pattern Using Recursive Template Call
-
-```typescript
-// In setupKafka.ts - add after existing templates
-
-    // ── Reconciliation template with retry loop for KafkaNodePool ─────────
-    // Uses recursive call: on VAP failure, suspends then calls itself again
-
-    .addTemplate("deployKafkaNodePoolWithRetry", t => t
-        .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
-        .addRequiredInput("suspendName", typeToken<string>())  // e.g., "myKafka.KafkaNodePool"
-
-        .addSteps(b => b
-            // Step 1: Try apply with continueOn.failed
-            .addStep("tryApply", INTERNAL, "deployKafkaNodePool", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    clusterConfig: b.inputs.clusterConfig,
-                }),
-                { continueOn: { failed: true } }
-            )
-
-            // Step 2: If VAP blocked (error contains "Major Change Blocked"), suspend
-            // Naming: waitForFixOrApproval
-            .addStep("waitForFixOrApproval", INLINE, t => t
-                .addRequiredInput("name", typeToken<string>())
-                .addSuspend(),
-                c => c.register({
-                    name: b.inputs.suspendName
-                }),
-                { when: { templateExp: expr.and(
-                    // Check if step failed
-                    expr.not(expr.equals(
-                        expr.taskData("steps", "tryApply", "status"),
-                        expr.literal("Succeeded")
-                    )),
-                    // Check if error message contains "Major Change Blocked"
-                    expr.regexMatch(
-                        expr.literal("Major Change Blocked"),
-                        expr.taskData("steps", "tryApply", "message")
-                    )
-                )}}
-            )
-
-            // Step 3: After suspend resumes, recursively call self to retry
-            // This creates the retry loop - keeps trying until success
-            .addStep("retryLoop", INTERNAL, "deployKafkaNodePoolWithRetry", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    clusterConfig: b.inputs.clusterConfig,
-                    suspendName: b.inputs.suspendName,
-                }),
-                { when: { templateExp: expr.equals(
-                    expr.taskData("steps", "waitForFixOrApproval", "status"),
-                    expr.literal("Succeeded")
-                )}}
-            )
-        )
-    )
-```
-
-**Alternative: Using retryStrategy**
-
-If the above pattern is too complex, we could use Argo's built-in `retryStrategy` with a custom error pattern. However, this requires the VAP error to be surfaced in a way that matches the retry condition.
-
-### Output Handling
-
-For templates that produce outputs (like `deployKafkaClusterKraft` which outputs `brokers`), use `expr.ternary` instead of the non-existent `expr.coalesce`:
-
-```typescript
-.addExpressionOutput("brokers", c =>
-    expr.ternary(
-        expr.equals(
-            expr.taskData("steps", "tryApply", "status"),
-            expr.literal("Succeeded")
-        ),
-        c.steps.tryApply.outputs.brokers,
-        c.steps.retryLoop.outputs.brokers
-    )
-)
-```
-
----
-
-## Expression Helpers Available
-
-Based on `expression.ts`, the available helpers are:
-
-| Helper | Purpose | Example |
-|--------|---------|---------|
-| `expr.ternary(cond, ifTrue, ifFalse)` | Conditional | `expr.ternary(expr.isEmpty(x), "default", x)` |
-| `expr.equals(a, b)` | Equality check | `expr.equals(status, "Succeeded")` |
-| `expr.and(a, b)` | Logical AND | `expr.and(isFailed, isVapError)` |
-| `expr.or(a, b)` | Logical OR | - |
-| `expr.not(x)` | Logical NOT | `expr.not(expr.isEmpty(x))` |
-| `expr.regexMatch(pattern, text)` | Regex match | `expr.regexMatch("Major Change", errorMsg)` |
-| `expr.isEmpty(x)` | Check empty | `expr.isEmpty(expr.asString(x))` |
-| `expr.concat(...parts)` | String concat | `expr.concat(prefix, ".suffix")` |
-| `expr.taskData(type, name, key)` | Access task data | `expr.taskData("steps", "tryApply", "status")` |
-
-**Not available** (would need to be added if needed):
-- `expr.coalesce()` - use `expr.ternary(expr.isEmpty(...), ..., ...)` instead
-- `expr.contains()` - use `expr.regexMatch()` instead
-- `expr.failed()` / `expr.succeeded()` - use `expr.equals(taskData(..., "status"), "Succeeded")` instead
-
----
-
-## Verification Plan
-
-### 1. Test CEL Expressions (Manual)
-
-```bash
-# Create a test KafkaNodePool
-kubectl apply -f - <<EOF
-apiVersion: kafka.strimzi.io/v1
-kind: KafkaNodePool
-metadata:
-  name: test-pool
-  labels:
-    strimzi.io/cluster: test-cluster
-spec:
-  replicas: 1
-  roles: [broker, controller]
-  storage:
-    type: ephemeral
-EOF
-
-# Try to change replicas (should be blocked)
-kubectl patch kafkanodepool test-pool --type=merge -p '{"spec":{"replicas":3}}'
-# Expected: Error "Major Change Blocked [replicas]..."
-
-# Add specific approval annotation with the target value
-kubectl annotate kafkanodepool test-pool migrations.opensearch.org/approved-replicas=3
-
-# Retry (should succeed)
-kubectl patch kafkanodepool test-pool --type=merge -p '{"spec":{"replicas":3}}'
-```
-
-### 2. Test Retry Loop Behavior
-
-1. Deploy workflow with a VAP that will block
-2. Verify workflow suspends at `waitForFixOrApproval` step
-3. Click "Resume" in Argo UI
-4. Verify workflow recursively calls `retryLoop` step
-5. Without fixing the issue, verify it suspends again
-6. Add approval annotation
-7. Click "Resume" again
-8. Verify workflow completes successfully
-
-### 3. Edge Cases to Test
-
-| Scenario | Expected Behavior |
-|----------|-------------------|
-| Fresh install (no existing resource) | Creates normally, VAP only checks UPDATEs |
-| Re-run with same config | Applies successfully (no change detected) |
-| Minor change only (e.g., config tuning) | Applies successfully |
-| Major change without approval | Suspends, waits for user action |
-| Multiple major changes | Each needs its own approval annotation |
-| Immutable field change | Hard fail (no retry possible) |
-| User adds approval, resumes | Retry loop succeeds |
-
----
-
-## Summary
-
-This design uses Kubernetes-native ValidatingAdmissionPolicies to enforce change safety at the API level, combined with Argo workflow suspend/resume with recursive retry loops for user approval.
-
-Key implementation details:
-1. **Distinct approval annotations** per check type (not a single blanket approval)
-2. **Recursive template calls** for retry loops (since Argo continues after suspend)
-3. **Use `expr.regexMatch()`** instead of non-existent `expr.contains()`
-4. **Use `expr.ternary()`** instead of non-existent `expr.coalesce()`
-5. **Need to add `continueOn`** support to TaskOpts in workflow builders
-
-Key files to implement:
-1. `validatingAdmissionPolicies.yaml` - NEW (VAPs + bindings with distinct approval annotations)
-2. `workflowRbac.yaml` - ADD ClusterRole for VAPs
-3. `taskBuilder.ts` - ADD `continueOn` option to TaskOpts
-4. `setupKafka.ts` - ADD reconciliation templates with recursive retry loops
+See [reconfiguringWorkflowsImpl.md](./reconfiguringWorkflowsImpl.md) for the concrete implementation reference — file-by-file changes, code patterns, and migration steps for existing Kafka VAPs.

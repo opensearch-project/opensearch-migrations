@@ -142,6 +142,7 @@
                 "template": "waitforkafkacluster",
                 "name": "resource-management"
               },
+              "when": "{{=sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
               "arguments": {
                 "parameters": [
                   {
@@ -164,7 +165,25 @@
           [
             {
               "templateRef": {
-                "template": "setupproxy",
+                "template": "readkafkaconnectionprofile",
+                "name": "resource-management"
+              },
+              "when": "{{=sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  }
+                ]
+              },
+              "name": "readKafkaConnectionProfile"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "setupproxywithlifecycle",
                 "name": "setup-capture"
               },
               "arguments": {
@@ -200,27 +219,22 @@
                   {
                     "name": "imageCaptureProxyPullPolicy",
                     "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "resolvedKafkaConnection",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.bootstrapServers}}"
+                  },
+                  {
+                    "name": "resolvedKafkaListenerName",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.listenerName}}"
+                  },
+                  {
+                    "name": "resolvedKafkaAuthType",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.authType}}"
                   }
                 ]
               },
               "name": "setupProxy"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "patchcapturedtrafficready",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.proxyName}}"
-                  }
-                ]
-              },
-              "name": "patchCapturedTraffic"
             }
           ]
         ],
@@ -1007,6 +1021,7 @@
                 "template": "waitforkafkacluster",
                 "name": "resource-management"
               },
+              "when": "{{=sprig.dig('managedByWorkflow', false, fromJSON(inputs.parameters.kafkaConfig))}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1024,6 +1039,24 @@
                 ]
               },
               "name": "waitForKafkaCluster"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "readkafkaconnectionprofile",
+                "name": "resource-management"
+              },
+              "when": "{{=sprig.dig('managedByWorkflow', false, fromJSON(inputs.parameters.kafkaConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  }
+                ]
+              },
+              "name": "readKafkaConnectionProfile"
             }
           ],
           [
@@ -1057,6 +1090,18 @@
                   {
                     "name": "kafkaGroupId",
                     "value": "{{='replayer-'+fromJSON(inputs.parameters.targetConfig)['label']}}"
+                  },
+                  {
+                    "name": "resolvedKafkaConnection",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.bootstrapServers}}"
+                  },
+                  {
+                    "name": "resolvedKafkaListenerName",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.listenerName}}"
+                  },
+                  {
+                    "name": "resolvedKafkaAuthType",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.authType}}"
                   },
                   {
                     "name": "name",

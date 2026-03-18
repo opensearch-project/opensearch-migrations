@@ -1,6 +1,7 @@
 import {
     ARGO_REPLAYER_OPTIONS,
     DENORMALIZED_S3_REPO_CONFIG,
+    DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     OVERALL_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
@@ -11,6 +12,7 @@ import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
 import {promises as dns} from "dns";
 import { generateSemaphoreKey } from './semaphoreUtils';
+import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG>;
@@ -87,6 +89,17 @@ export function setNamesInUserConfig(userConfig: InputConfig): InputConfig {
                 )
             };
         })
+    };
+}
+
+function buildUnifiedValidationInput(rawData: unknown, parsedData: InputConfig): unknown {
+    if (typeof rawData !== "object" || rawData === null || Array.isArray(rawData)) {
+        return parsedData;
+    }
+    return {
+        ...rawData,
+        kafkaClusterConfiguration: parsedData.kafkaClusterConfiguration,
+        snapshotMigrationConfigs: parsedData.snapshotMigrationConfigs,
     };
 }
 
@@ -171,17 +184,36 @@ function buildKafkaClientConfig(
         throw new Error(`Kafka cluster '${kafkaClusterKey}' not found in kafkaClusterConfiguration`);
     }
     if ('existing' in cluster) {
+        const auth = cluster.existing.auth ?? {type: "none" as const};
         return {
-            ...cluster.existing,
+            enableMSKAuth: cluster.existing.enableMSKAuth,
+            kafkaConnection: cluster.existing.kafkaConnection,
             kafkaTopic: topic || cluster.existing.kafkaTopic,
+            managedByWorkflow: false,
+            listenerName: "",
+            authType: auth.type,
+            secretName: "secretName" in auth ? auth.secretName : "",
+            caSecretName: "caSecretName" in auth ? auth.caSecretName : "",
+            kafkaUserName: "kafkaUserName" in auth ? (auth.kafkaUserName ?? "") : "",
+            topicSpecOverrides: DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
             label: kafkaClusterKey
         };
     }
-    // autoCreate — Strimzi creates a deterministic bootstrap service: <clusterName>-kafka-bootstrap:9092
+    const auth = cluster.autoCreate.auth ?? {type: "none" as const};
+    const listenerName = auth.type === "scram-sha-512" ? "tls" : "plain";
+    const listenerPort = auth.type === "scram-sha-512" ? 9093 : 9092;
+    // autoCreate — Strimzi creates a deterministic bootstrap service for the selected internal listener.
     return {
         enableMSKAuth: false,
-        kafkaConnection: `${kafkaClusterKey}-kafka-bootstrap:9092`,
+        kafkaConnection: `${kafkaClusterKey}-kafka-bootstrap:${listenerPort}`,
         kafkaTopic: topic,
+        managedByWorkflow: true,
+        listenerName,
+        authType: auth.type,
+        secretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
+        caSecretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-cluster-ca-cert` : "",
+        kafkaUserName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
+        topicSpecOverrides: cluster.autoCreate.topicSpecOverrides,
         label: kafkaClusterKey
     };
 }
@@ -200,8 +232,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     validateInput(data: unknown): InputConfig {
         // First pass: normal schema validation (including refinements)
-        const obj = super.validateInput(data);
-        
+        const obj = setNamesInUserConfig(super.validateInput(data));
+
+        // Second pass: unified schema validation for embedded Strimzi passthrough sections
+        validateInputAgainstUnifiedSchema(buildUnifiedValidationInput(data, obj));
+
         // Second pass: check for extra keys
         validateNoExtraKeys(data, OVERALL_MIGRATION_CONFIG);
         

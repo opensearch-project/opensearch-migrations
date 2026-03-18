@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from console_link.environment import Environment, WorkflowConfigException
 from console_link.models.cluster import SourceCluster
-from console_link.models.kafka import StandardKafka, MSK
+from console_link.models.kafka import StandardKafka, MSK, ScramKafka
 
 
 def test_get_cluster_from_workflow_config_valid():
@@ -158,6 +158,34 @@ def test_get_kafka_from_workflow_config_existing_cluster_uses_reference():
 
     assert isinstance(kafka, MSK)
     assert kafka.brokers == "broker.a:9092,broker.b:9092"
+
+
+def test_get_kafka_from_workflow_config_autocreate_scram(monkeypatch):
+    monkeypatch.setenv("KAFKA_SCRAM_PASSWORD", "test-password")
+    config = {
+        "kafkaClusterConfiguration": {
+            "default": {
+                "autoCreate": {
+                    "auth": {
+                        "type": "scram-sha-512"
+                    }
+                }
+            }
+        },
+        "traffic": {
+            "proxies": {
+                "capture-proxy": {
+                    "source": "source"
+                }
+            }
+        }
+    }
+
+    kafka = Environment._get_kafka_from_workflow_config(config)
+
+    assert isinstance(kafka, ScramKafka)
+    assert kafka.brokers == "default-kafka-bootstrap:9093"
+    assert kafka.username == "default-migration-app"
 
 
 @patch('console_link.environment.WorkflowConfigStore')
