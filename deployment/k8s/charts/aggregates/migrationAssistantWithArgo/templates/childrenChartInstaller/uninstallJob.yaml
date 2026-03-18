@@ -26,6 +26,10 @@ spec:
         - name: helm-uninstaller
           image: {{ .Values.images.installer.repository}}:{{ .Values.images.installer.tag }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
+          {{- with .Values.installer.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command:
             - /bin/sh
             - -c
