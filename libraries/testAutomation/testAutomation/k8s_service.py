@@ -337,6 +337,16 @@ class K8sService:
             (f"Pods in {self.namespace}", self._kubectl_base() + ["get", "pods", "-n", self.namespace, "-o", "wide"]),
             ("Pods in kyverno-ma", self._kubectl_base() + ["get", "pods", "-n", "kyverno-ma", "-o", "wide"]),
             (f"Jobs in {self.namespace}", self._kubectl_base() + ["get", "jobs", "-n", self.namespace, "-o", "wide"]),
+            (f"Job status detail", self._kubectl_base() + [
+                "get", "jobs", "-n", self.namespace, "-l", f"app.kubernetes.io/instance={release_name}",
+                "-o", "jsonpath={range .items[*]}name={.metadata.name} succeeded={.status.succeeded} "
+                "failed={.status.failed} conditions={.status.conditions[*].type} "
+                "uncountedSucceeded={.status.uncountedTerminatedPods.succeeded} "
+                "uncountedFailed={.status.uncountedTerminatedPods.failed}{\"\\n\"}{end}"]),
+            (f"Pod finalizers", self._kubectl_base() + [
+                "get", "pods", "-n", self.namespace, "-l", f"app.kubernetes.io/instance={release_name}",
+                "-o", "jsonpath={range .items[*]}name={.metadata.name} phase={.status.phase} "
+                "finalizers={.metadata.finalizers}{\"\\n\"}{end}"]),
             (f"Events in {self.namespace}", self._kubectl_base() + [
                 "get", "events", "-n", self.namespace, "--sort-by=.lastTimestamp"]),
             ("Events in kyverno-ma", self._kubectl_base() + [
