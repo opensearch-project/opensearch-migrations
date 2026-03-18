@@ -80,14 +80,17 @@ function transformProperties(properties) {
 }
 
 function getFromMap(obj, key) {
-    return obj instanceof Map ? obj.get(key) : (obj ? obj[key] : undefined);
+    if (!obj) {
+        return undefined;
+    }
+    return obj instanceof Map ? obj.get(key) : obj[key];
 }
 
 function main(context) {
     return function(metadata) {
-        var body = getFromMap(metadata, 'body');
-        var mappings = getFromMap(body, 'mappings');
-        var properties = getFromMap(mappings, 'properties');
+        const body = getFromMap(metadata, 'body');
+        const mappings = getFromMap(body, 'mappings');
+        const properties = getFromMap(mappings, 'properties');
         if (properties) {
             transformProperties(properties);
         }
