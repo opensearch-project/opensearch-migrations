@@ -64,8 +64,7 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
         var scriptFile = (String) config.getOrDefault(SCRIPT_FILE_KEY, null);
         if (scriptFile != null) {
             try {
-                var localPath = ConfigUriResolver.resolve(scriptFile, ".py");
-                script = Files.readString(localPath);
+                script = Files.readString(Path.of(scriptFile));
             } catch (IOException ioe) {
                 throw new IllegalArgumentException(
                     "Failed to load script file '" + scriptFile + "'. " + getConfigUsageStr(), ioe
@@ -123,7 +122,7 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
         if (modulePath == null) {
             return null;
         }
-        var localPath = ConfigUriResolver.resolve(modulePath, ".tar.gz");
+        var localPath = Path.of(modulePath);
         if (Files.isDirectory(localPath)) {
             return localPath;
         }
@@ -169,7 +168,7 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
     private String getConfigUsageStr() {
         return this.getClass().getName() + " expects the incoming configuration to be a Map<String, Object>, "
             + "with keys: " + INLINE_SCRIPT_KEY + " or " + SCRIPT_FILE_KEY + ", " + BINDINGS_OBJECT + ".\n"
-            + SCRIPT_FILE_KEY + " is a string pointing to a local file path or remote URI to a Python file. \n"
+            + SCRIPT_FILE_KEY + " is a string pointing to a local file path to a Python file. \n"
             + RESOURCE_PATH_KEY
             + " is a string pointing to a resource path to a Python file in a jar on the classpath. \n"
             + INLINE_SCRIPT_KEY
@@ -180,6 +179,6 @@ public class JsonPythonTransformerProvider implements IJsonTransformerProvider {
             + " is a value which can be deserialized with Jackson ObjectMapper into a Map, List, Array,"
             + " or primitive type/wrapper.\n"
             + PYTHON_MODULE_PATH_KEY
-            + " (optional) is a local path, .tar.gz file, or remote URI to a Python venv with pip packages.";
+            + " (optional) is a local directory path or .tar.gz file containing a Python venv with pip packages.";
     }
 }

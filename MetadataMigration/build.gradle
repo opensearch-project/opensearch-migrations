@@ -9,7 +9,6 @@ dependencies {
     implementation project(':transformation')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonPythonTransformerProvider')
-    runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerS3')
 
     implementation libs.jcommander
     implementation libs.slf4j.api
