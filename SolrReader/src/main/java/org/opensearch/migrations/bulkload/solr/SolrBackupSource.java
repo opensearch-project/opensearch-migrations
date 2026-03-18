@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
@@ -105,11 +106,10 @@ public class SolrBackupSource implements DocumentSource {
                         .flatMapSequential(docIdx -> Mono.fromCallable(() ->
                             SolrLuceneDocReader.getDocument(
                                 segReader, docIdx, true, segDocBase,
-                                () -> segReader.toString(), backupDir,
                                 DocumentChangeType.INDEX
                             )
                         ).subscribeOn(scheduler), 10)
-                        .filter(doc -> doc != null);
+                        .filter(Objects::nonNull);
                 })
                 .skip(startingDocOffset)
                 .map(SolrBackupSource::toDocument)
@@ -128,7 +128,7 @@ public class SolrBackupSource implements DocumentSource {
                 .orElseThrow(() -> new IllegalStateException(
                     "No segments_N file found in Solr backup: " + backupDir));
         } catch (IOException e) {
-            throw new RuntimeException("Failed to list Solr backup directory: " + backupDir, e);
+            throw new IllegalStateException("Failed to list Solr backup directory: " + backupDir, e);
         }
     }
 

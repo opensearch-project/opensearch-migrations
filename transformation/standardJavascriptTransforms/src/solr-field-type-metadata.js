@@ -44,57 +44,59 @@ const SOLR_TO_OS_TYPE = {
     'binary':   'binary'
 };
 
-function convertSolrType(solrType) {
-    return SOLR_TO_OS_TYPE[solrType] || 'text';
+function getFieldType(fieldDef) {
+    return fieldDef instanceof Map ? fieldDef.get('type') : fieldDef.type;
+}
+
+function setFieldType(fieldDef, osType) {
+    if (fieldDef instanceof Map) {
+        fieldDef.set('type', osType);
+    } else {
+        fieldDef.type = osType;
+    }
+}
+
+function getNestedProperties(fieldDef) {
+    return fieldDef instanceof Map ? fieldDef.get('properties') : fieldDef.properties;
 }
 
 function transformProperties(properties) {
-    if (!properties || typeof properties !== 'object') return properties;
+    if (!properties || typeof properties !== 'object') return;
 
     const entries = properties instanceof Map ? properties.entries() : Object.entries(properties);
-    for (const [name, fieldDef] of entries) {
+    for (const [, fieldDef] of entries) {
         if (!fieldDef || typeof fieldDef !== 'object') continue;
 
-        const type = fieldDef instanceof Map ? fieldDef.get('type') : fieldDef.type;
+        const type = getFieldType(fieldDef);
         if (type && SOLR_TO_OS_TYPE[type]) {
-            const osType = convertSolrType(type);
-            if (fieldDef instanceof Map) {
-                fieldDef.set('type', osType);
-            } else {
-                fieldDef.type = osType;
-            }
+            setFieldType(fieldDef, SOLR_TO_OS_TYPE[type]);
         }
 
-        // Recurse into nested properties
-        const nested = fieldDef instanceof Map ? fieldDef.get('properties') : fieldDef.properties;
+        const nested = getNestedProperties(fieldDef);
         if (nested) {
             transformProperties(nested);
         }
     }
-    return properties;
+}
+
+function getFromMap(obj, key) {
+    return obj instanceof Map ? obj.get(key) : (obj ? obj[key] : undefined);
 }
 
 function main(context) {
     return function(metadata) {
-        if (!metadata) return metadata;
-
-        const body = metadata instanceof Map ? metadata.get('body') : metadata.body;
-        if (!body) return metadata;
-
-        const mappings = body instanceof Map ? body.get('mappings') : body.mappings;
-        if (!mappings) return metadata;
-
-        const properties = mappings instanceof Map ? mappings.get('properties') : mappings.properties;
+        var body = getFromMap(metadata, 'body');
+        var mappings = getFromMap(body, 'mappings');
+        var properties = getFromMap(mappings, 'properties');
         if (properties) {
             transformProperties(properties);
         }
-
         return metadata;
     };
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { main, convertSolrType, SOLR_TO_OS_TYPE };
+    module.exports = { main, SOLR_TO_OS_TYPE };
 }
 
 (() => main)();

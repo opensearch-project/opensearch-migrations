@@ -113,5 +113,8 @@ public class SolrClient implements AutoCloseable {
         // HttpClient doesn't need explicit close in Java 11+
     }
 
-    public record SolrQueryResponse(JsonNode docs, String nextCursorMark, long numFound) {}
+    /** Response from a Solr /select query. */
+    public record SolrQueryResponse(JsonNode docs, String nextCursorMark, long numFound) {
+        // Record — no additional methods needed
+    }
 }

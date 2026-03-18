@@ -1,16 +1,13 @@
 package org.opensearch.migrations.bulkload.solr;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
-import org.opensearch.migrations.bulkload.lucene.LuceneDocument;
 import org.opensearch.migrations.bulkload.lucene.LuceneField;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
@@ -39,23 +36,14 @@ final class SolrLuceneDocReader {
         int luceneDocId,
         boolean isLive,
         int segmentDocBase,
-        Supplier<String> getSegmentReaderDebugInfo,
-        Path indexDirectoryPath,
         DocumentChangeType operation
     ) {
         if (!isLive) {
             return null;
         }
 
-        LuceneDocument document;
-        try {
-            document = reader.document(luceneDocId);
-        } catch (IOException e) {
-            log.atError()
-                .setCause(e)
-                .setMessage("Failed to read Solr document at Lucene index location {}")
-                .addArgument(luceneDocId)
-                .log();
+        var document = readDocument(reader, luceneDocId);
+        if (document == null) {
             return null;
         }
 
@@ -63,37 +51,17 @@ final class SolrLuceneDocReader {
         var fields = new LinkedHashMap<String, Object>();
 
         for (var field : document.getFields()) {
-            String fieldName = field.name();
-
-            if (isInternalField(fieldName)) {
+            if (isInternalField(field.name())) {
                 continue;
             }
-
             Object value = extractFieldValue(field);
             if (value == null) {
                 continue;
             }
-
-            if ("id".equals(fieldName)) {
+            if ("id".equals(field.name())) {
                 docId = value.toString();
             }
-
-            // Handle multi-valued fields: collect into a list
-            var existing = fields.get(fieldName);
-            if (existing != null) {
-                if (existing instanceof List) {
-                    @SuppressWarnings("unchecked")
-                    var list = (List<Object>) existing;
-                    list.add(value);
-                } else {
-                    var list = new ArrayList<>();
-                    list.add(existing);
-                    list.add(value);
-                    fields.put(fieldName, list);
-                }
-            } else {
-                fields.put(fieldName, value);
-            }
+            addFieldValue(fields, field.name(), value);
         }
 
         if (docId == null) {
@@ -108,17 +76,47 @@ final class SolrLuceneDocReader {
             return null;
         }
 
+        return serializeDocument(segmentDocBase + luceneDocId, docId, fields, operation);
+    }
+
+    private static org.opensearch.migrations.bulkload.lucene.LuceneDocument readDocument(
+        LuceneLeafReader reader, int luceneDocId
+    ) {
         try {
-            byte[] sourceBytes = MAPPER.writeValueAsBytes(fields);
-            return new LuceneDocumentChange(
-                segmentDocBase + luceneDocId, docId, null, sourceBytes, null, operation
-            );
-        } catch (Exception e) {
+            return reader.document(luceneDocId);
+        } catch (IOException e) {
             log.atError()
                 .setCause(e)
-                .setMessage("Failed to serialize Solr document {}")
-                .addArgument(docId)
+                .setMessage("Failed to read Solr document at Lucene index location {}")
+                .addArgument(luceneDocId)
                 .log();
+            return null;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void addFieldValue(LinkedHashMap<String, Object> fields, String name, Object value) {
+        var existing = fields.get(name);
+        if (existing == null) {
+            fields.put(name, value);
+        } else if (existing instanceof List) {
+            ((List<Object>) existing).add(value);
+        } else {
+            var list = new ArrayList<>();
+            list.add(existing);
+            list.add(value);
+            fields.put(name, list);
+        }
+    }
+
+    private static LuceneDocumentChange serializeDocument(
+        int docNumber, String docId, LinkedHashMap<String, Object> fields, DocumentChangeType operation
+    ) {
+        try {
+            byte[] sourceBytes = MAPPER.writeValueAsBytes(fields);
+            return new LuceneDocumentChange(docNumber, docId, null, sourceBytes, null, operation);
+        } catch (Exception e) {
+            log.atError().setCause(e).setMessage("Failed to serialize Solr document {}").addArgument(docId).log();
             return null;
         }
     }
@@ -128,7 +126,6 @@ final class SolrLuceneDocReader {
     }
 
     private static Object extractFieldValue(LuceneField field) {
-        // Try numeric first (pint, plong, pfloat, pdouble)
         var numValue = field.numericValue();
         if (numValue != null) {
             return numValue;
