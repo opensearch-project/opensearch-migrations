@@ -17,6 +17,7 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSin
 import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
@@ -35,9 +36,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 /**
  * End-to-end tests: Solr backup (Lucene) → pipeline → OpenSearch.
  *
- * <p>Creates a Solr core, indexes documents, takes a backup (raw Lucene files),
- * copies the backup out, then reads via {@link SolrBackupSource} (Lucene reader)
- * through the pipeline to a real OpenSearch container.
+ * <p>Creates a Solr core, indexes documents, fetches schema, takes a backup,
+ * then reads via {@link SolrBackupSource} (Lucene + schema) through the pipeline
+ * to a real OpenSearch container.
  */
 @Slf4j
 @Tag("isolatedTest")
@@ -69,11 +70,10 @@ public class SolrToOpenSearchEndToEndTest {
             createSolrCollection(solr, COLLECTION_NAME);
             populateSolrDocuments(solr, COLLECTION_NAME, 10);
 
-            // Take backup and copy out
+            var schema = fetchSolrSchema(solr, COLLECTION_NAME);
             var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
 
-            // Migrate from backup via Lucene reader
-            var source = new SolrBackupSource(backupDir, COLLECTION_NAME);
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
             var targetClient = createOpenSearchClient(target);
             var sink = new OpenSearchDocumentSink(targetClient, null, false,
                 DocumentExceptionAllowlist.empty(), null);
@@ -87,10 +87,10 @@ public class SolrToOpenSearchEndToEndTest {
         }
     }
 
-    @ParameterizedTest(name = "verify fields: {0} → {1}")
+    @ParameterizedTest(name = "mappings: {0} → {1}")
     @MethodSource("solr8ToOpenSearch")
-    void backupMigrationPreservesFieldValues(SolrClusterContainer.SolrVersion solrVersion,
-                                              SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
+    void backupMigrationCreatesMappingsFromSchema(SolrClusterContainer.SolrVersion solrVersion,
+                                                   SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
         try (var solr = new SolrClusterContainer(solrVersion);
              var target = new SearchClusterContainer(targetVersion)) {
 
@@ -100,61 +100,74 @@ public class SolrToOpenSearchEndToEndTest {
             createSolrCollection(solr, COLLECTION_NAME);
             populateSolrDocuments(solr, COLLECTION_NAME, 3);
 
+            var schema = fetchSolrSchema(solr, COLLECTION_NAME);
             var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
 
-            var source = new SolrBackupSource(backupDir, COLLECTION_NAME);
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
             var targetClient = createOpenSearchClient(target);
             var sink = new OpenSearchDocumentSink(targetClient, null, false,
                 DocumentExceptionAllowlist.empty(), null);
             var pipeline = new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE);
             pipeline.migrateAll().collectList().block();
 
-            // Verify docs exist and have content
+            // Verify mappings on target
             var restClient = createRestClient(target);
             var context = DocumentMigrationTestContext.factory().noOtelTracking();
             restClient.get("_refresh", context.createUnboundRequestContext());
 
-            // Search for a specific doc
-            var resp = restClient.get(COLLECTION_NAME + "/_search?q=*:*&size=1",
-                context.createUnboundRequestContext());
-            assertThat("Search should succeed", resp.statusCode, equalTo(200));
-            var hits = MAPPER.readTree(resp.body).path("hits").path("hits");
-            assertThat("Should have hits", hits.size(), greaterThan(0));
+            var resp = restClient.get(COLLECTION_NAME + "/_mapping", context.createUnboundRequestContext());
+            assertThat("Mapping request should succeed", resp.statusCode, equalTo(200));
 
-            var firstDoc = hits.get(0).path("_source");
-            assertNotNull(firstDoc, "Document should have _source");
-            log.info("Migrated doc from Solr backup: {}", firstDoc);
+            var properties = MAPPER.readTree(resp.body)
+                .path(COLLECTION_NAME).path("mappings").path("properties");
+            log.info("OpenSearch mappings: {}", properties);
+
+            // id field should be keyword (from Solr string type)
+            assertThat("id should be keyword",
+                properties.path("id").path("type").asText(), equalTo("keyword"));
+
+            // Verify docs have content
+            var searchResp = restClient.get(COLLECTION_NAME + "/_search?q=*:*&size=1",
+                context.createUnboundRequestContext());
+            var hits = MAPPER.readTree(searchResp.body).path("hits").path("hits");
+            assertThat("Should have hits", hits.size(), greaterThan(0));
+            assertNotNull(hits.get(0).path("_source"), "Doc should have _source");
+
+            log.info("Mappings verified: Solr schema → OpenSearch mappings applied");
         }
     }
 
     // --- Helpers ---
 
+    private static JsonNode fetchSolrSchema(SolrClusterContainer solr, String collection) throws Exception {
+        var result = solr.execInContainer(
+            "curl", "-s", "http://localhost:8983/solr/" + collection + "/schema?wt=json"
+        );
+        if (result.getExitCode() != 0) {
+            throw new RuntimeException("Failed to fetch schema: " + result.getStderr());
+        }
+        var schemaResponse = MAPPER.readTree(result.getStdout());
+        return schemaResponse.path("schema");
+    }
+
     private Path createAndCopyBackup(SolrClusterContainer solr, String collection) throws Exception {
-        // Create backup inside Solr container
-        var backupResult = solr.execInContainer(
+        solr.execInContainer(
             "curl", "-s",
             "http://localhost:8983/solr/" + collection + "/replication?command=backup&location=/var/solr/data&name=migration_backup"
         );
-        log.info("Backup response: {}", backupResult.getStdout());
-
-        // Wait for backup to complete
         Thread.sleep(3000);
 
-        // Copy backup files out of container
         var localBackupDir = tempDir.toPath().resolve("solr_backup");
         Files.createDirectories(localBackupDir);
 
-        // List and copy all files from the backup directory
         var listResult = solr.execInContainer("ls", "/var/solr/data/snapshot.migration_backup");
-        log.info("Backup files: {}", listResult.getStdout());
-
         for (var fileName : listResult.getStdout().trim().split("\n")) {
             if (fileName.isEmpty()) continue;
-            var containerPath = "/var/solr/data/snapshot.migration_backup/" + fileName;
-            var localPath = localBackupDir.resolve(fileName).toString();
-            solr.copyFileFromContainer(containerPath, localPath);
+            solr.copyFileFromContainer(
+                "/var/solr/data/snapshot.migration_backup/" + fileName,
+                localBackupDir.resolve(fileName).toString()
+            );
         }
-
         log.info("Copied Solr backup to {}", localBackupDir);
         return localBackupDir;
     }
@@ -164,7 +177,6 @@ public class SolrToOpenSearchEndToEndTest {
         if (result.getExitCode() != 0) {
             throw new RuntimeException("Failed to create Solr core: " + result.getStderr());
         }
-        log.info("Created Solr core: {}", name);
     }
 
     private static void populateSolrDocuments(SolrClusterContainer solr, String collection, int count)
@@ -178,25 +190,18 @@ public class SolrToOpenSearchEndToEndTest {
             ));
         }
         sb.append("]");
-
-        var result = solr.execInContainer(
-            "curl", "-s",
-            "-H", "Content-Type: application/json",
+        solr.execInContainer(
+            "curl", "-s", "-H", "Content-Type: application/json",
             "http://localhost:8983/solr/" + collection + "/update?commit=true",
             "-d", sb.toString()
         );
-        if (result.getExitCode() != 0) {
-            throw new RuntimeException("Failed to index documents: " + result.getStderr());
-        }
-        log.info("Indexed {} documents into Solr collection {}", count, collection);
     }
 
     private static org.opensearch.migrations.bulkload.common.OpenSearchClient createOpenSearchClient(
         SearchClusterContainer cluster
     ) {
-        var connectionContext = ConnectionContextTestParams.builder()
-            .host(cluster.getUrl()).build().toConnectionContext();
-        return new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
+        return new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+            .host(cluster.getUrl()).build().toConnectionContext()).determineVersionAndCreate();
     }
 
     private static RestClient createRestClient(SearchClusterContainer cluster) {
@@ -208,9 +213,8 @@ public class SolrToOpenSearchEndToEndTest {
         var context = DocumentMigrationTestContext.factory().noOtelTracking();
         var restClient = createRestClient(cluster);
         restClient.get("_refresh", context.createUnboundRequestContext());
-        var requests = new SearchClusterRequests(context);
-        var counts = requests.getMapOfIndexAndDocCount(restClient);
-        assertEquals(expected, counts.getOrDefault(indexName, 0),
+        assertEquals(expected,
+            new SearchClusterRequests(context).getMapOfIndexAndDocCount(restClient).getOrDefault(indexName, 0),
             "Expected " + expected + " docs in " + indexName);
     }
 }

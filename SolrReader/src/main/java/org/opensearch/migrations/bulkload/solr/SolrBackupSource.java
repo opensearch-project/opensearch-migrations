@@ -6,12 +6,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
-import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
 import org.opensearch.migrations.bulkload.lucene.SegmentNameSorter;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
@@ -20,6 +18,8 @@ import org.opensearch.migrations.bulkload.pipeline.ir.Document;
 import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -27,21 +27,30 @@ import reactor.core.scheduler.Schedulers;
 
 /**
  * {@link DocumentSource} that reads documents from a Solr backup directory
- * containing raw Lucene index files.
+ * containing raw Lucene index files, with schema-derived mappings.
  *
- * <p>A Solr backup is a flat directory of Lucene segment files with a {@code segments_N}
- * file. Solr 8 uses Lucene 8.11, readable by Lucene 9 backward-compatible codecs.
- * Since Solr has no {@code _source} field, document JSON is reconstructed from stored fields.
+ * <p>Requires both a backup directory (Lucene files) and a Solr schema
+ * (JSON from {@code /schema?wt=json} or the {@code managed-schema} file).
+ * The schema is always converted to OpenSearch mappings via {@link SolrSchemaConverter}.
  */
 @Slf4j
 public class SolrBackupSource implements DocumentSource {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private final Path backupDir;
     private final String collectionName;
+    private final JsonNode solrSchema;
 
-    public SolrBackupSource(Path backupDir, String collectionName) {
+    /**
+     * @param backupDir      path to the Solr backup directory containing Lucene index files
+     * @param collectionName the name to use for this collection in the target
+     * @param solrSchema     Solr schema JSON (the "schema" object from /schema?wt=json response)
+     */
+    public SolrBackupSource(Path backupDir, String collectionName, JsonNode solrSchema) {
         this.backupDir = backupDir;
         this.collectionName = collectionName;
+        this.solrSchema = solrSchema;
     }
 
     @Override
@@ -56,7 +65,12 @@ public class SolrBackupSource implements DocumentSource {
 
     @Override
     public CollectionMetadata readCollectionMetadata(String collectionName) {
-        return new CollectionMetadata(collectionName, 1, Map.of());
+        var fields = solrSchema.path("fields");
+        var mappings = SolrSchemaConverter.convertToOpenSearchMappings(fields);
+        log.info("Converted Solr schema to OpenSearch mappings: {} fields", mappings.path("properties").size());
+        return new CollectionMetadata(collectionName, 1, Map.of(
+            CollectionMetadata.ES_MAPPINGS, mappings
+        ));
     }
 
     @Override
@@ -71,13 +85,11 @@ public class SolrBackupSource implements DocumentSource {
 
             var scheduler = Schedulers.newBoundedElastic(10, Integer.MAX_VALUE, "solrReader");
 
-            // Sort segments by name and read docs from each
             var sortedLeaves = directoryReader.leaves().stream()
                 .map(LuceneLeafReaderContext::reader)
                 .sorted(SegmentNameSorter.INSTANCE)
                 .toList();
 
-            // Build cumulative doc bases
             int[] docBases = new int[sortedLeaves.size()];
             for (int i = 1; i < sortedLeaves.size(); i++) {
                 docBases[i] = docBases[i - 1] + sortedLeaves.get(i - 1).maxDoc();
