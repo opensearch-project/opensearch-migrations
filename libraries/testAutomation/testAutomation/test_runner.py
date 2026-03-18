@@ -16,8 +16,8 @@ from typing import List, Optional, Tuple
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10"]
-VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_3.1"]
+VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "OS_1.3"]
+VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_2.x", "OS_3.1", "AOSS"]
 MA_RELEASE_NAME = "ma"
 
 
@@ -149,8 +149,11 @@ class TestRunner:
             "/root/lib/integ_test/integ_test/ma_workflow_test.py",
             f"--unique_id={self.unique_id}",
             f"--source_version={source_version}",
-            f"--target_version={target_version}"
         ]
+        if target_version == "AOSS":
+            command_list.append("--target_type=AOSS")
+        else:
+            command_list.append(f"--target_version={target_version}")
         if self.test_ids:
             command_list.append(f"--test_ids={','.join(self.test_ids)}")
         if keep_workflows:
@@ -325,6 +328,8 @@ def _generate_unique_id() -> str:
 
 def get_version_combinations(source_version, target_version):
     source_list = VALID_SOURCE_VERSIONS if source_version == "all" else [source_version]
+    if target_version == "AOSS":
+        return [(s, "AOSS") for s in source_list]
     target_list = VALID_TARGET_VERSIONS if target_version == "all" else [target_version]
 
     # Cartesian product of source and target lists
@@ -348,7 +353,8 @@ def parse_args() -> argparse.Namespace:
         "--target-version",
         choices=target_versions,
         default="OS_2.19",
-        help=f"Target version to use. Must be one of: {', '.join(target_versions)}"
+        help=f"Target version to use. Must be one of: {', '.join(target_versions)}. "
+             "Use 'AOSS' for Amazon OpenSearch Serverless targets."
     )
     parser.add_argument(
         "--skip-delete",
