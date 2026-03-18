@@ -73,8 +73,13 @@ public class OpenSearchDocumentSink implements DocumentSink {
                     (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get(CollectionMetadata.ES_ALIASES)
                 );
                 OpenSearchIndexCreator.createIndex(client, esMetadata, OBJECT_MAPPER, null);
+            } else if (sourceConfig.containsKey(CollectionMetadata.ES_MAPPINGS)) {
+                // Non-ES source with mappings (e.g. Solr): create index with mappings only
+                var body = OBJECT_MAPPER.createObjectNode();
+                body.set("mappings", (com.fasterxml.jackson.databind.node.ObjectNode) sourceConfig.get(CollectionMetadata.ES_MAPPINGS));
+                client.createIndex(metadata.name(), body, null);
             } else {
-                // Non-ES source: create index with defaults
+                // Unknown source: create index with defaults
                 client.createIndex(metadata.name(), OBJECT_MAPPER.createObjectNode(), null);
             }
         })

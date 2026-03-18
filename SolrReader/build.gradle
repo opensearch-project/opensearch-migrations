@@ -1,0 +1,33 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+    id 'java-test-fixtures'
+}
+
+dependencies {
+    implementation project(':RfsPipeline')
+    implementation project(':RfsCommon')
+
+    implementation libs.jackson.databind
+    implementation libs.jackson.core
+    implementation libs.reactor.core
+    implementation libs.slf4j.api
+
+    testFixturesImplementation libs.testcontainers
+    testFixturesImplementation libs.slf4j.api
+
+    testImplementation project(':RFS')
+    testImplementation project(':RfsPipeline')
+    testImplementation testFixtures(project(':RFS'))
+    testImplementation testFixtures(project(':SolrReader'))
+    testImplementation testFixtures(project(':RfsPipeline'))
+    testImplementation libs.reactor.test
+    testImplementation libs.testcontainers
+    testImplementation libs.hamcrest
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testImplementation libs.log4j.core
+    testImplementation libs.log4j.slf4j2.impl
+
+    testRuntimeOnly libs.junit.jupiter.engine
+}
