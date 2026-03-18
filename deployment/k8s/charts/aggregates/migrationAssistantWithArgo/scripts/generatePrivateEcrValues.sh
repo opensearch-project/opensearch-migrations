@@ -185,13 +185,12 @@ charts:
         registry: "${M}/reg.kyverno.io"
       initImage:
         registry: "${M}/reg.kyverno.io"
-      cleanupJobs:
-        admissionReports:
-          image:
-            registry: "${M}/mirror.gcr.io"
-        clusterAdmissionReports:
-          image:
-            registry: "${M}/mirror.gcr.io"
+      webhooksCleanup:
+        image:
+          registry: "${M}/registry.k8s.io"
+      test:
+        image:
+          registry: "${M}/ghcr.io"
 
 # --- Direct template image overrides ---
 defaultBucketConfiguration:
