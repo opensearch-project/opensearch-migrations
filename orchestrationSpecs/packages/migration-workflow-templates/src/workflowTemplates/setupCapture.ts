@@ -100,7 +100,7 @@ function makeProxyDeploymentManifest(args: {
         container.volumeMounts = [{name: "tls-certs", mountPath: "/etc/proxy-tls", readOnly: true}];
     }
 
-    const podSpec: Record<string, any> = {containers: [container]};
+    const podSpec: Record<string, any> = {serviceAccountName: "migration-console-access-role", containers: [container]};
     if (args.tlsSecretName) {
         podSpec.volumes = [{name: "tls-certs", secret: {secretName: args.tlsSecretName}}];
     }
