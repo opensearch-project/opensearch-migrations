@@ -262,12 +262,10 @@ class TestRunner:
                                 "images.installer.repository": repo,
                                 "images.installer.tag": mc_tag,
                                 # Kyverno image overrides
-                                "charts.kyverno.values.cleanupJobs.admissionReports.image.repository": repo,
-                                "charts.kyverno.values.cleanupJobs.admissionReports.image.tag": mc_tag,
-                                "charts.kyverno.values.cleanupJobs.clusterAdmissionReports.image.repository": repo,
-                                "charts.kyverno.values.cleanupJobs.clusterAdmissionReports.image.tag": mc_tag,
                                 "charts.kyverno.values.webhooksCleanup.image.repository": repo,
                                 "charts.kyverno.values.webhooksCleanup.image.tag": mc_tag,
+                                "charts.kyverno.values.test.image.repository": repo,
+                                "charts.kyverno.values.test.image.tag": mc_tag,
                             })
                         else:
                             prefix = self.registry_prefix
@@ -279,9 +277,8 @@ class TestRunner:
                                 "images.migrationConsole.repository": mc_repo,
                                 "images.installer.repository": mc_repo,
                                 # Kyverno image overrides
-                                "charts.kyverno.values.cleanupJobs.admissionReports.image.repository": mc_repo,
-                                "charts.kyverno.values.cleanupJobs.clusterAdmissionReports.image.repository": mc_repo,
                                 "charts.kyverno.values.webhooksCleanup.image.repository": mc_repo,
+                                "charts.kyverno.values.test.image.repository": mc_repo,
                             })
                     if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
                                                          values_file=self.values_file,
