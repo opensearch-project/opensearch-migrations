@@ -51,6 +51,8 @@ def cat_indices(cluster: Cluster, refresh=False, as_json=False):
     try:
         if refresh and not cluster.is_serverless:
             cluster.call_api('/_refresh')
+        elif refresh and cluster.is_serverless:
+            logger.debug("Skipping index refresh — not supported for serverless collections")
         as_json_suffix = "?format=json" if as_json else "?v=true"
         if cluster.is_serverless:
             cat_indices_path = f"/_cat/indices{as_json_suffix}"
