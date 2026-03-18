@@ -11,7 +11,6 @@ import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
@@ -26,7 +25,6 @@ import reactor.core.publisher.Flux;
 @Slf4j
 public class SolrDocumentSource implements DocumentSource {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int DEFAULT_PAGE_SIZE = 500;
 
     private final SolrClient client;
@@ -62,7 +60,7 @@ public class SolrDocumentSource implements DocumentSource {
     public CollectionMetadata readCollectionMetadata(String collectionName) {
         try {
             var schema = client.getSchema(collectionName);
-            var sourceConfig = buildSourceConfig(collectionName, schema);
+            var sourceConfig = buildSourceConfig(schema);
             return new CollectionMetadata(collectionName, 1, sourceConfig);
         } catch (IOException e) {
             throw new SolrReadException("Failed to read schema for " + collectionName, e);
@@ -75,31 +73,37 @@ public class SolrDocumentSource implements DocumentSource {
         var collection = solrPartition.collection();
 
         return Flux.<Document>create(sink -> {
-            String cursorMark = "*";
-            long emitted = 0;
             try {
-                while (!sink.isCancelled()) {
-                    var response = client.query(collection, cursorMark, pageSize);
-                    var docs = response.docs();
-                    if (!docs.isArray() || docs.isEmpty()) {
-                        break;
-                    }
-                    for (var doc : docs) {
-                        emitted++;
-                        if (emitted > startingDocOffset) {
-                            sink.next(toDocument(doc));
-                        }
-                    }
-                    if (response.nextCursorMark().equals(cursorMark)) {
-                        break;
-                    }
-                    cursorMark = response.nextCursorMark();
-                }
+                paginateDocuments(collection, startingDocOffset, sink);
                 sink.complete();
             } catch (IOException e) {
                 sink.error(new SolrReadException("Failed to query " + collection, e));
             }
         });
+    }
+
+    private void paginateDocuments(
+        String collection, long startingDocOffset, reactor.core.publisher.FluxSink<Document> sink
+    ) throws IOException {
+        String cursorMark = "*";
+        long emitted = 0;
+        while (!sink.isCancelled()) {
+            var response = client.query(collection, cursorMark, pageSize);
+            var docs = response.docs();
+            if (!docs.isArray() || docs.isEmpty()) {
+                return;
+            }
+            for (var doc : docs) {
+                emitted++;
+                if (emitted > startingDocOffset) {
+                    sink.next(toDocument(doc));
+                }
+            }
+            if (response.nextCursorMark().equals(cursorMark)) {
+                return;
+            }
+            cursorMark = response.nextCursorMark();
+        }
     }
 
     private Document toDocument(JsonNode solrDoc) {
@@ -126,7 +130,7 @@ public class SolrDocumentSource implements DocumentSource {
      * Build sourceConfig from Solr schema. Converts Solr field definitions to
      * an OpenSearch-compatible mapping structure.
      */
-    private Map<String, Object> buildSourceConfig(String collectionName, JsonNode schema) {
+    private Map<String, Object> buildSourceConfig(JsonNode schema) {
         var schemaNode = schema.path("schema");
         var fields = schemaNode.path("fields");
         var mappings = SolrSchemaConverter.convertToOpenSearchMappings(fields);

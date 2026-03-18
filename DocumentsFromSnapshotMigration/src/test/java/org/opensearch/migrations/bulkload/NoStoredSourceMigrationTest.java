@@ -15,7 +15,7 @@ import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
@@ -345,7 +345,7 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             log.info("Target index body: {}", targetIndexBody);
             targetOps.createIndex(indexName, targetIndexBody);
 
-            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
                 sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
             var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
@@ -513,7 +513,7 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                 "\"mappings\":{\"properties\":{\"included_field\":{\"type\":\"keyword\"},\"excluded_field\":{\"type\":\"integer\"}}}}";
             targetOps.createIndex(indexName, targetIndexBody);
 
-            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
                 sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
             var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
@@ -598,7 +598,7 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                 "\"mappings\":{\"properties\":{\"binary_field\":{\"type\":\"binary\"}}}}";
             targetOps.createIndex(indexName, targetIndexBody);
 
-            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
                 sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
             var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
@@ -680,7 +680,7 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                 "\"mappings\":{\"properties\":{\"included_field\":{\"type\":\"keyword\"},\"excluded_field\":{\"type\":\"keyword\"}}}}";
             targetOps.createIndex(indexName, targetIndexBody);
 
-            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
                 sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
             var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();

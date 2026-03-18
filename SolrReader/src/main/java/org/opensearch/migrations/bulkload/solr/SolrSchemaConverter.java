@@ -13,31 +13,40 @@ public final class SolrSchemaConverter {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    private static final String OS_INTEGER = "integer";
+    private static final String OS_LONG = "long";
+    private static final String OS_FLOAT = "float";
+    private static final String OS_DOUBLE = "double";
+    private static final String OS_DATE = "date";
+    private static final String OS_BOOLEAN = "boolean";
+    private static final String OS_KEYWORD = "keyword";
+    private static final String OS_TEXT = "text";
+
     private static final Map<String, String> SOLR_TO_OS_TYPE = Map.ofEntries(
-        Map.entry("string", "keyword"),
-        Map.entry("strings", "keyword"),
-        Map.entry("text_general", "text"),
-        Map.entry("text_en", "text"),
-        Map.entry("text_ws", "text"),
-        Map.entry("pint", "integer"),
-        Map.entry("plong", "long"),
-        Map.entry("pfloat", "float"),
-        Map.entry("pdouble", "double"),
-        Map.entry("pdate", "date"),
-        Map.entry("boolean", "boolean"),
-        Map.entry("booleans", "boolean"),
-        Map.entry("plongs", "long"),
-        Map.entry("pfloats", "float"),
-        Map.entry("pdoubles", "double"),
-        Map.entry("pdates", "date"),
-        Map.entry("pints", "integer"),
-        Map.entry("int", "integer"),
-        Map.entry("long", "long"),
-        Map.entry("float", "float"),
-        Map.entry("double", "double"),
-        Map.entry("date", "date"),
-        Map.entry("binary", "binary"),
-        Map.entry("text", "text")
+        Map.entry("string", OS_KEYWORD),
+        Map.entry("strings", OS_KEYWORD),
+        Map.entry("text_general", OS_TEXT),
+        Map.entry("text_en", OS_TEXT),
+        Map.entry("text_ws", OS_TEXT),
+        Map.entry("text", OS_TEXT),
+        Map.entry("pint", OS_INTEGER),
+        Map.entry("pints", OS_INTEGER),
+        Map.entry("int", OS_INTEGER),
+        Map.entry("plong", OS_LONG),
+        Map.entry("plongs", OS_LONG),
+        Map.entry("long", OS_LONG),
+        Map.entry("pfloat", OS_FLOAT),
+        Map.entry("pfloats", OS_FLOAT),
+        Map.entry("float", OS_FLOAT),
+        Map.entry("pdouble", OS_DOUBLE),
+        Map.entry("pdoubles", OS_DOUBLE),
+        Map.entry("double", OS_DOUBLE),
+        Map.entry("pdate", OS_DATE),
+        Map.entry("pdates", OS_DATE),
+        Map.entry("date", OS_DATE),
+        Map.entry("boolean", OS_BOOLEAN),
+        Map.entry("booleans", OS_BOOLEAN),
+        Map.entry("binary", "binary")
     );
 
     private SolrSchemaConverter() {}
@@ -59,7 +68,7 @@ public final class SolrSchemaConverter {
                     continue;
                 }
 
-                var osType = SOLR_TO_OS_TYPE.getOrDefault(type, "text");
+                var osType = SOLR_TO_OS_TYPE.getOrDefault(type, OS_TEXT);
                 ObjectNode fieldMapping = MAPPER.createObjectNode();
                 fieldMapping.put("type", osType);
                 properties.set(name, fieldMapping);
