@@ -22,13 +22,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "config": {
                   "type": "object",
+                  "nullable": true,
                   "properties": {
-                    "replicas": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "default": 1
-                    },
-                    "storage": {
+                    "auth": {
                       "oneOf": [
                         {
                           "type": "object",
@@ -36,7 +32,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": {
                               "type": "string",
                               "enum": [
-                                "ephemeral"
+                                "none"
                               ]
                             }
                           },
@@ -50,32 +46,40 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": {
                               "type": "string",
                               "enum": [
-                                "persistent-claim"
+                                "scram-sha-512"
                               ]
-                            },
-                            "size": {
-                              "type": "string"
                             }
                           },
                           "required": [
-                            "type",
-                            "size"
+                            "type"
                           ]
                         }
                       ],
                       "default": {
-                        "type": "ephemeral"
-                      }
+                        "type": "none"
+                      },
+                      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. This controls the managed listener/auth contract used by migration applications."
                     },
-                    "partitions": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "default": 1
+                    "clusterSpecOverrides": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "nullable": true
+                      },
+                      "description": "Optional overrides merged into the generated Strimzi Kafka.spec. Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."
                     },
-                    "topicReplicas": {
-                      "type": "integer",
-                      "minimum": 1,
-                      "default": 1
+                    "nodePoolSpecOverrides": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "nullable": true
+                      },
+                      "description": "Optional overrides merged into the generated Strimzi KafkaNodePool.spec. Workflow-managed fields such as cluster labels may be overwritten by the workflow."
+                    },
+                    "topicSpecOverrides": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "nullable": true
+                      },
+                      "description": "Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics."
                     }
                   }
                 },
@@ -89,7 +93,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               "required": [
                 "name",
                 "version",
-                "config",
                 "topics"
               ]
             },
@@ -118,6 +121,64 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": "",
                       "description": "Empty defaults to the name of the target label"
+                    },
+                    "managedByWorkflow": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "listenerName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "authType": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "scram-sha-512"
+                      ],
+                      "default": "none"
+                    },
+                    "secretName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "caSecretName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "kafkaUserName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "topicSpecOverrides": {
+                      "type": "object",
+                      "properties": {
+                        "partitions": {
+                          "type": "number"
+                        },
+                        "replicas": {
+                          "type": "number"
+                        },
+                        "config": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "nullable": true
+                          }
+                        }
+                      },
+                      "default": {
+                        "partitions": 1,
+                        "replicas": 1,
+                        "config": {
+                          "retention.ms": 604800000,
+                          "segment.bytes": 1073741824
+                        }
+                      },
+                      "required": [
+                        "partitions",
+                        "replicas",
+                        "config"
+                      ]
                     },
                     "label": {
                       "type": "string"
@@ -1075,6 +1136,64 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": "",
                       "description": "Empty defaults to the name of the target label"
                     },
+                    "managedByWorkflow": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "listenerName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "authType": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "scram-sha-512"
+                      ],
+                      "default": "none"
+                    },
+                    "secretName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "caSecretName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "kafkaUserName": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "topicSpecOverrides": {
+                      "type": "object",
+                      "properties": {
+                        "partitions": {
+                          "type": "number"
+                        },
+                        "replicas": {
+                          "type": "number"
+                        },
+                        "config": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "nullable": true
+                          }
+                        }
+                      },
+                      "default": {
+                        "partitions": 1,
+                        "replicas": 1,
+                        "config": {
+                          "retention.ms": 604800000,
+                          "segment.bytes": 1073741824
+                        }
+                      },
+                      "required": [
+                        "partitions",
+                        "replicas",
+                        "config"
+                      ]
+                    },
                     "label": {
                       "type": "string"
                     }
@@ -1364,13 +1483,9 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "properties": {
               "autoCreate": {
                 "type": "object",
+                "nullable": true,
                 "properties": {
-                  "replicas": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "default": 1
-                  },
-                  "storage": {
+                  "auth": {
                     "oneOf": [
                       {
                         "type": "object",
@@ -1378,7 +1493,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": {
                             "type": "string",
                             "enum": [
-                              "ephemeral"
+                              "none"
                             ]
                           }
                         },
@@ -1392,39 +1507,35 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": {
                             "type": "string",
                             "enum": [
-                              "persistent-claim"
+                              "scram-sha-512"
                             ]
-                          },
-                          "size": {
-                            "type": "string"
                           }
                         },
                         "required": [
-                          "type",
-                          "size"
+                          "type"
                         ]
                       }
                     ],
                     "default": {
-                      "type": "ephemeral"
-                    }
+                      "type": "none"
+                    },
+                    "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. This controls the managed listener/auth contract used by migration applications."
                   },
-                  "partitions": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "default": 1
+                  "clusterSpecOverrides": {
+                    "$ref": "#/$defs/StrimziKafkaSpec",
+                    "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."
                   },
-                  "topicReplicas": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "default": 1
+                  "nodePoolSpecOverrides": {
+                    "$ref": "#/$defs/StrimziKafkaNodePoolSpec",
+                    "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource."
+                  },
+                  "topicSpecOverrides": {
+                    "$ref": "#/$defs/StrimziKafkaTopicSpec",
+                    "description": "Strimzi KafkaTopic.spec overrides merged into workflow-created Kafka topics."
                   }
                 }
               }
-            },
-            "required": [
-              "autoCreate"
-            ]
+            }
           },
           {
             "type": "object",
@@ -1444,6 +1555,55 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "default": "",
                     "description": "Empty defaults to the name of the target label"
+                  },
+                  "auth": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "none"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "scram-sha-512"
+                            ]
+                          },
+                          "secretName": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                          },
+                          "caSecretName": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                          },
+                          "kafkaUserName": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "secretName",
+                          "caSecretName"
+                        ]
+                      }
+                    ],
+                    "default": {
+                      "type": "none"
+                    }
                   }
                 },
                 "required": [
@@ -2528,6 +2688,247 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
     "sourceClusters",
     "targetClusters",
     "snapshotMigrationConfigs"
-  ]
+  ],
+  "$defs": {
+    "io.strimzi.api.kafka.model.KafkaSpec": {
+      "type": "object",
+      "properties": {
+        "kafka": {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.KafkaClusterSpec"
+        },
+        "entityOperator": {
+          "type": "object",
+          "properties": {
+            "topicOperator": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "userOperator": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "io.strimzi.api.kafka.model.nodepool.KafkaNodePoolSpec": {
+      "type": "object",
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "broker",
+              "controller"
+            ]
+          }
+        },
+        "storage": {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.Storage"
+        }
+      },
+      "additionalProperties": false
+    },
+    "io.strimzi.api.kafka.model.topic.KafkaTopicSpec": {
+      "type": "object",
+      "properties": {
+        "partitions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "config": {
+          "type": "object",
+          "properties": {
+            "cleanup.policy": {
+              "type": "string",
+              "enum": [
+                "delete",
+                "compact"
+              ]
+            },
+            "retention.ms": {
+              "type": "integer"
+            },
+            "segment.bytes": {
+              "type": "integer"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "io.strimzi.api.kafka.model.storage.Storage": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.JbodStorage"
+        },
+        {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.PersistentClaimStorage"
+        }
+      ]
+    },
+    "io.strimzi.api.kafka.model.storage.JbodStorage": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "jbod"
+        },
+        "volumes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.PersistentClaimStorage"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "io.strimzi.api.kafka.model.storage.PersistentClaimStorage": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string",
+          "const": "persistent-claim"
+        },
+        "size": {
+          "type": "string"
+        },
+        "deleteClaim": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "io.strimzi.api.kafka.model.KafkaClusterSpec": {
+      "type": "object",
+      "properties": {
+        "readinessProbe": {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.Probe"
+        },
+        "livenessProbe": {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.Probe"
+        },
+        "config": {
+          "type": "object",
+          "properties": {
+            "auto.create.topics.enable": {
+              "type": "boolean"
+            },
+            "offsets.topic.replication.factor": {
+              "type": "integer"
+            },
+            "transaction.state.log.replication.factor": {
+              "type": "integer"
+            },
+            "transaction.state.log.min.isr": {
+              "type": "integer"
+            },
+            "default.replication.factor": {
+              "type": "integer"
+            },
+            "min.insync.replicas": {
+              "type": "integer"
+            },
+            "log.message.format.version": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "listeners": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/io.strimzi.api.kafka.model.GenericKafkaListener"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "io.strimzi.api.kafka.model.Probe": {
+      "type": "object",
+      "properties": {
+        "initialDelaySeconds": {
+          "type": "integer"
+        },
+        "periodSeconds": {
+          "type": "integer"
+        },
+        "timeoutSeconds": {
+          "type": "integer"
+        },
+        "failureThreshold": {
+          "type": "integer"
+        }
+      },
+      "additionalProperties": false
+    },
+    "io.strimzi.api.kafka.model.GenericKafkaListener": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "internal",
+            "loadbalancer"
+          ]
+        },
+        "tls": {
+          "type": "boolean"
+        },
+        "authentication": {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.KafkaListenerAuthentication"
+        }
+      },
+      "additionalProperties": false
+    },
+    "io.strimzi.api.kafka.model.KafkaListenerAuthentication": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "scram-sha-512",
+            "tls"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "StrimziKafkaSpec": {
+      "$ref": "#/$defs/io.strimzi.api.kafka.model.KafkaSpec"
+    },
+    "StrimziKafkaNodePoolSpec": {
+      "$ref": "#/$defs/io.strimzi.api.kafka.model.nodepool.KafkaNodePoolSpec"
+    },
+    "StrimziKafkaTopicSpec": {
+      "$ref": "#/$defs/io.strimzi.api.kafka.model.topic.KafkaTopicSpec"
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://opensearch.org/schemas/workflowMigration.schema.json",
+  "title": "OpenSearch Migration Workflow Configuration",
+  "x-orchestration-specs-strimzi-schema-mode": "full",
+  "x-orchestration-specs-strimzi-schema-detail": "tests/fixtures/strimzi/minimal-openapi.json"
 }"
 `;

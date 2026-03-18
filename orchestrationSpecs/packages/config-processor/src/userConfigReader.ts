@@ -2,6 +2,8 @@ import fs from "node:fs";
 import {parse} from "yaml";
 import {OVERALL_MIGRATION_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
+import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
+import {setNamesInUserConfig} from "./migrationConfigTransformer";
 
 async function readStdin(): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -42,5 +44,11 @@ export async function parseUserConfig(yamlPathOrStdin: string) {
     if (!result.success) {
         throw result.error; // Throw Zod error directly
     }
-    return result.data;
+    const normalized = setNamesInUserConfig(result.data);
+    validateInputAgainstUnifiedSchema({
+        ...data,
+        kafkaClusterConfiguration: normalized.kafkaClusterConfiguration,
+        snapshotMigrationConfigs: normalized.snapshotMigrationConfigs,
+    });
+    return normalized;
 }

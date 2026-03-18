@@ -35,7 +35,7 @@
             },
             {
               "name": "kafkaInfo",
-              "description": "Snapshot configuration information (JSON)",
+              "description": "Kafka client configuration information (JSON)",
               "value": ""
             },
             {
@@ -210,7 +210,7 @@
             },
             {
               "name": "kafkaInfo",
-              "description": "Snapshot configuration information (JSON)",
+              "description": "Kafka client configuration information (JSON)",
               "value": ""
             },
             {

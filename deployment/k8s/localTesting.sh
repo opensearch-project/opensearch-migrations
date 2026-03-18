@@ -31,6 +31,7 @@ gradlew() {
 export KUBE_CONTEXT="${KUBE_CONTEXT:-minikube}"
 
 export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
+export BUILDKIT_HELM_ARGS="--set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0"
 "${MIGRATIONS_REPO_ROOT_DIR}"/buildImages/setUpK8sImageBuildServices.sh
 
 BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
@@ -57,7 +58,7 @@ esac
 
 gradlew :buildImages:buildImagesToRegistry_$PLATFORM -Pbuilder="$BUILDER_NAME"
 
-kubectl config set-context --current --namespace=ma
+kubectl config set-context "${KUBE_CONTEXT}" --namespace=ma
 
 # Nice to have additions to minikube
 minikube addons enable metrics-server
@@ -70,11 +71,7 @@ helm dependency update charts/aggregates/migrationAssistantWithArgo
 
 if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
   echo "Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
-  helm upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
-      --wait --timeout 10m \
-      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard"
-
-  helm upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
+  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
     --wait --timeout 10m \
     -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml \
     --set "images.captureProxy.repository=${LOCAL_REGISTRY}/migrations/capture_proxy" \
@@ -92,14 +89,18 @@ if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
     --set "images.reindexFromSnapshot.repository=${LOCAL_REGISTRY}/migrations/reindex_from_snapshot" \
     --set "images.reindexFromSnapshot.tag=latest" \
     --set "images.reindexFromSnapshot.pullPolicy=Always"
+
+  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
+      --wait --timeout 10m \
+      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard"
 else
   echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
-  helm upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
-    --wait --timeout 10m
-
-  helm upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
+  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
     --wait --timeout 10m \
     -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
+
+  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
+    --wait --timeout 10m
 fi
 
 

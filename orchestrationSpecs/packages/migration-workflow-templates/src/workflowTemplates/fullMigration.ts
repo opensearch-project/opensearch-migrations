@@ -130,7 +130,29 @@ export const FullMigration = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.kafkaClusterName,
                 })
-            )
+            , {
+                when: {
+                    templateExp: expr.dig(
+                        expr.deserializeRecord(b.inputs.proxyConfig),
+                        ["kafkaConfig", "managedByWorkflow"],
+                        false
+                    )
+                }
+            })
+            .addStep("readKafkaConnectionProfile", ResourceManagement, "readKafkaConnectionProfile", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.kafkaClusterName,
+                })
+            , {
+                when: {
+                    templateExp: expr.dig(
+                        expr.deserializeRecord(b.inputs.proxyConfig),
+                        ["kafkaConfig", "managedByWorkflow"],
+                        false
+                    )
+                }
+            })
             .addStep("setupProxy", SetupCapture, "setupProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -140,6 +162,9 @@ export const FullMigration = WorkflowBuilder.create({
                     proxyName: b.inputs.proxyName,
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    resolvedKafkaConnection: c.steps.readKafkaConnectionProfile.outputs.bootstrapServers,
+                    resolvedKafkaListenerName: c.steps.readKafkaConnectionProfile.outputs.listenerName,
+                    resolvedKafkaAuthType: c.steps.readKafkaConnectionProfile.outputs.authType,
                 })
             )
             .addStep("patchCapturedTraffic", ResourceManagement, "patchCapturedTrafficReady", c =>
@@ -408,13 +433,38 @@ export const FullMigration = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.kafkaClusterName
                 })
-            )
+            , {
+                when: {
+                    templateExp: expr.dig(
+                        expr.deserializeRecord(b.inputs.kafkaConfig),
+                        ["managedByWorkflow"],
+                        false
+                    )
+                }
+            })
+            .addStep("readKafkaConnectionProfile", ResourceManagement, "readKafkaConnectionProfile", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.kafkaClusterName
+                })
+            , {
+                when: {
+                    templateExp: expr.dig(
+                        expr.deserializeRecord(b.inputs.kafkaConfig),
+                        ["managedByWorkflow"],
+                        false
+                    )
+                }
+            })
 
             .addStep("deployReplayer", Replayer, "setupReplayer", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     kafkaGroupId: expr.concat(expr.literal("replayer-"),
                         expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label")),
+                    resolvedKafkaConnection: c.steps.readKafkaConnectionProfile.outputs.bootstrapServers,
+                    resolvedKafkaListenerName: c.steps.readKafkaConnectionProfile.outputs.listenerName,
+                    resolvedKafkaAuthType: c.steps.readKafkaConnectionProfile.outputs.authType,
                     name: expr.concat(
                         b.inputs.fromProxy,
                         expr.literal("-"),
