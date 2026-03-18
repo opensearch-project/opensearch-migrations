@@ -114,6 +114,6 @@ public class SolrClient implements AutoCloseable {
     }
 
     /** Response from a Solr /select query. */
-    @SuppressWarnings("java:S100") // Record name follows Java naming conventions
+    @SuppressWarnings({ "java:S100", "java:S1186" }) // Record — no additional methods needed
     public record SolrQueryResponse(JsonNode docs, String nextCursorMark, long numFound) {}
 }
