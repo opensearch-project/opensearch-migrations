@@ -15,11 +15,17 @@ function convertTermsFacet(def: JavaMap): JavaMap {
   const termsInner = new Map<string, any>();
   termsInner.set('field', def.get('field'));
 
-  const limit = def.get('limit');
-  if (limit != null) termsInner.set('size', limit);
+  let offset = def.get('offset');
+  let limit = def.get('limit');
 
-  const offset = def.get('offset');
-  if (offset != null) termsInner.set('shard_size', offset);
+  // OpenSearch has no concept of offset. So, return a large result and
+  // expect the client to take the last `limit` results.
+  // TODO: emit a metric when validation framework is ready.
+  if (offset != null || limit != null) {
+    offset ??= 0;
+    limit ??= 10;
+    termsInner.set('size', offset + limit);
+  }
 
   const mincount = def.get('mincount');
   if (mincount != null) termsInner.set('min_doc_count', mincount);
