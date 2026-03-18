@@ -333,14 +333,10 @@ class K8sService:
     def _dump_helm_debug_info(self, release_name: str):
         """Dump detailed debug info when helm install fails."""
         logger.error("=== BEGIN HELM INSTALL DEBUG INFO ===")
-        debug_namespaces = [self.namespace, "kyverno-ma", "kube-system"]
-        debug_commands = []
-        for ns in debug_namespaces:
-            debug_commands.extend([
-                (f"Pods in {ns}", self._kubectl_base() + ["get", "pods", "-n", ns, "-o", "wide"]),
-                (f"Events in {ns}", self._kubectl_base() + [
-                    "get", "events", "-n", ns, "--sort-by=.lastTimestamp"]),
-            ])
+        debug_commands = [
+            ("All pods", self._kubectl_base() + ["get", "pods", "--all-namespaces", "-o", "wide"]),
+            ("All events", self._kubectl_base() + ["get", "events", "--all-namespaces", "--sort-by=.lastTimestamp"]),
+        ]
         debug_commands.extend([
             (f"Jobs in {self.namespace}", self._kubectl_base() + ["get", "jobs", "-n", self.namespace, "-o", "wide"]),
             ("Job status detail", self._kubectl_base() + [
