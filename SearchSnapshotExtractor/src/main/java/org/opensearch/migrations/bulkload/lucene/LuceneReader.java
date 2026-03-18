@@ -21,36 +21,38 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 public class LuceneReader {
 
-    /** Dedicated scheduler for Lucene I/O — more threads than boundedElastic on small pods. */
-    private static final Scheduler LUCENE_IO_SCHEDULER = Schedulers.newBoundedElastic(
-        64, Integer.MAX_VALUE, "lucene-io", 60, true
-    );
-
-    /** Concurrency for flatMapSequential within a segment — matches the scheduler thread count. */
-    private static final int SEGMENT_READ_CONCURRENCY = 64;
-
     private LuceneReader() {}
 
     /* Start reading docs from a specific segment and document id.
        If the startSegmentIndex is 0, it will start from the first segment.
        If the startDocId is 0, it will start from the first document in the segment.
-       Segments are read sequentially; within each segment, docs are read with bounded
-       concurrency (matching the Lucene I/O scheduler thread count) via flatMapSequential
-       to keep the source feeding batches fast enough.
      */
-    public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
+    public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId, FieldMappingContext mappingContext) {
+        var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
             .addArgument(() -> reader.leaves().size())
             .log();
 
+        // Create shared scheduler for i/o bound document reading
+        var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
         return getSegmentsFromStartingSegment(reader.leaves(), startDocId)
             .concatMapDelayError(c -> readDocsFromSegment(c,
                     startDocId,
+                    sharedSegmentReaderScheduler,
+                    maxDocumentsToReadAtOnce,
                     reader.getIndexDirectoryPath(),
-                    DocumentChangeType.INDEX)
+                    DocumentChangeType.INDEX,
+                    mappingContext)
             )
-            .subscribeOn(LUCENE_IO_SCHEDULER);
+            .subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
+            .publishOn(Schedulers.boundedElastic()) // Switch scheduler for subsequent chain
+            .doFinally(s -> sharedSegmentReaderScheduler.dispose());
+    }
+
+    /** Backwards-compatible overload without mapping context */
+    public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
+        return readDocsByLeavesFromStartingPosition(reader, startDocId, null);
     }
 
     /**
@@ -100,8 +102,9 @@ public class LuceneReader {
         return Flux.fromIterable(sortedReaderAndBase.subList(index, sortedReaderAndBase.size()));
     }
 
-    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
-                                                Path indexDirectoryPath, DocumentChangeType operation) {
+    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId, Scheduler scheduler,
+                                                int concurrency, Path indexDirectoryPath, DocumentChangeType operation,
+                                                FieldMappingContext mappingContext) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = readerAndBase.getLiveDocs();
 
@@ -127,11 +130,13 @@ public class LuceneReader {
         var idxStream = (liveDocs != null) ? liveDocs.stream().filter(idx -> idx >= startDocIdInSegment) :
             IntStream.range(startDocIdInSegment, segmentReader.maxDoc());
         return Flux.fromStream(idxStream.boxed())
-            .flatMapSequential(docIdx -> Mono.defer(() -> {
+            .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
                     try {
-                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation);
-                        return Mono.justOrEmpty(document);
+                        // Get document, returns null to skip malformed docs
+                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext);
+                        return Mono.justOrEmpty(document); // Emit only non-null documents
                     } catch (Exception e) {
+                        // Handle individual document read failures gracefully
                         log.atError().setMessage("Error reading document from reader {} with index: {}")
                             .addArgument(getSegmentReaderDebugInfo)
                             .addArgument(docIdx)
@@ -140,10 +145,20 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                }).subscribeOn(LUCENE_IO_SCHEDULER), SEGMENT_READ_CONCURRENCY, 1);
+                }).subscribeOn(scheduler),
+                        concurrency, 1)
+                .subscribeOn(scheduler);
     }
 
-    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation) {
+    /** Backwards-compatible overload without mapping context */
+    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId, Scheduler scheduler,
+                                                int concurrency, Path indexDirectoryPath, DocumentChangeType operation) {
+        return readDocsFromSegment(readerAndBase, docStartingId, scheduler, concurrency, indexDirectoryPath, operation, null);
+    }
+
+    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, 
+            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
+            FieldMappingContext mappingContext) {
         LuceneDocument document;
         try {
             document = reader.document(luceneDocId);
@@ -155,7 +170,7 @@ public class LuceneReader {
 
         String openSearchDocId = null;
         String type = null;
-        byte[] sourceBytes = null;
+        String sourceBytes = null;
         String routing = null;
 
         try {
@@ -175,8 +190,8 @@ public class LuceneReader {
                         break;
                     }
                     case "_source": {
-                        // All versions — keep as raw bytes to avoid String allocation
-                        sourceBytes = field.utf8Value();
+                        // All versions (?)
+                        sourceBytes = field.utf8ToStringValue();
                         break;
                     }
                     case "_routing": {
@@ -196,13 +211,25 @@ public class LuceneReader {
                 return null;  // Skip documents with missing id
             }
 
-            if (sourceBytes == null || sourceBytes.length == 0) {
-                log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have the _source field enabled.")
-                    .addArgument(luceneDocId)
-                    .addArgument(getSegmentReaderDebugInfo)
-                    .addArgument(indexDirectoryPath)
-                    .log();
-                return null;  // Skip these
+            if (sourceBytes == null || sourceBytes.isEmpty()) {
+                // Try to reconstruct _source from doc_values and stored fields
+                log.atDebug().setMessage("Document {} has no _source, attempting reconstruction from doc_values and stored fields")
+                    .addArgument(openSearchDocId).log();
+                sourceBytes = SourceReconstructor.reconstructSource(reader, luceneDocId, document, mappingContext);
+                
+                if (sourceBytes == null || sourceBytes.isEmpty()) {
+                    log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, _source is missing and reconstruction failed.")
+                        .addArgument(luceneDocId)
+                        .addArgument(getSegmentReaderDebugInfo)
+                        .addArgument(indexDirectoryPath)
+                        .log();
+                    return null;  // Skip these
+                }
+                log.atDebug().setMessage("Successfully reconstructed _source for document {} from doc_values")
+                    .addArgument(openSearchDocId).log();
+            } else {
+                // Merge excluded fields from doc_values and stored fields
+                sourceBytes = SourceReconstructor.mergeWithDocValues(sourceBytes, reader, luceneDocId, document, mappingContext);
             }
 
             log.atDebug().setMessage("Reading document {}").addArgument(openSearchDocId).log();
@@ -225,5 +252,11 @@ public class LuceneReader {
 
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
         return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing, operation);
+    }
+
+    /** Backwards-compatible overload without mapping context */
+    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, 
+            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation) {
+        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, null);
     }
 }
