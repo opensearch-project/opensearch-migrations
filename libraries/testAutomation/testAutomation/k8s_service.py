@@ -317,7 +317,8 @@ class K8sService:
             logger.info(f"Helm release {release_name} already exists, skipping install")
             return True
         logger.info(f"Installing {release_name} from {chart_path} with values {values_file}")
-        command = self._helm_base() + ["install", release_name, chart_path, "-n", self.namespace, "--create-namespace"]
+        command = self._helm_base() + ["install", release_name, chart_path, "-n", self.namespace, "--create-namespace",
+                                       "--wait", "--timeout", "5m"]
         if values_file:
             command.extend(["-f", values_file])
         if values:
@@ -333,15 +334,26 @@ class K8sService:
         """Dump detailed debug info when helm install fails."""
         logger.error("=== BEGIN HELM INSTALL DEBUG INFO ===")
         debug_commands = [
-            (f"Pods in {self.namespace}", self._kubectl_base() + ["get", "pods", "-n", self.namespace, "-o", "wide"]),
-            ("Pods in kyverno-ma", self._kubectl_base() + ["get", "pods", "-n", "kyverno-ma", "-o", "wide"]),
-            (f"Jobs in {self.namespace}", self._kubectl_base() + ["get", "jobs", "-n", self.namespace, "-o", "wide"]),
-            (f"Events in {self.namespace}", self._kubectl_base() + [
-                "get", "events", "-n", self.namespace, "--sort-by=.lastTimestamp"]),
-            ("Events in kyverno-ma", self._kubectl_base() + [
-                "get", "events", "-n", "kyverno-ma", "--sort-by=.lastTimestamp"]),
-            ("Helm list all namespaces", self._helm_base() + ["list", "--all-namespaces"]),
+            ("All pods", self._kubectl_base() + ["get", "pods", "--all-namespaces", "-o", "wide"]),
+            ("All events", self._kubectl_base() + ["get", "events", "--all-namespaces", "--sort-by=.lastTimestamp"]),
+            ("kube-system pod logs", self._kubectl_base() + [
+                "logs", "-n", "kube-system", "--all-containers", "--prefix", "--tail=200",
+                "-l", "tier=control-plane"]),
         ]
+        debug_commands.extend([
+            (f"Jobs in {self.namespace}", self._kubectl_base() + ["get", "jobs", "-n", self.namespace, "-o", "wide"]),
+            ("Job status detail", self._kubectl_base() + [
+                "get", "jobs", "-n", self.namespace, "-l", f"app.kubernetes.io/instance={release_name}",
+                "-o", "jsonpath={range .items[*]}name={.metadata.name} succeeded={.status.succeeded} "
+                "failed={.status.failed} conditions={.status.conditions[*].type} "
+                "uncountedSucceeded={.status.uncountedTerminatedPods.succeeded} "
+                "uncountedFailed={.status.uncountedTerminatedPods.failed}{\"\\n\"}{end}"]),
+            ("Pod finalizers", self._kubectl_base() + [
+                "get", "pods", "-n", self.namespace, "-l", f"app.kubernetes.io/instance={release_name}",
+                "-o", "jsonpath={range .items[*]}name={.metadata.name} phase={.status.phase} "
+                "finalizers={.metadata.finalizers}{\"\\n\"}{end}"]),
+            ("Helm list all namespaces", self._helm_base() + ["list", "--all-namespaces"]),
+        ])
         for label, cmd in debug_commands:
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
