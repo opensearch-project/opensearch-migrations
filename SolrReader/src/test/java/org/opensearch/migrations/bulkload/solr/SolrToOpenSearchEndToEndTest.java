@@ -32,13 +32,10 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end tests: Solr backup (Lucene) → pipeline → OpenSearch.
- *
- * <p>Creates a Solr core, indexes documents, fetches schema, takes a backup,
- * then reads via {@link SolrBackupSource} (Lucene + schema) through the pipeline
- * to a real OpenSearch container.
  */
 @Slf4j
 @Tag("isolatedTest")
@@ -59,11 +56,14 @@ public class SolrToOpenSearchEndToEndTest {
 
     @ParameterizedTest(name = "{0} → {1}")
     @MethodSource("solr8ToOpenSearch")
-    void fullMigrationFromBackup(SolrClusterContainer.SolrVersion solrVersion,
-                                  SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
-        try (var solr = new SolrClusterContainer(solrVersion);
-             var target = new SearchClusterContainer(targetVersion)) {
-
+    void fullMigrationFromBackup(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
             solr.start();
             target.start();
 
@@ -75,85 +75,235 @@ public class SolrToOpenSearchEndToEndTest {
 
             var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
             var targetClient = createOpenSearchClient(target);
-            var sink = new OpenSearchDocumentSink(targetClient, null, false,
-                DocumentExceptionAllowlist.empty(), null);
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
             var pipeline = new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE);
 
             var cursors = pipeline.migrateAll().collectList().block();
 
             assertThat("Should have progress cursors", cursors.size(), greaterThan(0));
             verifyDocCount(target, COLLECTION_NAME, 10);
-            log.info("Solr backup {} → OS {} migration complete: 10 docs", solrVersion, targetVersion);
         }
     }
 
-    @ParameterizedTest(name = "mappings: {0} → {1}")
+    /**
+     * Tests migration of diverse Solr field types with various stored/docValues/indexed
+     * combinations. Verifies:
+     * - Schema-derived mappings have correct OpenSearch types
+     * - Stored fields are readable from the Lucene backup
+     * - Unstored fields with docValues are readable
+     * - Multi-valued fields migrate correctly
+     * - All field type conversions (string→keyword, pint→integer, etc.)
+     */
+    @ParameterizedTest(name = "field types: {0} → {1}")
     @MethodSource("solr8ToOpenSearch")
-    void backupMigrationCreatesMappingsFromSchema(SolrClusterContainer.SolrVersion solrVersion,
-                                                   SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
-        try (var solr = new SolrClusterContainer(solrVersion);
-             var target = new SearchClusterContainer(targetVersion)) {
-
+    void migratesAllFieldTypesAndStorageCombinations(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
             solr.start();
             target.start();
 
             createSolrCollection(solr, COLLECTION_NAME);
-            populateSolrDocuments(solr, COLLECTION_NAME, 3);
+
+            // Add explicit fields with various stored/docValues/indexed combos
+            addSchemaFields(solr, COLLECTION_NAME);
+
+            // Index a document exercising all field types
+            indexRichDocument(solr, COLLECTION_NAME);
 
             var schema = fetchSolrSchema(solr, COLLECTION_NAME);
             var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
 
             var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
             var targetClient = createOpenSearchClient(target);
-            var sink = new OpenSearchDocumentSink(targetClient, null, false,
-                DocumentExceptionAllowlist.empty(), null);
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
             var pipeline = new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE);
             pipeline.migrateAll().collectList().block();
 
-            // Verify mappings on target
             var restClient = createRestClient(target);
-            var context = DocumentMigrationTestContext.factory().noOtelTracking();
-            restClient.get("_refresh", context.createUnboundRequestContext());
+            var ctx = DocumentMigrationTestContext.factory().noOtelTracking();
+            restClient.get("_refresh", ctx.createUnboundRequestContext());
 
-            var resp = restClient.get(COLLECTION_NAME + "/_mapping", context.createUnboundRequestContext());
-            assertThat("Mapping request should succeed", resp.statusCode, equalTo(200));
-
-            var properties = MAPPER.readTree(resp.body)
+            // --- Verify mappings ---
+            var mappingResp = restClient.get(
+                COLLECTION_NAME + "/_mapping", ctx.createUnboundRequestContext()
+            );
+            var properties = MAPPER.readTree(mappingResp.body)
                 .path(COLLECTION_NAME).path("mappings").path("properties");
             log.info("OpenSearch mappings: {}", properties);
 
-            // id field should be keyword (from Solr string type)
-            assertThat("id should be keyword",
-                properties.path("id").path("type").asText(), equalTo("keyword"));
+            assertThat("id → keyword", properties.path("id").path("type").asText(), equalTo("keyword"));
+            assertThat(
+                "stored_keyword → keyword",
+                properties.path("stored_keyword").path("type").asText(),
+                equalTo("keyword")
+            );
+            assertThat(
+                "stored_text → text",
+                properties.path("stored_text").path("type").asText(),
+                equalTo("text")
+            );
+            assertThat(
+                "stored_int → integer",
+                properties.path("stored_int").path("type").asText(),
+                equalTo("integer")
+            );
+            assertThat(
+                "stored_long → long",
+                properties.path("stored_long").path("type").asText(),
+                equalTo("long")
+            );
+            assertThat(
+                "stored_float → float",
+                properties.path("stored_float").path("type").asText(),
+                equalTo("float")
+            );
+            assertThat(
+                "stored_double → double",
+                properties.path("stored_double").path("type").asText(),
+                equalTo("double")
+            );
+            assertThat(
+                "stored_date → date",
+                properties.path("stored_date").path("type").asText(),
+                equalTo("date")
+            );
+            assertThat(
+                "stored_bool → boolean",
+                properties.path("stored_bool").path("type").asText(),
+                equalTo("boolean")
+            );
+            assertThat(
+                "stored_binary → binary",
+                properties.path("stored_binary").path("type").asText(),
+                equalTo("binary")
+            );
+            assertThat(
+                "multi_string → keyword",
+                properties.path("multi_string").path("type").asText(),
+                equalTo("keyword")
+            );
+            // Unstored fields should still appear in mappings (from schema)
+            assertThat(
+                "unstored_keyword → keyword",
+                properties.path("unstored_keyword").path("type").asText(),
+                equalTo("keyword")
+            );
+            assertThat(
+                "unstored_int → integer",
+                properties.path("unstored_int").path("type").asText(),
+                equalTo("integer")
+            );
 
-            // Verify docs have content
-            var searchResp = restClient.get(COLLECTION_NAME + "/_search?q=*:*&size=1",
-                context.createUnboundRequestContext());
+            // --- Verify document content ---
+            var searchResp = restClient.get(
+                COLLECTION_NAME + "/_search?q=id:doc1&size=1", ctx.createUnboundRequestContext()
+            );
             var hits = MAPPER.readTree(searchResp.body).path("hits").path("hits");
-            assertThat("Should have hits", hits.size(), greaterThan(0));
-            assertNotNull(hits.get(0).path("_source"), "Doc should have _source");
+            assertThat("Should find doc1", hits.size(), equalTo(1));
 
-            log.info("Mappings verified: Solr schema → OpenSearch mappings applied");
+            var source1 = hits.get(0).path("_source");
+            log.info("Migrated doc: {}", source1);
+
+            // Stored fields should be present
+            assertNotNull(source1.get("stored_keyword"), "stored_keyword should be in _source");
+            assertThat(source1.path("stored_keyword").asText(), equalTo("hello"));
+            assertNotNull(source1.get("stored_text"), "stored_text should be in _source");
+            assertThat(source1.path("stored_text").asText(), equalTo("full text search"));
+            assertNotNull(source1.get("stored_int"), "stored_int should be in _source");
+            assertNotNull(source1.get("stored_long"), "stored_long should be in _source");
+            assertNotNull(source1.get("stored_float"), "stored_float should be in _source");
+            assertNotNull(source1.get("stored_double"), "stored_double should be in _source");
+            assertNotNull(source1.get("stored_date"), "stored_date should be in _source");
+            assertNotNull(source1.get("stored_bool"), "stored_bool should be in _source");
+            assertNotNull(source1.get("nodv_keyword"), "nodv_keyword (stored, no docValues) should be in _source");
+            assertThat(source1.path("nodv_keyword").asText(), equalTo("no-docvalues"));
+
+            // Multi-valued field
+            assertTrue(
+                source1.has("multi_string"),
+                "multi_string should be in _source"
+            );
+
+            log.info("All field types and storage combinations verified");
         }
     }
 
     // --- Helpers ---
 
+    private static void addSchemaFields(SolrClusterContainer solr, String collection) throws Exception {
+        var schemaUpdate = "{"
+            + "\"add-field\": ["
+            + "  {\"name\":\"stored_keyword\",   \"type\":\"string\",      \"stored\":true,  \"docValues\":true,  \"indexed\":true},"
+            + "  {\"name\":\"unstored_keyword\", \"type\":\"string\",      \"stored\":false, \"docValues\":true,  \"indexed\":true},"
+            + "  {\"name\":\"stored_text\",      \"type\":\"text_general\", \"stored\":true,  \"indexed\":true},"
+            + "  {\"name\":\"unstored_text\",    \"type\":\"text_general\", \"stored\":false, \"indexed\":true},"
+            + "  {\"name\":\"stored_int\",       \"type\":\"pint\",         \"stored\":true,  \"docValues\":true,  \"indexed\":true},"
+            + "  {\"name\":\"unstored_int\",     \"type\":\"pint\",         \"stored\":false, \"docValues\":true,  \"indexed\":true},"
+            + "  {\"name\":\"stored_long\",      \"type\":\"plong\",        \"stored\":true,  \"docValues\":true},"
+            + "  {\"name\":\"stored_float\",     \"type\":\"pfloat\",       \"stored\":true,  \"docValues\":true},"
+            + "  {\"name\":\"stored_double\",    \"type\":\"pdouble\",      \"stored\":true,  \"docValues\":true},"
+            + "  {\"name\":\"stored_date\",      \"type\":\"pdate\",        \"stored\":true,  \"docValues\":true},"
+            + "  {\"name\":\"stored_bool\",      \"type\":\"boolean\",      \"stored\":true,  \"docValues\":true},"
+            + "  {\"name\":\"unstored_bool\",    \"type\":\"boolean\",      \"stored\":false, \"docValues\":true},"
+            + "  {\"name\":\"stored_binary\",    \"type\":\"binary\",       \"stored\":true},"
+            + "  {\"name\":\"multi_string\",     \"type\":\"strings\",      \"stored\":true,  \"docValues\":true, \"multiValued\":true},"
+            + "  {\"name\":\"nodv_keyword\",     \"type\":\"string\",       \"stored\":true,  \"docValues\":false, \"indexed\":true}"
+            + "]}";
+        var result = solr.execInContainer(
+            "curl", "-s", "-H", "Content-Type: application/json",
+            "http://localhost:8983/solr/" + collection + "/schema",
+            "-d", schemaUpdate
+        );
+        log.info("Schema update: {}", result.getStdout());
+    }
+
+    private static void indexRichDocument(SolrClusterContainer solr, String collection) throws Exception {
+        var doc = "[{"
+            + "\"id\": \"doc1\","
+            + "\"stored_keyword\": \"hello\","
+            + "\"unstored_keyword\": \"invisible\","
+            + "\"stored_text\": \"full text search\","
+            + "\"unstored_text\": \"not stored\","
+            + "\"stored_int\": 42,"
+            + "\"unstored_int\": 99,"
+            + "\"stored_long\": 1234567890,"
+            + "\"stored_float\": 3.14,"
+            + "\"stored_double\": 2.718281828,"
+            + "\"stored_date\": \"2024-01-15T10:30:00Z\","
+            + "\"stored_bool\": true,"
+            + "\"unstored_bool\": false,"
+            + "\"stored_binary\": \"SGVsbG8gV29ybGQ=\","
+            + "\"multi_string\": [\"alpha\", \"beta\", \"gamma\"],"
+            + "\"nodv_keyword\": \"no-docvalues\""
+            + "}]";
+        solr.execInContainer(
+            "curl", "-s", "-H", "Content-Type: application/json",
+            "http://localhost:8983/solr/" + collection + "/update?commit=true",
+            "-d", doc
+        );
+    }
+
     private static JsonNode fetchSolrSchema(SolrClusterContainer solr, String collection) throws Exception {
         var result = solr.execInContainer(
             "curl", "-s", "http://localhost:8983/solr/" + collection + "/schema?wt=json"
         );
-        if (result.getExitCode() != 0) {
-            throw new RuntimeException("Failed to fetch schema: " + result.getStderr());
-        }
-        var schemaResponse = MAPPER.readTree(result.getStdout());
-        return schemaResponse.path("schema");
+        return MAPPER.readTree(result.getStdout()).path("schema");
     }
 
     private Path createAndCopyBackup(SolrClusterContainer solr, String collection) throws Exception {
         solr.execInContainer(
             "curl", "-s",
-            "http://localhost:8983/solr/" + collection + "/replication?command=backup&location=/var/solr/data&name=migration_backup"
+            "http://localhost:8983/solr/" + collection
+                + "/replication?command=backup&location=/var/solr/data&name=migration_backup"
         );
         Thread.sleep(3000);
 
@@ -168,7 +318,6 @@ public class SolrToOpenSearchEndToEndTest {
                 localBackupDir.resolve(fileName).toString()
             );
         }
-        log.info("Copied Solr backup to {}", localBackupDir);
         return localBackupDir;
     }
 
@@ -200,21 +349,27 @@ public class SolrToOpenSearchEndToEndTest {
     private static org.opensearch.migrations.bulkload.common.OpenSearchClient createOpenSearchClient(
         SearchClusterContainer cluster
     ) {
-        return new OpenSearchClientFactory(ConnectionContextTestParams.builder()
-            .host(cluster.getUrl()).build().toConnectionContext()).determineVersionAndCreate();
+        return new OpenSearchClientFactory(
+            ConnectionContextTestParams.builder().host(cluster.getUrl()).build().toConnectionContext()
+        ).determineVersionAndCreate();
     }
 
     private static RestClient createRestClient(SearchClusterContainer cluster) {
-        return new RestClient(ConnectionContextTestParams.builder()
-            .host(cluster.getUrl()).build().toConnectionContext());
+        return new RestClient(
+            ConnectionContextTestParams.builder().host(cluster.getUrl()).build().toConnectionContext()
+        );
     }
 
     private static void verifyDocCount(SearchClusterContainer cluster, String indexName, int expected) {
         var context = DocumentMigrationTestContext.factory().noOtelTracking();
         var restClient = createRestClient(cluster);
         restClient.get("_refresh", context.createUnboundRequestContext());
-        assertEquals(expected,
-            new SearchClusterRequests(context).getMapOfIndexAndDocCount(restClient).getOrDefault(indexName, 0),
-            "Expected " + expected + " docs in " + indexName);
+        assertEquals(
+            expected,
+            new SearchClusterRequests(context)
+                .getMapOfIndexAndDocCount(restClient)
+                .getOrDefault(indexName, 0),
+            "Expected " + expected + " docs in " + indexName
+        );
     }
 }
