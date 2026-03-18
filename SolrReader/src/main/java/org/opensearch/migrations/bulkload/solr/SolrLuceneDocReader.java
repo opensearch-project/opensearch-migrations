@@ -51,17 +51,15 @@ final class SolrLuceneDocReader {
         var fields = new LinkedHashMap<String, Object>();
 
         for (var field : document.getFields()) {
-            if (isInternalField(field.name())) {
-                continue;
+            if (!isInternalField(field.name())) {
+                Object value = extractFieldValue(field);
+                if (value != null) {
+                    if ("id".equals(field.name())) {
+                        docId = value.toString();
+                    }
+                    addFieldValue(fields, field.name(), value);
+                }
             }
-            Object value = extractFieldValue(field);
-            if (value == null) {
-                continue;
-            }
-            if ("id".equals(field.name())) {
-                docId = value.toString();
-            }
-            addFieldValue(fields, field.name(), value);
         }
 
         if (docId == null) {

@@ -37,14 +37,14 @@ public final class SolrSchemaConverter {
         Map.entry("long", OS_LONG),
         Map.entry("pfloat", OS_FLOAT),
         Map.entry("pfloats", OS_FLOAT),
-        Map.entry("float", OS_FLOAT),
+        Map.entry(OS_FLOAT, OS_FLOAT),
         Map.entry("pdouble", OS_DOUBLE),
         Map.entry("pdoubles", OS_DOUBLE),
-        Map.entry("double", OS_DOUBLE),
+        Map.entry(OS_DOUBLE, OS_DOUBLE),
         Map.entry("pdate", OS_DATE),
         Map.entry("pdates", OS_DATE),
         Map.entry("date", OS_DATE),
-        Map.entry("boolean", OS_BOOLEAN),
+        Map.entry(OS_BOOLEAN, OS_BOOLEAN),
         Map.entry("booleans", OS_BOOLEAN),
         Map.entry("binary", "binary")
     );

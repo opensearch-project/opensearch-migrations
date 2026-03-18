@@ -85,9 +85,11 @@ public class SolrDocumentSource implements DocumentSource {
     private void paginateDocuments(
         String collection, long startingDocOffset, reactor.core.publisher.FluxSink<Document> sink
     ) throws IOException {
-        String cursorMark = "*";
         long emitted = 0;
-        while (!sink.isCancelled()) {
+        String cursorMark = "*";
+        String previousCursorMark;
+        do {
+            previousCursorMark = cursorMark;
             var response = client.query(collection, cursorMark, pageSize);
             var docs = response.docs();
             if (!docs.isArray() || docs.isEmpty()) {
@@ -99,11 +101,8 @@ public class SolrDocumentSource implements DocumentSource {
                     sink.next(toDocument(doc));
                 }
             }
-            if (response.nextCursorMark().equals(cursorMark)) {
-                return;
-            }
             cursorMark = response.nextCursorMark();
-        }
+        } while (!sink.isCancelled() && !cursorMark.equals(previousCursorMark));
     }
 
     private Document toDocument(JsonNode solrDoc) {
