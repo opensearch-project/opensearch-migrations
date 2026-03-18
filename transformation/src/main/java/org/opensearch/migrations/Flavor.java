@@ -9,7 +9,8 @@ public enum Flavor {
     ELASTICSEARCH("ES"),
     OPENSEARCH("OS"),
     AMAZON_MANAGED_OPENSEARCH("AOS"),
-    AMAZON_SERVERLESS_OPENSEARCH("AOSS");
+    AMAZON_SERVERLESS_OPENSEARCH("AOSS"),
+    SOLR("SOLR");
 
     final String shorthand;
 
