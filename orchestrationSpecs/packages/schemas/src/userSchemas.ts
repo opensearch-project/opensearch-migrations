@@ -174,16 +174,16 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
     clusterSpecOverrides: {
         kafka: {
             readinessProbe: {
-                initialDelaySeconds: 1,
-                periodSeconds: 2,
-                timeoutSeconds: 2,
-                failureThreshold: 1,
+                initialDelaySeconds: 10,
+                periodSeconds: 10,
+                timeoutSeconds: 5,
+                failureThreshold: 12,
             },
             livenessProbe: {
-                initialDelaySeconds: 1,
-                periodSeconds: 2,
-                timeoutSeconds: 2,
-                failureThreshold: 2,
+                initialDelaySeconds: 30,
+                periodSeconds: 15,
+                timeoutSeconds: 5,
+                failureThreshold: 8,
             },
             config: {
                 "auto.create.topics.enable": false,

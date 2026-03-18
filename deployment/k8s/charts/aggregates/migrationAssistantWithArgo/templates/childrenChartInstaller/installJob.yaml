@@ -96,7 +96,68 @@ spec:
         {{- if $kyvernoChart }}
               echo "Installing Kyverno first (must be ready before other charts)..."
               {{- include "migration.installChart" (dict "name" "kyverno" "chart" $kyvernoChart "root" $ "forceWait" true) | nindent 14 }}
-              echo "Kyverno installed and ready"
+              echo "Kyverno helm install complete, waiting for admission webhook to be ready..."
+              kubectl wait --for=condition=Ready -n {{ $kyvernoChart.namespace | default $.Release.Namespace }} pod -l app.kubernetes.io/component=admission-controller --timeout=60s
+              echo "Kyverno webhook is ready"
+
+      {{- if $.Values.kyvernoPolicies.zeroResourceRequests }}
+              echo "Applying zero-resource-requests ClusterPolicy before installing other charts..."
+              kubectl wait --for=condition=Established crd/clusterpolicies.kyverno.io --timeout=60s
+              cat <<'POLICY_EOF' | kubectl apply -f -
+              apiVersion: kyverno.io/v1
+              kind: ClusterPolicy
+              metadata:
+                name: zero-resource-requests
+                annotations:
+                  policies.kyverno.io/title: Zero Resource Requests for Dev
+                  policies.kyverno.io/description: Zeros cpu/memory requests and limits for dev environments.
+              spec:
+                rules:
+                  - name: zero-resources
+                    match:
+                      any:
+                        - resources:
+                            kinds:
+                              - Pod
+                    mutate:
+                      patchStrategicMerge:
+                        metadata:
+                          annotations:
+                            kyverno.io/mutated-by: "zero-resource-requests"
+                        spec:
+                          containers:
+                            - (name): "*"
+                              resources:
+                                requests:
+                                  cpu: "0"
+                                  memory: "0"
+                                limits:
+                                  cpu: "0"
+                                  memory: "0"
+                          initContainers:
+                            - (name): "*"
+                              resources:
+                                requests:
+                                  cpu: "0"
+                                  memory: "0"
+                                limits:
+                                  cpu: "0"
+                                  memory: "0"
+              POLICY_EOF
+              echo "Waiting for zero-resource-requests policy to be ready..."
+              kubectl wait --for=condition=Ready clusterpolicy/zero-resource-requests --timeout=60s
+              echo "Verifying policy is actively enforcing via canary pod..."
+              INSTALLER_IMAGE="{{ $.Values.images.installer.repository }}:{{ $.Values.images.installer.tag }}"
+              until kubectl run kyverno-canary -n {{ $.Release.Namespace }} --image="$INSTALLER_IMAGE" --restart=Never --command -- sleep 999 2>/dev/null \
+                && kubectl get pod -n {{ $.Release.Namespace }} kyverno-canary -o jsonpath='{.metadata.annotations.kyverno\.io/mutated-by}' 2>/dev/null | grep -q zero-resource-requests; do
+                kubectl delete pod kyverno-canary -n {{ $.Release.Namespace }} --ignore-not-found 2>/dev/null
+                echo "Policy not yet enforcing, retrying..."
+                sleep 2
+              done
+              kubectl delete pod kyverno-canary -n {{ $.Release.Namespace }} --ignore-not-found
+              echo "Zero-resource-requests policy is active and enforcing"
+      {{- end }}
+
 
               # Set ownerReference on kyverno namespace so it gets cascade-deleted with the release namespace
               {{- if ne ($kyvernoChart.namespace | default $.Release.Namespace) $.Release.Namespace }}
