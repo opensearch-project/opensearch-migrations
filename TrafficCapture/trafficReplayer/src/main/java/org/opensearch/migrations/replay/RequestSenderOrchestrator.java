@@ -18,6 +18,7 @@ import org.opensearch.migrations.replay.datatypes.ChannelTask;
 import org.opensearch.migrations.replay.datatypes.ChannelTaskType;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
+import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
@@ -71,7 +72,7 @@ public class RequestSenderOrchestrator {
         ClientConnectionPool clientConnectionPool,
         BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory
     ) {
-        this(clientConnectionPool, Duration.ofMillis(100), Duration.ofSeconds(300), packetConsumerFactory);
+        this(clientConnectionPool, Duration.ofMillis(100), Duration.ofSeconds(30), packetConsumerFactory);
     }
 
     public RequestSenderOrchestrator(
@@ -182,6 +183,88 @@ public class RequestSenderOrchestrator {
                 visitor
             )
         );
+    }
+
+    /**
+     * How far ahead of the target send time to start transformation work.
+     * The transform is gated on both this time buffer AND the N-2 response completing,
+     * whichever comes last.
+     */
+    public static final Duration EXPECTED_TRANSFORMATION_DURATION = Duration.ofSeconds(1);
+
+    /**
+     * Schedules a request where transformation is deferred until the connection's sequencer fires.
+     * The transform runs just before sending, keeping signatures fresh.
+     */
+    public <T> TrackedFuture<String, T> scheduleDeferredTransformAndSendRequest(
+        UniqueReplayerRequestKey requestKey,
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Instant start,
+        Instant end,
+        Supplier<TrackedFuture<String, TransformedOutputAndResult<ByteBufList>>> transformSupplier,
+        java.util.function.Function<TransformedOutputAndResult<ByteBufList>,
+            RetryVisitor<T>> retryVisitorFactory
+    ) {
+        var sessionNumber = requestKey.sourceRequestIndexSessionIdentifier;
+        var channelInteractionNum = requestKey.getReplayerRequestIndex();
+        var generation = requestKey.trafficStreamKey.getSourceGeneration();
+
+        final var replaySession = clientConnectionPool.getCachedSession(
+            ctx.getLogicalEnclosingScope(), sessionNumber, generation);
+
+        var transformFuture = new TextTrackedFuture<TransformedOutputAndResult<ByteBufList>>(
+            "waiting for transform gate to start transform");
+
+        // The target time for the transform to begin: 1s before the send time
+        var transformTargetTime = start.minus(EXPECTED_TRANSFORMATION_DURATION);
+
+        return NettyFutureBinders.bindNettySubmitToTrackableFuture(replaySession.eventLoop)
+            .getDeferredFutureThroughHandle((v, t) -> {
+                // Acquire the gate on the event loop — completes when request N-2 finishes
+                var transformGate = replaySession.getTransformGateAndAdvance();
+
+                // Schedule a time-based trigger for targetTime - 1s
+                var timeGate = new java.util.concurrent.CompletableFuture<Void>();
+                var delay = getDelayFromNowMs(transformTargetTime);
+                if (delay.isZero()) {
+                    timeGate.complete(null);
+                } else {
+                    replaySession.eventLoop.schedule(
+                        () -> timeGate.complete(null), delay.toMillis(), TimeUnit.MILLISECONDS);
+                }
+
+                // Transform starts when BOTH gates are satisfied
+                java.util.concurrent.CompletableFuture.allOf(
+                    transformGate.getWaitOn(), timeGate
+                ).whenComplete((gv, gt) -> {
+                    var transformScheduledContext = ctx.createScheduledContext(transformTargetTime);
+                    try {
+                        transformSupplier.get()
+                            .whenComplete((result, err) -> {
+                                transformScheduledContext.close();
+                                if (err != null) {
+                                    transformFuture.future.completeExceptionally(err);
+                                } else {
+                                    transformFuture.future.complete(result);
+                                }
+                            }, () -> "propagating transform result");
+                    } catch (Exception e) {
+                        transformScheduledContext.close();
+                        transformFuture.future.completeExceptionally(e);
+                    }
+                });
+
+                // Submit the send through the sequencer
+                return replaySession.scheduleSequencer.addFutureForWork(
+                    channelInteractionNum,
+                    f -> f.thenCompose(
+                        voidValue -> scheduleDeferredSendOnSession(
+                            ctx, replaySession, start, end, transformFuture, retryVisitorFactory,
+                            transformGate.getSignalWhenDone()),
+                        () -> "Work callback on replay session"
+                    )
+                );
+            }, () -> "Acquiring transform gate and scheduling send for slot " + channelInteractionNum);
     }
 
     /**
@@ -315,6 +398,51 @@ public class RequestSenderOrchestrator {
             }, () -> "sending packets for request"))
         )
             .whenComplete((v,t) -> packets.release(), () -> "waiting for request to be sent to release ByteBufList");
+    }
+
+    private <T> TrackedFuture<String, T> scheduleDeferredSendOnSession(
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        ConnectionReplaySession connectionReplaySession,
+        Instant startTime,
+        Instant endTime,
+        TrackedFuture<String, TransformedOutputAndResult<ByteBufList>> transformFuture,
+        java.util.function.Function<TransformedOutputAndResult<ByteBufList>,
+            RetryVisitor<T>> retryVisitorFactory,
+        CompletableFuture<Void> requestCompletionSignal
+    ) {
+        var eventLoop = connectionReplaySession.eventLoop;
+        var scheduledContext = ctx.createScheduledContext(startTime);
+        int channelInteractionNum = ctx.getReplayerRequestKey().getSourceRequestIndex();
+        var diagnosticCtx = new IndexedChannelInteraction(
+            ctx.getLogicalEnclosingScope().getChannelKey(),
+            channelInteractionNum
+        );
+
+        return scheduleOnConnectionReplaySession(
+            diagnosticCtx,
+            connectionReplaySession,
+            startTime,
+            new ChannelTask<>(ChannelTaskType.TRANSMIT, trigger -> trigger.thenCompose(voidVal -> {
+                scheduledContext.close();
+                // By the time the sequencer fires (N-1 done), the transform should
+                // already be complete (it started when N-2 finished).
+                return transformFuture.thenCompose(transformedResult -> {
+                    var packets = transformedResult.transformedOutput;
+                    var numPackets = packets.size();
+                    var interval = numPackets > 1
+                        ? Duration.between(startTime, endTime).dividedBy(numPackets - 1L)
+                        : Duration.ZERO;
+                    var visitor = retryVisitorFactory.apply(transformedResult);
+                    final Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier =
+                        () -> packetConsumerFactory.apply(connectionReplaySession, ctx);
+                    return sendRequestWithRetries(senderSupplier, eventLoop, packets, startTime,
+                        initialRetryDelay, interval, visitor);
+                }, () -> "sending transformed request");
+            }, () -> "deferred send after transform"))
+        )
+            // Signal request complete on both success and failure to unblock subsequent transforms
+            .whenComplete((v, t) -> requestCompletionSignal.complete(null),
+                () -> "signaling request complete for transform gate");
     }
 
     private TrackedFuture<String, Void> scheduleCloseOnConnectionReplaySession(
