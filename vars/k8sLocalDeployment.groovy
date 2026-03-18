@@ -59,30 +59,16 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 5, unit: 'MINUTES') {
                         script {
-                            // Kubernetes 1.31+ enables JobSuccessPolicy by default, which causes Jobs
-                            // to get SuccessCriteriaMet condition instead of Complete. Helm doesn't
-                            // recognize SuccessCriteriaMet, so pre-install hook Jobs time out.
-                            // Disable this feature gate to restore standard Complete condition behavior.
-                            def featureGates = "JobSuccessPolicy=false"
-                            def minikubeStartCmd = "minikube start --extra-config=controller-manager.feature-gates=${featureGates}"
                             def status = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
                             if (status == "Running") {
-                                // Check if the feature gate is already configured
-                                def fgCheck = sh(script: "kubectl get pod -n kube-system -l component=kube-controller-manager -o jsonpath='{.items[0].spec.containers[0].command}' 2>/dev/null | grep -q 'JobSuccessPolicy=false' && echo 'ok' || echo 'missing'", returnStdout: true).trim()
-                                if (fgCheck == "ok") {
-                                    echo "✅ Minikube is running with correct feature gates"
-                                } else {
-                                    echo "⚠️ Minikube running but missing JobSuccessPolicy=false feature gate, restarting..."
-                                    sh(script: "minikube delete", returnStdout: true)
-                                    sh(script: minikubeStartCmd, returnStdout: true)
-                                }
+                                echo "✅ Minikube is running"
                             } else {
                                 echo "Minikube is not running, status: " + status
                                 sh(script: "minikube delete", returnStdout: true)
-                                sh(script: minikubeStartCmd, returnStdout: true)
+                                sh(script: "minikube start", returnStdout: true)
                                 def status2 = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
                                 if (status2 == "Running") {
-                                    echo "✅ Minikube was started and is running"
+                                    echo "✅ Minikube was started as is running"
                                 } else {
                                     error("❌ Minikube failed to start")
                                 }
