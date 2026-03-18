@@ -318,7 +318,7 @@ class K8sService:
             return True
         logger.info(f"Installing {release_name} from {chart_path} with values {values_file}")
         command = self._helm_base() + ["install", release_name, chart_path, "-n", self.namespace, "--create-namespace",
-                                       "--wait", "--timeout", "20m"]
+                                       "--wait", "--timeout", "5m"]
         if values_file:
             command.extend(["-f", values_file])
         if values:
