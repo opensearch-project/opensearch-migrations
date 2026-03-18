@@ -29,9 +29,9 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.closeTo;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -203,37 +203,58 @@ public class SolrToOpenSearchEndToEndTest {
                 equalTo("integer")
             );
 
-            // --- Verify document content ---
+            // --- Verify document field values ---
             var searchResp = restClient.get(
                 COLLECTION_NAME + "/_search?q=id:doc1&size=1", ctx.createUnboundRequestContext()
             );
             var hits = MAPPER.readTree(searchResp.body).path("hits").path("hits");
             assertThat("Should find doc1", hits.size(), equalTo(1));
 
-            var source1 = hits.get(0).path("_source");
-            log.info("Migrated doc: {}", source1);
+            var doc = hits.get(0).path("_source");
+            log.info("Migrated doc: {}", doc);
 
-            // Stored fields should be present
-            assertNotNull(source1.get("stored_keyword"), "stored_keyword should be in _source");
-            assertThat(source1.path("stored_keyword").asText(), equalTo("hello"));
-            assertNotNull(source1.get("stored_text"), "stored_text should be in _source");
-            assertThat(source1.path("stored_text").asText(), equalTo("full text search"));
-            assertNotNull(source1.get("stored_int"), "stored_int should be in _source");
-            assertNotNull(source1.get("stored_long"), "stored_long should be in _source");
-            assertNotNull(source1.get("stored_float"), "stored_float should be in _source");
-            assertNotNull(source1.get("stored_double"), "stored_double should be in _source");
-            assertNotNull(source1.get("stored_date"), "stored_date should be in _source");
-            assertNotNull(source1.get("stored_bool"), "stored_bool should be in _source");
-            assertNotNull(source1.get("nodv_keyword"), "nodv_keyword (stored, no docValues) should be in _source");
-            assertThat(source1.path("nodv_keyword").asText(), equalTo("no-docvalues"));
-
-            // Multi-valued field
-            assertTrue(
-                source1.has("multi_string"),
-                "multi_string should be in _source"
+            // String/keyword fields — stored
+            assertThat("stored_keyword value", doc.path("stored_keyword").asText(), equalTo("hello"));
+            assertThat(
+                "nodv_keyword value (stored, no docValues)",
+                doc.path("nodv_keyword").asText(),
+                equalTo("no-docvalues")
             );
 
-            log.info("All field types and storage combinations verified");
+            // Text field — stored
+            assertThat(
+                "stored_text value", doc.path("stored_text").asText(), equalTo("full text search")
+            );
+
+            // Numeric fields — stored, exact values
+            assertThat("stored_int value", doc.path("stored_int").asInt(), equalTo(42));
+            assertThat("stored_long value", doc.path("stored_long").asLong(), equalTo(1234567890L));
+            assertThat("stored_float value", (double) doc.path("stored_float").floatValue(), closeTo(3.14, 0.01));
+            assertThat(
+                "stored_double value", doc.path("stored_double").doubleValue(), closeTo(2.718281828, 0.0001)
+            );
+
+            // Date field — Lucene stores as epoch millis, OpenSearch returns as epoch millis
+            assertThat(
+                "stored_date value (2024-01-15T10:30:00Z as epoch ms)",
+                doc.path("stored_date").asLong(),
+                equalTo(1705314600000L)
+            );
+
+            // Boolean field — stored (Lucene T/F → true/false)
+            assertThat("stored_bool value", doc.path("stored_bool").asBoolean(), equalTo(true));
+
+            // Multi-valued field — stored, should be array with 3 values
+            assertTrue(doc.path("multi_string").isArray(), "multi_string should be an array");
+            assertThat("multi_string size", doc.path("multi_string").size(), equalTo(3));
+            // Verify array contents (order may vary)
+            var multiValues = new java.util.HashSet<String>();
+            doc.path("multi_string").forEach(v -> multiValues.add(v.asText()));
+            assertTrue(multiValues.contains("alpha"), "multi_string should contain alpha");
+            assertTrue(multiValues.contains("beta"), "multi_string should contain beta");
+            assertTrue(multiValues.contains("gamma"), "multi_string should contain gamma");
+
+            log.info("All field values verified");
         }
     }
 
