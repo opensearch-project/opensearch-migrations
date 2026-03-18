@@ -82,6 +82,7 @@ public class SolrDocumentSource implements DocumentSource {
         });
     }
 
+    @SuppressWarnings("java:S1854") // Sonar false positive: initial cursorMark="*" is used in first query
     private void paginateDocuments(
         String collection, long startingDocOffset, reactor.core.publisher.FluxSink<Document> sink
     ) throws IOException {
