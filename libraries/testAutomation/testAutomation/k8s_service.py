@@ -333,9 +333,15 @@ class K8sService:
     def _dump_helm_debug_info(self, release_name: str):
         """Dump detailed debug info when helm install fails."""
         logger.error("=== BEGIN HELM INSTALL DEBUG INFO ===")
-        debug_commands = [
-            (f"Pods in {self.namespace}", self._kubectl_base() + ["get", "pods", "-n", self.namespace, "-o", "wide"]),
-            ("Pods in kyverno-ma", self._kubectl_base() + ["get", "pods", "-n", "kyverno-ma", "-o", "wide"]),
+        debug_namespaces = [self.namespace, "kyverno-ma", "kube-system"]
+        debug_commands = []
+        for ns in debug_namespaces:
+            debug_commands.extend([
+                (f"Pods in {ns}", self._kubectl_base() + ["get", "pods", "-n", ns, "-o", "wide"]),
+                (f"Events in {ns}", self._kubectl_base() + [
+                    "get", "events", "-n", ns, "--sort-by=.lastTimestamp"]),
+            ])
+        debug_commands.extend([
             (f"Jobs in {self.namespace}", self._kubectl_base() + ["get", "jobs", "-n", self.namespace, "-o", "wide"]),
             ("Job status detail", self._kubectl_base() + [
                 "get", "jobs", "-n", self.namespace, "-l", f"app.kubernetes.io/instance={release_name}",
@@ -347,10 +353,6 @@ class K8sService:
                 "get", "pods", "-n", self.namespace, "-l", f"app.kubernetes.io/instance={release_name}",
                 "-o", "jsonpath={range .items[*]}name={.metadata.name} phase={.status.phase} "
                 "finalizers={.metadata.finalizers}{\"\\n\"}{end}"]),
-            (f"Events in {self.namespace}", self._kubectl_base() + [
-                "get", "events", "-n", self.namespace, "--sort-by=.lastTimestamp"]),
-            ("Events in kyverno-ma", self._kubectl_base() + [
-                "get", "events", "-n", "kyverno-ma", "--sort-by=.lastTimestamp"]),
             ("Helm list all namespaces", self._helm_base() + ["list", "--all-namespaces"]),
         ]
         for label, cmd in debug_commands:
