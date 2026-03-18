@@ -554,10 +554,11 @@ deploy_dashboard() {
   local full_name="MA-${STAGE}-${AWS_CFN_REGION}-${dashboard_name}"
   aws cloudwatch put-dashboard \
     --dashboard-name "$full_name" \
-    --dashboard-body "file://${tmp_json}" >/dev/null
+    --dashboard-body "file://${tmp_json}" \
+    --region "${AWS_CFN_REGION}" >/dev/null
 
   # Validate dashboards on CloudWatch
-  if aws cloudwatch get-dashboard --dashboard-name "$full_name" >/dev/null 2>&1; then
+  if aws cloudwatch get-dashboard --dashboard-name "$full_name" --region "${AWS_CFN_REGION}" >/dev/null 2>&1; then
     echo "OK: Dashboard available: ${full_name}"
   else
     echo "WARN: Could not read back dashboard: ${full_name}"

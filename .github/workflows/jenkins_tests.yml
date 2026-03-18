@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - jenkins-trigger-test-*
   pull_request_target:
     types: [opened, synchronize, reopened, labeled]
 
@@ -30,13 +31,16 @@ jobs:
       group: ${{ github.workflow }}-full-es68-e2e-aws-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
+      - uses: actions/checkout@v4
       - name: Jenkins Job Trigger and Monitor
-        uses: jugal-chauhan/jenkins-trigger@1.0.6
+        uses: ./.github/actions/jenkins-trigger
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: ${{ github.event_name == 'push' && 'main-full-es68source-e2e-test' || 'pr-full-es68source-e2e-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
 
   elasticsearch-5x-k8s-local-test:
     needs: [get-require-approval, sanitize-input]
@@ -46,13 +50,16 @@ jobs:
       group: ${{ github.workflow }}-elasticsearch-5x-k8s-local-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
+      - uses: actions/checkout@v4
       - name: Jenkins Job Trigger and Monitor
-        uses: jugal-chauhan/jenkins-trigger@1.0.6
+        uses: ./.github/actions/jenkins-trigger
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: ${{ github.event_name == 'push' && 'main-elasticsearch-5x-k8s-local-test' || 'pr-elasticsearch-5x-k8s-local-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
 
   eks-integ-test:
     if: |
@@ -67,13 +74,16 @@ jobs:
       group: ${{ github.workflow }}-eks-integ-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
+      - uses: actions/checkout@v4
       - name: Jenkins Job Trigger and Monitor
-        uses: jugal-chauhan/jenkins-trigger@1.0.6
+        uses: ./.github/actions/jenkins-trigger
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: ${{ github.event_name == 'push' && 'main-eks-integ-test' || 'pr-eks-integ-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
           job_timeout_minutes: "120"
 
   eks-byos-integ-test:

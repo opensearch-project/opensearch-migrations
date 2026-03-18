@@ -124,6 +124,13 @@ installer:
     name: "migrations-service-account"
   rbac:
     create: true
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
 
 # For OTEL Operator
 extraOtelConfiguration:
@@ -227,6 +234,7 @@ awsPrivateCA:
     deletionPolicy: delete  # or retain (keeps PCA after helm uninstall)
 
 charts:
+
   cert-manager:
     version: 1.17.2
     repository: https://charts.jetstack.io
@@ -678,7 +686,7 @@ charts:
       webhooks: true             # Delete mutating/validating webhook configs before uninstall
     postUninstallCleanup:
       crds: true                 # Delete CRDs after uninstall
-    version: "3.5.2"
+    version: "3.7.1"
     repository: "https://kyverno.github.io/kyverno/"
     namespace: kyverno-ma
     values:
