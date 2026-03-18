@@ -4,9 +4,15 @@ plugins {
     id 'java-test-fixtures'
 }
 
+evaluationDependsOn ':SearchSnapshotExtractor'
+
 dependencies {
     implementation project(':RfsPipeline')
     implementation project(':RfsCommon')
+    implementation project(':SearchSnapshotExtractor')
+
+    // Shadow lucene9 jar for reading Solr 8 (Lucene 8.11) backup files
+    implementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene9').map { it.outputs.files }
 
     implementation libs.jackson.databind
     implementation libs.jackson.core
