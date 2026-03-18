@@ -137,7 +137,8 @@ export type AssertionRuleType =
   | 'loose-order' // Compare arrays as sets (ignore ordering)
   | 'loose-type' // Allow numeric type coercion (1 == 1.0)
   | 'expect-diff' // Known difference — test passes, diff logged as info
-  | 'regex'; // Match actual value against a regex pattern
+  | 'regex' // Match actual value against a regex pattern
+  | 'sublist'; // Array rule: extract a sublist from actual (via skip/take) before comparing
 
 /**
  * A per-path assertion rule that controls how differences are handled.
@@ -152,6 +153,8 @@ export interface AssertionRule {
   rule: AssertionRuleType;
   /** For 'regex' rule: the pattern to match against the actual value. */
   expected?: string;
+  /** For 'sublist' rule: number of leading elements to skip in actual before comparing. Defaults to 0. */
+  skip?: number;
   /** Documentation: WHY this rule exists. Shows up in diff reports. */
   reason?: string;
 }

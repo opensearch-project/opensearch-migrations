@@ -3,6 +3,15 @@
 ORIGINAL_DIR=$(pwd)
 cd "$(dirname "$0")/../" || exit
 
+helm install -n ma ma charts/aggregates/migrationAssistant
+if [ $? -eq 0 ]; then
+  echo "installed migrationAssistant in 'ma' namespace"
+else
+  echo Rebuilding dependency
+  helm dependency build charts/aggregates/migrationAssistant
+  helm install -n ma ma charts/aggregates/migrationAssistant
+fi
+
 helm install -n ma tc charts/aggregates/testClusters
 if [ $? -eq 0 ]; then
   echo "installed testClusters in 'ma' namespace"
@@ -10,15 +19,6 @@ else
   echo Rebuilding dependency
   helm dependency build charts/aggregates/testClusters
   helm install -n ma tc charts/aggregates/testClusters
-fi
-
-helm install -n ma ma charts/aggregates/migrationAssistant
-if [ $? -eq 0 ]; then
-  echo "installed testClusters in 'ma' namespace"
-else
-  echo Rebuilding dependency
-  helm dependency build charts/aggregates/migrationAssistant
-  helm install -n ma ma charts/aggregates/migrationAssistant
 fi
 
 helm install -n ma ma charts/tests/testConsole
