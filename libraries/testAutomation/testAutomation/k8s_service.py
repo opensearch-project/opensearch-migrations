@@ -336,8 +336,9 @@ class K8sService:
         debug_commands = [
             ("All pods", self._kubectl_base() + ["get", "pods", "--all-namespaces", "-o", "wide"]),
             ("All events", self._kubectl_base() + ["get", "events", "--all-namespaces", "--sort-by=.lastTimestamp"]),
-            ("kube-controller-manager logs", self._kubectl_base() + [
-                "logs", "-n", "kube-system", "kube-controller-manager-minikube", "--tail=200"]),
+            ("kube-system pod logs", self._kubectl_base() + [
+                "logs", "-n", "kube-system", "--all-containers", "--prefix", "--tail=200",
+                "-l", "tier=control-plane"]),
         ]
         debug_commands.extend([
             (f"Jobs in {self.namespace}", self._kubectl_base() + ["get", "jobs", "-n", self.namespace, "-o", "wide"]),
