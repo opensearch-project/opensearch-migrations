@@ -241,9 +241,14 @@ def run_test_benchmarks_cmd(ctx, cluster):
               help="AOSS collection type to load workloads for")
 @click.pass_obj
 def run_aoss_test_benchmarks_cmd(ctx, collection_type):
-    """Run AOSS-specific OpenSearch Benchmark workloads against the source cluster"""
+    """Run AOSS-specific OpenSearch Benchmark workloads against the source cluster.
+    Note: source cluster must use basic auth (not SigV4) for benchmark execution."""
     if not ctx.env.source_cluster:
         raise click.UsageError("Cannot run test benchmarks because no source cluster is defined.")
+    if ctx.env.source_cluster.auth_type.name == "SIGV4":
+        raise click.UsageError(
+            "run-aoss-test-benchmarks requires basic auth on the source cluster; SigV4 is not supported."
+        )
     click.echo(clusters_.run_aoss_test_benchmarks(ctx.env.source_cluster, collection_type))
 
 
