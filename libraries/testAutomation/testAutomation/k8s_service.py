@@ -324,7 +324,68 @@ class K8sService:
         if values:
             for key, value in values.items():
                 command.extend(["--set", f"{key}={shlex.quote(str(value))}"])
-        return self.run_command(command)
+        try:
+            return self.run_command(command)
+        except subprocess.CalledProcessError:
+            self._dump_helm_debug_info(release_name)
+            raise
+
+    def _dump_helm_debug_info(self, release_name: str):
+        """Dump detailed debug info when helm install fails."""
+        logger.error("=== BEGIN HELM INSTALL DEBUG INFO ===")
+        debug_commands = [
+            (f"Pods in {self.namespace}", self._kubectl_base() + ["get", "pods", "-n", self.namespace, "-o", "wide"]),
+            ("Pods in kyverno-ma", self._kubectl_base() + ["get", "pods", "-n", "kyverno-ma", "-o", "wide"]),
+            (f"Jobs in {self.namespace}", self._kubectl_base() + ["get", "jobs", "-n", self.namespace, "-o", "wide"]),
+            (f"Events in {self.namespace}", self._kubectl_base() + [
+                "get", "events", "-n", self.namespace, "--sort-by=.lastTimestamp"]),
+            ("Events in kyverno-ma", self._kubectl_base() + [
+                "get", "events", "-n", "kyverno-ma", "--sort-by=.lastTimestamp"]),
+            ("Helm list all namespaces", self._helm_base() + ["list", "--all-namespaces"]),
+        ]
+        for label, cmd in debug_commands:
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                logger.error(f"--- {label} ---\n{result.stdout}{result.stderr}")
+            except Exception as e:
+                logger.error(f"--- {label} --- FAILED: {e}")
+
+        # Dump installer job logs if present
+        try:
+            chart_name = release_name.replace('ma', 'migrationAssistantWithArgo')
+            pod_result = subprocess.run(
+                self._kubectl_base() + ["get", "pods", "-n", self.namespace,
+                                        "-l", f"app.kubernetes.io/name={chart_name}",
+                                        "-o", "jsonpath={.items[*].metadata.name}"],
+                capture_output=True, text=True, timeout=10)
+            for pod_name in pod_result.stdout.split():
+                log_result = subprocess.run(
+                    self._kubectl_base() + ["logs", "-n", self.namespace, pod_name, "--tail=200"],
+                    capture_output=True, text=True, timeout=30)
+                logger.error(f"--- Logs for {pod_name} ---\n{log_result.stdout}{log_result.stderr}")
+        except Exception as e:
+            logger.error(f"--- Installer pod logs --- FAILED: {e}")
+
+        # Describe any non-running pods
+        try:
+            result = subprocess.run(
+                self._kubectl_base() + ["get", "pods", "--all-namespaces",
+                                        "--field-selector=status.phase!=Running,status.phase!=Succeeded",
+                                        "-o", "wide"],
+                capture_output=True, text=True, timeout=10)
+            if result.stdout.strip():
+                logger.error(f"--- Non-running pods (all namespaces) ---\n{result.stdout}")
+                for line in result.stdout.strip().split('\n')[1:]:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        ns, name = parts[0], parts[1]
+                        desc = subprocess.run(
+                            self._kubectl_base() + ["describe", "pod", name, "-n", ns],
+                            capture_output=True, text=True, timeout=15)
+                        logger.error(f"--- Describe {ns}/{name} ---\n{desc.stdout[-2000:]}")
+        except Exception as e:
+            logger.error(f"--- Non-running pods --- FAILED: {e}")
+        logger.error("=== END HELM INSTALL DEBUG INFO ===")
 
     def helm_uninstall(self, release_name: str) -> CompletedProcess | bool:
         helm_release_exists = self.check_helm_release_exists(release_name=release_name)
