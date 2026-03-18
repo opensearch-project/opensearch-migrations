@@ -354,7 +354,7 @@ class K8sService:
                 "-o", "jsonpath={range .items[*]}name={.metadata.name} phase={.status.phase} "
                 "finalizers={.metadata.finalizers}{\"\\n\"}{end}"]),
             ("Helm list all namespaces", self._helm_base() + ["list", "--all-namespaces"]),
-        ]
+        ])
         for label, cmd in debug_commands:
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
