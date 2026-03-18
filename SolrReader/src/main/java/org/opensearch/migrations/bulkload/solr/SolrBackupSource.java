@@ -1,0 +1,137 @@
+package org.opensearch.migrations.bulkload.solr;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
+
+import org.opensearch.migrations.bulkload.common.DocumentChangeType;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
+import org.opensearch.migrations.bulkload.lucene.SegmentNameSorter;
+import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
+import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
+import org.opensearch.migrations.bulkload.pipeline.ir.Document;
+import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
+import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
+
+import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+
+/**
+ * {@link DocumentSource} that reads documents from a Solr backup directory
+ * containing raw Lucene index files.
+ *
+ * <p>A Solr backup is a flat directory of Lucene segment files with a {@code segments_N}
+ * file. Solr 8 uses Lucene 8.11, readable by Lucene 9 backward-compatible codecs.
+ * Since Solr has no {@code _source} field, document JSON is reconstructed from stored fields.
+ */
+@Slf4j
+public class SolrBackupSource implements DocumentSource {
+
+    private final Path backupDir;
+    private final String collectionName;
+
+    public SolrBackupSource(Path backupDir, String collectionName) {
+        this.backupDir = backupDir;
+        this.collectionName = collectionName;
+    }
+
+    @Override
+    public List<String> listCollections() {
+        return List.of(collectionName);
+    }
+
+    @Override
+    public List<Partition> listPartitions(String collectionName) {
+        return List.of(new SolrShardPartition(collectionName, "shard1"));
+    }
+
+    @Override
+    public CollectionMetadata readCollectionMetadata(String collectionName) {
+        return new CollectionMetadata(collectionName, 1, Map.of());
+    }
+
+    @Override
+    public Flux<Document> readDocuments(Partition partition, long startingDocOffset) {
+        try {
+            var reader = new IndexReader9(backupDir, false, null);
+            var segmentsFile = findSegmentsFile();
+            var directoryReader = reader.getReader(segmentsFile);
+
+            log.info("Reading Solr backup: {} docs in {} segments from {}",
+                directoryReader.maxDoc(), directoryReader.leaves().size(), backupDir);
+
+            var scheduler = Schedulers.newBoundedElastic(10, Integer.MAX_VALUE, "solrReader");
+
+            // Sort segments by name and read docs from each
+            var sortedLeaves = directoryReader.leaves().stream()
+                .map(LuceneLeafReaderContext::reader)
+                .sorted(SegmentNameSorter.INSTANCE)
+                .toList();
+
+            // Build cumulative doc bases
+            int[] docBases = new int[sortedLeaves.size()];
+            for (int i = 1; i < sortedLeaves.size(); i++) {
+                docBases[i] = docBases[i - 1] + sortedLeaves.get(i - 1).maxDoc();
+            }
+
+            return Flux.range(0, sortedLeaves.size())
+                .concatMap(segIdx -> {
+                    var segReader = sortedLeaves.get(segIdx);
+                    int segDocBase = docBases[segIdx];
+                    var liveDocs = segReader.getLiveDocs();
+                    var liveDocStream = (liveDocs != null)
+                        ? liveDocs.stream()
+                        : IntStream.range(0, segReader.maxDoc());
+
+                    return Flux.fromStream(liveDocStream.boxed())
+                        .flatMapSequential(docIdx -> Mono.fromCallable(() ->
+                            SolrLuceneDocReader.getDocument(
+                                segReader, docIdx, true, segDocBase,
+                                () -> segReader.toString(), backupDir,
+                                DocumentChangeType.INDEX
+                            )
+                        ).subscribeOn(scheduler), 10)
+                        .filter(doc -> doc != null);
+                })
+                .skip(startingDocOffset)
+                .map(SolrBackupSource::toDocument)
+                .doFinally(s -> scheduler.dispose());
+        } catch (IOException e) {
+            return Flux.error(new RuntimeException("Failed to open Solr backup: " + backupDir, e));
+        }
+    }
+
+    private String findSegmentsFile() {
+        try (var stream = Files.list(backupDir)) {
+            return stream
+                .map(p -> p.getFileName().toString())
+                .filter(name -> name.startsWith("segments_"))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                    "No segments_N file found in Solr backup: " + backupDir));
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to list Solr backup directory: " + backupDir, e);
+        }
+    }
+
+    static Document toDocument(LuceneDocumentChange change) {
+        var id = change.getId();
+        if (id == null || id.isEmpty()) {
+            id = "solr_doc_" + change.getLuceneDocNumber();
+        }
+        byte[] source = change.getSource();
+        if (source == null) {
+            source = "{}".getBytes(StandardCharsets.UTF_8);
+        }
+        return new Document(id, source, Document.Operation.UPSERT, Map.of(), Map.of());
+    }
+}

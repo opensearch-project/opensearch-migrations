@@ -48,7 +48,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
         ObjectNode settings = indexMetadata.getSettings();
 
-        ObjectNode mappings = indexMetadata.getMappings();
+        ObjectNode mappings = (ObjectNode) indexMetadata.getMappings();
         String[] problemMappingFields = { "_all" };
         for (var field : problemMappingFields) {
             ObjectNodeUtils.removeFieldsByPath(mappings, field);
