@@ -632,7 +632,7 @@ ENVEOF
 
                                         # Drain ENIs from stack subnets before deletion
                                         subnets=\$(aws cloudformation describe-stack-resources --stack-name "${clusterStackName}" \
-                                            --query 'StackResources[?ResourceType==\`AWS::EC2::Subnet\`].PhysicalResourceId' \
+                                            --query 'StackResources[?ResourceType==`AWS::EC2::Subnet`].PhysicalResourceId' \
                                             --output text 2>/dev/null || true)
                                         if [ -n "\$subnets" ]; then
                                             echo "CLEANUP: Drain gate: waiting for ENIs to clear"
