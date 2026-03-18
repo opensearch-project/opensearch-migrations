@@ -17,6 +17,7 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 /**
@@ -156,11 +157,15 @@ public class DeltaLuceneReader {
             .addArgument(totalDocsToAdd)
             .log();
 
+        var scheduler = Schedulers.newBoundedElastic(100, Integer.MAX_VALUE, "deltaReader");
+
         // Create additions stream — sequential segment processing preserves document ordering
         var additionsStream = Flux.fromIterable(additions)
             .concatMapDelayError( c ->
                 LuceneReader.readDocsFromSegment(c,
                     startDocId,
+                    scheduler,
+                    100,
                     Path.of(c.getReader().getSegmentName()),
                     DocumentChangeType.INDEX)
             ).subscribeOn(Schedulers.boundedElastic());
@@ -170,6 +175,8 @@ public class DeltaLuceneReader {
             .concatMapDelayError( c ->
                 LuceneReader.readDocsFromSegment(c,
                     startDocId,
+                    scheduler,
+                    100,
                     Path.of(c.getReader().getSegmentName()),
                     DocumentChangeType.DELETE)
             ).subscribeOn(Schedulers.boundedElastic());
