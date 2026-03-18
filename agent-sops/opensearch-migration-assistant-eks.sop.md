@@ -1,8 +1,8 @@
-# OpenSearch Migration Assistant on EKS — Full-Stack Migration
+# OpenSearch Migration Assistant on EKS — Data Migration
 
 ## Overview
 
-This SOP guides an agent through a complete migration from Elasticsearch or OpenSearch on Kubernetes to Amazon OpenSearch Service. It covers the full lifecycle: source discovery, target provisioning, Migration Assistant deployment, data migration, and optional parallel application stack deployment. It is runtime-discovery-first and uses a configurable interaction level so the user can be hands-on or hands-off.
+This SOP guides an agent through a data migration from Elasticsearch or OpenSearch to Amazon OpenSearch Service. It covers the core lifecycle: source discovery, target provisioning, Migration Assistant deployment, and data migration (metadata + backfill). It is runtime-discovery-first and uses a configurable interaction level so the user can be hands-on or hands-off.
 
 ## Parameters
 
@@ -10,10 +10,9 @@ This SOP guides an agent through a complete migration from Elasticsearch or Open
   - `guided`: Ask for confirmation before each phase and before any destructive or irreversible action.
   - `semi_auto`: Proceed automatically within a phase, but ask for confirmation at phase boundaries and before destructive/irreversible actions.
   - `auto`: Proceed automatically end-to-end, but still stop for destructive/irreversible actions unless explicitly permitted via `allow_destructive`.
-- **migration_scope** (optional, default: ask user): Controls what the agent does.
-  - `data_only`: Migrate data only (source must already exist, target must already exist or be provisioned).
-  - `full_stack`: Full lifecycle — discover source, provision target, migrate data, deploy parallel application stack.
-  - If omitted, the agent MUST ask the user: *"Do you want me to just migrate the data, or do you want the full stack — including provisioning the target domain and deploying a parallel copy of your application?"*
+- **migration_scope** (optional, default: `data_only`): Controls what the agent does.
+  - `data_only`: Migrate data (source must already exist, target must already exist or be provisioned).
+  - If the user explicitly asks about deploying a parallel application stack, suggest it as a post-migration next step rather than part of the core migration flow.
 - **kube_context** (optional, default: current kubectl context): The kubectl context to use.
 - **namespace** (optional, default: "ma"): Kubernetes namespace where MA is/will be deployed.
 - **source_selection** (optional, default: "discover"): How to find the source cluster.
@@ -24,20 +23,12 @@ This SOP guides an agent through a complete migration from Elasticsearch or Open
 - **target_provisioning** (optional, default: ask user): How to handle the target cluster.
   - `provision_new`: Provision a new Amazon OpenSearch Service domain based on source cluster sizing.
   - `use_existing`: Use an existing target cluster (discover or user-provided).
-  - If omitted and `migration_scope=full_stack`, the agent MUST ask: *"Should I provision a new OpenSearch domain based on your source cluster, or do you have an existing target?"*
+  - If omitted, the agent MUST ask: *"Should I provision a new OpenSearch domain based on your source cluster, or do you have an existing target?"*
 - **target_cluster** (optional): Target cluster connection details, required when `target_provisioning=use_existing` and `source_selection=custom`.
 - **ma_deployment** (optional, default: "auto"): How to handle Migration Assistant deployment.
   - `auto`: Check if MA is already deployed; if not, deploy it via Helm.
   - `use_existing`: Assume MA is already deployed and healthy.
   - `deploy_new`: Always deploy a fresh MA instance via Helm.
-- **app_deployment** (optional, default: ask user if `migration_scope=full_stack`): Whether to deploy a parallel application stack.
-  - `parallel`: Deploy a parallel copy of the application pointing at the new target.
-  - `skip`: Do not deploy any application stack.
-  - If omitted and `migration_scope=full_stack`, the agent MUST ask: *"I can deploy a parallel copy of your application pointing at the new OpenSearch cluster. Want me to do that? If so, share your application source code, repo URL, manifests, or describe your deployment so I can understand how to build and deploy it."*
-- **app_source** (optional): How to find the application to clone.
-  - `discover`: Inspect K8s deployments in the source cluster's namespace for pods connecting to the source cluster.
-  - `manifests`: User provides a path to K8s manifests, Helm chart, or deployment config.
-  - `describe`: User describes the application and the agent builds manifests.
 - **allow_insecure** (optional, default: false): If true, allow TLS without verification for cluster connections.
 - **index_allowlist** (optional): List of index names to migrate (exact names). If omitted, migrate all non-system indices.
 - **allow_destructive** (optional, default: false): If true, the agent may run destructive operations without additional confirmation when `hands_on_level=auto`.
@@ -47,7 +38,7 @@ This SOP guides an agent through a complete migration from Elasticsearch or Open
 
 **Constraints for parameter acquisition:**
 - You MUST infer as many parameters as possible from the user's natural language input before asking any questions. For example:
-  - "full stack autonomous migration" → `migration_scope: full_stack`, `hands_on_level: auto`
+  - "full stack autonomous migration" → `hands_on_level: auto`
   - "my es 8 cluster in EKS" → `source_selection: discover`, source version ES 8
   - "new OS 3.3 cluster with sigv4" → `target_provisioning: provision_new`, target version OS 3.3, auth sigv4
   - "in this region" → use the current AWS region from environment
@@ -247,51 +238,7 @@ echo "VPC: $VPC_ID  Subnets: $SUBNET_IDS  SGs: $SG_IDS  ClusterSG: $CLUSTER_SG"
 - It does NOT query the ES/OS HTTP API (no `_cluster/health`, `_cat/indices`, `_mapping`). Those API calls happen later in Step 6 (Pre-Migration Validation) through the migration console after MA is deployed.
 - The kubectl-derived sizing (CPU, memory, disk, node count) is sufficient to provision the target cluster in Step 4 and deploy MA in Step 5.
 
-### 3. Application Discovery (if `migration_scope=full_stack`)
-
-Discover the application stack connected to the source cluster so it can be cloned later.
-
-**Skip condition:** Skip this step if `migration_scope=data_only` or `app_deployment=skip`.
-
-**Constraints:**
-- You MUST ask the user for their application source code, repository URL, or detailed deployment information before attempting any discovery or deployment. Do NOT blindly inspect the cluster — the user knows their application best:
-  *"Before I can deploy a parallel copy of your application, I need to understand it. Can you share: (1) your application source code or repo URL, (2) your K8s manifests or Helm charts, or (3) a description of your application architecture and how it connects to the cluster? The more context I have, the better I can set up the parallel deployment."*
-- You MUST ask the user how to find their application if `app_source` is not set:
-  *"I need to understand your application to deploy a parallel copy later. I can: (1) inspect your K8s cluster for deployments connecting to the source, (2) read your manifests/Helm charts if you point me to them, or (3) you can describe your setup and I'll build the config. Which works best?"*
-- You MUST NOT assume any specific application architecture. The application could be:
-  - A single pod with an env var pointing to ES
-  - A multi-service stack (API, ingestion, dashboards)
-  - A Helm-deployed application
-  - Something entirely custom
-
-**Discovery procedure (`app_source=discover`):**
-
-```bash
-# Find deployments in the same namespace or cluster that reference the source endpoint
-kubectl get deployments --all-namespaces -o json | \
-  jq -r '.items[] | select(.spec.template.spec.containers[].env[]?.value // "" | test("elasticsearch|<source-svc-name>|9200")) | "\(.metadata.namespace)/\(.metadata.name)"'
-
-# For each discovered deployment, capture:
-# - Full deployment spec
-# - Service definitions
-# - ConfigMaps/Secrets referenced
-# - Environment variables that reference the source cluster
-```
-
-- You MUST record for each discovered application component:
-  - Deployment name and namespace
-  - Container image(s)
-  - Environment variables or config that reference the source cluster endpoint
-  - Associated services (ClusterIP, LoadBalancer, NodePort)
-  - Replica count and resource limits
-- You MUST present the discovered application topology to the user and confirm it's correct.
-- You MUST save the original manifests to `{artifacts_dir}/app-original/` for reference.
-
-**Manifest-based discovery (`app_source=manifests`):**
-- You MUST read the provided manifests and identify all references to the source cluster endpoint.
-- You MUST ask the user to confirm which environment variables or config values need to be updated for the target.
-
-### 4. Target Provisioning
+### 3. Target Provisioning
 
 Provision or connect to the target OpenSearch cluster.
 
@@ -674,64 +621,7 @@ Verify the migration results are complete and consistent.
 - You MUST provide a short "go/no-go" assessment.
 - If validation fails, you MUST propose remediation (re-run backfill, fix templates, etc.) before proceeding.
 
-### 10. Parallel Application Stack Deployment (if `migration_scope=full_stack`)
-
-Deploy a parallel copy of the application stack pointing at the new OpenSearch cluster.
-
-**Skip condition:** Skip this step if `migration_scope=data_only` or `app_deployment=skip`.
-
-**Constraints:**
-- You MUST have application source code, manifests, or detailed deployment information from Step 3 before proceeding. If Step 3 did not capture sufficient information, you MUST ask the user again: *"I don't have enough information about your application to deploy a parallel copy. Can you share your source code, repo URL, or deployment manifests?"*
-- You MUST use the application information captured in Step 3 to create modified deployments.
-- You MUST create modified copies of the original manifests with:
-  - New deployment/service names (e.g., append `-migrated` or a user-chosen suffix)
-  - Environment variables and config updated to point at the new OpenSearch endpoint
-  - Same replica counts, resource limits, and other configuration preserved
-  - New service endpoints so both stacks can run simultaneously
-- You MUST present the modified manifests to the user for review before deploying (even in `auto` mode) because deploying incorrect application config could cause outages or data corruption.
-- You MUST save the modified manifests to `{artifacts_dir}/app-migrated/`.
-
-**Deployment procedure:**
-
-```bash
-# Apply the modified manifests
-kubectl apply -f {artifacts_dir}/app-migrated/
-
-# Wait for pods to be ready
-kubectl -n <app-namespace> wait --for=condition=ready pod -l <migrated-app-selector> --timeout=300s
-
-# Verify the new pods are running
-kubectl -n <app-namespace> get pods -l <migrated-app-selector>
-```
-
-- You MUST verify the parallel stack is healthy:
-  - All pods Running and Ready
-  - Services have endpoints
-  - Application can connect to the new OpenSearch cluster
-- If the user wants to access the parallel stack (e.g., dashboards), you SHOULD set up port-forwarding or provide the service endpoint.
-- You MUST NOT modify or disrupt the original application stack.
-
-### 11. End-to-End Validation
-
-Validate the complete migration including the application stack.
-
-**Skip condition:** If `app_deployment=skip`, perform only data validation (same as Step 9).
-
-**Constraints:**
-- You MUST verify:
-  - Data migration completeness (doc counts match)
-  - Application stack health (all pods running)
-  - Application connectivity to the new cluster (queries return data)
-- You SHOULD present a side-by-side comparison if possible:
-  - Source cluster stats vs target cluster stats
-  - Original app endpoints vs migrated app endpoints
-- You MUST provide a clear summary of what's running and how to access each stack.
-- You MUST provide next steps for the user:
-  - How to gradually shift traffic to the new stack
-  - How to decommission the old stack when ready
-  - Any remaining manual steps (DNS changes, load balancer updates, etc.)
-
-### 12. Post-Run Summary
+### 10. Post-Run Summary
 
 Produce a concise summary of everything that happened.
 
@@ -741,31 +631,31 @@ Produce a concise summary of everything that happened.
   - Target cluster details (domain name, endpoint, version, sizing)
   - Migration Assistant deployment details
   - Migration workflow results (duration, doc counts, any issues)
-  - Application stack deployment details (if applicable)
   - Validation results
   - Actions taken and destructive actions (if any)
   - Paths to logs and key outputs
-- You MUST provide next steps based on observed gaps.
+- You MUST provide next steps based on observed gaps, which may include:
+  - Deploying a parallel application stack pointing at the new target
+  - Updating DNS or load balancer configuration to redirect client traffic
+  - Decommissioning the source cluster
+  - Setting up monitoring on the target cluster
 - You MUST present the summary to the user.
 
 ## Examples
 
-### Example Input (Full Stack, Guided)
+### Example Input (Guided, New Target)
 
 ```text
 hands_on_level: guided
-migration_scope: full_stack
 source_selection: discover
 target_provisioning: provision_new
-app_deployment: parallel
 aws_region: us-east-1
 ```
 
-### Example Input (Data Only, Auto)
+### Example Input (Auto, Existing Clusters)
 
 ```text
 hands_on_level: auto
-migration_scope: data_only
 source_selection: custom
 target_provisioning: use_existing
 source_cluster: { endpoint: "https://source.example:9200", auth: "basic_auth" }
@@ -777,17 +667,13 @@ allow_destructive: true
 
 ```text
 "I have an Elasticsearch cluster in EKS. Migrate everything to OpenSearch on Amazon OpenSearch Service.
-Inspect my source, provision a matching target, deploy the Migration Assistant, run the migration,
-then spin up a parallel application stack. Auto mode."
+Inspect my source, provision a matching target, deploy the Migration Assistant, and run the migration. Auto mode."
 ```
 
 The agent should infer:
 - `hands_on_level: auto`
-- `migration_scope: full_stack`
 - `source_selection: discover`
 - `target_provisioning: provision_new`
-- `app_deployment: parallel`
-- `app_source: discover`
 
 ## Troubleshooting
 
@@ -848,10 +734,4 @@ Common field type transformations needed when migrating to OpenSearch:
 - If domain creation fails due to instance type availability, try a different instance type in the same family.
 - Domain provisioning typically takes 15–20 minutes. Use this time to deploy MA (Step 5).
 
-### Application Stack Deployment Issues
 
-- If the parallel app can't connect to the new OpenSearch cluster, verify:
-  - Security group rules allow traffic from the app pods to the OpenSearch domain
-  - The endpoint URL is correct (use the VPC endpoint, not the public endpoint)
-  - Auth credentials/IAM roles are configured for the new domain
-- If pods fail to start, check for image pull issues, resource limits, or missing ConfigMaps/Secrets.

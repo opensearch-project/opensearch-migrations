@@ -10,11 +10,11 @@ The user will describe their migration in natural language. Infer all parameters
 
 Examples of natural language → parameter inference:
 
-- "full stack autonomous migration from my es 8 cluster in EKS to a new OS 3.3 cluster with sigv4 in this region"
-  → `hands_on_level: auto`, `migration_scope: full_stack`, `source_selection: discover`, `target_provisioning: provision_new`, target version OS 3.3, auth sigv4, use current region
+- "autonomous migration from my es 8 cluster in EKS to a new OS 3.3 cluster with sigv4 in this region"
+  → `hands_on_level: auto`, `source_selection: discover`, `target_provisioning: provision_new`, target version OS 3.3, auth sigv4, use current region
 
 - "migrate my data from ES to OpenSearch, I already have both clusters"
-  → `migration_scope: data_only`, `source_selection: custom` or `discover`, `target_provisioning: use_existing`, ask for `hands_on_level`
+  → `source_selection: custom` or `discover`, `target_provisioning: use_existing`, ask for `hands_on_level`
 
 - "help me migrate"
   → Ask what they have and what they want
@@ -25,3 +25,4 @@ Examples of natural language → parameter inference:
 - Do NOT ask for parameters the user already provided in natural language.
 - If the user gave enough info to start, start immediately and discover the rest at runtime.
 - Default to `guided` mode if interaction level is unclear.
+- If the user asks about deploying a parallel application stack, suggest it as a post-migration next step.
