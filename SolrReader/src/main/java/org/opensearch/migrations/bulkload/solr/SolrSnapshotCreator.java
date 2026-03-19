@@ -25,6 +25,7 @@ import lombok.extern.slf4j.Slf4j;
 public class SolrSnapshotCreator {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String STATUS_FIELD = "status";
 
     private final String solrBaseUrl;
     private final HttpClient httpClient;
@@ -64,7 +65,7 @@ public class SolrSnapshotCreator {
             );
             log.info("Initiating SolrCloud backup for collection '{}': async={}", collection, asyncId);
             var response = getJson(url);
-            var status = response.path("responseHeader").path("status").asInt(-1);
+            var status = response.path("responseHeader").path(STATUS_FIELD).asInt(-1);
             if (status != 0) {
                 var errorMsg = response.path("error").path("msg").asText(response.toString());
                 throw new SolrBackupFailed("Backup initiation failed for collection '" + collection + "': " + errorMsg);
@@ -82,7 +83,7 @@ public class SolrSnapshotCreator {
                 solrBaseUrl, asyncId
             );
             var response = getJson(url);
-            var state = response.path("status").path("state").asText("");
+            var state = response.path(STATUS_FIELD).path("state").asText("");
             if ("completed".equalsIgnoreCase(state)) {
                 log.info("SolrCloud backup completed for collection '{}'", collection);
                 continue;
@@ -92,7 +93,7 @@ public class SolrSnapshotCreator {
                 return false;
             }
             if ("failed".equalsIgnoreCase(state) || "notfound".equalsIgnoreCase(state)) {
-                var msg = response.path("status").path("msg").asText(state);
+                var msg = response.path(STATUS_FIELD).path("msg").asText(state);
                 throw new SolrBackupFailed("Backup failed for collection '" + collection + "': " + msg);
             }
             // Unknown state — treat as in-progress

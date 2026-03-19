@@ -54,11 +54,11 @@ class SolrMetadata:
         self.target_cluster = target_cluster
         self.index_allowlist = index_allowlist
 
-    def evaluate(self, extra_args=None) -> CommandResult:
+    def evaluate(self, **kwargs) -> CommandResult:
         """Dry-run: show what would be created."""
         return self._migrate_schemas(dry_run=True)
 
-    def migrate(self, extra_args=None) -> CommandResult:
+    def migrate(self, **kwargs) -> CommandResult:
         """Create OpenSearch indices from Solr schemas."""
         return self._migrate_schemas(dry_run=False)
 

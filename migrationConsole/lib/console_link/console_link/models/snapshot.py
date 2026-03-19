@@ -17,6 +17,8 @@ from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
 
 logger = logging.getLogger(__name__)
 
+SOLR_NO_DELETE_MSG = "Solr backups are managed as files; no delete API available."
+
 
 # Define the models first to avoid forward reference issues
 class SnapshotIndex(BaseModel):
@@ -137,9 +139,9 @@ class Snapshot(ABC):
             raise
 
     def _is_solr_source(self) -> bool:
-        return (self.source_cluster is not None
-                and self.source_cluster.version is not None
-                and self.source_cluster.version.upper().startswith("SOLR"))
+        return (self.source_cluster is not None and
+                isinstance(self.source_cluster.version, str) and
+                self.source_cluster.version.upper().startswith("SOLR"))
 
     def _collect_universal_command_args(self) -> Dict:
         if not self.source_cluster:
@@ -244,14 +246,14 @@ class S3Snapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return "Solr backups are managed as files; no delete API available."
+            return SOLR_NO_DELETE_MSG
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete_all_snapshots(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return "Solr backups are managed as files; no delete API available."
+            return SOLR_NO_DELETE_MSG
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> str:
@@ -310,14 +312,14 @@ class FileSystemSnapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return "Solr backups are managed as files; no delete API available."
+            return SOLR_NO_DELETE_MSG
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete_all_snapshots(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return "Solr backups are managed as files; no delete API available."
+            return SOLR_NO_DELETE_MSG
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> str:
@@ -645,6 +647,41 @@ def _solr_backup_status(cluster: Cluster, snapshot_name: str) -> CommandResult:
         return CommandResult(success=False, value=f"Failed to get Solr backup status: {e}")
 
 
+def _determine_solr_step_state(all_completed: bool, any_failed: bool) -> StepState:
+    """Map Solr backup flags to a StepState."""
+    if all_completed:
+        return StepState.COMPLETED
+    if any_failed:
+        return StepState.FAILED
+    return StepState.RUNNING
+
+
+def _parse_collection_response(resp: dict) -> dict:
+    """Parse a single collection's REQUESTSTATUS response into normalized metrics."""
+    response_data = resp.get("response", [])
+    if isinstance(response_data, list):
+        num_shards = int(_get_named_list_value(response_data, "numShards") or 0)
+        size_mb = float(_get_named_list_value(response_data, "indexSizeMB") or 0.0)
+        start_time_str = _get_named_list_value(response_data, "startTime")
+    else:
+        num_shards = int(response_data.get("numShards", 0))
+        size_mb = float(response_data.get("indexSizeMB", 0.0))
+        start_time_str = response_data.get("startTime")
+
+    started_dt = None
+    if start_time_str:
+        try:
+            started_dt = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            pass
+
+    return {
+        "num_shards": num_shards,
+        "size_bytes": int(size_mb * 1024 * 1024),
+        "started_dt": started_dt,
+    }
+
+
 def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotStatus:
     """Build a SnapshotStatus from SolrCloud REQUESTSTATUS responses."""
     r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
@@ -656,7 +693,6 @@ def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotS
     started_dt = None
     all_completed = True
     any_failed = False
-    any_running = False
     any_found = False
 
     for coll in collections:
@@ -672,32 +708,20 @@ def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotS
                 continue
 
             any_found = True
-            response_data = resp.get("response", [])
-            if isinstance(response_data, list):
-                num_shards = int(_get_named_list_value(response_data, "numShards") or 0)
-                size_mb = float(_get_named_list_value(response_data, "indexSizeMB") or 0.0)
-                start_time_str = _get_named_list_value(response_data, "startTime")
-            else:
-                num_shards = int(response_data.get("numShards", 0))
-                size_mb = float(response_data.get("indexSizeMB", 0.0))
-                start_time_str = response_data.get("startTime")
+            parsed = _parse_collection_response(resp)
 
-            total_shards += num_shards
-            index_size_bytes += int(size_mb * 1024 * 1024)
+            total_shards += parsed["num_shards"]
+            index_size_bytes += parsed["size_bytes"]
 
-            if start_time_str and started_dt is None:
-                try:
-                    started_dt = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
-                except (ValueError, AttributeError):
-                    pass
+            if parsed["started_dt"] and started_dt is None:
+                started_dt = parsed["started_dt"]
 
             if state == "completed":
-                completed_shards += num_shards
+                completed_shards += parsed["num_shards"]
             elif state == "failed":
                 any_failed = True
                 all_completed = False
             else:
-                any_running = True
                 all_completed = False
                 completed_shards += len(resp.get("success", {}))
 
@@ -708,15 +732,9 @@ def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotS
         return SnapshotStatus(status=StepState.PENDING, percentage_completed=0.0)
 
     pct = (completed_shards / total_shards * 100) if total_shards else 0.0
-    if all_completed:
-        step_state = StepState.COMPLETED
+    step_state = _determine_solr_step_state(all_completed, any_failed)
+    if step_state == StepState.COMPLETED:
         pct = 100.0
-    elif any_failed:
-        step_state = StepState.FAILED
-    elif any_running:
-        step_state = StepState.RUNNING
-    else:
-        step_state = StepState.RUNNING
 
     # Estimate ETA from elapsed time and progress
     eta_ms = None
