@@ -715,62 +715,63 @@ def _compute_eta(started_dt: Optional[datetime], pct: float, step_state: StepSta
     return eta_ms, finished_dt
 
 
+def _accumulate_collection_result(result: dict, accum: dict) -> None:
+    """Update accumulator with a single collection's poll result."""
+    state = result["state"]
+    accum["any_found"] = True
+    accum["total_shards"] += result["num_shards"]
+    accum["index_size_bytes"] += result["size_bytes"]
+    if result["started_dt"] and accum["started_dt"] is None:
+        accum["started_dt"] = result["started_dt"]
+    if state == "completed":
+        accum["completed_shards"] += result["num_shards"]
+    elif state == "failed":
+        accum["any_failed"] = True
+        accum["all_completed"] = False
+    else:
+        accum["all_completed"] = False
+        accum["completed_shards"] += result["success_count"]
+
+
 def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotStatus:
     """Build a SnapshotStatus from SolrCloud REQUESTSTATUS responses."""
     r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
     collections = r.json().get("collections", [])
 
-    total_shards = 0
-    completed_shards = 0
-    index_size_bytes = 0
-    started_dt = None
-    all_completed = True
-    any_failed = False
-    any_found = False
+    accum = {
+        "total_shards": 0, "completed_shards": 0, "index_size_bytes": 0,
+        "started_dt": None, "all_completed": True, "any_failed": False, "any_found": False,
+    }
 
     for coll in collections:
         result = _poll_collection_status(cluster, snapshot_name, coll)
         if result is None:
             continue
         if result["state"] == "error":
-            all_completed = False
+            accum["all_completed"] = False
             continue
+        _accumulate_collection_result(result, accum)
 
-        any_found = True
-        total_shards += result["num_shards"]
-        index_size_bytes += result["size_bytes"]
-        if result["started_dt"] and started_dt is None:
-            started_dt = result["started_dt"]
-
-        if result["state"] == "completed":
-            completed_shards += result["num_shards"]
-        elif result["state"] == "failed":
-            any_failed = True
-            all_completed = False
-        else:
-            all_completed = False
-            completed_shards += result["success_count"]
-
-    if not any_found:
+    if not accum["any_found"]:
         return SnapshotStatus(status=StepState.PENDING, percentage_completed=0.0)
 
-    pct = (completed_shards / total_shards * 100) if total_shards else 0.0
-    step_state = _determine_solr_step_state(all_completed, any_failed)
+    pct = (accum["completed_shards"] / accum["total_shards"] * 100) if accum["total_shards"] else 0.0
+    step_state = _determine_solr_step_state(accum["all_completed"], accum["any_failed"])
     if step_state == StepState.COMPLETED:
         pct = 100.0
 
-    eta_ms, finished_dt = _compute_eta(started_dt, pct, step_state)
+    eta_ms, finished_dt = _compute_eta(accum["started_dt"], pct, step_state)
 
     return SnapshotStatus(
         status=step_state,
         percentage_completed=pct,
         eta_ms=eta_ms,
-        started=started_dt,
+        started=accum["started_dt"],
         finished=finished_dt,
-        data_total_bytes=index_size_bytes,
-        data_processed_bytes=index_size_bytes if all_completed else None,
-        shard_total=total_shards,
-        shard_complete=completed_shards,
+        data_total_bytes=accum["index_size_bytes"],
+        data_processed_bytes=accum["index_size_bytes"] if accum["all_completed"] else None,
+        shard_total=accum["total_shards"],
+        shard_complete=accum["completed_shards"],
     )
 
 
