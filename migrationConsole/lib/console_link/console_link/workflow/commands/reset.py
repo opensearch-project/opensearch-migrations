@@ -60,6 +60,49 @@ def _patch_teardown(namespace, plural, name):
         return False
 
 
+def _show_resources(namespace, crds):
+    """List mode: show all migration CRDs and approval gates."""
+    click.echo(f"Migration resources in namespace '{namespace}':")
+    for plural, name, phase in crds:
+        kind = plural.rstrip('s')
+        click.echo(f"  {kind}/{name:<35} ({phase})")
+    for name, phase in list_approval_gates(namespace):
+        click.echo(f"  approvalgate/{name:<30} ({phase})")
+    click.echo()
+    click.echo("Use 'workflow reset <name>' to teardown a resource.")
+    click.echo("Use 'workflow reset *' to teardown all and delete the workflow.")
+
+
+def _patch_targets(namespace, targets):
+    """Patch a list of CRDs to Teardown. Returns True if all succeeded."""
+    for plural, name, phase in targets:
+        if _patch_teardown(namespace, plural, name):
+            click.echo(f"  ✓ Patched {name} to Teardown")
+        else:
+            click.echo(f"  ✗ Failed to patch {name}", err=True)
+            return False
+    return True
+
+
+def _reset_all(namespace, workflow_name, argo_server, token, insecure):
+    """Approve all gates, wait for workflow completion, delete workflow."""
+    for name, phase in list_approval_gates(namespace):
+        if phase == 'Pending' and approve_gate(namespace, name):
+            click.echo(f"  ✓ Approved gate {name}")
+
+    click.echo("Waiting for workflow to complete...")
+    phase = wait_for_workflow_completion(workflow_name, namespace, argo_server, token, insecure)
+    if phase:
+        click.echo(f"Workflow finished: {phase}")
+    else:
+        click.echo("Timed out waiting for workflow completion.", err=True)
+
+    if delete_workflow(workflow_name, namespace, argo_server, token, insecure):
+        click.echo(f"  ✓ Deleted workflow '{workflow_name}'")
+    else:
+        click.echo(f"  ✗ Failed to delete workflow '{workflow_name}'", err=True)
+
+
 @click.command(name="reset")
 @click.argument('path', required=False, default=None)
 @click.option('--workflow-name', default=DEFAULT_WORKFLOW_NAME, shell_complete=get_workflow_completions)
@@ -96,18 +139,8 @@ def reset_command(ctx, path, workflow_name, argo_server, namespace, insecure, to
             click.echo("No migration resources found.")
             return
 
-        # LIST mode
         if path is None:
-            click.echo(f"Migration resources in namespace '{namespace}':")
-            for plural, name, phase in crds:
-                kind = plural.rstrip('s')
-                click.echo(f"  {kind}/{name:<35} ({phase})")
-            gates = list_approval_gates(namespace)
-            for name, phase in gates:
-                click.echo(f"  approvalgate/{name:<30} ({phase})")
-            click.echo()
-            click.echo("Use 'workflow reset <name>' to teardown a resource.")
-            click.echo("Use 'workflow reset *' to teardown all and delete the workflow.")
+            _show_resources(namespace, crds)
             return
 
         # Find CRDs to patch
@@ -120,33 +153,12 @@ def reset_command(ctx, path, workflow_name, argo_server, namespace, insecure, to
             click.echo(f"No resources to teardown matching '{path}'.")
             return
 
-        for plural, name, phase in targets:
-            if _patch_teardown(namespace, plural, name):
-                click.echo(f"  ✓ Patched {name} to Teardown")
-            else:
-                click.echo(f"  ✗ Failed to patch {name}", err=True)
-                ctx.exit(ExitCode.FAILURE.value)
-                return
+        if not _patch_targets(namespace, targets):
+            ctx.exit(ExitCode.FAILURE.value)
+            return
 
-        # If *, also approve all pending gates to unblock the workflow
         if path == '*':
-            pending_gates = [(n, ph) for n, ph in list_approval_gates(namespace) if ph == 'Pending']
-            for name, _ in pending_gates:
-                if approve_gate(namespace, name):
-                    click.echo(f"  ✓ Approved gate {name}")
-
-            click.echo("Waiting for workflow to complete...")
-            phase = wait_for_workflow_completion(
-                workflow_name, namespace, argo_server, token, insecure)
-            if phase:
-                click.echo(f"Workflow finished: {phase}")
-            else:
-                click.echo("Timed out waiting for workflow completion.", err=True)
-
-            if delete_workflow(workflow_name, namespace, argo_server, token, insecure):
-                click.echo(f"  ✓ Deleted workflow '{workflow_name}'")
-            else:
-                click.echo(f"  ✗ Failed to delete workflow '{workflow_name}'", err=True)
+            _reset_all(namespace, workflow_name, argo_server, token, insecure)
 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
