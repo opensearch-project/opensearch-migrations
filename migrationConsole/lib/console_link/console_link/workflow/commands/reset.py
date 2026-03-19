@@ -81,6 +81,15 @@ def extract_reset_actions(nodes):
     return actions
 
 
+def _is_custom_resource(api_version):
+    """Check if an apiVersion refers to a custom resource (has a dot in the group)."""
+    # Core: "v1", "apps/v1" — Custom: "kafka.strimzi.io/v1", "argoproj.io/v1alpha1"
+    if '/' not in api_version:
+        return False
+    group = api_version.rsplit('/', 1)[0]
+    return '.' in group
+
+
 def _execute_reset_action(action, default_namespace):
     """Execute a single reset action against the k8s API.
 
@@ -97,8 +106,7 @@ def _execute_reset_action(action, default_namespace):
         return False
 
     try:
-        if '/' in api_version:
-            # Custom resource (e.g. kafka.strimzi.io/v1)
+        if _is_custom_resource(api_version):
             group, version = api_version.rsplit('/', 1)
             custom_api = client.CustomObjectsApi()
             plural = _kind_to_plural(kind)
