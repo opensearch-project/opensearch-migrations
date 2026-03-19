@@ -362,8 +362,3 @@ class TestConfigureCommands:
         assert 'Sample configuration loaded successfully' in result.output
         # Verify save_config was called
         assert mock_store.save_config.called
-
-
-class TestApprovalCompletions:
-    """Approval completions removed - approve now uses CRD-based approach without shell completion."""
-    pass
