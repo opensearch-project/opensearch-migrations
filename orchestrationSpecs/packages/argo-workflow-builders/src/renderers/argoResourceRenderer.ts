@@ -302,6 +302,7 @@ function formatTemplate(templates: GenericScope, templateName: string) {
         ...(template.retryStrategy && Object.keys(template.retryStrategy).length > 0 ?
             {retryStrategy: template.retryStrategy} : {}),
         ...(template.synchronization && {synchronization: formatSynchronization(template.synchronization)}),
+        ...(template.onExit ? {onExit: convertTemplateName(template.onExit)} : {}),
         outputs: formatOutputParameters(template.outputs)
     }
 }
