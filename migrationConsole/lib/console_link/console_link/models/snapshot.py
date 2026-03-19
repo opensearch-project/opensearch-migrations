@@ -624,76 +624,123 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
 def _solr_backup_status(cluster: Cluster, snapshot_name: str) -> CommandResult:
     """Check SolrCloud backup status via Collections API REQUESTSTATUS."""
     try:
-        r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
-        collections = r.json().get("collections", [])
+        status_obj = _get_solr_snapshot_status(cluster, snapshot_name)
+        start_time = status_obj.started.strftime('%Y-%m-%d %H:%M:%S') if status_obj.started else ''
+        finish_time = status_obj.finished.strftime('%Y-%m-%d %H:%M:%S') if status_obj.finished else ''
+        eta_str = format_duration(int(status_obj.eta_ms)) if status_obj.eta_ms else "0h 0m 0s"
+        data_mb = (status_obj.data_total_bytes or 0) / (1024 ** 2)
 
-        total_shards = 0
-        completed_shards = 0
-        all_states = []
-        index_size_mb = 0.0
-
-        for coll in collections:
-            async_id = f"{snapshot_name}-{coll}"
-            try:
-                r = cluster.call_api(
-                    f"/solr/admin/collections?action=REQUESTSTATUS&requestid={async_id}&wt=json"
-                )
-                resp = r.json()
-                state = resp.get("status", {}).get("state", "notfound")
-                all_states.append((coll, state))
-
-                # Extract shard progress from the response NamedList
-                response_data = resp.get("response", [])
-                if isinstance(response_data, list):
-                    num_shards = _get_named_list_value(response_data, "numShards") or 0
-                    size_mb = _get_named_list_value(response_data, "indexSizeMB") or 0.0
-                else:
-                    num_shards = response_data.get("numShards", 0)
-                    size_mb = response_data.get("indexSizeMB", 0.0)
-
-                num_shards = int(num_shards)
-                total_shards += num_shards
-
-                if state == "completed":
-                    completed_shards += num_shards
-                index_size_mb += float(size_mb)
-
-                # Count per-shard completions from success entries
-                if state != "completed":
-                    success = resp.get("success", {})
-                    completed_shards += len(success)
-
-            except Exception as e:
-                all_states.append((coll, f"error: {e}"))
-
-        # Determine overall state
-        states = [s for _, s in all_states]
-        if all(s == "completed" for s in states):
-            overall = "COMPLETED"
-            pct = 100.0
-        elif any(s == "failed" for s in states):
-            overall = "FAILED"
-            pct = (completed_shards / total_shards * 100) if total_shards else 0.0
-        elif any(s == "notfound" for s in states):
-            overall = "NOT_STARTED"
-            pct = 0.0
-        else:
-            overall = "RUNNING"
-            pct = (completed_shards / total_shards * 100) if total_shards else 0.0
-
-        lines = [
-            f"Backup status: {overall}",
-            f"Percent completed: {pct:.1f}%",
-            f"Total shards: {total_shards}",
-            f"Completed shards: {completed_shards}",
-            f"Index size: {index_size_mb:.3f} MB",
-        ]
-        for coll, state in all_states:
-            lines.append(f"  Collection '{coll}': {state}")
-
-        return CommandResult(success=True, value="\n".join(lines))
+        message = (
+            f"Backup status: {status_obj.status.value}\n"
+            f"Start time: {start_time}\n"
+            f"Finished time: {finish_time}\n"
+            f"Percent completed: {status_obj.percentage_completed:.2f}%\n"
+            f"Estimated time to completion: {eta_str}\n"
+            f"Data size: {data_mb:.3f} MiB\n"
+            f"Total shards: {status_obj.shard_total}\n"
+            f"Completed shards: {status_obj.shard_complete}\n"
+        )
+        return CommandResult(success=True, value=message)
     except Exception as e:
         return CommandResult(success=False, value=f"Failed to get Solr backup status: {e}")
+
+
+def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotStatus:
+    """Build a SnapshotStatus from SolrCloud REQUESTSTATUS responses."""
+    r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+    collections = r.json().get("collections", [])
+
+    total_shards = 0
+    completed_shards = 0
+    index_size_bytes = 0
+    started_dt = None
+    all_completed = True
+    any_failed = False
+    any_running = False
+    any_found = False
+
+    for coll in collections:
+        async_id = f"{snapshot_name}-{coll}"
+        try:
+            r = cluster.call_api(
+                f"/solr/admin/collections?action=REQUESTSTATUS&requestid={async_id}&wt=json"
+            )
+            resp = r.json()
+            state = resp.get("status", {}).get("state", "notfound")
+
+            if state == "notfound":
+                continue
+
+            any_found = True
+            response_data = resp.get("response", [])
+            if isinstance(response_data, list):
+                num_shards = int(_get_named_list_value(response_data, "numShards") or 0)
+                size_mb = float(_get_named_list_value(response_data, "indexSizeMB") or 0.0)
+                start_time_str = _get_named_list_value(response_data, "startTime")
+            else:
+                num_shards = int(response_data.get("numShards", 0))
+                size_mb = float(response_data.get("indexSizeMB", 0.0))
+                start_time_str = response_data.get("startTime")
+
+            total_shards += num_shards
+            index_size_bytes += int(size_mb * 1024 * 1024)
+
+            if start_time_str and started_dt is None:
+                try:
+                    started_dt = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    pass
+
+            if state == "completed":
+                completed_shards += num_shards
+            elif state == "failed":
+                any_failed = True
+                all_completed = False
+            else:
+                any_running = True
+                all_completed = False
+                completed_shards += len(resp.get("success", {}))
+
+        except Exception:
+            all_completed = False
+
+    if not any_found:
+        return SnapshotStatus(status=StepState.PENDING, percentage_completed=0.0)
+
+    pct = (completed_shards / total_shards * 100) if total_shards else 0.0
+    if all_completed:
+        step_state = StepState.COMPLETED
+        pct = 100.0
+    elif any_failed:
+        step_state = StepState.FAILED
+    elif any_running:
+        step_state = StepState.RUNNING
+    else:
+        step_state = StepState.RUNNING
+
+    # Estimate ETA from elapsed time and progress
+    eta_ms = None
+    finished_dt = None
+    if started_dt:
+        elapsed = datetime.now(started_dt.tzinfo) - started_dt
+        elapsed_ms = elapsed.total_seconds() * 1000
+        if 0 < pct < 100:
+            eta_ms = (elapsed_ms / pct) * (100 - pct)
+        if step_state == StepState.COMPLETED:
+            finished_dt = started_dt + elapsed
+            eta_ms = 0.0
+
+    return SnapshotStatus(
+        status=step_state,
+        percentage_completed=pct,
+        eta_ms=eta_ms,
+        started=started_dt,
+        finished=finished_dt,
+        data_total_bytes=index_size_bytes,
+        data_processed_bytes=index_size_bytes if all_completed else None,
+        shard_total=total_shards,
+        shard_complete=completed_shards,
+    )
 
 
 def _get_named_list_value(named_list, key):
