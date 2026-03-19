@@ -39,23 +39,25 @@ describe("documentBulkLoad cleanup-on-failure", () => {
         });
     });
 
-    describe("setupAndRunBulkLoad ensures cleanupRfsCoordinator always runs", () => {
-        const template = findTemplate(rendered, "setupandrunbulkload");
+    describe("setupAndRunBulkLoad delegates to internal template with onExit for coordinator cleanup", () => {
+        const wrapper = findTemplate(rendered, "setupandrunbulkload");
+        const internal = findTemplate(rendered, "setupandrunbulkloadinternal");
 
-        it("has continueOn.failed on createRfsCoordinator", () => {
-            const step = findStep(template.steps, "createRfsCoordinator");
-            expect(step?.continueOn).toEqual({ failed: true });
-        });
-
-        it("has continueOn.failed on runBulkLoad", () => {
-            const step = findStep(template.steps, "runBulkLoad");
-            expect(step?.continueOn).toEqual({ failed: true });
-        });
-
-        it("does not have continueOn on cleanupRfsCoordinator (final cleanup step)", () => {
-            const step = findStep(template.steps, "cleanupRfsCoordinator");
+        it("wrapper delegates to setupAndRunBulkLoadInternal", () => {
+            const step = findStep(wrapper.steps, "setupAndRunBulkLoadInternal");
             expect(step).toBeDefined();
-            expect(step?.continueOn).toBeUndefined();
+        });
+
+        it("internal template has onExit pointing to cleanupRfsCoordinator", () => {
+            expect(internal?.onExit).toBe("cleanupRfsCoordinator".toLowerCase());
+        });
+
+        it("internal template has no continueOn on any steps", () => {
+            for (const group of internal.steps) {
+                for (const step of group) {
+                    expect(step.continueOn).toBeUndefined();
+                }
+            }
         });
     });
 });
@@ -63,23 +65,25 @@ describe("documentBulkLoad cleanup-on-failure", () => {
 describe("rfsCoordinatorCluster cleanup-on-failure", () => {
     const rendered = renderWorkflowTemplate(RfsCoordinatorCluster);
 
-    describe("deleteRfsCoordinator ensures all deletes run", () => {
-        const template = findTemplate(rendered, "deleterfscoordinator");
+    describe("deleteRfsCoordinator delegates to internal template with onExit for secret cleanup", () => {
+        const wrapper = findTemplate(rendered, "deleterfscoordinator");
+        const internal = findTemplate(rendered, "deleterfscoordinatorresources");
 
-        it("has continueOn.failed on deleteStatefulSet", () => {
-            const step = findStep(template.steps, "deleteStatefulSet");
-            expect(step?.continueOn).toEqual({ failed: true });
-        });
-
-        it("has continueOn.failed on deleteService", () => {
-            const step = findStep(template.steps, "deleteService");
-            expect(step?.continueOn).toEqual({ failed: true });
-        });
-
-        it("does not have continueOn on deleteSecret (final cleanup step)", () => {
-            const step = findStep(template.steps, "deleteSecret");
+        it("wrapper delegates to deleteRfsCoordinatorResources", () => {
+            const step = findStep(wrapper.steps, "deleteRfsCoordinatorResources");
             expect(step).toBeDefined();
-            expect(step?.continueOn).toBeUndefined();
+        });
+
+        it("internal template has onExit pointing to deleteRfsCoordinatorSecret", () => {
+            expect(internal?.onExit).toBe("deleterfscoordinatorsecret");
+        });
+
+        it("internal template has no continueOn on any steps", () => {
+            for (const group of internal.steps) {
+                for (const step of group) {
+                    expect(step.continueOn).toBeUndefined();
+                }
+            }
         });
     });
 });
