@@ -1,6 +1,6 @@
 """Tests for workflow reset command."""
 import json
-from unittest.mock import patch, Mock, MagicMock
+from unittest.mock import patch, Mock
 
 import pytest
 from click.testing import CliRunner
