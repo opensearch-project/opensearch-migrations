@@ -24,7 +24,7 @@
         },
         {
           "name": "monitor-retry-limit",
-          "value": "33"
+          "value": "132"
         }
       ]
     },
@@ -113,8 +113,9 @@
           "limit": "{{workflow.parameters.monitor-retry-limit}}",
           "retryPolicy": "Always",
           "backoff": {
-            "duration": "60",
-            "factor": "1"
+            "duration": "5",
+            "factor": "2",
+            "cap": "15"
           }
         },
         "outputs": {
