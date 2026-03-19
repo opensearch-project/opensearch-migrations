@@ -1,4 +1,5 @@
 {{- range $item := (list
+  (dict "kind" "ApprovalGate"      "plural" "approvalgates"      "singular" "approvalgate")
   (dict "kind" "CapturedTraffic"   "plural" "capturedtraffics"   "singular" "capturedtraffic")
   (dict "kind" "DataSnapshot"      "plural" "datasnapshots"      "singular" "datasnapshot")
   (dict "kind" "SnapshotMigration" "plural" "snapshotmigrations" "singular" "snapshotmigration")

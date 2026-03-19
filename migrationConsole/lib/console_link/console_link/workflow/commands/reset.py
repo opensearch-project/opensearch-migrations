@@ -13,6 +13,7 @@ from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode, load_k8s_config
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .approve import list_approval_gates, approve_gate
 from .suspend_steps import (
     wait_for_workflow_completion,
     delete_workflow,
@@ -101,6 +102,9 @@ def reset_command(ctx, path, workflow_name, argo_server, namespace, insecure, to
             for plural, name, phase in crds:
                 kind = plural.rstrip('s')
                 click.echo(f"  {kind}/{name:<35} ({phase})")
+            gates = list_approval_gates(namespace)
+            for name, phase in gates:
+                click.echo(f"  approvalgate/{name:<30} ({phase})")
             click.echo()
             click.echo("Use 'workflow reset <name>' to teardown a resource.")
             click.echo("Use 'workflow reset *' to teardown all and delete the workflow.")
@@ -124,8 +128,13 @@ def reset_command(ctx, path, workflow_name, argo_server, namespace, insecure, to
                 ctx.exit(ExitCode.FAILURE.value)
                 return
 
-        # If *, wait for workflow completion and delete
+        # If *, also approve all pending gates to unblock the workflow
         if path == '*':
+            pending_gates = [(n, ph) for n, ph in list_approval_gates(namespace) if ph == 'Pending']
+            for name, _ in pending_gates:
+                if approve_gate(namespace, name):
+                    click.echo(f"  ✓ Approved gate {name}")
+
             click.echo("Waiting for workflow to complete...")
             phase = wait_for_workflow_completion(
                 workflow_name, namespace, argo_server, token, insecure)

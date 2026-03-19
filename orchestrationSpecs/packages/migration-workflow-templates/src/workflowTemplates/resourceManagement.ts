@@ -207,6 +207,40 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
 
+    // ── Approval gate templates ─────────────────────────────────────────
+
+    .addTemplate("createApprovalGate", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "ApprovalGate",
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Pending"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("waitForApproval", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addWaitForExistingResource(b => b
+            .setDefinition({
+                resource: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "ApprovalGate",
+                    name: b.inputs.resourceName
+                },
+                conditions: {successCondition: "status.phase == Approved"}
+            })
+        )
+    )
+
+
     // ── Teardown signal templates ───────────────────────────────────────
 
     .addTemplate("waitForTeardown", t => t
