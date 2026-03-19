@@ -118,6 +118,15 @@ export type OutputParamDef<T extends PlainObject> = {
     | { fromWhere: "default"; default: BaseExpression<T> }
     );
 
+/** Output artifact definition — uploaded to S3 via Argo's artifact repository. */
+export type OutputArtifactDef = {
+    name: string;
+    path: string;
+    archive?: { none: {} };
+};
+
+export type OutputArtifactsRecord = Record<string, OutputArtifactDef>;
+
 /** Canonical maps for inputs/outputs (values are type-only descriptors). */
 export type InputParametersRecord = Record<string, InputParamDef<any, boolean>>;
 export type OutputParametersRecord = Record<string, OutputParamDef<any>>;
