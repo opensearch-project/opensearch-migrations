@@ -103,7 +103,6 @@ class AOSSTestBase(MATestBase):
                     "indexAllowlist": self.expected_indices
                 },
                 "documentBackfillConfig": {
-                    "useTargetClusterForWorkCoordination": False,
                     "indexAllowlist": self.expected_indices
                 }
             }]
