@@ -254,6 +254,7 @@ public class LuceneDocumentsReaderTest {
                 var field2 = mock(LuceneField.class);
                 when(field2.name()).thenReturn("_source");
                 when(field2.utf8Value()).thenReturn("{\"field\":\"value\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                when(field2.utf8ToStringValue()).thenReturn("{\"field\":\"value\"}");
                 when(doc.getFields()).thenAnswer(inv -> List.of(field1, field2));
 
                 return doc;
