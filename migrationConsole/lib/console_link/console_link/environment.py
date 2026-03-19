@@ -183,8 +183,8 @@ class Environment:
         instance.metadata = None
         instance.backfill = None
         instance.snapshot = None
-        if (source_cluster and source_cluster.version
-                and source_cluster.version.upper().startswith("SOLR") and target_cluster):
+        if (source_cluster and isinstance(source_cluster.version, str) and
+                source_cluster.version.upper().startswith("SOLR") and target_cluster):
             from console_link.models.solr_metadata import SolrMetadata
             from console_link.models.solr_backfill import SolrBackfill
             instance.metadata = SolrMetadata(source_cluster, target_cluster)

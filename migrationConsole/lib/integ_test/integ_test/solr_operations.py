@@ -1,7 +1,6 @@
 from .default_operations import DefaultOperationsLibrary
 from console_link.models.cluster import Cluster
 
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,7 +26,8 @@ class SolrOperationsLibrary(DefaultOperationsLibrary):
 
     def get_document(self, index_name: str, doc_id: str, cluster: Cluster, doc_type="_doc",
                      max_attempts=5, delay=2.0, **kwargs):
-        import requests, time
+        import requests
+        import time
         for attempt in range(max_attempts):
             r = requests.get(
                 f"{cluster.endpoint}/solr/{index_name}/select?q=id:{doc_id}&wt=json",
