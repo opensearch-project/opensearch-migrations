@@ -38,34 +38,46 @@ def _fetch_reset_actions(workflow_name, namespace, argo_server, token, insecure)
     return extract_reset_actions(nodes)
 
 
-def extract_reset_actions(nodes):
-    """Extract resetAction parameters from workflow nodes, excluding those marked as resetDone."""
-    actions = []
-    done_keys = set()
+def _get_node_param(node, param_name):
+    """Get a named parameter value from a workflow node's inputs."""
+    for p in node.get('inputs', {}).get('parameters', []):
+        if p.get('name') == param_name:
+            return p.get('value', '')
+    return ''
 
-    # First pass: collect resetDone keys from succeeded nodes
+
+def _collect_done_keys(nodes):
+    """Collect resetDone keys from succeeded nodes."""
+    done_keys = set()
     for node in nodes.values():
         if node.get('phase') != 'Succeeded':
             continue
-        for p in node.get('inputs', {}).get('parameters', []):
-            if p.get('name') == 'resetDone' and p.get('value'):
-                done_keys.add(p['value'])
+        value = _get_node_param(node, 'resetDone')
+        if value:
+            done_keys.add(value)
+    return done_keys
 
-    # Second pass: collect resetAction entries not already done
+
+def _action_key(action):
+    """Compute the resource key for a resetAction."""
+    return f"{action.get('apiVersion', '')}/{action.get('kind', '')}/{action.get('name', '')}"
+
+
+def extract_reset_actions(nodes):
+    """Extract resetAction parameters from workflow nodes, excluding those marked as resetDone."""
+    done_keys = _collect_done_keys(nodes)
+    actions = []
     for node in nodes.values():
-        display_name = node.get('displayName', '')
-        for p in node.get('inputs', {}).get('parameters', []):
-            if p.get('name') == 'resetAction' and p.get('value'):
-                try:
-                    action = json.loads(p['value'])
-                    if not action:
-                        continue
-                    key = f"{action.get('apiVersion', '')}/{action.get('kind', '')}/{action.get('name', '')}"
-                    if key in done_keys:
-                        continue
-                    actions.append((display_name, action))
-                except (json.JSONDecodeError, TypeError):
-                    pass
+        raw = _get_node_param(node, 'resetAction')
+        if not raw:
+            continue
+        try:
+            action = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not action or _action_key(action) in done_keys:
+            continue
+        actions.append((node.get('displayName', ''), action))
     return actions
 
 
@@ -150,6 +162,39 @@ def _kind_to_plural(kind):
     return mapping.get(kind.lower(), kind.lower() + 's')
 
 
+def _delete_argo_workflow(namespace, workflow_name):
+    """Delete the Argo workflow resource. Returns True if deleted."""
+    try:
+        custom_api = client.CustomObjectsApi()
+        custom_api.delete_namespaced_custom_object(
+            group='argoproj.io', version='v1alpha1',
+            namespace=namespace, plural='workflows', name=workflow_name
+        )
+        logger.info(f"Deleted workflow '{workflow_name}'")
+        return True
+    except ApiException as e:
+        if e.status == 404:
+            logger.info(f"Workflow '{workflow_name}' not found (already removed)")
+        else:
+            logger.error(f"Failed to delete workflow: {e}")
+    return False
+
+
+def _execute_and_log(display_name, action, namespace):
+    """Execute a single reset action and log the result. Returns 1 if acted, 0 otherwise."""
+    kind = action.get('kind', '')
+    name = action.get('name', '')
+    act = action.get('action', 'delete')
+    try:
+        if _execute_reset_action(action, namespace):
+            logger.info(f"Reset {act} {kind} '{name}' (from: {display_name})")
+            return 1
+        logger.info(f"{kind} '{name}' not found (already removed)")
+    except Exception as e:
+        logger.error(f"Failed to {act} {kind} '{name}': {e}")
+    return 0
+
+
 def reset_workflow_resources(workflow_name, namespace, argo_server, token=None, insecure=False,
                              delete_workflow=True):
     """Reset workflow resources to a clean state. Callable from code or CLI.
@@ -166,35 +211,10 @@ def reset_workflow_resources(workflow_name, namespace, argo_server, token=None, 
         return 0
 
     load_k8s_config()
+    total = sum(_execute_and_log(name, action, namespace) for name, action in actions)
 
-    total = 0
-    for display_name, action in actions:
-        kind = action.get('kind', '')
-        name = action.get('name', '')
-        act = action.get('action', 'delete')
-        try:
-            if _execute_reset_action(action, namespace):
-                logger.info(f"Reset {act} {kind} '{name}' (from: {display_name})")
-                total += 1
-            else:
-                logger.info(f"{kind} '{name}' not found (already removed)")
-        except Exception as e:
-            logger.error(f"Failed to {act} {kind} '{name}': {e}")
-
-    if delete_workflow:
-        try:
-            custom_api = client.CustomObjectsApi()
-            custom_api.delete_namespaced_custom_object(
-                group='argoproj.io', version='v1alpha1',
-                namespace=namespace, plural='workflows', name=workflow_name
-            )
-            logger.info(f"Deleted workflow '{workflow_name}'")
-            total += 1
-        except ApiException as e:
-            if e.status == 404:
-                logger.info(f"Workflow '{workflow_name}' not found (already removed)")
-            else:
-                logger.error(f"Failed to delete workflow: {e}")
+    if delete_workflow and _delete_argo_workflow(namespace, workflow_name):
+        total += 1
 
     logger.info(f"Reset complete. {total} resource(s) affected.")
     return total
