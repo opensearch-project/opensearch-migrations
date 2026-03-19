@@ -3,6 +3,7 @@ from enum import Enum
 import json
 import logging
 import subprocess
+import time
 from pydantic import BaseModel
 
 import boto3
@@ -163,13 +164,55 @@ class Cluster:
     @property
     def is_serverless(self) -> bool:
         """Check if this is an Amazon OpenSearch Serverless (AOSS) collection.
-        Detects via SigV4 service=aoss or AOSS endpoint pattern, to handle
-        both authenticated and no-auth (VPC-only) serverless clusters."""
+        Config-based detection: SigV4 service=aoss or .aoss.amazonaws.com endpoint pattern.
+        For runtime detection (like Java's GET / probe), use detect_serverless_collection_type()."""
         if (self.auth_type == AuthMethod.SIGV4 and
                 self.auth_details is not None and
                 self.auth_details.get("service") == "aoss"):
             return True
         return ".aoss.amazonaws.com" in (self.endpoint or "")
+
+    def detect_serverless_collection_type(self) -> Optional[str]:
+        """Detect AOSS collection type by mirroring Java OpenSearchClientFactory logic:
+        1. Probe GET / — if 200, not serverless (return None)
+        2. If 404, probe with invalid KNN index to detect SEARCH/TIMESERIES/VECTOR from error message.
+        Returns 'SEARCH', 'TIMESERIES', 'VECTOR', 'UNKNOWN' (serverless but undetected), or None (not serverless)."""
+        # Step 1: probe root API (mirrors Java getClusterVersion())
+        try:
+            r = self.call_api("/", raise_error=False, timeout=5)
+            if r.status_code == 200:
+                return None  # Not serverless
+            if r.status_code != 404:
+                logger.debug(f"Unexpected status {r.status_code} from GET /, cannot determine serverless type")
+                return None
+        except Exception as e:
+            logger.debug(f"GET / probe failed: {e}")
+            return None
+
+        # Step 2: KNN probe to detect collection type (mirrors Java detectServerlessCollectionType())
+        probe_index = f"migrations_type_probe_{int(time.time())}"
+        probe_body = json.dumps({
+            "settings": {"index.knn": True},
+            "mappings": {"properties": {"v": {"type": "knn_vector", "dimension": -1}}}
+        })
+        try:
+            r = self.call_api(f"/{probe_index}", method=HttpMethod.PUT,
+                              data=probe_body,
+                              headers={"Content-Type": "application/json"},
+                              raise_error=False, timeout=10)
+            body = r.text or ""
+            if r.status_code < 400:
+                self.call_api(f"/{probe_index}", method=HttpMethod.DELETE, raise_error=False)
+        except Exception as e:
+            body = str(e)
+
+        if "KNN features not supported on TIMESERIES collection type" in body:
+            return "TIMESERIES"
+        elif "KNN features not supported on SEARCH collection type" in body:
+            return "SEARCH"
+        elif "Dimension value must be greater than 0" in body:
+            return "VECTOR"
+        return "UNKNOWN"
 
     @property
     def display_name(self) -> str:
