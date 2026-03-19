@@ -237,7 +237,7 @@ class S3Snapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return _solr_backup_status(self.source_cluster)
+            return _solr_backup_status(self.source_cluster, self.snapshot_name)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
@@ -303,7 +303,7 @@ class FileSystemSnapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return _solr_backup_status(self.source_cluster)
+            return _solr_backup_status(self.source_cluster, self.snapshot_name)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
@@ -621,24 +621,76 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     return SnapshotStateAndDetails(state, snapshot_info)
 
 
-def _solr_backup_status(cluster: Cluster) -> CommandResult:
-    """Check SolrCloud backup status via Collections API async request status."""
+def _solr_backup_status(cluster: Cluster, snapshot_name: str) -> CommandResult:
+    """Check SolrCloud backup status via Collections API REQUESTSTATUS."""
     try:
-        # Get collections list
         r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
         collections = r.json().get("collections", [])
-        lines = []
+
+        total_shards = 0
+        completed_shards = 0
+        all_states = []
+        index_size_mb = 0.0
+
         for coll in collections:
-            # Convention: async ID = <snapshot_name>-<collection>
-            # Since we don't know the snapshot name here, check replication details as fallback
-            r = cluster.call_api(f"/solr/{coll}/replication?command=details&wt=json")
-            details = r.json().get("details", {})
-            backup = details.get("backup")
-            if backup:
-                status = _get_named_list_value(backup, "status") if isinstance(backup, list) else backup.get("status", "unknown")
-                lines.append(f"Collection '{coll}': backup status = {status}")
-            else:
-                lines.append(f"Collection '{coll}': no backup in progress")
+            async_id = f"{snapshot_name}-{coll}"
+            try:
+                r = cluster.call_api(
+                    f"/solr/admin/collections?action=REQUESTSTATUS&requestid={async_id}&wt=json"
+                )
+                resp = r.json()
+                state = resp.get("status", {}).get("state", "notfound")
+                all_states.append((coll, state))
+
+                # Extract shard progress from the response NamedList
+                response_data = resp.get("response", [])
+                if isinstance(response_data, list):
+                    num_shards = _get_named_list_value(response_data, "numShards") or 0
+                    size_mb = _get_named_list_value(response_data, "indexSizeMB") or 0.0
+                else:
+                    num_shards = response_data.get("numShards", 0)
+                    size_mb = response_data.get("indexSizeMB", 0.0)
+
+                num_shards = int(num_shards)
+                total_shards += num_shards
+
+                if state == "completed":
+                    completed_shards += num_shards
+                index_size_mb += float(size_mb)
+
+                # Count per-shard completions from success entries
+                if state != "completed":
+                    success = resp.get("success", {})
+                    completed_shards += len(success)
+
+            except Exception as e:
+                all_states.append((coll, f"error: {e}"))
+
+        # Determine overall state
+        states = [s for _, s in all_states]
+        if all(s == "completed" for s in states):
+            overall = "COMPLETED"
+            pct = 100.0
+        elif any(s == "failed" for s in states):
+            overall = "FAILED"
+            pct = (completed_shards / total_shards * 100) if total_shards else 0.0
+        elif any(s == "notfound" for s in states):
+            overall = "NOT_STARTED"
+            pct = 0.0
+        else:
+            overall = "RUNNING"
+            pct = (completed_shards / total_shards * 100) if total_shards else 0.0
+
+        lines = [
+            f"Backup status: {overall}",
+            f"Percent completed: {pct:.1f}%",
+            f"Total shards: {total_shards}",
+            f"Completed shards: {completed_shards}",
+            f"Index size: {index_size_mb:.3f} MB",
+        ]
+        for coll, state in all_states:
+            lines.append(f"  Collection '{coll}': {state}")
+
         return CommandResult(success=True, value="\n".join(lines))
     except Exception as e:
         return CommandResult(success=False, value=f"Failed to get Solr backup status: {e}")
