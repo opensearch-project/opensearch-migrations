@@ -798,6 +798,39 @@ class WorkflowService:
             error=error_msg
         )
 
+    def get_artifact_content(
+        self,
+        workflow_name: str,
+        node_id: str,
+        artifact_name: str,
+        namespace: str,
+        argo_server: str,
+        token: Optional[str] = None,
+        insecure: bool = False
+    ) -> Optional[str]:
+        """Fetch artifact content from Argo Server artifact API.
+
+        Args:
+            workflow_name: Name of the workflow
+            node_id: Node ID that produced the artifact
+            artifact_name: Name of the artifact
+            namespace: Kubernetes namespace
+            argo_server: Argo Server URL
+            token: Bearer token for authentication
+            insecure: Whether to skip TLS verification
+
+        Returns:
+            Artifact content as string, or None if not found
+        """
+        headers = self._prepare_headers(token)
+        url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}/artifacts/{node_id}/{artifact_name}"
+        try:
+            resp = requests.get(url, headers=headers, verify=not insecure)
+            return resp.text if resp.status_code == 200 else None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to fetch artifact {artifact_name}: {e}")
+            return None
+
     def wait_for_workflow_completion(
         self,
         namespace: str,

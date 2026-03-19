@@ -22,6 +22,7 @@ from ..tree_utils import (
     filter_tree_nodes,
     display_workflow_tree,
     get_node_input_parameter,
+    ArtifactRef,
     WorkflowDisplayer
 )
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
@@ -69,7 +70,7 @@ class StatusCommandHandler:
             click.echo(f"Error: Could not find workflow {workflow_name}", err=True)
             raise click.Abort()
 
-        self._display_workflow_with_tree(workflow_data, live_check)
+        self._display_workflow_with_tree(workflow_data, live_check, argo_server, namespace, insecure)
 
     def _handle_workflow_list(self, show_all: bool, argo_server: str, namespace: str,
                               insecure: bool, live_check: bool) -> None:
@@ -92,7 +93,7 @@ class StatusCommandHandler:
                 f"Processing workflow {i + 1}/{len(sorted_workflows)}: "
                 f"{workflow_name}"
             )
-            self._display_workflow_with_tree(workflow_data, live_check)
+            self._display_workflow_with_tree(workflow_data, live_check, argo_server, namespace, insecure)
 
     def _handle_no_workflows(self, show_all: bool, argo_server: str, namespace: str,
                              insecure: bool, live_check: bool) -> None:
@@ -111,7 +112,7 @@ class StatusCommandHandler:
             most_recent = self.sorter.find_most_recent_completed(all_workflows)
             if most_recent:
                 click.echo("\nShowing last completed workflow:\n")
-                self._display_workflow_with_tree(most_recent, live_check)
+                self._display_workflow_with_tree(most_recent, live_check, argo_server, namespace, insecure)
 
             click.echo("\nUse --all to see all completed workflows")
         else:
@@ -121,12 +122,29 @@ class StatusCommandHandler:
         """Extract workflow name from workflow data."""
         return workflow_data.get('metadata', {}).get('name', 'unknown')
 
-    def _display_workflow_with_tree(self, workflow_data: Dict[str, Any], live_check: bool) -> None:
+    def _display_workflow_with_tree(self, workflow_data: Dict[str, Any], live_check: bool,
+                                    argo_server: str = "", namespace: str = "",
+                                    insecure: bool = False) -> None:
         """Display workflow using tree structure with optional live status checks."""
         tree_nodes = build_nested_workflow_tree(workflow_data)
         if live_check:
             self.live_check_processor.enrich_tree_with_live_checks(tree_nodes)
         filtered_tree = filter_tree_nodes(tree_nodes)
+
+        # Create artifact resolver using the Argo API
+        workflow_name = workflow_data.get('metadata', {}).get('name', '')
+        token = self.data_fetcher.token
+
+        def artifact_resolver(ref: ArtifactRef) -> Optional[str]:
+            return self.service.get_artifact_content(
+                workflow_name=workflow_name,
+                node_id=ref.node_id,
+                artifact_name=ref.artifact_name,
+                namespace=namespace,
+                argo_server=argo_server,
+                token=token,
+                insecure=insecure
+            )
 
         # Extract status info from workflow data
         status = workflow_data.get('status', {})
@@ -138,7 +156,8 @@ class StatusCommandHandler:
             status.get('startedAt'),
             status.get('finishedAt'),
             filtered_tree,
-            workflow_data)
+            workflow_data,
+            artifact_resolver=artifact_resolver)
 
 
 class WorkflowDataFetcher:
@@ -297,11 +316,12 @@ class StatusWorkflowDisplayer(WorkflowDisplayer):
 
     def display_workflow_status(self, workflow_name: str, phase: str, started_at: str,
                                 finished_at: str, tree_nodes: List[Dict[str, Any]],
-                                workflow_data: Dict[str, Any] = None) -> None:
+                                workflow_data: Dict[str, Any] = None,
+                                artifact_resolver=None) -> None:
         """Display complete workflow status with tree."""
         self.display_workflow_header(workflow_name, phase, started_at, finished_at)
         click.echo("")
-        display_workflow_tree(tree_nodes, workflow_data or {})
+        display_workflow_tree(tree_nodes, workflow_data or {}, artifact_resolver=artifact_resolver)
 
         if phase in ('Running', 'Pending'):
             click.echo("")
