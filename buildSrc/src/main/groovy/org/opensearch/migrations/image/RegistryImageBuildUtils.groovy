@@ -39,6 +39,46 @@ class RegistryImageBuildUtils {
         return formatter.getFullBaseImageIdentifier(url, group, image, tag)
     }
 
+    /**
+     * Query a v2 registry for the digest of an image reference like "host:port/repo:tag"
+     * and return "host:port/repo@sha256:...". Throws if the digest cannot be resolved.
+     */
+    static String resolveDigest(String imageReference, boolean allowInsecure) {
+        def atIdx = imageReference.indexOf('@')
+        if (atIdx >= 0) return imageReference // already has a digest
+
+        def colonIdx = imageReference.lastIndexOf(':')
+        def slashIdx = imageReference.lastIndexOf('/')
+        String tag = (colonIdx > slashIdx && colonIdx >= 0) ? imageReference.substring(colonIdx + 1) : "latest"
+        String repoWithHost = (colonIdx > slashIdx && colonIdx >= 0) ? imageReference.substring(0, colonIdx) : imageReference
+
+        def firstSlash = repoWithHost.indexOf('/')
+        if (firstSlash < 0) throw new GradleException("Cannot parse registry host from image reference: ${imageReference}")
+        def registryHost = repoWithHost.substring(0, firstSlash)
+        def repository = repoWithHost.substring(firstSlash + 1)
+
+        def scheme = allowInsecure ? "http" : "https"
+        def url = new URL("${scheme}://${registryHost}/v2/${repository}/manifests/${tag}")
+        def conn = (HttpURLConnection) url.openConnection()
+        conn.setRequestMethod("HEAD")
+        conn.setRequestProperty("Accept",
+                "application/vnd.docker.distribution.manifest.list.v2+json, " +
+                "application/vnd.docker.distribution.manifest.v2+json, " +
+                "application/vnd.oci.image.index.v1+json, " +
+                "application/vnd.oci.image.manifest.v1+json")
+        conn.setConnectTimeout(5000)
+        conn.setReadTimeout(5000)
+
+        if (conn.responseCode != 200) {
+            throw new GradleException("Failed to resolve digest for ${imageReference}: registry returned HTTP ${conn.responseCode}")
+        }
+        def digest = conn.getHeaderField("Docker-Content-Digest")
+        if (!digest) {
+            throw new GradleException("Failed to resolve digest for ${imageReference}: registry did not return Docker-Content-Digest header")
+        }
+        return "${repoWithHost}@${digest}"
+    }
+
     // Determine the build mode based on the tasks requested in the CLI, throwing if multiple variants are configured
     private String detectArchitecture(Project rootProject) {
         def startTasks = rootProject.gradle.startParameter.taskNames
@@ -98,6 +138,16 @@ class RegistryImageBuildUtils {
                             config.imageTag.toString(),
                             config.get("repoName", null)?.toString()
                     )
+
+                    // For intermediate images (built in the same pipeline), resolve the
+                    // digest at execution time to ensure reproducible builds.
+                    if (baseEndpoint == intermediateRegistry.hostUrl) {
+                        project.tasks.named("jib").configure {
+                            doFirst {
+                                project.jib.from.image = RegistryImageBuildUtils.resolveDigest(baseImage, project.jib.allowInsecureRegistries)
+                            }
+                        }
+                    }
 
                     project.jib {
                         from {
