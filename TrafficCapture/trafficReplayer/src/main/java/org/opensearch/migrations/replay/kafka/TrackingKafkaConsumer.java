@@ -513,7 +513,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             // This function will only ever be called in a threadsafe way, mutually exclusive from any
             // other call other than commitKafkaKey(). Since commitKafkaKey() doesn't alter
             // partitionToOffsetLifecycleTrackerMap, these lines can be outside of the commitDataLock mutex
-            log.trace("partitionToOffsetLifecycleTrackerMap=" + partitionToOffsetLifecycleTrackerMap);
+            log.atTrace().setMessage("partitionToOffsetLifecycleTrackerMap={}").addArgument(partitionToOffsetLifecycleTrackerMap).log();
             kafkaRecordsLeftToCommitEventually.set(
                 partitionToOffsetLifecycleTrackerMap.values().stream().mapToInt(OffsetLifecycleTracker::size).sum()
             );

@@ -20,6 +20,17 @@ const SIMPLE_CONSOLE_CLI_RESOURCES = {
 // See https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed for details
 // about how these values effect eviction priorities of pods.
 export const DEFAULT_RESOURCES = {
+    PROXY: {
+        limits: {
+            cpu: "3500m",
+            memory: "3500Mi",
+        },
+        requests: {
+            cpu: "3500m",
+            memory: "3500Mi",
+        }
+    },
+
     REPLAYER: {
         limits: {
             cpu: "3500m",

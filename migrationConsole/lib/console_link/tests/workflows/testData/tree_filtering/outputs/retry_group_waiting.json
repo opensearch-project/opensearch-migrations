@@ -1,0 +1,13 @@
+[
+  {
+    "id": "try1",
+    "display_name": "KafkaNodePool: default",
+    "phase": "Running",
+    "type": "Suspend",
+    "boundary_id": "retry-group",
+    "inputs": {},
+    "outputs": {},
+    "started_at": "2026-01-01T00:00:01Z",
+    "children": []
+  }
+]

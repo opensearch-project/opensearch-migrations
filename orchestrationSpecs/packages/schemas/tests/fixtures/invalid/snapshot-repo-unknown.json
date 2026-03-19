@@ -1,0 +1,26 @@
+{
+  "sourceClusters": {
+    "source": {
+      "version": "ES 7.10.2",
+      "endpoint": "http://source:9200",
+      "snapshotInfo": {
+        "repos": {
+          "real-repo": {
+            "awsRegion": "us-east-1",
+            "s3RepoPathUri": "s3://my-bucket/snapshots"
+          }
+        },
+        "snapshots": {
+          "snap1": {
+            "repoName": "wrong-repo",
+            "config": { "externallyManagedSnapshotName": "snap1" }
+          }
+        }
+      }
+    }
+  },
+  "targetClusters": {
+    "target": { "endpoint": "http://target:9200" }
+  },
+  "snapshotMigrationConfigs": []
+}

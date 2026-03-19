@@ -1,0 +1,188 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "create-or-get-snapshot"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "getsnapshotname",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceLabel"
+            },
+            {
+              "name": "snapshotNameConfig"
+            },
+            {
+              "name": "snapshotPrefix"
+            },
+            {
+              "name": "uniqueRunNonce"
+            }
+          ]
+        },
+        "steps": [
+          []
+        ],
+        "outputs": {
+          "parameters": [
+            {
+              "name": "snapshotName",
+              "valueFrom": {
+                "expression": "(('createSnapshotConfig' in fromJSON(inputs.parameters.snapshotNameConfig)) ? (inputs.parameters.sourceLabel + '_' + inputs.parameters.snapshotPrefix + '_' + inputs.parameters.uniqueRunNonce) : (fromJSON(inputs.parameters.snapshotNameConfig)['externallyManagedSnapshotName']))"
+              }
+            },
+            {
+              "name": "autoCreate",
+              "valueFrom": {
+                "expression": "'createSnapshotConfig' in fromJSON(inputs.parameters.snapshotNameConfig)"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "createorgetsnapshot",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "createSnapshotConfig"
+            },
+            {
+              "name": "sourceConfig"
+            },
+            {
+              "name": "snapshotConfig"
+            },
+            {
+              "name": "snapshotPrefix"
+            },
+            {
+              "name": "targetLabel"
+            },
+            {
+              "name": "uniqueRunNonce"
+            },
+            {
+              "name": "semaphoreConfigMapName"
+            },
+            {
+              "name": "semaphoreKey"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "getsnapshotname",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "snapshotPrefix",
+                    "value": "{{inputs.parameters.snapshotPrefix}}"
+                  },
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}"
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{=fromJSON(inputs.parameters.sourceConfig)['label']}}"
+                  },
+                  {
+                    "name": "snapshotNameConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotConfig)['config'])}}"
+                  }
+                ]
+              },
+              "name": "getSnapshotName"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "snapshotworkflow",
+                "name": "create-snapshot"
+              },
+              "when": "{{steps.getSnapshotName.outputs.parameters.autoCreate}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{=toJSON(sprig.dict(\"repoConfig\", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig'), \"snapshotName\", lower(steps.getSnapshotName.outputs.parameters.snapshotName), \"label\", jsonpath(inputs.parameters.snapshotConfig, '$.label')))}}"
+                  },
+                  {
+                    "name": "createSnapshotConfig",
+                    "value": "{{inputs.parameters.createSnapshotConfig}}"
+                  },
+                  {
+                    "name": "targetLabel",
+                    "value": "{{inputs.parameters.targetLabel}}"
+                  },
+                  {
+                    "name": "semaphoreConfigMapName",
+                    "value": "{{inputs.parameters.semaphoreConfigMapName}}"
+                  },
+                  {
+                    "name": "semaphoreKey",
+                    "value": "{{inputs.parameters.semaphoreKey}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  }
+                ]
+              },
+              "name": "createSnapshot"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": [
+            {
+              "name": "snapshotConfig",
+              "valueFrom": {
+                "expression": "toJSON(sprig.dict(\"snapshotName\", steps.getSnapshotName.outputs.parameters.snapshotName, \"repoConfig\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], \"label\", fromJSON(inputs.parameters.snapshotConfig)['label']))"
+              }
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

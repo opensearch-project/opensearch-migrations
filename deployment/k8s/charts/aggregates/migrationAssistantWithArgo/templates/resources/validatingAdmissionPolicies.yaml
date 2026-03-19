@@ -1,0 +1,223 @@
+{{- if get .Values.conditionalPackageInstalls "argo-workflows" }}
+# ValidatingAdmissionPolicies for Kafka resources
+# Prevents accidental major changes without explicit approval
+# Each policy check has its own distinct approval annotation
+
+# ─────────────────────────────────────────────────────────────
+# KafkaNodePool Policy - replicas, storage size, storage type, roles
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-kafkanodepool-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["kafka.strimzi.io"]
+      apiVersions: ["v1", "v1beta2"]
+      operations: ["UPDATE"]
+      resources: ["kafkanodepools"]
+  validations:
+    # Major change: replica scaling requires approval with target value
+    # Annotation value must match the target replica count to prevent race conditions
+    - expression: |
+        object.spec.replicas == oldObject.spec.replicas ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-replicas' in object.metadata.annotations &&
+         object.metadata.annotations['migrations.opensearch.org/approved-replicas'] == string(object.spec.replicas))
+      messageExpression: |
+        "Major Change Blocked [replicas]: NodePool scaling from " +
+        string(oldObject.spec.replicas) + " to " + string(object.spec.replicas) +
+        ". To proceed: kubectl annotate kafkanodepool/" + object.metadata.name +
+        " migrations.opensearch.org/approved-replicas=" + string(object.spec.replicas) + " --overwrite"
+    # Major change: storage size requires approval with target value
+    - expression: |
+        !has(object.spec.storage.size) || !has(oldObject.spec.storage.size) ||
+        object.spec.storage.size == oldObject.spec.storage.size ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-storage-size' in object.metadata.annotations &&
+         object.metadata.annotations['migrations.opensearch.org/approved-storage-size'] == object.spec.storage.size)
+      messageExpression: |
+        "Major Change Blocked [storage.size]: Storage resize from " +
+        oldObject.spec.storage.size + " to " + object.spec.storage.size +
+        ". To proceed: kubectl annotate kafkanodepool/" + object.metadata.name +
+        " migrations.opensearch.org/approved-storage-size=" + object.spec.storage.size + " --overwrite"
+    # Immutable: storage type cannot change after creation
+    - expression: |
+        object.spec.storage.type == oldObject.spec.storage.type
+      message: "Immutable: Storage type cannot be changed after creation"
+    # Immutable: node pool roles cannot change after creation
+    - expression: |
+        object.spec.roles == oldObject.spec.roles
+      message: "Immutable: Node pool roles cannot be changed after creation"
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-kafkanodepool-binding
+spec:
+  policyName: {{ .Release.Namespace }}-kafkanodepool-policy
+  validationActions: [Deny]
+  matchResources:
+    # Uses built-in namespace name label (available since K8s 1.21)
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+# ─────────────────────────────────────────────────────────────
+# Kafka Cluster Policy - version changes
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-kafka-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["kafka.strimzi.io"]
+      apiVersions: ["v1", "v1beta2"]
+      operations: ["UPDATE"]
+      resources: ["kafkas"]
+  validations:
+    # Major change: Kafka version change requires approval with target value
+    - expression: |
+        object.spec.kafka.version == oldObject.spec.kafka.version ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-version' in object.metadata.annotations &&
+         object.metadata.annotations['migrations.opensearch.org/approved-version'] == object.spec.kafka.version)
+      messageExpression: |
+        "Major Change Blocked [version]: Kafka version change from '" +
+        oldObject.spec.kafka.version + "' to '" + object.spec.kafka.version +
+        "'. To proceed: kubectl annotate kafka/" + object.metadata.name +
+        " migrations.opensearch.org/approved-version=" + object.spec.kafka.version + " --overwrite"
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-kafka-binding
+spec:
+  policyName: {{ .Release.Namespace }}-kafka-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+# ─────────────────────────────────────────────────────────────
+# KafkaTopic Policy - partition decrease (blocked), replica change
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-kafkatopic-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["kafka.strimzi.io"]
+      apiVersions: ["v1", "v1beta2"]
+      operations: ["UPDATE"]
+      resources: ["kafkatopics"]
+  validations:
+    # Blocked: partition decrease (Kafka limitation - cannot be overridden)
+    - expression: |
+        object.spec.partitions >= oldObject.spec.partitions
+      messageExpression: |
+        "Blocked: Partition count cannot decrease (Kafka limitation). " +
+        "Current: " + string(oldObject.spec.partitions) + ", Requested: " + string(object.spec.partitions)
+    # Major change: topic replication factor change requires approval with target value
+    - expression: |
+        object.spec.replicas == oldObject.spec.replicas ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-topic-replicas' in object.metadata.annotations &&
+         object.metadata.annotations['migrations.opensearch.org/approved-topic-replicas'] == string(object.spec.replicas))
+      messageExpression: |
+        "Major Change Blocked [replicas]: Topic replication factor change from " +
+        string(oldObject.spec.replicas) + " to " + string(object.spec.replicas) +
+        ". To proceed: kubectl annotate kafkatopic/" + object.metadata.name +
+        " migrations.opensearch.org/approved-topic-replicas=" + string(object.spec.replicas) + " --overwrite"
+    # Immutable: cluster assignment cannot change
+    - expression: |
+        !has(oldObject.metadata.labels) ||
+        !('strimzi.io/cluster' in oldObject.metadata.labels) ||
+        object.metadata.labels['strimzi.io/cluster'] == oldObject.metadata.labels['strimzi.io/cluster']
+      message: "Immutable: Topic cannot be moved to a different cluster"
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-kafkatopic-binding
+spec:
+  policyName: {{ .Release.Namespace }}-kafkatopic-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+# ─────────────────────────────────────────────────────────────
+# Managed Deployment Policy - blocks direct edits to workflow-managed Deployments
+# Edit the corresponding CRD instead (ProxyConfig, ReplayerConfig, etc.)
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-managed-deployment-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["apps"]
+      apiVersions: ["v1"]
+      operations: ["UPDATE"]
+      resources: ["deployments"]
+  matchConditions:
+    # Only apply to Deployments with managed-by annotation
+    - name: is-managed
+      expression: |
+        has(object.metadata.annotations) &&
+        'migrations.opensearch.org/managed-by' in object.metadata.annotations
+  validations:
+    # Block direct edits unless override annotation is set
+    - expression: |
+        has(object.metadata.annotations) &&
+        'migrations.opensearch.org/allow-direct-edit' in object.metadata.annotations &&
+        object.metadata.annotations['migrations.opensearch.org/allow-direct-edit'] == 'true'
+      messageExpression: |
+        "Direct edit blocked: This Deployment is managed by '" +
+        object.metadata.annotations['migrations.opensearch.org/managed-by'] +
+        "'. Edit the corresponding CRD instead. " +
+        "To override (use with caution): kubectl annotate deployment/" + object.metadata.name +
+        " migrations.opensearch.org/allow-direct-edit=true --overwrite"
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-managed-deployment-binding
+spec:
+  policyName: {{ .Release.Namespace }}-managed-deployment-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+{{- end }}

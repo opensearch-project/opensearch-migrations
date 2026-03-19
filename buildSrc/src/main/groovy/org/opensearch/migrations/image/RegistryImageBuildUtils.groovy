@@ -6,6 +6,7 @@ import org.gradle.api.tasks.Exec
 import org.opensearch.migrations.common.CommonUtils
 
 class RegistryImageBuildUtils {
+    private static boolean builderWarningShown = false
 
     static class Registry { // Helper object
         final String hostUrl      // For Jib, which runs in the JVM directly (e.g., localhost:5001)
@@ -36,6 +37,46 @@ class RegistryImageBuildUtils {
     private static String resolveBaseImageForUrl(String url, String group, String image, String tag) {
         def formatter = ImageRegistryFormatterFactory.getFormatter(url)
         return formatter.getFullBaseImageIdentifier(url, group, image, tag)
+    }
+
+    /**
+     * Query a v2 registry for the digest of an image reference like "host:port/repo:tag"
+     * and return "host:port/repo@sha256:...". Throws if the digest cannot be resolved.
+     */
+    static String resolveDigest(String imageReference, boolean allowInsecure) {
+        def atIdx = imageReference.indexOf('@')
+        if (atIdx >= 0) return imageReference // already has a digest
+
+        def colonIdx = imageReference.lastIndexOf(':')
+        def slashIdx = imageReference.lastIndexOf('/')
+        String tag = (colonIdx > slashIdx && colonIdx >= 0) ? imageReference.substring(colonIdx + 1) : "latest"
+        String repoWithHost = (colonIdx > slashIdx && colonIdx >= 0) ? imageReference.substring(0, colonIdx) : imageReference
+
+        def firstSlash = repoWithHost.indexOf('/')
+        if (firstSlash < 0) throw new GradleException("Cannot parse registry host from image reference: ${imageReference}")
+        def registryHost = repoWithHost.substring(0, firstSlash)
+        def repository = repoWithHost.substring(firstSlash + 1)
+
+        def scheme = allowInsecure ? "http" : "https"
+        def url = new URL("${scheme}://${registryHost}/v2/${repository}/manifests/${tag}")
+        def conn = (HttpURLConnection) url.openConnection()
+        conn.setRequestMethod("HEAD")
+        conn.setRequestProperty("Accept",
+                "application/vnd.docker.distribution.manifest.list.v2+json, " +
+                "application/vnd.docker.distribution.manifest.v2+json, " +
+                "application/vnd.oci.image.index.v1+json, " +
+                "application/vnd.oci.image.manifest.v1+json")
+        conn.setConnectTimeout(5000)
+        conn.setReadTimeout(5000)
+
+        if (conn.responseCode != 200) {
+            throw new GradleException("Failed to resolve digest for ${imageReference}: registry returned HTTP ${conn.responseCode}")
+        }
+        def digest = conn.getHeaderField("Docker-Content-Digest")
+        if (!digest) {
+            throw new GradleException("Failed to resolve digest for ${imageReference}: registry did not return Docker-Content-Digest header")
+        }
+        return "${repoWithHost}@${digest}"
     }
 
     // Determine the build mode based on the tasks requested in the CLI, throwing if multiple variants are configured
@@ -98,6 +139,16 @@ class RegistryImageBuildUtils {
                             config.get("repoName", null)?.toString()
                     )
 
+                    // For intermediate images (built in the same pipeline), resolve the
+                    // digest at execution time to ensure reproducible builds.
+                    if (baseEndpoint == intermediateRegistry.hostUrl) {
+                        project.tasks.named("jib").configure {
+                            doFirst {
+                                project.jib.from.image = RegistryImageBuildUtils.resolveDigest(baseImage, project.jib.allowInsecureRegistries)
+                            }
+                        }
+                    }
+
                     project.jib {
                         from {
                             image = baseImage
@@ -114,6 +165,12 @@ class RegistryImageBuildUtils {
                             if (targetArch != "multi") dest = "${registryDestination}_${targetArch}"
                             image = dest
 
+                            // For single-arch builds, also tag as the base name (without suffix)
+                            // to match BuildKit behavior and allow local k8s deployments to find images
+                            def tagList = []
+                            if (targetArch != "multi") {
+                                tagList.add(config.imageTag.toString())
+                            }
                             def versionTag = rootProject.findProperty("imageVersion")
                             if (versionTag) {
                                 def suffix = (targetArch != "multi") ? "_${targetArch}" : ""
@@ -122,8 +179,9 @@ class RegistryImageBuildUtils {
                                         config.get("repoName", null)?.toString())[0]
                                 // Extract just the tag portion for Jib's tags list
                                 def formattedTag = versionDest.toString().split(":")[-1]
-                                tags = ["${formattedTag}${suffix}".toString()]
+                                tagList.add("${formattedTag}${suffix}".toString())
                             }
+                            if (tagList) tags = tagList
                         }
                         extraDirectories {
                             paths {
@@ -139,7 +197,14 @@ class RegistryImageBuildUtils {
                             }
                         }
                         allowInsecureRegistries = true
-                        container { entrypoint = ['tail', '-f', '/dev/null'] }
+                        container {
+                            def flags = (List<String>) config.get("jvmFlags", [])
+                            if (flags) {
+                                jvmFlags = flags
+                            }
+                            // mainClass is auto-detected from the application plugin.
+                            // Jib generates: java <jvmFlags> -cp @/app/jib-classpath-file <mainClass>
+                        }
                     }
 
                     // Handle Dependencies
@@ -205,7 +270,10 @@ class RegistryImageBuildUtils {
                 if (context) {
                     // NOTE: This naming convention must match setupK8sBuilders.sh's BUILDER_NAME derivation
                     builder = "builder-" + context.replaceAll("[^a-zA-Z0-9_-]", "-")
-                    project.logger.lifecycle("No -Pbuilder specified, derived '${builder}' from kube context '${context}'")
+                    if (!builderWarningShown) {
+                        project.logger.lifecycle("No -Pbuilder specified, derived '${builder}' from kube context '${context}'")
+                        builderWarningShown = true
+                    }
                 }
             } catch (Exception ignored) {}
             if (!builder) {

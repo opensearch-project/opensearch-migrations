@@ -12,12 +12,16 @@ minikube config set cpus $MINIKUBE_CPU_COUNT
 minikube config set memory $MINIKUBE_MEMORY_SIZE
 
 INSECURE_REGISTRY_CIDR="${INSECURE_REGISTRY_CIDR:-0.0.0.0/0}"
-minikube start \
-  --extra-config=kubelet.authentication-token-webhook=true \
-  --extra-config=kubelet.authorization-mode=Webhook \
-  --extra-config=scheduler.bind-address=0.0.0.0 \
-  --extra-config=controller-manager.bind-address=0.0.0.0 \
-  --insecure-registry="${INSECURE_REGISTRY_CIDR}"
+if minikube status --format='{{.Host}}' 2>/dev/null | grep -q Running; then
+  echo "minikube is already running, skipping start"
+else
+  minikube start \
+    --extra-config=kubelet.authentication-token-webhook=true \
+    --extra-config=kubelet.authorization-mode=Webhook \
+    --extra-config=scheduler.bind-address=0.0.0.0 \
+    --extra-config=controller-manager.bind-address=0.0.0.0 \
+    --insecure-registry="${INSECURE_REGISTRY_CIDR}"
+fi
 
 cd "${MIGRATIONS_REPO_ROOT_DIR}"
 gradlew() {
@@ -27,6 +31,7 @@ gradlew() {
 export KUBE_CONTEXT="${KUBE_CONTEXT:-minikube}"
 
 export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
+export BUILDKIT_HELM_ARGS="--set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0"
 "${MIGRATIONS_REPO_ROOT_DIR}"/buildImages/setUpK8sImageBuildServices.sh
 
 BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
@@ -66,11 +71,7 @@ helm dependency update charts/aggregates/migrationAssistantWithArgo
 
 if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
   echo "Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
-  helm install --create-namespace -n ma tc charts/aggregates/testClusters \
-      --wait --timeout 10m \
-      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard"
-
-  helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
+  helm upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
     --wait --timeout 10m \
     -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml \
     --set "images.captureProxy.repository=${LOCAL_REGISTRY}/migrations/capture_proxy" \
@@ -88,14 +89,18 @@ if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
     --set "images.reindexFromSnapshot.repository=${LOCAL_REGISTRY}/migrations/reindex_from_snapshot" \
     --set "images.reindexFromSnapshot.tag=latest" \
     --set "images.reindexFromSnapshot.pullPolicy=Always"
+
+  helm upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
+      --wait --timeout 10m \
+      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard"
 else
   echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
-  helm install --create-namespace -n ma tc charts/aggregates/testClusters \
-    --wait --timeout 10m
-
-  helm install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
+  helm upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
     --wait --timeout 10m \
     -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
+
+  helm upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
+    --wait --timeout 10m
 fi
 
 
