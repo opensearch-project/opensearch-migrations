@@ -207,4 +207,74 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
 
+    // ── Teardown signal templates ───────────────────────────────────────
+
+    .addTemplate("waitForTeardown", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addWaitForExistingResource(b => b
+            .setDefinition({
+                resource: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: b.inputs.resourceKind,
+                    name: b.inputs.resourceName
+                },
+                conditions: {successCondition: "status.phase == Teardown"}
+            })
+        )
+    )
+
+
+    .addTemplate("patchTeardown", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: b.inputs.resourceKind,
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Teardown"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("createTrafficReplay", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "TrafficReplay",
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Running"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("patchTrafficReplayReady", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "TrafficReplay",
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Ready"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
     .getFullScope();

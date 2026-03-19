@@ -1,27 +1,62 @@
-"""Reset command for workflow CLI - tears down workflow resources via Argo suspend steps.
+"""Reset command for workflow CLI - tears down workflow resources via CRD status patching.
 
-Workflow templates define 'reset:' prefixed suspend steps at resource teardown points.
-This command discovers and approves those steps, letting the workflow handle cleanup.
+Workflow templates watch for status.phase == Teardown on migration CRDs.
+This command patches CRDs to trigger that teardown, letting the workflow handle cleanup.
 """
 
 import logging
 import os
 
 import click
+from kubernetes import client
+from kubernetes.client.rest import ApiException
 
-from ..models.utils import ExitCode
+from ..models.utils import ExitCode, load_k8s_config
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from .suspend_steps import (
-    RESET_PREFIX,
-    fetch_workflow_nodes,
-    find_suspend_steps,
-    match_steps,
-    approve_steps,
     wait_for_workflow_completion,
     delete_workflow,
 )
 
 logger = logging.getLogger(__name__)
+
+CRD_GROUP = 'migrations.opensearch.org'
+CRD_VERSION = 'v1alpha1'
+TEARDOWN_CRDS = ['capturedtraffics', 'snapshotmigrations', 'trafficreplays']
+
+
+def _list_migration_crds(namespace):
+    """List all migration CRDs with their status phase. Returns list of (plural, name, phase)."""
+    custom = client.CustomObjectsApi()
+    results = []
+    for plural in TEARDOWN_CRDS:
+        try:
+            items = custom.list_namespaced_custom_object(
+                group=CRD_GROUP, version=CRD_VERSION,
+                namespace=namespace, plural=plural
+            ).get('items', [])
+            for item in items:
+                name = item['metadata']['name']
+                phase = item.get('status', {}).get('phase', 'Unknown')
+                results.append((plural, name, phase))
+        except ApiException:
+            pass
+    return results
+
+
+def _patch_teardown(namespace, plural, name):
+    """Patch a CRD's status.phase to Teardown. Returns True if patched."""
+    custom = client.CustomObjectsApi()
+    try:
+        custom.patch_namespaced_custom_object_status(
+            group=CRD_GROUP, version=CRD_VERSION,
+            namespace=namespace, plural=plural, name=name,
+            body={'status': {'phase': 'Teardown'}}
+        )
+        return True
+    except ApiException as e:
+        logger.error(f"Failed to patch {plural}/{name}: {e}")
+        return False
 
 
 @click.command(name="reset")
@@ -41,63 +76,55 @@ logger = logging.getLogger(__name__)
 @click.option('--token', help='Bearer token for authentication')
 @click.pass_context
 def reset_command(ctx, path, workflow_name, argo_server, namespace, insecure, token):
-    """Reset workflow resources by approving teardown suspend steps.
+    """Reset workflow resources by signaling teardown via CRD status.
 
-    With no arguments, lists available reset steps and their status.
-    With a PATH, approves matching reset steps (glob patterns supported).
-    With '*', approves all reset steps, waits for completion, and deletes the workflow.
+    With no arguments, lists migration CRDs and their status.
+    With a NAME, patches matching CRDs to Teardown phase.
+    With '*', patches all non-Teardown CRDs, waits for workflow completion, deletes workflow.
 
     Example:
-        workflow reset                     # list reset steps
-        workflow reset teardown-capture    # reset just capture
-        workflow reset *                   # reset everything and delete workflow
+        workflow reset                     # list resettable resources
+        workflow reset source-proxy        # teardown just capture proxy
+        workflow reset *                   # teardown everything and delete workflow
     """
     try:
-        nodes = fetch_workflow_nodes(workflow_name, namespace, argo_server, token, insecure)
-        if nodes is None:
-            click.echo(f"Workflow '{workflow_name}' not found.")
-            ctx.exit(ExitCode.FAILURE.value)
-            return
+        load_k8s_config()
+        crds = _list_migration_crds(namespace)
 
-        all_steps = find_suspend_steps(nodes, prefix=RESET_PREFIX)
-        if not all_steps:
-            click.echo("No reset steps found in workflow.")
+        if not crds:
+            click.echo("No migration resources found.")
             return
-
-        # Strip reset: prefix from names for display and matching
-        all_steps = [(nid, name[len(RESET_PREFIX):], disp, ph) for nid, name, disp, ph in all_steps]
 
         # LIST mode
         if path is None:
-            click.echo(f"Resettable resources for workflow '{workflow_name}':")
-            for _, short_name, display_name, phase in all_steps:
-                status = "waiting" if phase == "Running" else phase.lower()
-                click.echo(f"  {short_name:<30} ({status})")
+            click.echo(f"Migration resources in namespace '{namespace}':")
+            for plural, name, phase in crds:
+                kind = plural.rstrip('s')
+                click.echo(f"  {kind}/{name:<35} ({phase})")
             click.echo()
-            click.echo("Use 'workflow reset <path>' to reset specific resources.")
-            click.echo("Use 'workflow reset *' to reset all and delete the workflow.")
+            click.echo("Use 'workflow reset <name>' to teardown a resource.")
+            click.echo("Use 'workflow reset *' to teardown all and delete the workflow.")
             return
 
-        # Find suspended steps matching path
-        suspended = [s for s in all_steps if s[3] == 'Running']
-        matches = suspended if path == '*' else match_steps(suspended, [path])
+        # Find CRDs to patch
+        if path == '*':
+            targets = [(p, n, ph) for p, n, ph in crds if ph != 'Teardown']
+        else:
+            targets = [(p, n, ph) for p, n, ph in crds if n == path and ph != 'Teardown']
 
-        if not matches:
-            click.echo(f"No suspended reset steps match '{path}'.")
-            waiting = [sn for _, sn, _, ph in all_steps if ph == 'Running']
-            if waiting:
-                click.echo(f"Available: {', '.join(waiting)}")
+        if not targets:
+            click.echo(f"No resources to teardown matching '{path}'.")
             return
 
-        # Re-add prefix for the approve API (it uses the full node ID, so this is fine)
-        approved, error = approve_steps(
-            matches, workflow_name, namespace, argo_server, token, insecure)
+        for plural, name, phase in targets:
+            if _patch_teardown(namespace, plural, name):
+                click.echo(f"  ✓ Patched {name} to Teardown")
+            else:
+                click.echo(f"  ✗ Failed to patch {name}", err=True)
+                ctx.exit(ExitCode.FAILURE.value)
+                return
 
-        if error:
-            ctx.exit(ExitCode.FAILURE.value)
-            return
-
-        # If *, wait for completion and delete
+        # If *, wait for workflow completion and delete
         if path == '*':
             click.echo("Waiting for workflow to complete...")
             phase = wait_for_workflow_completion(

@@ -222,6 +222,27 @@
               },
               "name": "patchCapturedTraffic"
             }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforteardown",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "CapturedTraffic"
+                  }
+                ]
+              },
+              "name": "waitForTeardown"
+            }
           ]
         ],
         "outputs": {
@@ -898,6 +919,27 @@
               },
               "name": "patchSnapshotMigration"
             }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforteardown",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "SnapshotMigration"
+                  }
+                ]
+              },
+              "name": "waitForTeardown"
+            }
           ]
         ],
         "outputs": {
@@ -1065,6 +1107,61 @@
                 ]
               },
               "name": "deployReplayer"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "createtrafficreplay",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                  }
+                ]
+              },
+              "name": "createTrafficReplay"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchtrafficreplayready",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                  }
+                ]
+              },
+              "name": "patchTrafficReplayReady"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforteardown",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "TrafficReplay"
+                  }
+                ]
+              },
+              "name": "waitForTeardown"
             }
           ]
         ],

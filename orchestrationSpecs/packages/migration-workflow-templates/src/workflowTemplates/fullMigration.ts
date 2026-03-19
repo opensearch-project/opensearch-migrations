@@ -147,6 +147,14 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.proxyName,
                 })
             )
+            // Wait for teardown signal on the CapturedTraffic CRD
+            .addStep("waitForTeardown", ResourceManagement, "waitForTeardown", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.proxyName,
+                    resourceKind: expr.literal("CapturedTraffic"),
+                })
+            )
         )
     )
 
@@ -361,6 +369,14 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("patchSnapshotMigration", ResourceManagement, "patchSnapshotMigrationReady", c =>
                 c.register({...selectInputsForRegister(b, c)})
             )
+            // After migration is Ready, wait for teardown signal
+            .addStep("waitForTeardown", ResourceManagement, "waitForTeardown", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.resourceName,
+                    resourceKind: expr.literal("SnapshotMigration"),
+                })
+            )
         )
     )
 
@@ -420,6 +436,38 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.literal("-"),
                         expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
                         expr.literal("-replayer"))
+                })
+            )
+            // Create TrafficReplay CRD and wait for teardown signal
+            .addStep("createTrafficReplay", ResourceManagement, "createTrafficReplay", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: expr.concat(
+                        b.inputs.fromProxy,
+                        expr.literal("-"),
+                        expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
+                        expr.literal("-replayer")),
+                })
+            )
+            .addStep("patchTrafficReplayReady", ResourceManagement, "patchTrafficReplayReady", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: expr.concat(
+                        b.inputs.fromProxy,
+                        expr.literal("-"),
+                        expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
+                        expr.literal("-replayer")),
+                })
+            )
+            .addStep("waitForTeardown", ResourceManagement, "waitForTeardown", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: expr.concat(
+                        b.inputs.fromProxy,
+                        expr.literal("-"),
+                        expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
+                        expr.literal("-replayer")),
+                    resourceKind: expr.literal("TrafficReplay"),
                 })
             )
         )
