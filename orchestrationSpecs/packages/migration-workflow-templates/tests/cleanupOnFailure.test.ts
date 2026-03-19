@@ -1,6 +1,7 @@
 import { renderWorkflowTemplate } from "@opensearch-migrations/argo-workflow-builders";
 import { DocumentBulkLoad } from "../src/workflowTemplates/documentBulkLoad";
 import { RfsCoordinatorCluster } from "../src/workflowTemplates/rfsCoordinatorCluster";
+import { TestMigrationWithWorkflowCli } from "../src/workflowTemplates/testMigrationWithWorkflowCli";
 
 function findTemplate(rendered: any, name: string) {
     return rendered.spec.templates.find((t: any) => t.name === name);
@@ -83,6 +84,39 @@ describe("rfsCoordinatorCluster cleanup-on-failure", () => {
 
         it("does not have continueOn on deleteSecret (final cleanup step)", () => {
             const step = findStep(template.steps, "deleteSecret");
+            expect(step).toBeDefined();
+            expect(step?.continueOn).toBeUndefined();
+        });
+    });
+});
+
+describe("testMigrationWithWorkflowCli cleanup-on-failure", () => {
+    const rendered = renderWorkflowTemplate(TestMigrationWithWorkflowCli);
+
+    describe("main ensures deleteMigrationWorkflow always runs", () => {
+        const template = findTemplate(rendered, "main");
+
+        it("has continueOn.failed on configureAndSubmitWorkflow", () => {
+            const step = findStep(template.steps, "configureAndSubmitWorkflow");
+            expect(step?.continueOn).toEqual({ failed: true });
+        });
+
+        it("gates monitorWorkflow on configureAndSubmitWorkflow succeeding", () => {
+            const step = findStep(template.steps, "monitorWorkflow");
+            expect(step?.when).toContain("configureAndSubmitWorkflow.status");
+            expect(step?.when).toContain("Succeeded");
+            expect(step?.continueOn).toEqual({ failed: true });
+        });
+
+        it("gates evaluateWorkflowResult on monitorWorkflow succeeding", () => {
+            const step = findStep(template.steps, "evaluateWorkflowResult");
+            expect(step?.when).toContain("monitorWorkflow.status");
+            expect(step?.when).toContain("Succeeded");
+            expect(step?.continueOn).toEqual({ failed: true });
+        });
+
+        it("does not have continueOn on deleteMigrationWorkflow (final cleanup step)", () => {
+            const step = findStep(template.steps, "deleteMigrationWorkflow");
             expect(step).toBeDefined();
             expect(step?.continueOn).toBeUndefined();
         });
