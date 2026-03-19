@@ -127,10 +127,10 @@ public class CreateSnapshot {
         public String sourceType = "elasticsearch";
 
         @Parameter(
-                names = {"--solr-cores"},
+                names = {"--solr-collections"},
                 required = false,
-                description = "Comma-separated list of Solr core names to back up (required when source-type=solr)")
-        public List<String> solrCores = List.of();
+                description = "Comma-separated list of Solr collection names to back up (required when source-type=solr)")
+        public List<String> solrCollections = List.of();
     }
 
     @Getter
@@ -185,14 +185,14 @@ public class CreateSnapshot {
     private void runSolrBackup() {
         var backupLocation = arguments.fileSystemRepoPath != null
             ? arguments.fileSystemRepoPath : arguments.s3RepoUri;
-        if (arguments.solrCores.isEmpty()) {
-            throw new ParameterException("--solr-cores is required when --source-type=solr");
+        if (arguments.solrCollections.isEmpty()) {
+            throw new ParameterException("--solr-collections is required when --source-type=solr");
         }
         var solrCreator = new SolrSnapshotCreator(
             arguments.sourceArgs.toConnectionContext().getUri().toString(),
             arguments.snapshotName,
             backupLocation,
-            arguments.solrCores
+            arguments.solrCollections
         );
         solrCreator.registerRepo();
         solrCreator.createSnapshot();

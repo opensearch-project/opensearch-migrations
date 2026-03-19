@@ -59,28 +59,35 @@ def cat_indices(cluster: Cluster, refresh=False, as_json=False):
 
 
 def _solr_cat_indices(cluster: Cluster, as_json=False):
-    """List Solr cores with doc counts, analogous to ES _cat/indices."""
-    r = cluster.call_api("/solr/admin/cores?action=STATUS")
-    response = r.json()
-    status = response.get("status", {})
+    """List Solr collections with doc counts via Collections API (SolrCloud)."""
+    # Get collection list
+    r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+    collections = r.json().get("collections", [])
+
     if as_json:
         result = []
-        for core_name, core_info in status.items():
-            index_info = core_info.get("index", {})
+        for coll in collections:
+            doc_count = _solr_collection_doc_count(cluster, coll)
             result.append({
-                "index": core_name,
-                "docs.count": str(index_info.get("numDocs", 0)),
-                "store.size": str(index_info.get("sizeInBytes", 0)),
+                "index": coll,
+                "docs.count": str(doc_count),
             })
         return result
     else:
-        lines = ["index                docs.count  store.size"]
-        for core_name, core_info in status.items():
-            index_info = core_info.get("index", {})
-            num_docs = index_info.get("numDocs", 0)
-            size = index_info.get("sizeInBytes", 0)
-            lines.append(f"{core_name:<20} {num_docs:>10}  {size:>10}")
+        lines = ["collection           docs.count"]
+        for coll in collections:
+            doc_count = _solr_collection_doc_count(cluster, coll)
+            lines.append(f"{coll:<20} {doc_count:>10}")
         return "\n".join(lines).encode()
+
+
+def _solr_collection_doc_count(cluster: Cluster, collection: str) -> int:
+    """Get doc count for a Solr collection via select query."""
+    try:
+        r = cluster.call_api(f"/solr/{collection}/select?q=*:*&rows=0&wt=json")
+        return r.json().get("response", {}).get("numFound", 0)
+    except Exception:
+        return 0
 
 
 def connection_check(cluster: Cluster) -> ConnectionResult:
