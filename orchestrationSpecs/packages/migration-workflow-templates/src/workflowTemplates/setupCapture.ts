@@ -185,6 +185,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
         .addOptionalInput("tlsSecretName", c => "")
+        .addOptionalInput("resetAction", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
         .addResourceTask(b => b
             .setDefinition({
@@ -211,6 +212,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
         .addRequiredInput("tlsSecretName", typeToken<string>())
+        .addOptionalInput("resetAction", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
         .addResourceTask(b => b
             .setDefinition({
@@ -352,6 +354,12 @@ export const SetupCapture = WorkflowBuilder.create({
                                 jsonConfig: expr.asString(expr.serialize(
                                     makeProxyParamsDict(b.inputs.proxyConfig) as any
                                 )),
+                                resetAction: expr.asString(expr.serialize(expr.makeDict({
+                                    action: expr.literal("delete"),
+                                    apiVersion: expr.literal("apps/v1"),
+                                    kind: expr.literal("Deployment"),
+                                    name: expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "name"),
+                                }))),
                             }),
                         {when: {templateExp: expr.not(hasTls)}}
                     )
@@ -372,6 +380,12 @@ export const SetupCapture = WorkflowBuilder.create({
                                         })
                                     ) as any
                                 )),
+                                resetAction: expr.asString(expr.serialize(expr.makeDict({
+                                    action: expr.literal("delete"),
+                                    apiVersion: expr.literal("apps/v1"),
+                                    kind: expr.literal("Deployment"),
+                                    name: expr.get(expr.deserializeRecord(b.inputs.proxyConfig), "name"),
+                                }))),
                             }),
                         {when: {templateExp: hasTls}}
                     )

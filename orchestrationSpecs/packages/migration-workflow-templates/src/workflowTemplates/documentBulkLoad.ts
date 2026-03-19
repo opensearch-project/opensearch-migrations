@@ -388,6 +388,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
         .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
         .addOptionalInput("taskK8sLabel", c => "reindexFromSnapshot")
+        .addOptionalInput("resetAction", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addResourceTask(b => b
@@ -451,7 +452,13 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
-                    fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
+                    fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel,
+                    resetAction: expr.asString(expr.serialize(expr.makeDict({
+                        action: expr.literal("delete"),
+                        apiVersion: expr.literal("apps/v1"),
+                        kind: expr.literal("Deployment"),
+                        name: getRfsDeploymentName(b.inputs.sessionName),
+                    }))),
                 })
             )
         )

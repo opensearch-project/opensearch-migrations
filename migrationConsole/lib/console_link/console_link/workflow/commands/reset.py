@@ -1,7 +1,13 @@
-"""Reset command for workflow CLI - resets workflow resources to clean state."""
+"""Reset command for workflow CLI - resets workflow resources to clean state.
 
-import base64
-import fnmatch
+Discovers resettable resources from workflow nodes that have a 'resetAction' input
+parameter, then executes those actions. This keeps all resource-specific knowledge
+in the workflow templates, not in the CLI.
+
+A resetAction is a JSON object like:
+  {"action": "delete", "apiVersion": "apps/v1", "kind": "Deployment", "name": "my-proxy", "namespace": "ma"}
+"""
+
 import json
 import logging
 import os
@@ -17,8 +23,11 @@ from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completi
 logger = logging.getLogger(__name__)
 
 
-def _fetch_workflow_resources(workflow_name, namespace, argo_server, token, insecure):
-    """Fetch workflow data and extract managed resource names by type."""
+def _fetch_reset_actions(workflow_name, namespace, argo_server, token, insecure):
+    """Fetch workflow nodes and extract resetAction parameters.
+
+    Returns list of (display_name, action_dict) or None if workflow not found.
+    """
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
     response = requests.get(url, headers=headers, verify=not insecure, timeout=30)
@@ -26,40 +35,63 @@ def _fetch_workflow_resources(workflow_name, namespace, argo_server, token, inse
         return None
 
     nodes = response.json().get('status', {}).get('nodes', {})
-    return extract_resources_from_nodes(nodes)
+    return extract_reset_actions(nodes)
 
 
-def extract_resources_from_nodes(nodes):
-    """Extract managed resource names from workflow node data."""
-    resources = {
-        'proxy_deployments': set(),
-        'rfs_deployments': set(),
-        'coordinator_clusters': set(),
-        'kafka_clusters': set(),
-    }
-
+def extract_reset_actions(nodes):
+    """Extract resetAction parameters from workflow nodes."""
+    actions = []
     for node in nodes.values():
-        template_name = node.get('templateName', '')
-        inputs = {p['name']: p.get('value', '') for p in node.get('inputs', {}).get('parameters', [])}
-
-        if 'proxyName' in inputs and ('proxy' in template_name.lower() or 'capture' in template_name.lower()):
-            resources['proxy_deployments'].add(inputs['proxyName'])
-
-        if 'sessionName' in inputs and ('rfs' in template_name.lower() or 'bulk' in template_name.lower()):
-            session = inputs['sessionName']
-            resources['rfs_deployments'].add(f"{session}-rfs")
-            resources['coordinator_clusters'].add(f"{session}-rfs-coordinator")
-
-        if 'clusterName' in inputs and 'kafka' in template_name.lower():
-            resources['kafka_clusters'].add(inputs['clusterName'])
-
-    return resources
+        display_name = node.get('displayName', '')
+        for p in node.get('inputs', {}).get('parameters', []):
+            if p.get('name') == 'resetAction' and p.get('value'):
+                try:
+                    action = json.loads(p['value'])
+                    if action:  # skip empty objects
+                        actions.append((display_name, action))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+    return actions
 
 
-def _delete_ignoring_not_found(fn, *args, **kwargs):
-    """Call a kubernetes delete function, ignoring 404 errors."""
+def _execute_reset_action(action, default_namespace):
+    """Execute a single reset action against the k8s API.
+
+    Returns True if the action was executed, False if resource was not found.
+    """
+    api_version = action.get('apiVersion', '')
+    kind = action.get('kind', '')
+    name = action.get('name', '')
+    namespace = action.get('namespace', default_namespace)
+    act = action.get('action', 'delete')
+
+    if not name or not kind:
+        logger.warning(f"Skipping malformed resetAction: {action}")
+        return False
+
     try:
-        fn(*args, **kwargs)
+        if '/' in api_version:
+            # Custom resource (e.g. kafka.strimzi.io/v1)
+            group, version = api_version.rsplit('/', 1)
+            custom_api = client.CustomObjectsApi()
+            plural = _kind_to_plural(kind)
+            if act == 'delete':
+                custom_api.delete_namespaced_custom_object(
+                    group=group, version=version,
+                    namespace=namespace, plural=plural, name=name
+                )
+            elif act == 'patch':
+                custom_api.patch_namespaced_custom_object(
+                    group=group, version=version,
+                    namespace=namespace, plural=plural, name=name,
+                    body=action.get('patch', {})
+                )
+        else:
+            # Core/apps resources
+            if act == 'delete':
+                _delete_core_resource(kind, name, namespace)
+            elif act == 'patch':
+                _patch_core_resource(kind, name, namespace, action.get('patch', {}))
         return True
     except ApiException as e:
         if e.status == 404:
@@ -67,166 +99,87 @@ def _delete_ignoring_not_found(fn, *args, **kwargs):
         raise
 
 
-def _matches_path(name, path):
-    """Check if a resource name matches the given path filter."""
-    if path is None:
-        return True
-    return fnmatch.fnmatch(name, path)
-
-
-def _reset_proxy_deployments(apps_v1, namespace, names, path):
-    """Rolling update capture proxy deployments to noCapture mode."""
-    count = 0
-    for name in sorted(names):
-        if not _matches_path(name, path):
-            continue
-        try:
-            deployment = apps_v1.read_namespaced_deployment(name=name, namespace=namespace)
-            container = deployment.spec.template.spec.containers[0]
-            args = container.args or []
-
-            # The proxy args are ["---INLINE-JSON", "<base64-encoded-json>"]
-            if len(args) >= 2 and args[0] == "---INLINE-JSON":
-                try:
-                    config = json.loads(base64.b64decode(args[1]).decode())
-                except Exception:
-                    config = json.loads(args[1])
-                config.pop('kafkaConnection', None)
-                config['noCapture'] = True
-                new_b64 = base64.b64encode(json.dumps(config).encode()).decode()
-                patch_args = ["---INLINE-JSON", new_b64]
-            else:
-                # Fallback: just append --noCapture
-                patch_args = args + ["--noCapture"]
-
-            apps_v1.patch_namespaced_deployment(
-                name=name, namespace=namespace,
-                body={"spec": {"template": {"spec": {"containers": [{"name": container.name, "args": patch_args}]}}}}
-            )
-            logger.info(f"Updated proxy deployment '{name}' to noCapture mode")
-            count += 1
-        except ApiException as e:
-            if e.status == 404:
-                logger.info(f"Proxy deployment '{name}' not found (already removed)")
-            else:
-                logger.error(f"Failed to update proxy '{name}': {e.reason}")
-    return count
-
-
-def _reset_rfs_deployments(apps_v1, namespace, names, path):
-    """Delete RFS deployments."""
-    count = 0
-    for name in sorted(names):
-        if not _matches_path(name, path):
-            continue
-        if _delete_ignoring_not_found(apps_v1.delete_namespaced_deployment, name=name, namespace=namespace):
-            logger.info(f"Deleted RFS deployment '{name}'")
-            count += 1
-        else:
-            logger.info(f"RFS deployment '{name}' not found (already removed)")
-    return count
-
-
-def _reset_coordinator_clusters(apps_v1, core_v1, namespace, names, path):
-    """Delete coordinator cluster resources (StatefulSet, Service, Secret)."""
-    count = 0
-    for name in sorted(names):
-        if not _matches_path(name, path):
-            continue
-        deleted_any = False
-        if _delete_ignoring_not_found(apps_v1.delete_namespaced_stateful_set, name=name, namespace=namespace):
-            deleted_any = True
-        if _delete_ignoring_not_found(core_v1.delete_namespaced_service, name=name, namespace=namespace):
-            deleted_any = True
-        if _delete_ignoring_not_found(core_v1.delete_namespaced_secret, name=f"{name}-creds", namespace=namespace):
-            deleted_any = True
-
-        if deleted_any:
-            logger.info(f"Deleted coordinator cluster '{name}'")
-            count += 1
-        else:
-            logger.info(f"Coordinator cluster '{name}' not found (already removed)")
-    return count
-
-
-def _reset_kafka_clusters(custom_api, namespace, names, path):
-    """Delete Kafka cluster CRD resources (Kafka, KafkaNodePool, KafkaTopic)."""
-    count = 0
-    for name in sorted(names):
-        if not _matches_path(name, path):
-            continue
-        deleted_any = False
-
-        for plural in ('kafkatopics', 'kafkanodepools'):
-            try:
-                items = custom_api.list_namespaced_custom_object(
-                    group='kafka.strimzi.io', version='v1',
-                    namespace=namespace, plural=plural,
-                    label_selector=f'strimzi.io/cluster={name}'
-                )
-                for item in items.get('items', []):
-                    _delete_ignoring_not_found(
-                        custom_api.delete_namespaced_custom_object,
-                        group='kafka.strimzi.io', version='v1',
-                        namespace=namespace, plural=plural, name=item['metadata']['name']
-                    )
-            except ApiException:
-                pass
-
-        if _delete_ignoring_not_found(
-            custom_api.delete_namespaced_custom_object,
-            group='kafka.strimzi.io', version='v1',
-            namespace=namespace, plural='kafkas', name=name
-        ):
-            deleted_any = True
-
-        if deleted_any:
-            logger.info(f"Deleted Kafka cluster '{name}'")
-            count += 1
-        else:
-            logger.info(f"Kafka cluster '{name}' not found (already removed)")
-    return count
-
-
-def _delete_workflow_resource(custom_api, namespace, workflow_name):
-    """Delete the Argo workflow."""
-    if _delete_ignoring_not_found(
-        custom_api.delete_namespaced_custom_object,
-        group='argoproj.io', version='v1alpha1',
-        namespace=namespace, plural='workflows', name=workflow_name
-    ):
-        logger.info(f"Deleted workflow '{workflow_name}'")
-        return True
+def _delete_core_resource(kind, name, namespace):
+    """Delete a core/apps k8s resource by kind."""
+    kind_lower = kind.lower()
+    if kind_lower == 'deployment':
+        client.AppsV1Api().delete_namespaced_deployment(name=name, namespace=namespace)
+    elif kind_lower == 'statefulset':
+        client.AppsV1Api().delete_namespaced_stateful_set(name=name, namespace=namespace)
+    elif kind_lower == 'service':
+        client.CoreV1Api().delete_namespaced_service(name=name, namespace=namespace)
+    elif kind_lower == 'secret':
+        client.CoreV1Api().delete_namespaced_secret(name=name, namespace=namespace)
     else:
-        logger.info(f"Workflow '{workflow_name}' not found (already removed)")
-        return False
+        logger.warning(f"Unknown kind for delete: {kind}")
+
+
+def _patch_core_resource(kind, name, namespace, patch):
+    """Patch a core/apps k8s resource by kind."""
+    kind_lower = kind.lower()
+    if kind_lower == 'deployment':
+        client.AppsV1Api().patch_namespaced_deployment(name=name, namespace=namespace, body=patch)
+    elif kind_lower == 'statefulset':
+        client.AppsV1Api().patch_namespaced_stateful_set(name=name, namespace=namespace, body=patch)
+    else:
+        logger.warning(f"Unknown kind for patch: {kind}")
+
+
+def _kind_to_plural(kind):
+    """Convert a k8s Kind to its plural form for the API."""
+    mapping = {
+        'kafka': 'kafkas',
+        'kafkanodepool': 'kafkanodepools',
+        'kafkatopic': 'kafkatopics',
+    }
+    return mapping.get(kind.lower(), kind.lower() + 's')
 
 
 def reset_workflow_resources(workflow_name, namespace, argo_server, token=None, insecure=False,
-                             path=None, delete_workflow=True):
+                             delete_workflow=True):
     """Reset workflow resources to a clean state. Callable from code or CLI.
 
     Returns the number of resources affected, or -1 if workflow not found.
     """
-    resources = _fetch_workflow_resources(workflow_name, namespace, argo_server, token, insecure)
-    if resources is None:
+    actions = _fetch_reset_actions(workflow_name, namespace, argo_server, token, insecure)
+    if actions is None:
         logger.warning(f"Workflow '{workflow_name}' not found in namespace '{namespace}'")
         return -1
 
+    if not actions and not delete_workflow:
+        logger.info("No resetAction parameters found in workflow nodes.")
+        return 0
+
     load_k8s_config()
-    apps_v1 = client.AppsV1Api()
-    core_v1 = client.CoreV1Api()
-    custom_api = client.CustomObjectsApi()
 
     total = 0
-    total += _reset_proxy_deployments(apps_v1, namespace, resources['proxy_deployments'], path)
-    total += _reset_rfs_deployments(apps_v1, namespace, resources['rfs_deployments'], path)
-    total += _reset_coordinator_clusters(apps_v1, core_v1, namespace, resources['coordinator_clusters'], path)
-    total += _reset_kafka_clusters(custom_api, namespace, resources['kafka_clusters'], path)
+    for display_name, action in actions:
+        kind = action.get('kind', '')
+        name = action.get('name', '')
+        act = action.get('action', 'delete')
+        try:
+            if _execute_reset_action(action, namespace):
+                logger.info(f"Reset {act} {kind} '{name}' (from: {display_name})")
+                total += 1
+            else:
+                logger.info(f"{kind} '{name}' not found (already removed)")
+        except Exception as e:
+            logger.error(f"Failed to {act} {kind} '{name}': {e}")
 
-    if delete_workflow and path is None:
-        if _delete_workflow_resource(custom_api, namespace, workflow_name):
+    if delete_workflow:
+        try:
+            custom_api = client.CustomObjectsApi()
+            custom_api.delete_namespaced_custom_object(
+                group='argoproj.io', version='v1alpha1',
+                namespace=namespace, plural='workflows', name=workflow_name
+            )
+            logger.info(f"Deleted workflow '{workflow_name}'")
             total += 1
+        except ApiException as e:
+            if e.status == 404:
+                logger.info(f"Workflow '{workflow_name}' not found (already removed)")
+            else:
+                logger.error(f"Failed to delete workflow: {e}")
 
     logger.info(f"Reset complete. {total} resource(s) affected.")
     return total
@@ -246,63 +199,43 @@ def reset_workflow_resources(workflow_name, namespace, argo_server, token=None, 
 @click.option('--namespace', default='ma')
 @click.option('--insecure', is_flag=True, default=False)
 @click.option('--token', help='Bearer token for authentication')
-@click.option('--path', default=None, help='Resource name/glob to reset. If omitted, resets all resources.')
 @click.option('--yes', '-y', is_flag=True, default=False, help='Skip confirmation prompt')
 @click.pass_context
-def reset_command(ctx, workflow_name, argo_server, namespace, insecure, token, path, yes):
+def reset_command(ctx, workflow_name, argo_server, namespace, insecure, token, yes):
     """Reset workflow resources to a clean state.
 
-    Discovers and removes resources created by the workflow:
-    proxy deployments are set to noCapture mode, RFS deployments are deleted,
-    coordinator clusters are deleted, Kafka clusters are deleted,
-    and (at root level) the workflow itself is deleted.
-
-    Use --path to scope the reset to specific resources by name or glob pattern.
+    Discovers resettable resources from workflow nodes that declare a resetAction
+    input parameter, then executes those actions. The workflow itself is also deleted.
 
     Example:
         workflow reset
-        workflow reset --path "my-proxy-*"
         workflow reset --yes
+        workflow reset --workflow-name my-workflow
     """
     try:
-        resources = _fetch_workflow_resources(workflow_name, namespace, argo_server, token, insecure)
-        if resources is None:
+        actions = _fetch_reset_actions(workflow_name, namespace, argo_server, token, insecure)
+        if actions is None:
             click.echo(f"Workflow '{workflow_name}' not found in namespace '{namespace}'.")
             ctx.exit(ExitCode.FAILURE.value)
             return
 
-        is_root = path is None
-        has_matching = any(
-            _matches_path(name, path)
-            for names in resources.values()
-            for name in names
-        )
+        if not actions:
+            click.echo("No resettable resources found in workflow.")
+            if not yes:
+                click.confirm(f"Delete workflow '{workflow_name}' anyway?", abort=True)
+        else:
+            click.echo(f"Resources to reset for workflow '{workflow_name}':")
+            for display_name, action in actions:
+                act = action.get('action', 'delete')
+                kind = action.get('kind', '')
+                name = action.get('name', '')
+                click.echo(f"  {kind} '{name}' → {act}  (from: {display_name})")
+            click.echo(f"  Workflow '{workflow_name}' → delete")
 
-        if not has_matching and not is_root:
-            click.echo("No resources found matching the given path.")
-            return
+            if not yes:
+                click.confirm("Proceed with reset?", abort=True)
 
-        # Show what will be reset
-        click.echo(f"Resources to reset for workflow '{workflow_name}':")
-        for name in sorted(resources['proxy_deployments']):
-            if _matches_path(name, path):
-                click.echo(f"  Proxy deployment: {name} → set noCapture")
-        for name in sorted(resources['rfs_deployments']):
-            if _matches_path(name, path):
-                click.echo(f"  RFS deployment: {name} → delete")
-        for name in sorted(resources['coordinator_clusters']):
-            if _matches_path(name, path):
-                click.echo(f"  Coordinator cluster: {name} → delete")
-        for name in sorted(resources['kafka_clusters']):
-            if _matches_path(name, path):
-                click.echo(f"  Kafka cluster: {name} → delete")
-        if is_root:
-            click.echo(f"  Workflow: {workflow_name} → delete")
-
-        if not yes:
-            click.confirm("Proceed with reset?", abort=True)
-
-        result = reset_workflow_resources(workflow_name, namespace, argo_server, token, insecure, path)
+        result = reset_workflow_resources(workflow_name, namespace, argo_server, token, insecure)
         click.echo(f"\nReset complete. {result} resource(s) affected.")
 
     except click.Abort:
