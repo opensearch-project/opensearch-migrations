@@ -93,32 +93,19 @@ describe("rfsCoordinatorCluster cleanup-on-failure", () => {
 describe("testMigrationWithWorkflowCli cleanup-on-failure", () => {
     const rendered = renderWorkflowTemplate(TestMigrationWithWorkflowCli);
 
-    describe("main ensures deleteMigrationWorkflow always runs", () => {
+    describe("main uses onExit to ensure deleteMigrationWorkflow always runs", () => {
         const template = findTemplate(rendered, "main");
 
-        it("has continueOn.failed on configureAndSubmitWorkflow", () => {
-            const step = findStep(template.steps, "configureAndSubmitWorkflow");
-            expect(step?.continueOn).toEqual({ failed: true });
+        it("has onExit pointing to the cleanup template", () => {
+            expect(template?.onExit).toBe("cleanupmigrationworkflow");
         });
 
-        it("gates monitorWorkflow on configureAndSubmitWorkflow succeeding", () => {
-            const step = findStep(template.steps, "monitorWorkflow");
-            expect(step?.when).toContain("configureAndSubmitWorkflow.status");
-            expect(step?.when).toContain("Succeeded");
-            expect(step?.continueOn).toEqual({ failed: true });
-        });
-
-        it("gates evaluateWorkflowResult on monitorWorkflow succeeding", () => {
-            const step = findStep(template.steps, "evaluateWorkflowResult");
-            expect(step?.when).toContain("monitorWorkflow.status");
-            expect(step?.when).toContain("Succeeded");
-            expect(step?.continueOn).toEqual({ failed: true });
-        });
-
-        it("does not have continueOn on deleteMigrationWorkflow (final cleanup step)", () => {
-            const step = findStep(template.steps, "deleteMigrationWorkflow");
-            expect(step).toBeDefined();
-            expect(step?.continueOn).toBeUndefined();
+        it("does not have continueOn on any steps (onExit handles cleanup)", () => {
+            for (const group of template.steps) {
+                for (const step of group) {
+                    expect(step.continueOn).toBeUndefined();
+                }
+            }
         });
     });
 });

@@ -201,6 +201,32 @@
         }
       },
       {
+        "name": "cleanupmigrationworkflow",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "keepMigrationWorkflow",
+              "value": "false"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "deletemigrationworkflow",
+              "when": "{{=!(fromJSON(inputs.parameters.keepMigrationWorkflow))}}",
+              "arguments": {
+                "parameters": []
+              },
+              "name": "deleteMigrationWorkflow"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "main",
         "inputs": {
           "parameters": [
@@ -239,16 +265,12 @@
                   }
                 ]
               },
-              "name": "configureAndSubmitWorkflow",
-              "continueOn": {
-                "failed": true
-              }
+              "name": "configureAndSubmitWorkflow"
             }
           ],
           [
             {
               "template": "monitorworkflow",
-              "when": "{{=steps.configureAndSubmitWorkflow.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -261,16 +283,12 @@
                   }
                 ]
               },
-              "name": "monitorWorkflow",
-              "continueOn": {
-                "failed": true
-              }
+              "name": "monitorWorkflow"
             }
           ],
           [
             {
               "template": "evaluateworkflowresult",
-              "when": "{{=steps.monitorWorkflow.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -287,23 +305,11 @@
                   }
                 ]
               },
-              "name": "evaluateWorkflowResult",
-              "continueOn": {
-                "failed": true
-              }
-            }
-          ],
-          [
-            {
-              "template": "deletemigrationworkflow",
-              "when": "{{=!(fromJSON(inputs.parameters.keepMigrationWorkflow))}}",
-              "arguments": {
-                "parameters": []
-              },
-              "name": "deleteMigrationWorkflow"
+              "name": "evaluateWorkflowResult"
             }
           ]
         ],
+        "onExit": "cleanupmigrationworkflow",
         "outputs": {
           "parameters": []
         }
