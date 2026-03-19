@@ -25,6 +25,7 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
       queryQ.request, // q=... → query DSL
       jsonFacets.request, // json.facet → aggs,
       fieldList.request, // fl=... → _source
+      jsonFacets.request, // json.facet → aggs
     ],
   },
 };

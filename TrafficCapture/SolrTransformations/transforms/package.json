@@ -15,6 +15,7 @@
     "clean": "rm -rf dist"
   },
   "devDependencies": {
+    "@types/lucene": "^2.1.7",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
     "@typescript/native-preview": "7.0.0-dev.20251210.1",
@@ -29,5 +30,8 @@
     "@typescript/native-preview-darwin-arm64": "7.0.0-dev.20251210.1",
     "@typescript/native-preview-darwin-x64": "7.0.0-dev.20251210.1",
     "@typescript/native-preview-linux-x64": "7.0.0-dev.20251210.1"
+  },
+  "dependencies": {
+    "lucene": "^2.1.1"
   }
 }
