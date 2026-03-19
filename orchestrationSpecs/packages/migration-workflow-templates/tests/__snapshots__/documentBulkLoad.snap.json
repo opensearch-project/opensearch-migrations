@@ -510,7 +510,10 @@
                   }
                 ]
               },
-              "name": "startHistoricalBackfillFromConfig"
+              "name": "startHistoricalBackfillFromConfig",
+              "continueOn": {
+                "failed": true
+              }
             }
           ],
           [
@@ -519,6 +522,7 @@
                 "template": "getconsoleconfig",
                 "name": "migration-console"
               },
+              "when": "{{=steps.startHistoricalBackfillFromConfig.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -535,7 +539,10 @@
                   }
                 ]
               },
-              "name": "setupWaitForCompletion"
+              "name": "setupWaitForCompletion",
+              "continueOn": {
+                "failed": true
+              }
             }
           ],
           [
@@ -577,7 +584,10 @@
                   }
                 ]
               },
-              "name": "waitForCompletion"
+              "name": "waitForCompletion",
+              "continueOn": {
+                "failed": true
+              }
             }
           ],
           [
@@ -676,7 +686,10 @@
                   }
                 ]
               },
-              "name": "createRfsCoordinator"
+              "name": "createRfsCoordinator",
+              "continueOn": {
+                "failed": true
+              }
             }
           ],
           [
@@ -734,7 +747,10 @@
                   }
                 ]
               },
-              "name": "runBulkLoad"
+              "name": "runBulkLoad",
+              "continueOn": {
+                "failed": true
+              }
             }
           ],
           [

@@ -474,7 +474,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c)
-                }))
+                }),
+                {continueOn: {failed: true}})
             .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -483,7 +484,11 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                         sessionName: b.inputs.sessionName,
                         deploymentName: getRfsDeploymentName(b.inputs.sessionName)
                     }))
-                }))
+                }),
+                {
+                    continueOn: {failed: true},
+                    when: c => ({templateExp: expr.equals(c.startHistoricalBackfillFromConfig.status, "Succeeded")})
+                })
             .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -492,7 +497,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
                     fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
-                }))
+                }),
+                {continueOn: {failed: true}})
             .addStep("stopHistoricalBackfill", INTERNAL, "stopHistoricalBackfill", c =>
                 c.register({sessionName: b.inputs.sessionName}))
         )
@@ -522,7 +528,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName),
                             coordinatorImage: b.inputs.imageCoordinatorClusterLocation
                         }),
-                    {when: {templateExp: createRfsCluster}}
+                    {when: {templateExp: createRfsCluster}, continueOn: {failed: true}}
                 )
 
                 // Always run bulk load, use deployed cluster or target cluster based on flag 'createRfsCluster'
@@ -534,7 +540,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             expr.serialize(makeRfsCoordinatorConfig(getRfsCoordinatorClusterName(b.inputs.sessionName))),
                             b.inputs.targetConfig
                         )
-                    }))
+                    }),
+                    {continueOn: {failed: true}})
 
                 // (conditional) Cleanup OpenSearch cluster used for RFS work coordination
                 .addStep("cleanupRfsCoordinator", RfsCoordinatorCluster, "deleteRfsCoordinator", c =>
