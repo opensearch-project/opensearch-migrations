@@ -682,6 +682,39 @@ def _parse_collection_response(resp: dict) -> dict:
     }
 
 
+def _poll_collection_status(cluster: Cluster, snapshot_name: str, coll: str) -> Optional[dict]:
+    """Poll a single collection's async backup status. Returns None if not found or on error."""
+    async_id = f"{snapshot_name}-{coll}"
+    try:
+        r = cluster.call_api(
+            f"/solr/admin/collections?action=REQUESTSTATUS&requestid={async_id}&wt=json"
+        )
+        resp = r.json()
+        state = resp.get("status", {}).get("state", "notfound")
+        if state == "notfound":
+            return None
+        parsed = _parse_collection_response(resp)
+        parsed["state"] = state
+        parsed["success_count"] = len(resp.get("success", {}))
+        return parsed
+    except Exception:
+        return {"state": "error", "num_shards": 0, "size_bytes": 0, "started_dt": None, "success_count": 0}
+
+
+def _compute_eta(started_dt: Optional[datetime], pct: float, step_state: StepState) -> tuple:
+    """Compute ETA and finished datetime from progress."""
+    if not started_dt:
+        return None, None
+    elapsed = datetime.now(started_dt.tzinfo) - started_dt
+    elapsed_ms = elapsed.total_seconds() * 1000
+    eta_ms = (elapsed_ms / pct) * (100 - pct) if 0 < pct < 100 else None
+    finished_dt = None
+    if step_state == StepState.COMPLETED:
+        finished_dt = started_dt + elapsed
+        eta_ms = 0.0
+    return eta_ms, finished_dt
+
+
 def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotStatus:
     """Build a SnapshotStatus from SolrCloud REQUESTSTATUS responses."""
     r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
@@ -696,37 +729,27 @@ def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotS
     any_found = False
 
     for coll in collections:
-        async_id = f"{snapshot_name}-{coll}"
-        try:
-            r = cluster.call_api(
-                f"/solr/admin/collections?action=REQUESTSTATUS&requestid={async_id}&wt=json"
-            )
-            resp = r.json()
-            state = resp.get("status", {}).get("state", "notfound")
-
-            if state == "notfound":
-                continue
-
-            any_found = True
-            parsed = _parse_collection_response(resp)
-
-            total_shards += parsed["num_shards"]
-            index_size_bytes += parsed["size_bytes"]
-
-            if parsed["started_dt"] and started_dt is None:
-                started_dt = parsed["started_dt"]
-
-            if state == "completed":
-                completed_shards += parsed["num_shards"]
-            elif state == "failed":
-                any_failed = True
-                all_completed = False
-            else:
-                all_completed = False
-                completed_shards += len(resp.get("success", {}))
-
-        except Exception:
+        result = _poll_collection_status(cluster, snapshot_name, coll)
+        if result is None:
+            continue
+        if result["state"] == "error":
             all_completed = False
+            continue
+
+        any_found = True
+        total_shards += result["num_shards"]
+        index_size_bytes += result["size_bytes"]
+        if result["started_dt"] and started_dt is None:
+            started_dt = result["started_dt"]
+
+        if result["state"] == "completed":
+            completed_shards += result["num_shards"]
+        elif result["state"] == "failed":
+            any_failed = True
+            all_completed = False
+        else:
+            all_completed = False
+            completed_shards += result["success_count"]
 
     if not any_found:
         return SnapshotStatus(status=StepState.PENDING, percentage_completed=0.0)
@@ -736,17 +759,7 @@ def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotS
     if step_state == StepState.COMPLETED:
         pct = 100.0
 
-    # Estimate ETA from elapsed time and progress
-    eta_ms = None
-    finished_dt = None
-    if started_dt:
-        elapsed = datetime.now(started_dt.tzinfo) - started_dt
-        elapsed_ms = elapsed.total_seconds() * 1000
-        if 0 < pct < 100:
-            eta_ms = (elapsed_ms / pct) * (100 - pct)
-        if step_state == StepState.COMPLETED:
-            finished_dt = started_dt + elapsed
-            eta_ms = 0.0
+    eta_ms, finished_dt = _compute_eta(started_dt, pct, step_state)
 
     return SnapshotStatus(
         status=step_state,
