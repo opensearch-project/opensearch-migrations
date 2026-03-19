@@ -365,52 +365,5 @@ class TestConfigureCommands:
 
 
 class TestApprovalCompletions:
-    """Test suite for approval key autocompletion."""
-
-    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
-    def test_get_approval_key_completions(self, mock_fetch):
-        """Test autocompletion returns suspended step names."""
-        from console_link.workflow.commands.approve import get_approval_task_name_completions, _get_cache_file
-
-        mock_fetch.return_value = [
-            ('node-1', 'source.target.metadataMigrate', 'meta'),
-            ('node-2', 'source.target.backfill', 'backfill')
-        ]
-
-        # Clear cache
-        cache_file = _get_cache_file('migration-workflow')
-        if cache_file.exists():
-            cache_file.unlink()
-
-        ctx = Mock()
-        ctx.params = {'workflow_name': 'migration-workflow', 'namespace': 'ma'}
-
-        completions = get_approval_task_name_completions(ctx, None, 'source')
-
-        assert len(completions) == 2
-        values = [c.value for c in completions]
-        assert 'source.target.metadataMigrate' in values
-        assert 'source.target.backfill' in values
-
-    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
-    def test_get_approval_key_completions_caching(self, mock_fetch):
-        """Test that completions are cached."""
-        from console_link.workflow.commands.approve import get_approval_task_name_completions, _get_cache_file
-
-        mock_fetch.return_value = [('node-1', 'step.name', 'step')]
-
-        # Clear cache
-        cache_file = _get_cache_file('migration-workflow')
-        if cache_file.exists():
-            cache_file.unlink()
-
-        ctx = Mock()
-        ctx.params = {'workflow_name': 'migration-workflow', 'namespace': 'ma'}
-
-        # First call - should fetch
-        get_approval_task_name_completions(ctx, None, '')
-        assert mock_fetch.call_count == 1
-
-        # Second call - should use cache
-        get_approval_task_name_completions(ctx, None, '')
-        assert mock_fetch.call_count == 1  # Still 1, used cache
+    """Approval completions removed - approve now uses CRD-based approach without shell completion."""
+    pass
