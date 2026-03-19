@@ -96,11 +96,6 @@ charts:
 
   argo-workflows:
     values:
-      artifactRepository:
-        s3:
-          bucket: "migrations-default-000000000000-dev-us-east-1"
-          endpoint: "localstack.ma-dev.svc.cluster.local:4566"
-          insecure: true
       controller:
         replicas: 1
         pdb:
