@@ -32,9 +32,9 @@ public class SolrClient implements AutoCloseable {
             .build();
     }
 
-    /** List all collections (SolrCloud) or cores (standalone). */
+    /** List all collections (SolrCloud) or cores (standalone fallback). */
     public List<String> listCollections() throws IOException {
-        // Try SolrCloud collections API first
+        // SolrCloud collections API
         try {
             var node = getJson(baseUrl + "/solr/admin/collections?action=LIST&wt=json");
             var collections = node.get("collections");
@@ -43,10 +43,10 @@ public class SolrClient implements AutoCloseable {
                     .constructCollectionType(List.class, String.class));
             }
         } catch (Exception e) {
-            log.debug("Collections API not available, trying cores API", e);
+            log.debug("Collections API not available, falling back to cores API", e);
         }
 
-        // Fall back to cores API (standalone Solr)
+        // Standalone Solr fallback
         var node = getJson(baseUrl + "/solr/admin/cores?action=STATUS&wt=json");
         var status = node.get("status");
         if (status != null && status.isObject()) {

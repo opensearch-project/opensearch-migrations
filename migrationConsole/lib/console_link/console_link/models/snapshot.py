@@ -108,10 +108,10 @@ class Snapshot(ABC):
         """Delete a snapshot repository."""
         pass
 
-    def _get_solr_cores(self) -> list:
-        """Fetch core names from Solr admin API."""
-        r = self.source_cluster.call_api("/solr/admin/cores?action=STATUS")
-        return list(r.json().get("status", {}).keys())
+    def _get_solr_collections(self) -> list:
+        """Fetch collection names from SolrCloud Collections API."""
+        r = self.source_cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+        return r.json().get("collections", [])
 
     def get_snapshot_indexes(self, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
         """
@@ -205,8 +205,8 @@ class S3Snapshot(Snapshot):
         command_args.update(s3_command_args)
 
         if self._is_solr_source():
-            cores = self._get_solr_cores()
-            command_args["--solr-cores"] = ",".join(cores)
+            collections = self._get_solr_collections()
+            command_args["--solr-collections"] = ",".join(collections)
 
         wait = kwargs.get('wait', False)
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
@@ -276,8 +276,8 @@ class FileSystemSnapshot(Snapshot):
         command_args["--file-system-repo-path"] = self.repo_path
 
         if self._is_solr_source():
-            cores = self._get_solr_cores()
-            command_args["--solr-cores"] = ",".join(cores)
+            collections = self._get_solr_collections()
+            command_args["--solr-collections"] = ",".join(collections)
 
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
         extra_args = kwargs.get('extra_args')
@@ -622,20 +622,23 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
 
 
 def _solr_backup_status(cluster: Cluster) -> CommandResult:
-    """Check Solr replication backup status across all cores."""
+    """Check SolrCloud backup status via Collections API async request status."""
     try:
-        cores_resp = cluster.call_api("/solr/admin/cores?action=STATUS")
-        cores = list(cores_resp.json().get("status", {}).keys())
+        # Get collections list
+        r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+        collections = r.json().get("collections", [])
         lines = []
-        for core in cores:
-            r = cluster.call_api(f"/solr/{core}/replication?command=details&wt=json")
+        for coll in collections:
+            # Convention: async ID = <snapshot_name>-<collection>
+            # Since we don't know the snapshot name here, check replication details as fallback
+            r = cluster.call_api(f"/solr/{coll}/replication?command=details&wt=json")
             details = r.json().get("details", {})
             backup = details.get("backup")
             if backup:
                 status = _get_named_list_value(backup, "status") if isinstance(backup, list) else backup.get("status", "unknown")
-                lines.append(f"Core '{core}': backup status = {status}")
+                lines.append(f"Collection '{coll}': backup status = {status}")
             else:
-                lines.append(f"Core '{core}': no backup in progress")
+                lines.append(f"Collection '{coll}': no backup in progress")
         return CommandResult(success=True, value="\n".join(lines))
     except Exception as e:
         return CommandResult(success=False, value=f"Failed to get Solr backup status: {e}")

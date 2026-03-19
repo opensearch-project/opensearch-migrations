@@ -14,11 +14,12 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Creates a Solr replication backup, which produces Lucene segment files
- * that can be read by {@link SolrBackupSource}.
+ * Creates SolrCloud collection backups via the Collections API.
  *
- * <p>For each core, calls the Solr replication API:
- * {@code /solr/<core>/replication?command=backup&location=<path>&name=<name>}
+ * <p>For each collection, calls:
+ * {@code /solr/admin/collections?action=BACKUP&name=<name>&collection=<coll>&location=<path>&async=<id>}
+ * and polls status via:
+ * {@code /solr/admin/collections?action=REQUESTSTATUS&requestid=<id>}
  */
 @Slf4j
 public class SolrSnapshotCreator {
@@ -30,88 +31,75 @@ public class SolrSnapshotCreator {
     @Getter
     private final String backupName;
     private final String backupLocation;
-    private final List<String> cores;
+    private final List<String> collections;
 
     public SolrSnapshotCreator(
         String solrBaseUrl,
         String backupName,
         String backupLocation,
-        List<String> cores
+        List<String> collections
     ) {
         this.solrBaseUrl = solrBaseUrl.endsWith("/")
             ? solrBaseUrl.substring(0, solrBaseUrl.length() - 1) : solrBaseUrl;
         this.backupName = backupName;
         this.backupLocation = backupLocation;
-        this.cores = cores;
+        this.collections = collections;
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
     }
 
-    /** No-op for Solr — backup location is specified per-request. */
+    /** No-op for SolrCloud — backup location is specified per-request. */
     public void registerRepo() {
-        log.info("Solr does not require repo registration; backup location: {}", backupLocation);
+        log.info("SolrCloud does not require repo registration; backup location: {}", backupLocation);
     }
 
-    /** Trigger a replication backup for each core. */
+    /** Trigger an async backup for each collection via the Collections API. */
     public void createSnapshot() {
-        for (var core : cores) {
+        for (var collection : collections) {
+            var asyncId = backupName + "-" + collection;
             var url = String.format(
-                "%s/solr/%s/replication?command=backup&location=%s&name=%s",
-                solrBaseUrl, core, backupLocation, backupName
+                "%s/solr/admin/collections?action=BACKUP&name=%s&collection=%s&location=%s&async=%s&wt=json",
+                solrBaseUrl, backupName, collection, backupLocation, asyncId
             );
-            log.info("Initiating Solr backup for core '{}': {}", core, url);
+            log.info("Initiating SolrCloud backup for collection '{}': async={}", collection, asyncId);
             var response = getJson(url);
-            var status = response.path("status").asText("UNKNOWN");
-            if (!"OK".equalsIgnoreCase(status)) {
-                throw new SolrBackupFailed("Backup initiation failed for core '" + core + "': " + response);
+            var status = response.path("responseHeader").path("status").asInt(-1);
+            if (status != 0) {
+                var errorMsg = response.path("error").path("msg").asText(response.toString());
+                throw new SolrBackupFailed("Backup initiation failed for collection '" + collection + "': " + errorMsg);
             }
-            log.info("Solr backup initiated for core '{}'", core);
+            log.info("SolrCloud backup initiated for collection '{}'", collection);
         }
     }
 
-    /** Check if all core backups have completed. */
+    /** Check if all collection backups have completed by polling async request status. */
     public boolean isSnapshotFinished() {
-        for (var core : cores) {
-            var url = String.format("%s/solr/%s/replication?command=details&wt=json", solrBaseUrl, core);
+        for (var collection : collections) {
+            var asyncId = backupName + "-" + collection;
+            var url = String.format(
+                "%s/solr/admin/collections?action=REQUESTSTATUS&requestid=%s&wt=json",
+                solrBaseUrl, asyncId
+            );
             var response = getJson(url);
-            var details = response.path("details");
-            var backup = details.path("backup");
-            if (backup.isMissingNode() || backup.isEmpty()) {
+            var state = response.path("status").path("state").asText("");
+            if ("completed".equalsIgnoreCase(state)) {
+                log.info("SolrCloud backup completed for collection '{}'", collection);
                 continue;
             }
-            // Solr returns backup as a NamedList (flat array): ["key1","val1","key2","val2",...]
-            String backupStatus = getNamedListValue(backup, "status");
-            if (backupStatus == null) {
-                continue;
-            }
-            if ("In Progress".equalsIgnoreCase(backupStatus)) {
-                log.info("Solr backup still in progress for core '{}'", core);
+            if ("running".equalsIgnoreCase(state) || "submitted".equalsIgnoreCase(state)) {
+                log.info("SolrCloud backup still in progress for collection '{}': {}", collection, state);
                 return false;
             }
-            if ("success".equalsIgnoreCase(backupStatus)) {
-                continue;
+            if ("failed".equalsIgnoreCase(state) || "notfound".equalsIgnoreCase(state)) {
+                var msg = response.path("status").path("msg").asText(state);
+                throw new SolrBackupFailed("Backup failed for collection '" + collection + "': " + msg);
             }
-            throw new SolrBackupFailed("Backup failed for core '" + core + "': status=" + backupStatus);
+            // Unknown state — treat as in-progress
+            log.warn("Unknown backup state '{}' for collection '{}', treating as in-progress", state, collection);
+            return false;
         }
         return true;
-    }
-
-    /**
-     * Extract a value from Solr's NamedList JSON format: ["key1","val1","key2","val2",...].
-     */
-    private static String getNamedListValue(JsonNode namedList, String key) {
-        if (namedList.isArray()) {
-            for (int i = 0; i < namedList.size() - 1; i += 2) {
-                if (key.equals(namedList.get(i).asText())) {
-                    return namedList.get(i + 1).asText();
-                }
-            }
-        } else if (namedList.isObject()) {
-            var node = namedList.get(key);
-            return node != null ? node.asText() : null;
-        }
-        return null;
     }
 
     private JsonNode getJson(String url) {
