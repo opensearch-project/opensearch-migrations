@@ -13,6 +13,7 @@ from .test_cases.basic_tests import *
 from .test_cases.multi_type_tests import *
 from .test_cases.backfill_tests import *
 from .test_cases.snapshot_only_tests import *
+from .test_cases.solr_tests import *
 
 logger = logging.getLogger(__name__)
 
