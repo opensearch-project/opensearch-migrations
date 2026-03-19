@@ -369,7 +369,16 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("patchSnapshotMigration", ResourceManagement, "patchSnapshotMigrationReady", c =>
                 c.register({...selectInputsForRegister(b, c)})
             )
-            // After migration is Ready, wait for teardown signal
+            // Natural completion: self-teardown so waitForTeardown resolves immediately
+            .addStep("selfTeardown", ResourceManagement, "patchTeardown", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.resourceName,
+                    resourceKind: expr.literal("SnapshotMigration"),
+                })
+            )
+            // Wait for teardown signal (already satisfied by selfTeardown above,
+            // or by external reset if teardown was triggered before natural completion)
             .addStep("waitForTeardown", ResourceManagement, "waitForTeardown", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),

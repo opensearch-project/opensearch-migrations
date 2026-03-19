@@ -923,6 +923,27 @@
           [
             {
               "templateRef": {
+                "template": "patchteardown",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "SnapshotMigration"
+                  }
+                ]
+              },
+              "name": "selfTeardown"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "waitforteardown",
                 "name": "resource-management"
               },
