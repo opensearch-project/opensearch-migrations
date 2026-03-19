@@ -1,10 +1,21 @@
 import logging
+import os
+
 import pytest
 
+from console_link.workflow.commands.reset import reset_workflow_resources
 from .test_cases.ma_argo_test_base import MATestBase
 
 
 logger = logging.getLogger(__name__)
+
+
+def _get_argo_server_url():
+    return os.environ.get(
+        'ARGO_SERVER',
+        f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}:"
+        f"{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}"
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -26,10 +37,18 @@ def setup_and_teardown(request, keep_workflows, test_case: MATestBase):
         if request.node.rep_call and request.node.rep_call.failed:
             logger.info(f"Test failed - printing workflow details for {test_case.workflow_name}")
             test_case.argo_service.print_workflow_details(workflow_name=test_case.workflow_name)
-            # Save detailed diagnostics to logs directory (archived by Jenkins)
             test_case.argo_service.save_namespace_diagnostics("./logs")
         if not keep_workflows:
-            test_case.argo_service.delete_workflow(workflow_name=test_case.workflow_name)
+            logger.info(f"Resetting workflow resources for {test_case.workflow_name}")
+            try:
+                reset_workflow_resources(
+                    workflow_name=test_case.workflow_name,
+                    namespace=test_case.argo_service.namespace,
+                    argo_server=_get_argo_server_url(),
+                )
+            except Exception as e:
+                logger.warning(f"Reset failed, falling back to workflow delete: {e}")
+                test_case.argo_service.delete_workflow(workflow_name=test_case.workflow_name)
 
 
 def record_test(test_case: MATestBase, record_data) -> None:

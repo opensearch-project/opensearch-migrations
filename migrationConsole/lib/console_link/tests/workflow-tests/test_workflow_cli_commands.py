@@ -216,28 +216,6 @@ class TestWorkflowCLICommands:
         assert 'workflow-1' in result.output
         assert 'workflow-2' in result.output
 
-    @patch('console_link.workflow.commands.stop.WorkflowService')
-    def test_stop_command(self, mock_service_class):
-        """Test stop command with default workflow name."""
-        runner = CliRunner()
-
-        # Mock the service
-        mock_service = Mock()
-        mock_service_class.return_value = mock_service
-
-        mock_service.stop_workflow.return_value = {
-            'success': True,
-            'workflow_name': 'migration-workflow',
-            'namespace': 'ma',
-            'message': 'Workflow migration-workflow stopped successfully',
-            'error': None
-        }
-
-        result = runner.invoke(workflow_cli, ['stop'])
-
-        assert result.exit_code == 0
-        assert 'stopped successfully' in result.output
-
     @patch('console_link.workflow.commands.approve.WorkflowService')
     @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
     def test_approve_command_with_exact_key(self, mock_fetch, mock_service_class):
