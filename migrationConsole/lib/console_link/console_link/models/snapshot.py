@@ -108,6 +108,11 @@ class Snapshot(ABC):
         """Delete a snapshot repository."""
         pass
 
+    def _get_solr_cores(self) -> list:
+        """Fetch core names from Solr admin API."""
+        r = self.source_cluster.call_api("/solr/admin/cores?action=STATUS")
+        return list(r.json().get("status", {}).keys())
+
     def get_snapshot_indexes(self, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
         """
         Fetch all indexes that will be included in the snapshot with accurate document count and size information.
@@ -131,6 +136,11 @@ class Snapshot(ABC):
             logger.error(f"Failed to get snapshot indexes: {str(e)}")
             raise
 
+    def _is_solr_source(self) -> bool:
+        return (self.source_cluster is not None
+                and self.source_cluster.version is not None
+                and self.source_cluster.version.upper().startswith("SOLR"))
+
     def _collect_universal_command_args(self) -> Dict:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
@@ -140,6 +150,9 @@ class Snapshot(ABC):
             "--snapshot-repo-name": self.snapshot_repo_name,
             "--source-host": self.source_cluster.endpoint
         }
+
+        if self._is_solr_source():
+            command_args["--source-type"] = "solr"
 
         if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
@@ -191,6 +204,10 @@ class S3Snapshot(Snapshot):
         command_args = self._collect_universal_command_args()
         command_args.update(s3_command_args)
 
+        if self._is_solr_source():
+            cores = self._get_solr_cores()
+            command_args["--solr-cores"] = ",".join(cores)
+
         wait = kwargs.get('wait', False)
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
         extra_args = kwargs.get('extra_args')
@@ -219,25 +236,29 @@ class S3Snapshot(Snapshot):
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return _solr_backup_status(self.source_cluster)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return "Solr backups are managed as files; no delete API available."
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete_all_snapshots(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return "Solr backups are managed as files; no delete API available."
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return "Solr does not use snapshot repositories."
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 
@@ -253,6 +274,10 @@ class FileSystemSnapshot(Snapshot):
 
         command_args = self._collect_universal_command_args()
         command_args["--file-system-repo-path"] = self.repo_path
+
+        if self._is_solr_source():
+            cores = self._get_solr_cores()
+            command_args["--solr-cores"] = ",".join(cores)
 
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
         extra_args = kwargs.get('extra_args')
@@ -277,25 +302,29 @@ class FileSystemSnapshot(Snapshot):
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return _solr_backup_status(self.source_cluster)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return "Solr backups are managed as files; no delete API available."
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete_all_snapshots(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return "Solr backups are managed as files; no delete API available."
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return "Solr does not use snapshot repositories."
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 
@@ -590,6 +619,34 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     
     # Use the basic snapshot info we already have
     return SnapshotStateAndDetails(state, snapshot_info)
+
+
+def _solr_backup_status(cluster: Cluster) -> CommandResult:
+    """Check Solr replication backup status across all cores."""
+    try:
+        cores_resp = cluster.call_api("/solr/admin/cores?action=STATUS")
+        cores = list(cores_resp.json().get("status", {}).keys())
+        lines = []
+        for core in cores:
+            r = cluster.call_api(f"/solr/{core}/replication?command=details&wt=json")
+            details = r.json().get("details", {})
+            backup = details.get("backup")
+            if backup:
+                status = _get_named_list_value(backup, "status") if isinstance(backup, list) else backup.get("status", "unknown")
+                lines.append(f"Core '{core}': backup status = {status}")
+            else:
+                lines.append(f"Core '{core}': no backup in progress")
+        return CommandResult(success=True, value="\n".join(lines))
+    except Exception as e:
+        return CommandResult(success=False, value=f"Failed to get Solr backup status: {e}")
+
+
+def _get_named_list_value(named_list, key):
+    """Extract value from Solr NamedList format: ['key1','val1','key2','val2',...]."""
+    for i in range(0, len(named_list) - 1, 2):
+        if named_list[i] == key:
+            return named_list[i + 1]
+    return None
 
 
 def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_check: bool) -> CommandResult:
