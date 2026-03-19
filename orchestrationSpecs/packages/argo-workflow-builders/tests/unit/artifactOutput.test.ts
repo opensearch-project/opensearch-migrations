@@ -73,6 +73,29 @@ describe('Artifact Outputs', () => {
         expect(template.outputs.artifacts).toBeUndefined();
     });
 
+    it('should preserve artifact outputs through addRetryParameters', () => {
+        const wf = WorkflowBuilder.create({
+            k8sResourceName: 'test-retry-artifact',
+            serviceAccountName: 'sa'
+        })
+        .addTemplate('test', t => t
+            .addContainer(c => c
+                .addImageInfo('alpine', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addResources(EXAMPLE_RESOURCES)
+                .addArtifactOutput('result', '/tmp/result.txt')
+            )
+            .addRetryParameters({ limit: 3 })
+        )
+        .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const template = rendered.spec.templates.find((t: any) => t.name === 'test');
+        expect(template.outputs.artifacts).toEqual([
+            { name: 'result', path: '/tmp/result.txt', archive: { none: {} } }
+        ]);
+    });
+
     it('should render multiple artifact outputs', () => {
         const wf = WorkflowBuilder.create({
             k8sResourceName: 'test-multi-artifact',

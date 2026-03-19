@@ -222,7 +222,8 @@ export class ContainerBuilder<
             updates.outputs ?? this.outputsScope as unknown as NewOutput,
             updates.retry ?? this.retryParameters,
             updates.sync !== undefined ? updates.sync : this.synchronization,
-            updates.podConfig ?? this.podConfig
+            updates.podConfig ?? this.podConfig,
+            this.outputArtifacts
         );
     }
 
