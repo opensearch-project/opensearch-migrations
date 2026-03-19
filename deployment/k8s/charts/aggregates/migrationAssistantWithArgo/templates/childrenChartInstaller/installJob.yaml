@@ -242,6 +242,15 @@ spec:
               # Wait for all helm upgrades/installs to complete
               time wait
 
+      {{- if get .Values.conditionalPackageInstalls "argo-workflows" }}
+              # Patch Argo controller ConfigMap with artifact repository config
+              echo "Configuring Argo artifact repository..."
+              ARTIFACT_REPO_CONFIG=$(kubectl get configmap argo-artifact-repository-config -n {{ .Release.Namespace }} -o jsonpath='{.data.artifactRepository}')
+              kubectl patch configmap argo-workflow-controller-configmap -n {{ .Release.Namespace }} \
+                --type merge -p "{\"data\":{\"artifactRepository\":\"$ARTIFACT_REPO_CONFIG\"}}"
+              echo "Argo artifact repository configured"
+      {{- end }}
+
               # Combine all notes and create a ConfigMap to store them
               echo "All charts installed successfully!"
 

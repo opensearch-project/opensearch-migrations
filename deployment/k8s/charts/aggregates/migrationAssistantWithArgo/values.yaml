@@ -320,6 +320,7 @@ charts:
     repository: "https://argoproj.github.io/argo-helm"
     values:
       fullnameOverride: "argo"
+      useDefaultArtifactRepo: true
       images:
         # Override appVersion v3.7.8 to v3.7.9 to incorporate retry delay overflow fix
         # https://github.com/argoproj/argo-workflows/pull/15277

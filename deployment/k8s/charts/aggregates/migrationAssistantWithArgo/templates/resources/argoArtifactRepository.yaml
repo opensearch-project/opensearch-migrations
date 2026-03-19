@@ -1,0 +1,37 @@
+{{- if get .Values.conditionalPackageInstalls "argo-workflows" }}
+{{- $bucketName := printf "migrations-default-%s-%s-%s" (toString .Values.aws.account) .Values.stageName .Values.aws.region }}
+{{- if .Values.defaultBucketConfiguration.useLocalStack }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argo-artifact-s3-creds
+type: Opaque
+stringData:
+  accessKey: "test"
+  secretKey: "test"
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argo-artifact-repository-config
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  artifactRepository: |
+    archiveLogs: true
+    s3:
+      bucket: {{ $bucketName }}
+      {{- if .Values.defaultBucketConfiguration.useLocalStack }}
+      endpoint: {{ .Values.defaultBucketConfiguration.endpoint }}.{{ .Release.Namespace }}.svc.cluster.local:4566
+      insecure: true
+      accessKeySecret:
+        name: argo-artifact-s3-creds
+        key: accessKey
+      secretKeySecret:
+        name: argo-artifact-s3-creds
+        key: secretKey
+      {{- end }}
+      keyFormat: "argo-artifacts/{{`{{workflow.name}}`}}/{{`{{pod.name}}`}}"
+{{- end }}
