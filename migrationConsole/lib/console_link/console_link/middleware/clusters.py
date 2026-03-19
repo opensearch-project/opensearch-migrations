@@ -1,6 +1,7 @@
 import os
 import requests.exceptions
 import subprocess
+from typing import Optional
 
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.snapshot import Snapshot
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 class ConnectionResult:
     connection_message: str
     connection_established: bool
-    cluster_version: str = None
+    cluster_version: Optional[str] = None
 
     def __repr__(self):
         parts = [f"connection_message='{self.connection_message}'",
