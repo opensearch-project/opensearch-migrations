@@ -331,7 +331,7 @@ public class RequestSenderOrchestrator {
             connectionReplaySession,
             timestamp,
             new ChannelTask<>(ChannelTaskType.CLOSE, tf -> tf.whenComplete((v, t) -> {
-                log.trace("Calling closeConnection at slot " + channelInteraction);
+                log.atTrace().setMessage("Calling closeConnection at slot {}").addArgument(channelInteraction).log();
                 clientConnectionPool.closeConnection(ctx, connectionReplaySessionNum);
             }, () -> "Close connection"))
         );
