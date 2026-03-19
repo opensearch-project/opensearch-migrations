@@ -2,9 +2,7 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from console_link.workflow.tree_utils import get_step_status_output, ArtifactRef
