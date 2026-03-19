@@ -18,25 +18,6 @@ describe("onExit template support", () => {
         expect(mainTemplate?.onExit).toBe("cleanup");
     });
 
-    it("renders onExit on a steps template referencing an external template", () => {
-        const externalWf = WorkflowBuilder.create({k8sResourceName: "external"})
-            .addTemplate("externalCleanup", t => t
-                .addSteps(b => b)
-            )
-            .getFullScope();
-
-        const wf = WorkflowBuilder.create({k8sResourceName: "on-exit-external-test"})
-            .addTemplate("main", t => t
-                .addSteps(b => b)
-                .addOnExit(externalWf, "externalCleanup")
-            )
-            .getFullScope();
-
-        const rendered = renderWorkflowTemplate(wf);
-        const mainTemplate = rendered.spec.templates.find((t: Record<string, unknown>) => t.name === "main");
-        expect(mainTemplate?.onExit).toBe("externalcleanup");
-    });
-
     it("renders onExit on a container template", () => {
         const wf = WorkflowBuilder.create({k8sResourceName: "on-exit-container-test"})
             .addTemplate("cleanup", t => t

@@ -15,8 +15,8 @@ import {PlainObject} from "./plainObject";
 import {AllowLiteralOrExpression, BaseExpression, isExpression, toExpression} from "./expression";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
 import {SynchronizationConfig} from "./synchronization";
-import type {Workflow} from "./workflowBuilder";
 import {INTERNAL} from "./taskBuilder";
+import type {KeyFor} from "./taskBuilder";
 
 export type RetryParameters = GenericScope;
 
@@ -223,19 +223,15 @@ export abstract class TemplateBodyBuilder<
 
     /**
      * Set an onExit handler that runs when this template completes (success or failure).
-     * References an internal or external template by name.
+     * References a template within the same WorkflowTemplate by name.
      */
     public addOnExit<
-        TemplateSource extends typeof INTERNAL | Workflow<any, any, any>,
-        K extends string
+        K extends KeyFor<ParentWorkflowScope, typeof INTERNAL>
     >(
-        source: TemplateSource,
+        source: typeof INTERNAL,
         key: K
     ): this {
-        const name = (source === INTERNAL)
-            ? key
-            : key; // onExit references templates within the same WorkflowTemplate
-        this.onExitTemplateName = name;
+        this.onExitTemplateName = key as string;
         return this;
     }
 
