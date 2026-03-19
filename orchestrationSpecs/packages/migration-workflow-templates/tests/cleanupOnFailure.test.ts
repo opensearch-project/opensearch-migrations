@@ -39,24 +39,23 @@ describe("documentBulkLoad cleanup-on-failure", () => {
         });
     });
 
-    describe("setupAndRunBulkLoad uses onExit to ensure coordinator cleanup always runs", () => {
+    describe("setupAndRunBulkLoad ensures cleanupRfsCoordinator always runs", () => {
         const template = findTemplate(rendered, "setupandrunbulkload");
 
-        it("has onExit pointing to cleanupBulkLoadResources", () => {
-            expect(template?.onExit).toBe("cleanupbulkloadresources");
+        it("has continueOn.failed on createRfsCoordinator", () => {
+            const step = findStep(template.steps, "createRfsCoordinator");
+            expect(step?.continueOn).toEqual({ failed: true });
         });
 
-        it("does not have continueOn on any steps (onExit handles cleanup)", () => {
-            for (const group of template.steps) {
-                for (const step of group) {
-                    expect(step.continueOn).toBeUndefined();
-                }
-            }
+        it("has continueOn.failed on runBulkLoad", () => {
+            const step = findStep(template.steps, "runBulkLoad");
+            expect(step?.continueOn).toEqual({ failed: true });
         });
 
-        it("does not include cleanupRfsCoordinator as an inline step", () => {
+        it("does not have continueOn on cleanupRfsCoordinator (final cleanup step)", () => {
             const step = findStep(template.steps, "cleanupRfsCoordinator");
-            expect(step).toBeUndefined();
+            expect(step).toBeDefined();
+            expect(step?.continueOn).toBeUndefined();
         });
     });
 });

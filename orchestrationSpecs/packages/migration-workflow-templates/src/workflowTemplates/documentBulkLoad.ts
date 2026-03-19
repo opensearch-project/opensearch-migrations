@@ -501,20 +501,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(c => c)))
 
 
-    .addTemplate("cleanupBulkLoadResources", t => t
-        .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof ARGO_RFS_OPTIONS>>())
-        .addSteps(b => b
-            .addStep("cleanupRfsCoordinator", RfsCoordinatorCluster, "deleteRfsCoordinator", c =>
-                    c.register({
-                        clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName)
-                    }),
-                {when: {templateExp: shouldCreateRfsWorkCoordinationCluster(b.inputs.documentBackfillConfig)}}
-            )
-        )
-    )
-
-
     .addTemplate("setupAndRunBulkLoad", t => t
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
@@ -534,7 +520,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName),
                             coordinatorImage: b.inputs.imageCoordinatorClusterLocation
                         }),
-                    {when: {templateExp: createRfsCluster}}
+                    {when: {templateExp: createRfsCluster}, continueOn: {failed: true}}
                 )
 
                 // Always run bulk load, use deployed cluster or target cluster based on flag 'createRfsCluster'
@@ -546,9 +532,17 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             expr.serialize(makeRfsCoordinatorConfig(getRfsCoordinatorClusterName(b.inputs.sessionName))),
                             b.inputs.targetConfig
                         )
-                    }));
+                    }),
+                    {continueOn: {failed: true}})
+
+                // (conditional) Cleanup OpenSearch cluster used for RFS work coordination
+                .addStep("cleanupRfsCoordinator", RfsCoordinatorCluster, "deleteRfsCoordinator", c =>
+                        c.register({
+                            clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName)
+                        }),
+                    {when: {templateExp: createRfsCluster}}
+                );
         })
-        .addOnExit(INTERNAL, "cleanupBulkLoadResources")
     )
 
     .getFullScope();

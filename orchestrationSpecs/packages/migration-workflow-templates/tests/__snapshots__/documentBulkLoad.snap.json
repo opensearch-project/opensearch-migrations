@@ -598,42 +598,6 @@
         }
       },
       {
-        "name": "cleanupbulkloadresources",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "sessionName"
-            },
-            {
-              "name": "documentBackfillConfig"
-            }
-          ]
-        },
-        "steps": [
-          [
-            {
-              "templateRef": {
-                "template": "deleterfscoordinator",
-                "name": "rfs-coordinator-cluster"
-              },
-              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}"
-                  }
-                ]
-              },
-              "name": "cleanupRfsCoordinator"
-            }
-          ]
-        ],
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
         "name": "setupandrunbulkload",
         "inputs": {
           "parameters": [
@@ -698,7 +662,10 @@
                   }
                 ]
               },
-              "name": "createRfsCoordinator"
+              "name": "createRfsCoordinator",
+              "continueOn": {
+                "failed": true
+              }
             }
           ],
           [
@@ -756,11 +723,31 @@
                   }
                 ]
               },
-              "name": "runBulkLoad"
+              "name": "runBulkLoad",
+              "continueOn": {
+                "failed": true
+              }
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "deleterfscoordinator",
+                "name": "rfs-coordinator-cluster"
+              },
+              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}"
+                  }
+                ]
+              },
+              "name": "cleanupRfsCoordinator"
             }
           ]
         ],
-        "onExit": "cleanupbulkloadresources",
         "outputs": {
           "parameters": []
         }
