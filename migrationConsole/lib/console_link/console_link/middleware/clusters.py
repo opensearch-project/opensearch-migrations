@@ -123,50 +123,46 @@ def _ensure_vectorsearch_workload():
     logger.info("vectorsearch workload fetched successfully")
 
 
-def run_aoss_test_benchmarks(cluster: Cluster, collection_type: str):
-    """Run OSB workloads appropriate for a specific AOSS collection type.
+def run_aoss_test_benchmarks(cluster: Cluster):
+    """Run all OSB workloads for AOSS integration tests (search, timeseries, and vector).
 
     Intended for manually pre-staging snapshot data on a source cluster before
     creating a BYOS snapshot for AOSS integration tests. The source cluster must
     use basic auth (not SigV4) since execute_benchmark_workload does not support SigV4.
-
-    collection_type: 'search', 'timeseries', or 'vector'
     """
-    if collection_type == 'search':
-        cluster.execute_benchmark_workload(workload="geonames")
-        cluster.execute_benchmark_workload(workload="pmc")
-        cluster.execute_benchmark_workload(workload="so")
-    elif collection_type == 'timeseries':
-        cluster.execute_benchmark_workload(workload="http_logs")
-        cluster.execute_benchmark_workload(workload="eventdata")
-    elif collection_type == 'vector':
-        _ensure_vectorsearch_workload()
-        cluster.execute_benchmark_workload(
-            workload="vectorsearch",
-            workload_params="target_index_name:vectors_faiss,"
-                            "target_index_body:indices/faiss-index.json,"
-                            "target_field_name:target_field,"
-                            "target_index_dimension:768,"
-                            "target_index_space_type:l2,"
-                            "target_index_bulk_size:10,"
-                            "target_index_bulk_indexing_clients:1,"
-                            "target_index_bulk_index_data_set_corpus:cohere",
-            test_procedure="no-train-test-index-only"
-        )
-        cluster.execute_benchmark_workload(
-            workload="vectorsearch",
-            workload_params="target_index_name:vectors_lucene_filtered,"
-                            "target_index_body:indices/filters/lucene-index-attributes.json,"
-                            "target_field_name:target_field,"
-                            "target_index_dimension:768,"
-                            "target_index_space_type:l2,"
-                            "target_index_bulk_size:10,"
-                            "target_index_bulk_indexing_clients:1,"
-                            "target_index_bulk_index_data_set_corpus:cohere",
-            test_procedure="no-train-test-index-only"
-        )
-    else:
-        raise ValueError(f"Unknown AOSS collection type: {collection_type}. Use 'search', 'timeseries', or 'vector'.")
+    # Search workloads
+    cluster.execute_benchmark_workload(workload="geonames")
+    cluster.execute_benchmark_workload(workload="pmc")
+    cluster.execute_benchmark_workload(workload="so")
+    # Timeseries workloads
+    cluster.execute_benchmark_workload(workload="http_logs")
+    cluster.execute_benchmark_workload(workload="eventdata")
+    # Vector workloads
+    _ensure_vectorsearch_workload()
+    cluster.execute_benchmark_workload(
+        workload="vectorsearch",
+        workload_params="target_index_name:vectors_faiss,"
+                        "target_index_body:indices/faiss-index.json,"
+                        "target_field_name:target_field,"
+                        "target_index_dimension:768,"
+                        "target_index_space_type:l2,"
+                        "target_index_bulk_size:10,"
+                        "target_index_bulk_indexing_clients:1,"
+                        "target_index_bulk_index_data_set_corpus:cohere",
+        test_procedure="no-train-test-index-only"
+    )
+    cluster.execute_benchmark_workload(
+        workload="vectorsearch",
+        workload_params="target_index_name:vectors_lucene_filtered,"
+                        "target_index_body:indices/filters/lucene-index-attributes.json,"
+                        "target_field_name:target_field,"
+                        "target_index_dimension:768,"
+                        "target_index_space_type:l2,"
+                        "target_index_bulk_size:10,"
+                        "target_index_bulk_indexing_clients:1,"
+                        "target_index_bulk_index_data_set_corpus:cohere",
+        test_procedure="no-train-test-index-only"
+    )
 
 
 # As a default we exclude system indices and searchguard indices
