@@ -320,9 +320,11 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addSteps(b => b
             .addStepGroup(g => g
                 .addStep("deleteStatefulSet", INTERNAL, "deleteRfsCoordinatorStatefulSet", c =>
-                    c.register({clusterName: b.inputs.clusterName}))
+                    c.register({clusterName: b.inputs.clusterName}),
+                    {continueOn: {failed: true}})
                 .addStep("deleteService", INTERNAL, "deleteRfsCoordinatorService", c =>
-                    c.register({clusterName: b.inputs.clusterName}))
+                    c.register({clusterName: b.inputs.clusterName}),
+                    {continueOn: {failed: true}})
             )
             .addStepGroup(g => g
                 .addStep("deleteSecret", INTERNAL, "deleteRfsCoordinatorSecret", c =>

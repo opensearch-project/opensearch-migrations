@@ -287,7 +287,10 @@
                   }
                 ]
               },
-              "name": "deleteStatefulSet"
+              "name": "deleteStatefulSet",
+              "continueOn": {
+                "failed": true
+              }
             },
             {
               "template": "deleterfscoordinatorservice",
@@ -299,7 +302,10 @@
                   }
                 ]
               },
-              "name": "deleteService"
+              "name": "deleteService",
+              "continueOn": {
+                "failed": true
+              }
             }
           ],
           [
