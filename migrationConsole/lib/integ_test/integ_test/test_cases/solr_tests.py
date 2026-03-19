@@ -1,5 +1,4 @@
 """Solr-to-OpenSearch integration test cases."""
-import json
 import logging
 import time
 

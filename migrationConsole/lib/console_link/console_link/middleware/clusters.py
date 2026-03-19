@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 def _is_solr(cluster: Cluster) -> bool:
     """Check if the cluster is a Solr instance based on its configured version."""
-    return cluster.version is not None and cluster.version.upper().startswith("SOLR")
+    return isinstance(cluster.version, str) and cluster.version.upper().startswith("SOLR")
 
 
 @dataclass
