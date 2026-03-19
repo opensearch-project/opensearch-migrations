@@ -4,76 +4,24 @@ Workflow templates define 'reset:' prefixed suspend steps at resource teardown p
 This command discovers and approves those steps, letting the workflow handle cleanup.
 """
 
-import fnmatch
 import logging
 import os
-import time
 
 import click
-import requests
 
 from ..models.utils import ExitCode
-from ..services.workflow_service import WorkflowService
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .suspend_steps import (
+    RESET_PREFIX,
+    fetch_workflow_nodes,
+    find_suspend_steps,
+    match_steps,
+    approve_steps,
+    wait_for_workflow_completion,
+    delete_workflow,
+)
 
 logger = logging.getLogger(__name__)
-
-RESET_PREFIX = 'reset:'
-ENDING_PHASES = {'Succeeded', 'Failed', 'Error', 'Stopped'}
-
-
-def _fetch_all_reset_steps(workflow_name, namespace, argo_server, token, insecure):
-    """Fetch all reset: suspend nodes with their current phase.
-
-    Returns list of (node_id, short_name, display_name, phase) or None if workflow not found.
-    """
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
-    response = requests.get(url, headers=headers, verify=not insecure, timeout=10)
-    if response.status_code != 200:
-        return None
-
-    nodes = response.json().get('status', {}).get('nodes', {})
-    steps = []
-    for node_id, node in nodes.items():
-        if node.get('type') != 'Suspend':
-            continue
-        for p in node.get('inputs', {}).get('parameters', []):
-            if p.get('name') == 'name' and p.get('value', '').startswith(RESET_PREFIX):
-                short_name = p['value'][len(RESET_PREFIX):]
-                steps.append((node_id, short_name, node.get('displayName', ''), node.get('phase', '')))
-                break
-    return steps
-
-
-def _wait_for_workflow_completion(workflow_name, namespace, argo_server, token, insecure,
-                                  timeout_seconds=300):
-    """Poll until workflow reaches an ending phase. Returns final phase or None on timeout."""
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
-    deadline = time.time() + timeout_seconds
-    while time.time() < deadline:
-        try:
-            resp = requests.get(url, headers=headers, verify=not insecure, timeout=10)
-            if resp.status_code == 200:
-                phase = resp.json().get('status', {}).get('phase', '')
-                if phase in ENDING_PHASES:
-                    return phase
-        except requests.RequestException:
-            pass
-        time.sleep(5)
-    return None
-
-
-def _delete_workflow(workflow_name, namespace, argo_server, token, insecure):
-    """Delete the Argo workflow. Returns True if deleted."""
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
-    try:
-        resp = requests.delete(url, headers=headers, verify=not insecure, timeout=10)
-        return resp.status_code == 200
-    except requests.RequestException:
-        return False
 
 
 @click.command(name="reset")
@@ -105,20 +53,24 @@ def reset_command(ctx, path, workflow_name, argo_server, namespace, insecure, to
         workflow reset *                   # reset everything and delete workflow
     """
     try:
-        steps = _fetch_all_reset_steps(workflow_name, namespace, argo_server, token, insecure)
-        if steps is None:
+        nodes = fetch_workflow_nodes(workflow_name, namespace, argo_server, token, insecure)
+        if nodes is None:
             click.echo(f"Workflow '{workflow_name}' not found.")
             ctx.exit(ExitCode.FAILURE.value)
             return
 
-        if not steps:
+        all_steps = find_suspend_steps(nodes, prefix=RESET_PREFIX)
+        if not all_steps:
             click.echo("No reset steps found in workflow.")
             return
+
+        # Strip reset: prefix from names for display and matching
+        all_steps = [(nid, name[len(RESET_PREFIX):], disp, ph) for nid, name, disp, ph in all_steps]
 
         # LIST mode
         if path is None:
             click.echo(f"Resettable resources for workflow '{workflow_name}':")
-            for _, short_name, display_name, phase in steps:
+            for _, short_name, display_name, phase in all_steps:
                 status = "waiting" if phase == "Running" else phase.lower()
                 click.echo(f"  {short_name:<30} ({status})")
             click.echo()
@@ -127,49 +79,35 @@ def reset_command(ctx, path, workflow_name, argo_server, namespace, insecure, to
             return
 
         # Find suspended steps matching path
-        suspended = [(nid, sn, dn, ph) for nid, sn, dn, ph in steps if ph == 'Running']
-        if path == '*':
-            matches = suspended
-        else:
-            matches = [(nid, sn, dn, ph) for nid, sn, dn, ph in suspended
-                       if fnmatch.fnmatch(sn, path)]
+        suspended = [s for s in all_steps if s[3] == 'Running']
+        matches = suspended if path == '*' else match_steps(suspended, [path])
 
         if not matches:
             click.echo(f"No suspended reset steps match '{path}'.")
-            waiting = [sn for _, sn, _, ph in steps if ph == 'Running']
+            waiting = [sn for _, sn, _, ph in all_steps if ph == 'Running']
             if waiting:
                 click.echo(f"Available: {', '.join(waiting)}")
             return
 
-        # Approve matching steps
-        service = WorkflowService()
-        for node_id, short_name, display_name, _ in matches:
-            result = service.approve_workflow(
-                workflow_name=workflow_name,
-                namespace=namespace,
-                argo_server=argo_server,
-                token=token,
-                insecure=insecure,
-                node_field_selector=f"id={node_id}"
-            )
-            if result['success']:
-                click.echo(f"  ✓ Approved {short_name}")
-            else:
-                click.echo(f"  ✗ Failed {short_name}: {result['message']}", err=True)
-                ctx.exit(ExitCode.FAILURE.value)
-                return
+        # Re-add prefix for the approve API (it uses the full node ID, so this is fine)
+        approved, error = approve_steps(
+            matches, workflow_name, namespace, argo_server, token, insecure)
+
+        if error:
+            ctx.exit(ExitCode.FAILURE.value)
+            return
 
         # If *, wait for completion and delete
         if path == '*':
             click.echo("Waiting for workflow to complete...")
-            phase = _wait_for_workflow_completion(
+            phase = wait_for_workflow_completion(
                 workflow_name, namespace, argo_server, token, insecure)
             if phase:
                 click.echo(f"Workflow finished: {phase}")
             else:
                 click.echo("Timed out waiting for workflow completion.", err=True)
 
-            if _delete_workflow(workflow_name, namespace, argo_server, token, insecure):
+            if delete_workflow(workflow_name, namespace, argo_server, token, insecure):
                 click.echo(f"  ✓ Deleted workflow '{workflow_name}'")
             else:
                 click.echo(f"  ✗ Failed to delete workflow '{workflow_name}'", err=True)

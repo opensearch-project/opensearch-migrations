@@ -216,15 +216,15 @@ class TestWorkflowCLICommands:
         assert 'workflow-1' in result.output
         assert 'workflow-2' in result.output
 
-    @patch('console_link.workflow.commands.approve.WorkflowService')
-    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
+    @patch('console_link.workflow.commands.suspend_steps.WorkflowService')
+    @patch('console_link.workflow.commands.approve._fetch_approvable_steps')
     def test_approve_command_with_exact_key(self, mock_fetch, mock_service_class):
         """Test approve command with exact key match."""
         runner = CliRunner()
 
         mock_fetch.return_value = [
-            ('node-1', 'source.target.metadataMigrate', 'metadata-migrate'),
-            ('node-2', 'source.target.backfill', 'backfill-step')
+            ('node-1', 'source.target.metadataMigrate', 'metadata-migrate', 'Running'),
+            ('node-2', 'source.target.backfill', 'backfill-step', 'Running')
         ]
 
         mock_service = Mock()
@@ -242,16 +242,16 @@ class TestWorkflowCLICommands:
         call_kwargs = mock_service.approve_workflow.call_args[1]
         assert call_kwargs['node_field_selector'] == 'id=node-1'
 
-    @patch('console_link.workflow.commands.approve.WorkflowService')
-    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
+    @patch('console_link.workflow.commands.suspend_steps.WorkflowService')
+    @patch('console_link.workflow.commands.approve._fetch_approvable_steps')
     def test_approve_command_with_glob_pattern(self, mock_fetch, mock_service_class):
         """Test approve command with glob pattern matching multiple steps."""
         runner = CliRunner()
 
         mock_fetch.return_value = [
-            ('node-1', 'a.b.metadataMigrate', 'meta-1'),
-            ('node-2', 'x.y.metadataMigrate', 'meta-2'),
-            ('node-3', 'a.b.backfill', 'backfill')
+            ('node-1', 'a.b.metadataMigrate', 'meta-1', 'Running'),
+            ('node-2', 'x.y.metadataMigrate', 'meta-2', 'Running'),
+            ('node-3', 'a.b.backfill', 'backfill', 'Running')
         ]
 
         mock_service = Mock()
@@ -267,16 +267,16 @@ class TestWorkflowCLICommands:
         assert 'Approved 2 step' in result.output
         assert mock_service.approve_workflow.call_count == 2
 
-    @patch('console_link.workflow.commands.approve.WorkflowService')
-    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
+    @patch('console_link.workflow.commands.suspend_steps.WorkflowService')
+    @patch('console_link.workflow.commands.approve._fetch_approvable_steps')
     def test_approve_command_with_multiple_task_names(self, mock_fetch, mock_service_class):
         """Test approve command with multiple task names."""
         runner = CliRunner()
 
         mock_fetch.return_value = [
-            ('node-1', 'step1', 'step-1'),
-            ('node-2', 'step2', 'step-2'),
-            ('node-3', 'step3', 'step-3')
+            ('node-1', 'step1', 'step-1', 'Running'),
+            ('node-2', 'step2', 'step-2', 'Running'),
+            ('node-3', 'step3', 'step-3', 'Running')
         ]
 
         mock_service = Mock()
@@ -292,12 +292,12 @@ class TestWorkflowCLICommands:
         assert 'Approved 2 step' in result.output
         assert mock_service.approve_workflow.call_count == 2
 
-    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
+    @patch('console_link.workflow.commands.approve._fetch_approvable_steps')
     def test_approve_command_no_matches(self, mock_fetch):
         """Test approve command when key matches no suspended steps."""
         runner = CliRunner()
 
-        mock_fetch.return_value = [('node-1', 'source.target.backfill', 'backfill')]
+        mock_fetch.return_value = [('node-1', 'source.target.backfill', 'backfill', 'Running')]
 
         result = runner.invoke(workflow_cli, ['approve', 'nonexistent'])
 
@@ -305,7 +305,7 @@ class TestWorkflowCLICommands:
         assert "No suspended steps match" in result.output
         assert 'source.target.backfill' in result.output
 
-    @patch('console_link.workflow.commands.approve._fetch_suspended_step_names')
+    @patch('console_link.workflow.commands.approve._fetch_approvable_steps')
     def test_approve_command_no_suspended_steps(self, mock_fetch):
         """Test approve command fails when no steps are suspended."""
         runner = CliRunner()

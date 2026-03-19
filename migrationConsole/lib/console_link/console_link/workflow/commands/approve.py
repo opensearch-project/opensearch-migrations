@@ -1,6 +1,5 @@
 """Approve command for workflow CLI - resumes suspended workflows in Argo Workflows."""
 
-import fnmatch
 import json
 import logging
 import os
@@ -11,11 +10,16 @@ from typing import Any
 
 import click
 from click.shell_completion import CompletionItem
-import requests
 
 from ..models.utils import ExitCode
-from ..services.workflow_service import WorkflowService
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .suspend_steps import (
+    RESET_PREFIX,
+    fetch_workflow_nodes,
+    find_suspend_steps,
+    match_steps,
+    approve_steps,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,36 +32,12 @@ def _get_cache_file(workflow_name: str) -> Path:
     return cache_dir / f"approval_{workflow_name}.json"
 
 
-def _fetch_suspended_step_names(workflow_name: str, namespace: str, argo_server: str,
-                                token: str, insecure: bool,
-                                exclude_prefix: str = 'reset:') -> list[tuple[str, str, str]]:
-    """Fetch suspended steps from workflow. Returns list of (node_id, name_param, display_name).
-
-    Steps whose name starts with exclude_prefix are skipped (used to hide reset steps from approve).
-    """
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
-
-    response = requests.get(url, headers=headers, verify=not insecure, timeout=10)
-    if response.status_code != 200:
+def _fetch_approvable_steps(workflow_name, namespace, argo_server, token, insecure):
+    """Fetch suspended steps eligible for approval (excludes reset: steps)."""
+    nodes = fetch_workflow_nodes(workflow_name, namespace, argo_server, token, insecure)
+    if nodes is None:
         return []
-
-    data = response.json()
-    nodes = data.get('status', {}).get('nodes', {})
-
-    suspended = []
-    for node_id, node in nodes.items():
-        if node.get('type') == 'Suspend' and node.get('phase') == 'Running':
-            name_param = None
-            for p in node.get('inputs', {}).get('parameters', []):
-                if p.get('name') == 'name':
-                    name_param = p.get('value', '')
-                    break
-            if name_param:
-                if exclude_prefix and name_param.startswith(exclude_prefix):
-                    continue
-                suspended.append((node_id, name_param, node.get('displayName', '')))
-    return suspended
+    return find_suspend_steps(nodes, exclude_prefix=RESET_PREFIX, phase_filter='Running')
 
 
 def _get_cached_suspended_names(ctx) -> list[tuple[Any]] | list[tuple[str, str, str]] | list[Any]:
@@ -81,7 +61,7 @@ def _get_cached_suspended_names(ctx) -> list[tuple[Any]] | list[tuple[str, str, 
         token = ctx.params.get('token')
         insecure = ctx.params.get('insecure', False)
 
-        suspended = _fetch_suspended_step_names(workflow_name, namespace, argo_server, token, insecure)
+        suspended = _fetch_approvable_steps(workflow_name, namespace, argo_server, token, insecure)
         cache_file.write_text(json.dumps({'suspended': suspended}))
         return suspended
     except Exception:
@@ -93,7 +73,7 @@ def get_approval_task_name_completions(ctx, _, incomplete):
     suspended = _get_cached_suspended_names(ctx)
     return [
         CompletionItem(name_param, help=display_name)
-        for _, name_param, display_name in suspended
+        for _, name_param, display_name, _ in suspended
         if name_param.startswith(incomplete)
     ]
 
@@ -125,45 +105,28 @@ def approve_command(ctx, task_names, workflow_name, argo_server, namespace, inse
         workflow approve step1 step2 step3
     """
     try:
-        suspended = _fetch_suspended_step_names(workflow_name, namespace, argo_server, token, insecure)
+        steps = _fetch_approvable_steps(workflow_name, namespace, argo_server, token, insecure)
 
-        if not suspended:
+        if not steps:
             click.echo("No suspended steps found waiting for approval.")
             ctx.exit(ExitCode.FAILURE.value)
 
-        # Find matching steps for all task names
-        matches = []
-        for task_name in task_names:
-            matches.extend((nid, name, disp) for nid, name, disp in suspended
-                           if fnmatch.fnmatch(name, task_name) and (nid, name, disp) not in matches)
+        matches = match_steps(steps, task_names)
 
         if not matches:
             click.echo(f"No suspended steps match {task_names}.")
             click.echo("Available suspended steps:")
-            for _, name, disp in suspended:
+            for _, name, disp, _ in steps:
                 click.echo(f"  - {name} ({disp})")
             ctx.exit(ExitCode.FAILURE.value)
 
-        service = WorkflowService()
+        approved, error = approve_steps(
+            matches, workflow_name, namespace, argo_server, token, insecure)
 
-        for node_id, name_param, display_name in matches:
-            click.echo(f"Approving: {name_param} ({display_name})")
-            result = service.approve_workflow(
-                workflow_name=workflow_name,
-                namespace=namespace,
-                argo_server=argo_server,
-                token=token,
-                insecure=insecure,
-                node_field_selector=f"id={node_id}"
-            )
-
-            if result['success']:
-                click.echo("  ✓ Approved")
-            else:
-                click.echo(f"  ✗ Failed: {result['message']}", err=True)
-                ctx.exit(ExitCode.FAILURE.value)
-
-        click.echo(f"\nApproved {len(matches)} step(s).")
+        if error:
+            ctx.exit(ExitCode.FAILURE.value)
+        else:
+            click.echo(f"\nApproved {approved} step(s).")
 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
