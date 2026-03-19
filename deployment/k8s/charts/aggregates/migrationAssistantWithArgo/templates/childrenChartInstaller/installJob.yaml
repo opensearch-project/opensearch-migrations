@@ -226,6 +226,9 @@ spec:
           {{- end }}
                   --timeout {{ default "300" $chart.timeout }}s \
                   --set global.managedBy="{{ $.Release.Name }}" \
+          {{- if eq $name "argo-workflows" }}
+                  --set artifactRepository.s3.bucket="{{ printf "migrations-default-%s-%s-%s" (toString $.Values.aws.account) $.Values.stageName $.Values.aws.region }}" \
+          {{- end }}
                   $VALUE_PARAM \
           {{- if $chart.waitForInstallation }}
                   --wait
@@ -241,32 +244,6 @@ spec:
 
               # Wait for all helm upgrades/installs to complete
               time wait
-
-      {{- if get .Values.conditionalPackageInstalls "argo-workflows" }}
-              # Patch Argo controller ConfigMap with artifact repository config
-              echo "Configuring Argo artifact repository..."
-              {{- $bucketName := printf "migrations-default-%s-%s-%s" (toString .Values.aws.account) .Values.stageName .Values.aws.region }}
-              {{- $endpoint := printf "%s.%s.svc.cluster.local:4566" .Values.defaultBucketConfiguration.endpoint .Release.Namespace }}
-              ARTIFACT_REPO=$(printf '%s\n' \
-                'archiveLogs: true' \
-                's3:' \
-                '  bucket: {{ $bucketName }}' \
-              {{- if .Values.defaultBucketConfiguration.useLocalStack }}
-                '  endpoint: {{ $endpoint }}' \
-                '  insecure: true' \
-                '  accessKeySecret:' \
-                '    name: argo-artifact-s3-creds' \
-                '    key: accessKey' \
-                '  secretKeySecret:' \
-                '    name: argo-artifact-s3-creds' \
-                '    key: secretKey' \
-              {{- end }}
-                '  keyFormat: "argo-artifacts/{{ "{{" }}workflow.name{{ "}}" }}/{{ "{{" }}pod.name{{ "}}" }}"')
-              PATCH_JSON="{\"data\":{\"artifactRepository\":$(echo "$ARTIFACT_REPO" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')}}"
-              kubectl patch configmap argo-workflow-controller-configmap -n {{ .Release.Namespace }} \
-                --type merge -p "$PATCH_JSON"
-              echo "Argo artifact repository configured"
-      {{- end }}
 
               # Combine all notes and create a ConfigMap to store them
               echo "All charts installed successfully!"

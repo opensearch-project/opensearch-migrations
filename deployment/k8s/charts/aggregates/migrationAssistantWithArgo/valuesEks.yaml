@@ -123,6 +123,16 @@ otelConfiguration:
           exporters: [awsemf, prometheus]
 
 charts:
+  argo-workflows:
+    values:
+      useStaticCredentials: false
+      artifactRepository:
+        s3:
+          insecure: false
+          useSDKCreds: true
+          accessKeySecret: null
+          secretKeySecret: null
+
   fluent-bit:
     values:
       env:
@@ -181,7 +191,3 @@ charts:
       - name: KUBERNETES_CLIENT_READ_TIMEOUT_MS
         value: "30000"  # Avoid timing out on heavy K8s API responses
 
-# Note: Argo artifact repository config is handled by the argoArtifactRepository.yaml template.
-# When defaultBucketConfiguration.useLocalStack is false (EKS), the template omits the
-# LocalStack endpoint and credentials, relying on IAM-based S3 access via the
-# argo-workflow-executor service account.
