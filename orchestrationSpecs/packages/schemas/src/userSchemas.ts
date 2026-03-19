@@ -588,7 +588,7 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
     z.object({
         skipApprovals : z.boolean().default(false).optional(), // TODO - format
-        kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional(),
+        kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({"default": {autoCreate: {}}}).optional(),
         sourceClusters: SOURCE_CLUSTERS_MAP,
         targetClusters: TARGET_CLUSTERS_MAP,
         snapshotMigrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG),
