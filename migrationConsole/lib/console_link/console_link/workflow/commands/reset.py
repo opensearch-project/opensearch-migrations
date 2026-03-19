@@ -39,16 +39,31 @@ def _fetch_reset_actions(workflow_name, namespace, argo_server, token, insecure)
 
 
 def extract_reset_actions(nodes):
-    """Extract resetAction parameters from workflow nodes."""
+    """Extract resetAction parameters from workflow nodes, excluding those marked as resetDone."""
     actions = []
+    done_keys = set()
+
+    # First pass: collect resetDone keys from succeeded nodes
+    for node in nodes.values():
+        if node.get('phase') != 'Succeeded':
+            continue
+        for p in node.get('inputs', {}).get('parameters', []):
+            if p.get('name') == 'resetDone' and p.get('value'):
+                done_keys.add(p['value'])
+
+    # Second pass: collect resetAction entries not already done
     for node in nodes.values():
         display_name = node.get('displayName', '')
         for p in node.get('inputs', {}).get('parameters', []):
             if p.get('name') == 'resetAction' and p.get('value'):
                 try:
                     action = json.loads(p['value'])
-                    if action:  # skip empty objects
-                        actions.append((display_name, action))
+                    if not action:
+                        continue
+                    key = f"{action.get('apiVersion', '')}/{action.get('kind', '')}/{action.get('name', '')}"
+                    if key in done_keys:
+                        continue
+                    actions.append((display_name, action))
                 except (json.JSONDecodeError, TypeError):
                     pass
     return actions

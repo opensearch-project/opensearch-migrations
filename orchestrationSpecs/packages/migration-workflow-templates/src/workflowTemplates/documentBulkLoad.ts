@@ -310,6 +310,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 
     .addTemplate("stopHistoricalBackfill", t => t
         .addRequiredInput("sessionName", typeToken<string>())
+        .addOptionalInput("resetDone", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "delete", flags: ["--ignore-not-found"],
@@ -500,7 +501,13 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
                 }))
             .addStep("stopHistoricalBackfill", INTERNAL, "stopHistoricalBackfill", c =>
-                c.register({sessionName: b.inputs.sessionName}))
+                c.register({
+                    sessionName: b.inputs.sessionName,
+                    resetDone: expr.concat(
+                        expr.literal("apps/v1/Deployment/"),
+                        getRfsDeploymentName(b.inputs.sessionName)
+                    ),
+                }))
         )
     )
 

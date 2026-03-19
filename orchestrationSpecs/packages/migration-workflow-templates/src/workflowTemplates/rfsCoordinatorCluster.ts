@@ -293,6 +293,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
 
     .addTemplate("deleteRfsCoordinatorStatefulSet", t => t
         .addRequiredInput("clusterName", typeToken<string>())
+        .addOptionalInput("resetDone", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "delete",
@@ -310,6 +311,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
 
     .addTemplate("deleteRfsCoordinatorService", t => t
         .addRequiredInput("clusterName", typeToken<string>())
+        .addOptionalInput("resetDone", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "delete",
@@ -327,6 +329,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
 
     .addTemplate("deleteRfsCoordinatorSecret", t => t
         .addRequiredInput("clusterName", typeToken<string>())
+        .addOptionalInput("resetDone", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "delete",
@@ -348,13 +351,22 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addSteps(b => b
             .addStepGroup(g => g
                 .addStep("deleteStatefulSet", INTERNAL, "deleteRfsCoordinatorStatefulSet", c =>
-                    c.register({clusterName: b.inputs.clusterName}))
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        resetDone: expr.concat(expr.literal("apps/v1/StatefulSet/"), b.inputs.clusterName),
+                    }))
                 .addStep("deleteService", INTERNAL, "deleteRfsCoordinatorService", c =>
-                    c.register({clusterName: b.inputs.clusterName}))
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        resetDone: expr.concat(expr.literal("v1/Service/"), b.inputs.clusterName),
+                    }))
             )
             .addStepGroup(g => g
                 .addStep("deleteSecret", INTERNAL, "deleteRfsCoordinatorSecret", c =>
-                    c.register({clusterName: b.inputs.clusterName}))
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        resetDone: expr.concat(expr.literal("v1/Secret/"), b.inputs.clusterName, expr.literal("-creds")),
+                    }))
             )
         )
     )
