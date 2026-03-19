@@ -247,15 +247,22 @@ spec:
               echo "Configuring Argo artifact repository..."
               {{- $bucketName := printf "migrations-default-%s-%s-%s" (toString .Values.aws.account) .Values.stageName .Values.aws.region }}
               {{- $endpoint := printf "%s.%s.svc.cluster.local:4566" .Values.defaultBucketConfiguration.endpoint .Release.Namespace }}
-              PATCH_JSON=$(python3 -c "
-import json
-artifact_repo = 'archiveLogs: true\ns3:\n  bucket: {{ $bucketName }}\n'
+              ARTIFACT_REPO=$(printf '%s\n' \
+                'archiveLogs: true' \
+                's3:' \
+                '  bucket: {{ $bucketName }}' \
               {{- if .Values.defaultBucketConfiguration.useLocalStack }}
-artifact_repo += '  endpoint: {{ $endpoint }}\n  insecure: true\n  accessKeySecret:\n    name: argo-artifact-s3-creds\n    key: accessKey\n  secretKeySecret:\n    name: argo-artifact-s3-creds\n    key: secretKey\n'
+                '  endpoint: {{ $endpoint }}' \
+                '  insecure: true' \
+                '  accessKeySecret:' \
+                '    name: argo-artifact-s3-creds' \
+                '    key: accessKey' \
+                '  secretKeySecret:' \
+                '    name: argo-artifact-s3-creds' \
+                '    key: secretKey' \
               {{- end }}
-artifact_repo += '  keyFormat: \"argo-artifacts/{{ "{{" }}workflow.name{{ "}}" }}/{{ "{{" }}pod.name{{ "}}" }}\"\n'
-print(json.dumps({'data': {'artifactRepository': artifact_repo}}))
-")
+                '  keyFormat: "argo-artifacts/{{ "{{" }}workflow.name{{ "}}" }}/{{ "{{" }}pod.name{{ "}}" }}"')
+              PATCH_JSON="{\"data\":{\"artifactRepository\":$(echo "$ARTIFACT_REPO" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')}}"
               kubectl patch configmap argo-workflow-controller-configmap -n {{ .Release.Namespace }} \
                 --type merge -p "$PATCH_JSON"
               echo "Argo artifact repository configured"
