@@ -9,6 +9,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
@@ -118,6 +119,18 @@ public class CreateSnapshot {
                 description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
+
+        @Parameter(
+                names = {"--source-type"},
+                required = false,
+                description = "Source cluster type: 'elasticsearch' (default) or 'solr'")
+        public String sourceType = "elasticsearch";
+
+        @Parameter(
+                names = {"--solr-cores"},
+                required = false,
+                description = "Comma-separated list of Solr core names to back up (required when source-type=solr)")
+        public List<String> solrCores = List.of();
     }
 
     @Getter
@@ -162,6 +175,44 @@ public class CreateSnapshot {
     private ICreateSnapshotContext context;
 
     public void run() {
+        if ("solr".equalsIgnoreCase(arguments.sourceType)) {
+            runSolrBackup();
+            return;
+        }
+        runElasticsearchSnapshot();
+    }
+
+    private void runSolrBackup() {
+        var backupLocation = arguments.fileSystemRepoPath != null
+            ? arguments.fileSystemRepoPath : arguments.s3RepoUri;
+        if (arguments.solrCores.isEmpty()) {
+            throw new ParameterException("--solr-cores is required when --source-type=solr");
+        }
+        var solrCreator = new SolrSnapshotCreator(
+            arguments.sourceArgs.toConnectionContext().getUri().toString(),
+            arguments.snapshotName,
+            backupLocation,
+            arguments.solrCores
+        );
+        solrCreator.registerRepo();
+        solrCreator.createSnapshot();
+        if (!arguments.noWait) {
+            log.info("Waiting for Solr backup to complete...");
+            while (!solrCreator.isSnapshotFinished()) {
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new SolrSnapshotCreator.SolrBackupFailed("Interrupted while waiting for backup");
+                }
+            }
+            log.info("Solr backup '{}' completed", arguments.snapshotName);
+        } else {
+            log.info("Solr backup '{}' initiated (no-wait mode)", arguments.snapshotName);
+        }
+    }
+
+    private void runElasticsearchSnapshot() {
         var clientFactory = new OpenSearchClientFactory(arguments.sourceArgs.toConnectionContext());
         var client = clientFactory.determineVersionAndCreate();
         SnapshotCreator snapshotCreator;
