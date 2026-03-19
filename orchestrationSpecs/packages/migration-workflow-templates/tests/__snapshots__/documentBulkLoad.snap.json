@@ -509,10 +509,7 @@
                   }
                 ]
               },
-              "name": "startHistoricalBackfillFromConfig",
-              "continueOn": {
-                "failed": true
-              }
+              "name": "startHistoricalBackfillFromConfig"
             }
           ],
           [
@@ -521,7 +518,6 @@
                 "template": "getconsoleconfig",
                 "name": "migration-console"
               },
-              "when": "{{=steps.startHistoricalBackfillFromConfig.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -538,10 +534,7 @@
                   }
                 ]
               },
-              "name": "setupWaitForCompletion",
-              "continueOn": {
-                "failed": true
-              }
+              "name": "setupWaitForCompletion"
             }
           ],
           [
@@ -583,27 +576,11 @@
                   }
                 ]
               },
-              "name": "waitForCompletion",
-              "continueOn": {
-                "failed": true
-              }
-            }
-          ],
-          [
-            {
-              "template": "stophistoricalbackfill",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "sessionName",
-                    "value": "{{inputs.parameters.sessionName}}"
-                  }
-                ]
-              },
-              "name": "stopHistoricalBackfill"
+              "name": "waitForCompletion"
             }
           ]
         ],
+        "onExit": "stophistoricalbackfill",
         "outputs": {
           "parameters": []
         }
@@ -615,6 +592,42 @@
         },
         "steps": [
           []
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "cleanupbulkloadresources",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "documentBackfillConfig"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "deleterfscoordinator",
+                "name": "rfs-coordinator-cluster"
+              },
+              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}"
+                  }
+                ]
+              },
+              "name": "cleanupRfsCoordinator"
+            }
+          ]
         ],
         "outputs": {
           "parameters": []
@@ -685,10 +698,7 @@
                   }
                 ]
               },
-              "name": "createRfsCoordinator",
-              "continueOn": {
-                "failed": true
-              }
+              "name": "createRfsCoordinator"
             }
           ],
           [
@@ -746,31 +756,11 @@
                   }
                 ]
               },
-              "name": "runBulkLoad",
-              "continueOn": {
-                "failed": true
-              }
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "deleterfscoordinator",
-                "name": "rfs-coordinator-cluster"
-              },
-              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}"
-                  }
-                ]
-              },
-              "name": "cleanupRfsCoordinator"
+              "name": "runBulkLoad"
             }
           ]
         ],
+        "onExit": "cleanupbulkloadresources",
         "outputs": {
           "parameters": []
         }

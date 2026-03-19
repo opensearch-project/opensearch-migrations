@@ -18,50 +18,45 @@ function findStep(steps: any[][], name: string) {
 describe("documentBulkLoad cleanup-on-failure", () => {
     const rendered = renderWorkflowTemplate(DocumentBulkLoad);
 
-    describe("runBulkLoad ensures stopHistoricalBackfill always runs", () => {
+    describe("runBulkLoad uses onExit to ensure stopHistoricalBackfill always runs", () => {
         const template = findTemplate(rendered, "runbulkload");
 
-        it("has continueOn.failed on startHistoricalBackfillFromConfig", () => {
-            const step = findStep(template.steps, "startHistoricalBackfillFromConfig");
-            expect(step?.continueOn).toEqual({ failed: true });
+        it("has onExit pointing to stopHistoricalBackfill", () => {
+            expect(template?.onExit).toBe("stophistoricalbackfill");
         });
 
-        it("gates setupWaitForCompletion on backfill creation succeeding", () => {
-            const step = findStep(template.steps, "setupWaitForCompletion");
-            expect(step?.when).toContain("startHistoricalBackfillFromConfig.status");
-            expect(step?.when).toContain("Succeeded");
-            expect(step?.continueOn).toEqual({ failed: true });
+        it("does not have continueOn on any steps (onExit handles cleanup)", () => {
+            for (const group of template.steps) {
+                for (const step of group) {
+                    expect(step.continueOn).toBeUndefined();
+                }
+            }
         });
 
-        it("has continueOn.failed on waitForCompletion", () => {
-            const step = findStep(template.steps, "waitForCompletion");
-            expect(step?.continueOn).toEqual({ failed: true });
-        });
-
-        it("does not have continueOn on stopHistoricalBackfill (final cleanup step)", () => {
+        it("does not include stopHistoricalBackfill as an inline step", () => {
             const step = findStep(template.steps, "stopHistoricalBackfill");
-            expect(step).toBeDefined();
-            expect(step?.continueOn).toBeUndefined();
+            expect(step).toBeUndefined();
         });
     });
 
-    describe("setupAndRunBulkLoad ensures cleanupRfsCoordinator always runs", () => {
+    describe("setupAndRunBulkLoad uses onExit to ensure coordinator cleanup always runs", () => {
         const template = findTemplate(rendered, "setupandrunbulkload");
 
-        it("has continueOn.failed on createRfsCoordinator", () => {
-            const step = findStep(template.steps, "createRfsCoordinator");
-            expect(step?.continueOn).toEqual({ failed: true });
+        it("has onExit pointing to cleanupBulkLoadResources", () => {
+            expect(template?.onExit).toBe("cleanupbulkloadresources");
         });
 
-        it("has continueOn.failed on runBulkLoad", () => {
-            const step = findStep(template.steps, "runBulkLoad");
-            expect(step?.continueOn).toEqual({ failed: true });
+        it("does not have continueOn on any steps (onExit handles cleanup)", () => {
+            for (const group of template.steps) {
+                for (const step of group) {
+                    expect(step.continueOn).toBeUndefined();
+                }
+            }
         });
 
-        it("does not have continueOn on cleanupRfsCoordinator (final cleanup step)", () => {
+        it("does not include cleanupRfsCoordinator as an inline step", () => {
             const step = findStep(template.steps, "cleanupRfsCoordinator");
-            expect(step).toBeDefined();
-            expect(step?.continueOn).toBeUndefined();
+            expect(step).toBeUndefined();
         });
     });
 });

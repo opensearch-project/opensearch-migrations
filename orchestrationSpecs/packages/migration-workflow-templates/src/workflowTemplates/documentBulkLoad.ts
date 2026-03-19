@@ -473,8 +473,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
             .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c)
-                }),
-                {continueOn: {failed: true}})
+                }))
             .addStep("setupWaitForCompletion", MigrationConsole, "getConsoleConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -483,11 +482,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                         sessionName: b.inputs.sessionName,
                         deploymentName: getRfsDeploymentName(b.inputs.sessionName)
                     }))
-                }),
-                {
-                    continueOn: {failed: true},
-                    when: c => ({templateExp: expr.equals(c.startHistoricalBackfillFromConfig.status, "Succeeded")})
-                })
+                }))
             .addStep("waitForCompletion", INTERNAL, "waitForCompletion", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -496,16 +491,28 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
                     fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
-                }),
-                {continueOn: {failed: true}})
-            .addStep("stopHistoricalBackfill", INTERNAL, "stopHistoricalBackfill", c =>
-                c.register({sessionName: b.inputs.sessionName}))
+                }))
         )
+        .addOnExit(INTERNAL, "stopHistoricalBackfill")
     )
 
 
     .addTemplate("doNothing", t => t
         .addSteps(b => b.addStepGroup(c => c)))
+
+
+    .addTemplate("cleanupBulkLoadResources", t => t
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof ARGO_RFS_OPTIONS>>())
+        .addSteps(b => b
+            .addStep("cleanupRfsCoordinator", RfsCoordinatorCluster, "deleteRfsCoordinator", c =>
+                    c.register({
+                        clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName)
+                    }),
+                {when: {templateExp: shouldCreateRfsWorkCoordinationCluster(b.inputs.documentBackfillConfig)}}
+            )
+        )
+    )
 
 
     .addTemplate("setupAndRunBulkLoad", t => t
@@ -527,7 +534,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName),
                             coordinatorImage: b.inputs.imageCoordinatorClusterLocation
                         }),
-                    {when: {templateExp: createRfsCluster}, continueOn: {failed: true}}
+                    {when: {templateExp: createRfsCluster}}
                 )
 
                 // Always run bulk load, use deployed cluster or target cluster based on flag 'createRfsCluster'
@@ -539,17 +546,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             expr.serialize(makeRfsCoordinatorConfig(getRfsCoordinatorClusterName(b.inputs.sessionName))),
                             b.inputs.targetConfig
                         )
-                    }),
-                    {continueOn: {failed: true}})
-
-                // (conditional) Cleanup OpenSearch cluster used for RFS work coordination
-                .addStep("cleanupRfsCoordinator", RfsCoordinatorCluster, "deleteRfsCoordinator", c =>
-                        c.register({
-                            clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName)
-                        }),
-                    {when: {templateExp: createRfsCluster}}
-                );
+                    }));
         })
+        .addOnExit(INTERNAL, "cleanupBulkLoadResources")
     )
 
     .getFullScope();
