@@ -1,6 +1,6 @@
 # RFS High Level Design
 
-**LAST UPDATED: June 2024**
+**LAST UPDATED: March 2026**
 
 ## Table of Contents
 - [RFS High Level Design](#rfs-high-level-design)
@@ -10,6 +10,7 @@
     - [Ultra-High Level Design](#ultra-high-level-design)
     - [Key RFS Worker concepts](#key-rfs-worker-concepts)
     - [How the RFS Worker works](#how-the-rfs-worker-works)
+    - [Pipeline Integration](#pipeline-integration--how-work-coordination-drives-the-migration-pipeline)
     - [Appendix: Assumptions](#appendix-assumptions)
     - [Appendix: Centralized or Decentralized Coordination?](#appendix-centralized-or-decentralized-coordination)
     - [Appendix: CMS Schema](#appendix-cms-schema)
@@ -236,6 +237,58 @@ While performing its work, RFS Workers will not modify any Templates or Index Se
 While performing its work, if an RFS Worker is tasked to create an Elasticsearch Document on the target cluster, it will do so by using the same ID as on the source cluster, clobbering any existing Elasticsearch Document on the target cluster with that ID.  The reasoning for this policy is as follows.
 
 The pending work items are the remaining docs for each Elasticsearch Shard. The RFS Workers have a consistent view of the position of a document within the entire shard. If a lease is about to expire and a shard has not been fully migrated, the RFS Workers use the latest continuous migrated doc number to reduce the duplicate work a successor work item has. On the target cluster, overwritten documents appear as deleted documents, so the amount of duplicative work can be assessed from the deleted items metric (assuming there is not other activity on the cluster creating deleted documents).
+
+## Pipeline Integration — How Work Coordination Drives the Migration Pipeline
+
+The document migration pipeline (`RfsPipeline` module) is driven by work coordination through `PipelineDocumentsRunner`. This section describes how the two systems connect.
+
+### Coordinated Mode (Production)
+
+Multiple RFS workers each call `PipelineDocumentsRunner.migrateNextShard()` in a loop. The work coordinator ensures no two workers process the same shard.
+
+```
+RfsMigrateDocuments (CLI entry point)
+  │
+  ▼
+DocumentMigrationBootstrap (DI wiring)
+  │
+  ├── LuceneSnapshotSource (DocumentSource)
+  ├── OpenSearchDocumentSink (DocumentSink)
+  └── PipelineDocumentsRunner (work coordination)
+        │
+        ├── acquire shard ──► IWorkCoordinator (lease-based)
+        │
+        ├── migrate shard ──► DocumentMigrationPipeline.migratePartition()
+        │                       │
+        │                       ├── source.readDocuments(partition, offset)
+        │                       ├── batch by count + byte size
+        │                       ├── sink.writeBatch(collectionName, batch)
+        │                       └── emit ProgressCursor per batch
+        │
+        ├── progress ──► WorkItemCursor (successor work items)
+        │
+        └── cancellation on lease expiry ──► checkpoint + exit
+```
+
+### Standalone Mode (Testing / Small Migrations)
+
+`DocumentMigrationPipeline.migrateAll()` processes everything in a single process with no coordination:
+
+- Collections: sequential (`concatMap`)
+- Partitions within a collection: configurable concurrency (`flatMap(partitionConcurrency)`)
+- Batches within a partition: concurrent writes (`flatMapSequential(batchConcurrency)`)
+- Batch boundaries: configurable by `maxDocsPerBatch` and `maxBytesPerBatch`
+
+### Exit Codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success — work completed |
+| 2 | Process timed out |
+| 3 | No work left at all |
+| 4 | Work exists but none available to this worker (all leased by others) |
+
+Exit code 4 prevents Kubernetes from rapid-cycling pods when all work is leased by other workers.
 
 ## Appendix: Assumptions
 

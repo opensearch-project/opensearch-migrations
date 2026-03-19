@@ -8,6 +8,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _is_solr(cluster: Cluster) -> bool:
+    """Check if the cluster is a Solr instance based on its configured version."""
+    return isinstance(cluster.version, str) and cluster.version.upper().startswith("SOLR")
+
+
 @dataclass
 class ConnectionResult:
     connection_message: str
@@ -40,6 +45,8 @@ def call_api(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, head
 
 def cat_indices(cluster: Cluster, refresh=False, as_json=False):
     try:
+        if _is_solr(cluster):
+            return _solr_cat_indices(cluster, as_json)
         if refresh:
             cluster.call_api('/_refresh')
         as_json_suffix = "?format=json" if as_json else "?v=true"
@@ -51,20 +58,58 @@ def cat_indices(cluster: Cluster, refresh=False, as_json=False):
         return f"Error: Unable to perform cat-indices command with message: {e}"
 
 
+def _solr_cat_indices(cluster: Cluster, as_json=False):
+    """List Solr collections with doc counts via Collections API (SolrCloud)."""
+    # Get collection list
+    r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+    collections = r.json().get("collections", [])
+
+    if as_json:
+        result = []
+        for coll in collections:
+            doc_count = _solr_collection_doc_count(cluster, coll)
+            result.append({
+                "index": coll,
+                "docs.count": str(doc_count),
+            })
+        return result
+    else:
+        lines = ["collection           docs.count"]
+        for coll in collections:
+            doc_count = _solr_collection_doc_count(cluster, coll)
+            lines.append(f"{coll:<20} {doc_count:>10}")
+        return "\n".join(lines).encode()
+
+
+def _solr_collection_doc_count(cluster: Cluster, collection: str) -> int:
+    """Get doc count for a Solr collection via select query."""
+    try:
+        r = cluster.call_api(f"/solr/{collection}/select?q=*:*&rows=0&wt=json")
+        return r.json().get("response", {}).get("numFound", 0)
+    except Exception:
+        return 0
+
+
 def connection_check(cluster: Cluster) -> ConnectionResult:
-    cluster_details_path = "/"
     caught_exception = None
     r = None
     try:
-        r = cluster.call_api(cluster_details_path, timeout=3)
+        if _is_solr(cluster):
+            r = cluster.call_api("/solr/admin/info/system", timeout=3)
+        else:
+            r = cluster.call_api("/", timeout=3)
     except Exception as e:
         caught_exception = e
         logging.debug(f"Unable to access cluster: {cluster} with exception: {e}")
     if caught_exception is None:
         response_json = r.json()
+        if _is_solr(cluster):
+            version = response_json.get("lucene", {}).get("solr-spec-version", "unknown")
+        else:
+            version = response_json['version']['number']
         return ConnectionResult(connection_message="Successfully connected!",
                                 connection_established=True,
-                                cluster_version=response_json['version']['number'])
+                                cluster_version=version)
     else:
         return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {caught_exception}",
                                 connection_established=False,

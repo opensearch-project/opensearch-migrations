@@ -130,13 +130,16 @@ def buildKitProjects = [
                         "buildKit_migrationConsoleBase" // All buildKit projects are configured at the root
                 ]
         ],
-        // Not required for main MA operations, but has been helpful for creating test scenarios
-        [
-                serviceName: "elasticsearchWithSearchGuard",
-                contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard",
-                imageName:  "elasticsearch_searchguard"
-        ]
 ]
+
+// Test-only images: not required for main MA operations, excluded with -PskipTestImages=true
+if (!rootProject.findProperty('skipTestImages')?.toString()?.toBoolean()) {
+    buildKitProjects << [
+            serviceName: "elasticsearchWithSearchGuard",
+            contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard",
+            imageName:  "elasticsearch_searchguard"
+    ]
+}
 
 buildKitProjects.each { cfg ->
     cfg.repoName = getRepoNameIfPublishing(cfg)
