@@ -63,6 +63,10 @@
             },
             {
               "name": "version"
+            },
+            {
+              "name": "resetAction",
+              "value": ""
             }
           ]
         },
@@ -138,6 +142,10 @@
                   {
                     "name": "version",
                     "value": "{{inputs.parameters.version}}"
+                  },
+                  {
+                    "name": "resetAction",
+                    "value": "{{=toJSON(sprig.dict(\"action\", 'delete', \"apiVersion\", 'kafka.strimzi.io/v1', \"kind\", 'Kafka', \"name\", inputs.parameters.clusterName))}}"
                   }
                 ]
               },
