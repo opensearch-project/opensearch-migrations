@@ -18,8 +18,6 @@ import lombok.extern.slf4j.Slf4j;
 public class InvalidResponse extends RfsException {
     private static final Pattern UNKNOWN_SETTING = Pattern.compile("unknown setting \\[([a-zA-Z0-9_.-]+)\\].+");
     private static final Pattern PRIVATE_SETTING = Pattern.compile(".*private index setting \\[([a-zA-Z0-9_.-]+)\\] can not be set explicitly.*");
-    private static final Pattern UNSUPPORTED_MAPPING_PARAM = Pattern.compile("unsupported parameters:\\s+(.+)");
-    private static final Pattern MAPPING_PARAM_NAME = Pattern.compile("\\[([a-zA-Z0-9_.]+)\\s*:");
     private static final Pattern AWARENESS_ATTRIBUTE_EXCEPTION = Pattern.compile("expected total copies needs to be a multiple of total awareness attributes");
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private final transient HttpResponse response;
@@ -74,50 +72,6 @@ public class InvalidResponse extends RfsException {
             log.warn("Error parsing error message to attempt recovery" + response.body, e);
             return Set.of();
         }
-    }
-
-    /**
-     * Looks in the error response for unsupported mapping parameters (e.g. _all, _parent from older ES versions).
-     * @return The set of unsupported parameter names to remove from mappings. Empty if not a mapping error.
-     */
-    public Set<String> getUnsupportedMappingParameters() {
-        try {
-            var results = new ArrayList<String>();
-            var bodyNode = objectMapper.readTree(response.body);
-            var errorBody = Optional.ofNullable(bodyNode).map(node -> node.get(ERROR_STRING));
-
-            // Check high level cause, root causes, and suppressed
-            errorBody.map(InvalidResponse::getUnsupportedParams).ifPresent(results::addAll);
-            errorBody.map(node -> node.get("root_cause")).ifPresent(nodes ->
-                nodes.forEach(node -> Optional.of(node).map(InvalidResponse::getUnsupportedParams).ifPresent(results::addAll))
-            );
-            errorBody.map(node -> node.get("caused_by")).ifPresent(node ->
-                Optional.of(node).map(InvalidResponse::getUnsupportedParams).ifPresent(results::addAll)
-            );
-
-            return Set.copyOf(results);
-        } catch (Exception e) {
-            log.warn("Error parsing mapping error response: " + response.body, e);
-            return Set.of();
-        }
-    }
-
-    private static Set<String> getUnsupportedParams(JsonNode json) {
-        if (json == null) return Set.of();
-        var typeNode = json.get("type");
-        var reasonNode = json.get("reason");
-        if (typeNode == null || reasonNode == null) return Set.of();
-        if (!"mapper_parsing_exception".equals(typeNode.asText())) return Set.of();
-
-        var matcher = UNSUPPORTED_MAPPING_PARAM.matcher(reasonNode.asText());
-        if (!matcher.find()) return Set.of();
-
-        var paramsMatcher = MAPPING_PARAM_NAME.matcher(matcher.group(1));
-        var params = new ArrayList<String>();
-        while (paramsMatcher.find()) {
-            params.add(paramsMatcher.group(1));
-        }
-        return Set.copyOf(params);
     }
 
     private static Map.Entry<String, String> getUnknownSetting(JsonNode json) {

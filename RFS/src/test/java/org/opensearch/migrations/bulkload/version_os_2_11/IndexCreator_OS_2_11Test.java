@@ -126,44 +126,6 @@ class IndexCreator_OS_2_11Test {
         assertThat("All instances of this value should be removed from the response", finalIndexBody, not(containsString(elementThatShouldBeDeleted)));
     }
 
-    @Test
-    void testCreate_withRetryToRemoveUnsupportedMappingParams() throws Exception {
-        // Setup
-        var invalidResponse = mock(InvalidResponse.class);
-        when(invalidResponse.getUnsupportedMappingParameters()).thenReturn(Set.of("_all", "_parent"));
-
-        var client = mock(OpenSearchClient.class);
-        when(client.createIndex(any(), any(), any()))
-            .thenThrow(invalidResponse)
-            .thenReturn(INDEX_CREATE_SUCCESS);
-
-        var rawJson = "{\r\n" +
-            "  \"aliases\" : { },\r\n" +
-            "  \"mappings\" : {\r\n" +
-            "    \"_all\": { \"enabled\": false },\r\n" +
-            "    \"_parent\": { \"type\": \"parent_type\" },\r\n" +
-            "    \"dynamic\": false,\r\n" +
-            "    \"properties\": { \"field1\": { \"type\": \"text\" } }\r\n" +
-            "  },\r\n" +
-            "  \"settings\" : { }\r\n" +
-            "}";
-
-        // Action
-        var result = create(client, rawJson, "indexName");
-
-        // Assertions
-        assertThat(result.wasSuccessful(), equalTo(true));
-
-        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
-        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
-
-        var finalIndexBody = requestBodyCapture.getValue().toPrettyString();
-        assertThat(finalIndexBody, not(containsString("_all")));
-        assertThat(finalIndexBody, not(containsString("_parent")));
-        assertThat("dynamic=false should be preserved", finalIndexBody, containsString("dynamic"));
-        assertThat("properties should be preserved", finalIndexBody, containsString("field1"));
-    }
-
     @SneakyThrows
     private CreationResult create(OpenSearchClient client, String rawJson, String indexName) {
         var node = (ObjectNode) OBJECT_MAPPER.readTree(rawJson);

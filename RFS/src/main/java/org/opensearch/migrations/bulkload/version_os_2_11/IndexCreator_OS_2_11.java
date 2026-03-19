@@ -49,6 +49,10 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         ObjectNode settings = indexMetadata.getSettings();
 
         ObjectNode mappings = indexMetadata.getMappings();
+        String[] problemMappingFields = { "_all" };
+        for (var field : problemMappingFields) {
+            ObjectNodeUtils.removeFieldsByPath(mappings, field);
+        }
 
         // Copy top-level metadata fields into settings.
         // The source snapshot stores these at the top level of the index metadata JSON,
@@ -76,7 +80,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         body.set("settings", settings);
 
         try {
-            createInner(index, mode, context, result, settings, mappings, body, awarenessAttributeSettings);
+            createInner(index, mode, context, result, settings, body, awarenessAttributeSettings);
         } catch (IncompatibleReplicaCountException e) {
             result.failureType(CreationFailureType.INCOMPATIBLE_REPLICA_COUNT_FAILURE);
             result.exception(e);
@@ -112,7 +116,6 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                              ICreateIndexContext context,
                              CreationResultBuilder result,
                              ObjectNode settings,
-                             ObjectNode mappings,
                              ObjectNode body,
                              AwarenessAttributeSettings awarenessAttributeSettings) throws IncompatibleReplicaCountException {
         // Create the index; it's fine if it already exists
@@ -120,7 +123,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         if (mode == MigrationMode.SIMULATE) {
             alreadyExists = client.hasIndex(index.getName());
         } else if (mode == MigrationMode.PERFORM) {
-            alreadyExists = createWithRetry(index.getName(), body, settings, mappings, context);
+            alreadyExists = createWithRetry(index.getName(), body, settings, context);
         }
 
         if (alreadyExists) {
@@ -133,20 +136,20 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
     }
 
     /**
-     * Attempts to create the index, retrying by removing unknown settings or unsupported mapping
-     * parameters reported by the cluster. The cluster may report these in batches, so this loops
-     * until either the index is created successfully or no more removable arguments are found.
+     * Attempts to create the index, retrying by removing unknown settings reported by the cluster.
+     * The cluster may report unknown settings in batches, so this loops until either the index is
+     * created successfully or no more removable illegal arguments are found.
      *
      * @return true if the index already existed, false if it was created
      */
-    private boolean createWithRetry(String indexName, ObjectNode body, ObjectNode settings, ObjectNode mappings, ICreateIndexContext context) throws IncompatibleReplicaCountException {
+    private boolean createWithRetry(String indexName, ObjectNode body, ObjectNode settings, ICreateIndexContext context) throws IncompatibleReplicaCountException {
         while (true) {
             try {
                 return client.createIndex(indexName, body, context).isEmpty();
             } catch (InvalidResponse invalidResponse) {
-                handleInvalidResponse(invalidResponse, indexName, settings, mappings);
+                handleInvalidResponse(invalidResponse, indexName, settings);
             } catch (Exception e) {
-                handleWrappedException(e, indexName, settings, mappings);
+                handleWrappedException(e, indexName, settings);
             }
         }
     }
@@ -155,10 +158,10 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
      * Handles exceptions that may wrap an InvalidResponse at any depth in the cause chain.
      * Reactor's retryWhen may wrap the original exception, so we walk the chain to find it.
      */
-    private void handleWrappedException(Exception e, String indexName, ObjectNode settings, ObjectNode mappings) throws IncompatibleReplicaCountException {
+    private void handleWrappedException(Exception e, String indexName, ObjectNode settings) throws IncompatibleReplicaCountException {
         for (Throwable cause = e; cause != null; cause = cause.getCause()) {
             if (cause instanceof InvalidResponse ir) {
-                handleInvalidResponse(ir, indexName, settings, mappings);
+                handleInvalidResponse(ir, indexName, settings);
                 return;
             }
         }
@@ -166,7 +169,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         throw new RfsException("Unexpected exception during index creation", e);
     }
 
-    private void handleInvalidResponse(InvalidResponse invalidResponse, String indexName, ObjectNode settings, ObjectNode mappings) throws IncompatibleReplicaCountException {
+    private void handleInvalidResponse(InvalidResponse invalidResponse, String indexName, ObjectNode settings) throws IncompatibleReplicaCountException {
         var potentialAwarenessAttributeException = invalidResponse.containsAwarenessAttributeException();
         if (potentialAwarenessAttributeException.isPresent()) {
             log.warn("Index creation failed due to awareness attribute exception: " + potentialAwarenessAttributeException.get());
@@ -175,35 +178,22 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
         var illegalArguments = invalidResponse.getIllegalArguments();
 
-        if (!illegalArguments.isEmpty()) {
-            for (var illegalArgument : illegalArguments) {
-                if (!illegalArgument.startsWith("index.")) {
-                    log.warn("Expecting all retryable errors to start with 'index.', instead saw " + illegalArgument);
-                    throw invalidResponse;
-                }
-
-                var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
-                log.debug("Removing setting '{}' from index '{}' settings", shortenedIllegalArgument, indexName);
-                ObjectNodeUtils.removeFieldsByPath(settings, shortenedIllegalArgument);
-            }
-
-            log.info("Reattempting creation of index '{}' after removing illegal arguments: {}", indexName, illegalArguments);
-            return;
+        if (illegalArguments.isEmpty()) {
+            log.debug("Cannot retry invalid response, there are no illegal arguments to remove.");
+            throw invalidResponse;
         }
 
-        var unsupportedMappingParams = invalidResponse.getUnsupportedMappingParameters();
-
-        if (!unsupportedMappingParams.isEmpty()) {
-            for (var param : unsupportedMappingParams) {
-                log.debug("Removing unsupported mapping parameter '{}' from index '{}'", param, indexName);
-                ObjectNodeUtils.removeFieldsByPath(mappings, param);
+        for (var illegalArgument : illegalArguments) {
+            if (!illegalArgument.startsWith("index.")) {
+                log.warn("Expecting all retryable errors to start with 'index.', instead saw " + illegalArgument);
+                throw invalidResponse;
             }
 
-            log.info("Reattempting creation of index '{}' after removing unsupported mapping parameters: {}", indexName, unsupportedMappingParams);
-            return;
+            var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
+            log.debug("Removing setting '{}' from index '{}' settings", shortenedIllegalArgument, indexName);
+            ObjectNodeUtils.removeFieldsByPath(settings, shortenedIllegalArgument);
         }
 
-        log.debug("Cannot retry invalid response, there are no illegal arguments or unsupported mapping parameters to remove.");
-        throw invalidResponse;
+        log.info("Reattempting creation of index '{}' after removing illegal arguments: {}", indexName, illegalArguments);
     }
 }

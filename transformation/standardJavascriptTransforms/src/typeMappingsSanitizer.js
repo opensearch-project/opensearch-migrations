@@ -235,34 +235,6 @@ function deepEqualsObjects(obj1, obj2) {
     return keys1.every(key => key in obj2 && deepEquals(obj1[key], obj2[key]));
 }
 
-const UNSUPPORTED_META_FIELDS = new Set(['_all', '_parent']);
-
-function mergeFieldProperties(newProperties, typeMapping) {
-    for (const fieldName of typeMapping.properties.keys()) {
-        if (newProperties[fieldName]) {
-            if (!deepEquals(newProperties[fieldName], typeMapping.properties[fieldName])) {
-                throw new Error("Cannot create union of different types for field " + fieldName);
-            }
-        } else {
-            newProperties[fieldName] = typeMapping.properties[fieldName];
-        }
-    }
-}
-
-function mergeTypeLevelSettings(typeLevelSettings, typeMapping) {
-    for (const key of typeMapping.keys()) {
-        if (key === 'properties' || UNSUPPORTED_META_FIELDS.has(key)) continue;
-        const value = typeMapping[key];
-        if (key in typeLevelSettings) {
-            if (!deepEquals(typeLevelSettings[key], value)) {
-                throw new Error("Cannot create union of different values for mapping setting " + key);
-            }
-        } else {
-            typeLevelSettings[key] = value;
-        }
-    }
-}
-
 function createIndexAsUnionedExcise(targetIndicesMap, inputMap) {
     const request = inputMap.request;
     const jsonBody = request.payload.inlinedJsonBody;
@@ -279,14 +251,21 @@ function createIndexAsUnionedExcise(targetIndicesMap, inputMap) {
     const targetIndex = targetIndices.at(0);
     request.URI = "/" + targetIndex;
 
-    const newProperties = {};
-    const typeLevelSettings = {};
+    const newProperties = {}
     for (const [sourceType,] of targetIndicesMap) {
-        const typeMapping = oldMappings[sourceType];
-        mergeFieldProperties(newProperties, typeMapping);
-        mergeTypeLevelSettings(typeLevelSettings, typeMapping);
+        for (const fieldName of oldMappings[sourceType].properties.keys()) {
+            if (newProperties[fieldName]) {
+                const previouslyProcessedFieldDef = newProperties[fieldName];
+                const currentlyProcessingFieldDef = oldMappings[sourceType].properties[fieldName];
+                if (!deepEquals(previouslyProcessedFieldDef, currentlyProcessingFieldDef)) {
+                    throw new Error("Cannot create union of different types for field " + fieldName);
+                }
+            } else {
+                newProperties[fieldName] = oldMappings[sourceType].properties[fieldName];
+            }
+        }
     }
-    jsonBody.mappings = {...typeLevelSettings, properties: newProperties};
+    jsonBody.mappings = {properties: newProperties};
     return inputMap.request;
 }
 
@@ -401,13 +380,6 @@ function mergeProperties(existingMetadata, mappingValue) {
     const newProperties = mappingValue.get('properties');
     const mergedProperties = new Map([...existingProperties, ...newProperties]);
     docMapping.set('properties', mergedProperties);
-    // Merge type-level settings (everything except 'properties' and unsupported meta-fields)
-    for (const [key, value] of mappingValue.entries()) {
-        if (key === 'properties' || UNSUPPORTED_META_FIELDS.has(key)) continue;
-        if (!docMapping.has(key)) {
-            docMapping.set(key, value);
-        }
-    }
 }
 
 // Helper function to deep clone a Map, including nested Maps/objects

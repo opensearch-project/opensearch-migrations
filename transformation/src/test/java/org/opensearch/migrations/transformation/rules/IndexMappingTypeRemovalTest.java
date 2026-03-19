@@ -322,27 +322,6 @@ public class IndexMappingTypeRemovalTest {
     }
 
     @Test
-    void testApplyTransformation_noTypeMappings_preservesDynamicFalse() {
-        // OS 1 source format: mappings is an object with properties directly, no type wrapper
-        var indexJson = indexSettingJson(
-            "\"mappings\": {\n" +
-            "  \"dynamic\": false,\n" +
-            "  " + defaultMappingProperties + "\n" +
-            "},\n"
-        );
-        var originalJson = indexJson.deepCopy();
-
-        // Action
-        var wasChanged = applyTransformation(indexJson);
-        assertThat(canApply(originalJson), equalTo(CanApplyResult.NO));
-
-        // Verification - should be unchanged, dynamic=false preserved
-        assertThat(wasChanged, equalTo(false));
-        assertThat(indexJson.toPrettyString(), equalTo(originalJson.toPrettyString()));
-        assertThat(indexJson.get("mappings").get("dynamic").asBoolean(), equalTo(false));
-    }
-
-    @Test
     @SneakyThrows
     void testApplyTransformation_multiTypeUnion_withConflicts_es5Format() {
         var originalJson = (ObjectNode)new ObjectMapper().readTree("{\r\n" + //
