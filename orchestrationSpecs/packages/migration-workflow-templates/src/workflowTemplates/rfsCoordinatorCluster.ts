@@ -214,7 +214,6 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
 
     .addTemplate("createRfsCoordinatorSecret", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addOptionalInput("resetAction", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -226,7 +225,6 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
 
     .addTemplate("createRfsCoordinatorService", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addOptionalInput("resetAction", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -239,7 +237,6 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
     .addTemplate("createRfsCoordinatorStatefulSet", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("coordinatorImage", typeToken<string>())
-        .addOptionalInput("resetAction", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -256,44 +253,18 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addOptionalInput("groupName_view", c => "Start RFS OpenSearch cluster for worker coordination")
         .addSteps(b => b
             .addStep("createSecret", INTERNAL, "createRfsCoordinatorSecret", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    resetAction: expr.asString(expr.serialize(expr.makeDict({
-                        action: expr.literal("delete"),
-                        apiVersion: expr.literal("v1"),
-                        kind: expr.literal("Secret"),
-                        name: expr.concat(b.inputs.clusterName, expr.literal("-creds")),
-                    }))),
-                }))
+                c.register({clusterName: b.inputs.clusterName}))
             .addStepGroup(g => g
                 .addStep("createService", INTERNAL, "createRfsCoordinatorService", c =>
-                    c.register({
-                        clusterName: b.inputs.clusterName,
-                        resetAction: expr.asString(expr.serialize(expr.makeDict({
-                            action: expr.literal("delete"),
-                            apiVersion: expr.literal("v1"),
-                            kind: expr.literal("Service"),
-                            name: b.inputs.clusterName,
-                        }))),
-                    }))
+                    c.register({clusterName: b.inputs.clusterName}))
                 .addStep("createStatefulSet", INTERNAL, "createRfsCoordinatorStatefulSet", c =>
-                    c.register({
-                        clusterName: b.inputs.clusterName,
-                        coordinatorImage: b.inputs.coordinatorImage,
-                        resetAction: expr.asString(expr.serialize(expr.makeDict({
-                            action: expr.literal("delete"),
-                            apiVersion: expr.literal("apps/v1"),
-                            kind: expr.literal("StatefulSet"),
-                            name: b.inputs.clusterName,
-                        }))),
-                    }))
+                    c.register({clusterName: b.inputs.clusterName, coordinatorImage: b.inputs.coordinatorImage}))
             )
         )
     )
 
     .addTemplate("deleteRfsCoordinatorStatefulSet", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addOptionalInput("resetDone", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "delete",
@@ -311,7 +282,6 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
 
     .addTemplate("deleteRfsCoordinatorService", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addOptionalInput("resetDone", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "delete",
@@ -329,7 +299,6 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
 
     .addTemplate("deleteRfsCoordinatorSecret", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addOptionalInput("resetDone", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "delete",
@@ -351,22 +320,13 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addSteps(b => b
             .addStepGroup(g => g
                 .addStep("deleteStatefulSet", INTERNAL, "deleteRfsCoordinatorStatefulSet", c =>
-                    c.register({
-                        clusterName: b.inputs.clusterName,
-                        resetDone: expr.concat(expr.literal("apps/v1/StatefulSet/"), b.inputs.clusterName),
-                    }))
+                    c.register({clusterName: b.inputs.clusterName}))
                 .addStep("deleteService", INTERNAL, "deleteRfsCoordinatorService", c =>
-                    c.register({
-                        clusterName: b.inputs.clusterName,
-                        resetDone: expr.concat(expr.literal("v1/Service/"), b.inputs.clusterName),
-                    }))
+                    c.register({clusterName: b.inputs.clusterName}))
             )
             .addStepGroup(g => g
                 .addStep("deleteSecret", INTERNAL, "deleteRfsCoordinatorSecret", c =>
-                    c.register({
-                        clusterName: b.inputs.clusterName,
-                        resetDone: expr.concat(expr.literal("v1/Secret/"), b.inputs.clusterName, expr.literal("-creds")),
-                    }))
+                    c.register({clusterName: b.inputs.clusterName}))
             )
         )
     )

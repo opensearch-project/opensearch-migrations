@@ -29,8 +29,12 @@ def _get_cache_file(workflow_name: str) -> Path:
 
 
 def _fetch_suspended_step_names(workflow_name: str, namespace: str, argo_server: str,
-                                token: str, insecure: bool) -> list[tuple[str, str, str]]:
-    """Fetch suspended steps from workflow. Returns list of (node_id, name_param, display_name)."""
+                                token: str, insecure: bool,
+                                exclude_prefix: str = 'reset:') -> list[tuple[str, str, str]]:
+    """Fetch suspended steps from workflow. Returns list of (node_id, name_param, display_name).
+
+    Steps whose name starts with exclude_prefix are skipped (used to hide reset steps from approve).
+    """
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
 
@@ -50,6 +54,8 @@ def _fetch_suspended_step_names(workflow_name: str, namespace: str, argo_server:
                     name_param = p.get('value', '')
                     break
             if name_param:
+                if exclude_prefix and name_param.startswith(exclude_prefix):
+                    continue
                 suspended.append((node_id, name_param, node.get('displayName', '')))
     return suspended
 

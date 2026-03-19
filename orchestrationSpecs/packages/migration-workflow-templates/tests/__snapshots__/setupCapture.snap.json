@@ -82,10 +82,6 @@
               "value": ""
             },
             {
-              "name": "resetAction",
-              "value": ""
-            },
-            {
               "name": "imageCaptureProxyLocation"
             },
             {
@@ -132,10 +128,6 @@
             },
             {
               "name": "tlsSecretName"
-            },
-            {
-              "name": "resetAction",
-              "value": ""
             },
             {
               "name": "imageCaptureProxyLocation"
@@ -401,10 +393,6 @@
                   {
                     "name": "jsonConfig",
                     "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'internetFacing', 'podReplicas', 'resources'), sprig.merge(((sprig.dig('proxyConfig', 'noCapture', false, fromJSON(inputs.parameters.proxyConfig))) ? ({}) : (sprig.dict(\"kafkaConnection\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaConnection')))), sprig.dict(\"destinationUri\", fromJSON(inputs.parameters.proxyConfig)['sourceEndpoint'], \"insecureDestination\", fromJSON(inputs.parameters.proxyConfig)['sourceAllowInsecure'], \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic')))))}}"
-                  },
-                  {
-                    "name": "resetAction",
-                    "value": "{{=toJSON(sprig.dict(\"action\", 'delete', \"apiVersion\", 'apps/v1', \"kind\", 'Deployment', \"name\", fromJSON(inputs.parameters.proxyConfig)['name']))}}"
                   }
                 ]
               },
@@ -446,10 +434,6 @@
                   {
                     "name": "jsonConfig",
                     "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'internetFacing', 'podReplicas', 'resources'), sprig.merge(((sprig.dig('proxyConfig', 'noCapture', false, fromJSON(inputs.parameters.proxyConfig))) ? ({}) : (sprig.dict(\"kafkaConnection\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaConnection')))), sprig.dict(\"destinationUri\", fromJSON(inputs.parameters.proxyConfig)['sourceEndpoint'], \"insecureDestination\", fromJSON(inputs.parameters.proxyConfig)['sourceAllowInsecure'], \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic')))), sprig.dict(\"sslCertChainFile\", '/etc/proxy-tls/tls.crt', \"sslKeyFile\", '/etc/proxy-tls/tls.key')))}}"
-                  },
-                  {
-                    "name": "resetAction",
-                    "value": "{{=toJSON(sprig.dict(\"action\", 'delete', \"apiVersion\", 'apps/v1', \"kind\", 'Deployment', \"name\", fromJSON(inputs.parameters.proxyConfig)['name']))}}"
                   }
                 ]
               },

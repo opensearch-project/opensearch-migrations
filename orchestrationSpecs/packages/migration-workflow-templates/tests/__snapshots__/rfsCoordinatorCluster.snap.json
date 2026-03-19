@@ -30,10 +30,6 @@
           "parameters": [
             {
               "name": "clusterName"
-            },
-            {
-              "name": "resetAction",
-              "value": ""
             }
           ]
         },
@@ -61,10 +57,6 @@
           "parameters": [
             {
               "name": "clusterName"
-            },
-            {
-              "name": "resetAction",
-              "value": ""
             }
           ]
         },
@@ -95,10 +87,6 @@
             },
             {
               "name": "coordinatorImage"
-            },
-            {
-              "name": "resetAction",
-              "value": ""
             }
           ]
         },
@@ -146,10 +134,6 @@
                   {
                     "name": "clusterName",
                     "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "resetAction",
-                    "value": "{{=toJSON(sprig.dict(\"action\", 'delete', \"apiVersion\", 'v1', \"kind\", 'Secret', \"name\", inputs.parameters.clusterName+'-creds'))}}"
                   }
                 ]
               },
@@ -164,10 +148,6 @@
                   {
                     "name": "clusterName",
                     "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "resetAction",
-                    "value": "{{=toJSON(sprig.dict(\"action\", 'delete', \"apiVersion\", 'v1', \"kind\", 'Service', \"name\", inputs.parameters.clusterName))}}"
                   }
                 ]
               },
@@ -184,10 +164,6 @@
                   {
                     "name": "coordinatorImage",
                     "value": "{{inputs.parameters.coordinatorImage}}"
-                  },
-                  {
-                    "name": "resetAction",
-                    "value": "{{=toJSON(sprig.dict(\"action\", 'delete', \"apiVersion\", 'apps/v1', \"kind\", 'StatefulSet', \"name\", inputs.parameters.clusterName))}}"
                   }
                 ]
               },
@@ -205,10 +181,6 @@
           "parameters": [
             {
               "name": "clusterName"
-            },
-            {
-              "name": "resetDone",
-              "value": ""
             }
           ]
         },
@@ -238,10 +210,6 @@
           "parameters": [
             {
               "name": "clusterName"
-            },
-            {
-              "name": "resetDone",
-              "value": ""
             }
           ]
         },
@@ -271,10 +239,6 @@
           "parameters": [
             {
               "name": "clusterName"
-            },
-            {
-              "name": "resetDone",
-              "value": ""
             }
           ]
         },
@@ -320,10 +284,6 @@
                   {
                     "name": "clusterName",
                     "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "resetDone",
-                    "value": "{{='apps/v1/StatefulSet/'+inputs.parameters.clusterName}}"
                   }
                 ]
               },
@@ -336,10 +296,6 @@
                   {
                     "name": "clusterName",
                     "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "resetDone",
-                    "value": "{{='v1/Service/'+inputs.parameters.clusterName}}"
                   }
                 ]
               },
@@ -354,10 +310,6 @@
                   {
                     "name": "clusterName",
                     "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "resetDone",
-                    "value": "{{='v1/Secret/'+inputs.parameters.clusterName+'-creds'}}"
                   }
                 ]
               },

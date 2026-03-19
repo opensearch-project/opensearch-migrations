@@ -30,10 +30,6 @@
           "parameters": [
             {
               "name": "sessionName"
-            },
-            {
-              "name": "resetDone",
-              "value": ""
             }
           ]
         },
@@ -286,10 +282,6 @@
               "value": "reindexFromSnapshot"
             },
             {
-              "name": "resetAction",
-              "value": ""
-            },
-            {
               "name": "imageReindexFromSnapshotLocation"
             },
             {
@@ -416,10 +408,6 @@
                   {
                     "name": "fromSnapshotMigrationK8sLabel",
                     "value": "{{inputs.parameters.migrationLabel}}"
-                  },
-                  {
-                    "name": "resetAction",
-                    "value": "{{=toJSON(sprig.dict(\"action\", 'delete', \"apiVersion\", 'apps/v1', \"kind\", 'Deployment', \"name\", inputs.parameters.sessionName+'-rfs'))}}"
                   }
                 ]
               },
@@ -599,10 +587,6 @@
                   {
                     "name": "sessionName",
                     "value": "{{inputs.parameters.sessionName}}"
-                  },
-                  {
-                    "name": "resetDone",
-                    "value": "{{='apps/v1/Deployment/'+inputs.parameters.sessionName+'-rfs'}}"
                   }
                 ]
               },

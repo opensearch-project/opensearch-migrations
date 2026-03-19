@@ -125,7 +125,6 @@ export const SetupKafka = WorkflowBuilder.create({
     .addTemplate("deployKafkaClusterKraft", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("version", typeToken<string>())
-        .addOptionalInput("resetAction", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -158,12 +157,6 @@ export const SetupKafka = WorkflowBuilder.create({
                 c.register({
                     clusterName: b.inputs.clusterName,
                     version: b.inputs.version,
-                    resetAction: expr.asString(expr.serialize(expr.makeDict({
-                        action: expr.literal("delete"),
-                        apiVersion: expr.literal("kafka.strimzi.io/v1"),
-                        kind: expr.literal("Kafka"),
-                        name: b.inputs.clusterName,
-                    }))),
                 })
             )
         )
