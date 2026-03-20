@@ -93,9 +93,9 @@ class ScriptRunner:
                 if e.stderr:
                     print(f"stderr: {e.stderr}", file=sys.stderr)
             else:
-                logger.error(f"Script failed with exit code {e.returncode}")
+                logger.debug(f"Script failed with exit code {e.returncode}")
                 if e.stderr:
-                    logger.error(f"stderr: {e.stderr}")
+                    logger.debug(f"stderr: {e.stderr}")
             raise subprocess.CalledProcessError(
                 e.returncode, e.cmd, e.stdout, e.stderr
             ) from None
