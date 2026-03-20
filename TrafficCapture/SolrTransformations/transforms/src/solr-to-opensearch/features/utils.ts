@@ -6,15 +6,31 @@ const SORT_KEY_MAP: Record<string, string> = {
 };
 
 /**
- * Parse a Solr sort spec like "count desc" or "index asc" into an OpenSearch order map.
+ * Convert a Solr sort specification to an OpenSearch order map.
+ *
+ * Accepts either:
+ *   - A string like "count desc" or "index asc"
+ *   - A Map like {count: "desc"}
+ *
+ * Translates Solr sort keys (count, index) to their OpenSearch equivalents (_count, _key).
  */
-export function convertSort(sortSpec: string): JavaMap {
-  const order = new Map();
-  const parts = sortSpec.trim().split(/\s+/);
-  const key = parts[0];
-  const direction = parts[1] || 'desc';
-  const osKey = SORT_KEY_MAP[key] || key;
-  order.set(osKey, direction.toLowerCase());
+export function convertSort(sortSpec: string | JavaMap): JavaMap {
+  const order = new Map<string, any>();
+
+  if (typeof sortSpec === 'string') {
+    const parts = sortSpec.trim().split(/\s+/);
+    const key = parts[0];
+    const direction = parts[1] || 'desc';
+    const osKey = SORT_KEY_MAP[key] || key;
+    order.set(osKey, direction.toLowerCase());
+  } else if (isMapLike(sortSpec)) {
+    for (const key of sortSpec.keys()) {
+      const direction = (sortSpec.get(key) || 'desc').toString().toLowerCase();
+      const osKey = SORT_KEY_MAP[key] || key;
+      order.set(osKey, direction);
+    }
+  }
+
   return order;
 }
 
