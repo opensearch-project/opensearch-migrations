@@ -282,6 +282,92 @@ class OpenSearchDefaultRetryTest {
         Assertions.assertEquals(RequestSenderOrchestrator.RetryDirective.RETRY, determination.get());
     }
 
+    @Test
+    public void testBulkNon200StatusTreatedAsRetryable() throws Exception {
+        // Bulk response with non-200 status (e.g. 503) should be retryable via analyzeBulkResponse
+        var retryChecker = new OpenSearchDefaultRetry();
+        var analysis = retryChecker.analyzeBulkResponse(
+            Unpooled.wrappedBuffer(makeBulkResponse(503, null).getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertEquals(OpenSearchDefaultRetry.BulkResponseAnalysis.HAS_RETRYABLE_ERRORS, analysis);
+    }
+
+    @Test
+    public void testBulkMalformedJsonTreatedAsRetryable() throws Exception {
+        var retryChecker = new OpenSearchDefaultRetry();
+        var malformedResponse = "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nnot valid {{";
+        var analysis = retryChecker.analyzeBulkResponse(
+            Unpooled.wrappedBuffer(malformedResponse.getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertEquals(OpenSearchDefaultRetry.BulkResponseAnalysis.HAS_RETRYABLE_ERRORS, analysis);
+    }
+
+    @Test
+    public void testBulkResponseMissingItemsFieldWithErrorsTrue() throws Exception {
+        var retryChecker = new OpenSearchDefaultRetry();
+        var body = "{\"errors\": true, \"took\": 1}";
+        var response = "HTTP/1.1 200 OK\r\nContent-Length: " + body.length() + "\r\n\r\n" + body;
+        var analysis = retryChecker.analyzeBulkResponse(
+            Unpooled.wrappedBuffer(response.getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertEquals(OpenSearchDefaultRetry.BulkResponseAnalysis.HAS_RETRYABLE_ERRORS, analysis);
+    }
+
+    @Test
+    public void testBulkResponseMissingItemsFieldWithErrorsFalse() throws Exception {
+        var retryChecker = new OpenSearchDefaultRetry();
+        var body = "{\"errors\": false, \"took\": 1}";
+        var response = "HTTP/1.1 200 OK\r\nContent-Length: " + body.length() + "\r\n\r\n" + body;
+        var analysis = retryChecker.analyzeBulkResponse(
+            Unpooled.wrappedBuffer(response.getBytes(StandardCharsets.UTF_8)));
+        Assertions.assertEquals(OpenSearchDefaultRetry.BulkResponseAnalysis.NO_ERRORS, analysis);
+    }
+
+    @Test
+    public void testBulkResponseAllSuccessItems() throws Exception {
+        var retryChecker = new OpenSearchDefaultRetry();
+        // errors=true but all items actually succeeded (edge case) -> trust items over errors field
+        var targetBytes = makeBulkResponse(200, true, new String[]{null, null})
+            .getBytes(StandardCharsets.UTF_8);
+        var analysis = retryChecker.analyzeBulkResponse(Unpooled.wrappedBuffer(targetBytes));
+        // No error items found but errors=true -> HAS_RETRYABLE_ERRORS (trust top-level field)
+        Assertions.assertEquals(OpenSearchDefaultRetry.BulkResponseAnalysis.HAS_RETRYABLE_ERRORS, analysis);
+    }
+
+    @Test
+    public void testBulkRequestWith404FallsToSuperclass() throws Exception {
+        // Bulk request with target 404 (not 429/5xx, not 200) falls through to super.shouldRetry
+        var retryChecker = new OpenSearchDefaultRetry();
+        var sourceBytes = makeBulkResponse(200, false).getBytes(StandardCharsets.UTF_8);
+        var targetBytes = makeBulkResponse(404, false).getBytes(StandardCharsets.UTF_8);
+        var aggregatedResponse = AggregatedRawResponse.builder(Instant.now())
+            .addHttpParsedResponseObject(
+                HttpByteBufFormatter.parseHttpResponseFromBufs(Stream.of(Unpooled.wrappedBuffer(targetBytes)), 0))
+            .addResponsePacket(targetBytes)
+            .build();
+        var determination = retryChecker.shouldRetry(
+            Unpooled.wrappedBuffer(BULK_REQUEST.getBytes(StandardCharsets.UTF_8)),
+            List.of(),
+            aggregatedResponse,
+            TextTrackedFuture.completedFuture(new RetryTestUtils.TestRequestResponsePair(sourceBytes),
+                () -> "test future"));
+        // Source was 200, target is 404 -> super says RETRY
+        Assertions.assertEquals(RequestSenderOrchestrator.RetryDirective.RETRY, determination.get());
+    }
+
+    @Test
+    public void testBulkRequestWithNullRawResponseFallsToSuperclass() throws Exception {
+        var retryChecker = new OpenSearchDefaultRetry();
+        var sourceBytes = makeBulkResponse(200, false).getBytes(StandardCharsets.UTF_8);
+        // Build response with no parsed HTTP response object (null rawResponse)
+        var aggregatedResponse = AggregatedRawResponse.builder(Instant.now()).build();
+        var determination = retryChecker.shouldRetry(
+            Unpooled.wrappedBuffer(BULK_REQUEST.getBytes(StandardCharsets.UTF_8)),
+            List.of(),
+            aggregatedResponse,
+            TextTrackedFuture.completedFuture(new RetryTestUtils.TestRequestResponsePair(sourceBytes),
+                () -> "test future"));
+        // No raw response -> super.shouldRetry -> RETRY
+        Assertions.assertEquals(RequestSenderOrchestrator.RetryDirective.RETRY, determination.get());
+    }
+
     private static final String REGULAR_REQUEST =
         "GET /something HTTP/1.1\r\n" +
             "Host: localhost\r\n" +
