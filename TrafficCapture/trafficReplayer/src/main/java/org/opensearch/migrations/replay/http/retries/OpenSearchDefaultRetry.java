@@ -42,7 +42,6 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
     private static class BulkResponseAnalyzer extends ChannelInboundHandlerAdapter {
         private final ByteArrayOutputStream bodyBytes = new ByteArrayOutputStream();
         private BulkResponseAnalysis result = null;
-        private int statusCode = -1;
 
         BulkResponseAnalysis getAnalysis() {
             return result;
@@ -51,10 +50,10 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         @Override
         public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
             if (msg instanceof HttpResponse) {
-                statusCode = ((HttpResponse) msg).status().code();
-                if (statusCode != 200) {
+                var code = ((HttpResponse) msg).status().code();
+                if (code != 200) {
                     log.atDebug().setMessage("Bulk response status {} is not 200, treating as retryable error")
-                        .addArgument(statusCode).log();
+                        .addArgument(code).log();
                     result = BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
                 }
             }
@@ -95,14 +94,27 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
             var items = root.get("items");
             if (items == null || !items.isArray()) {
-                // No items to inspect — if errors was true/missing, treat as retryable
                 return errorsNode != null ? BulkResponseAnalysis.HAS_RETRYABLE_ERRORS : BulkResponseAnalysis.NO_ERRORS;
             }
 
+            var itemAnalysis = classifyItemErrors(items);
+            if (itemAnalysis != null) {
+                return itemAnalysis;
+            }
+            // No error items found — trust the top-level "errors" field
+            if (errorsNode != null && errorsNode.asBoolean()) {
+                return BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
+            }
+            return BulkResponseAnalysis.NO_ERRORS;
+        }
+
+        /**
+         * Scans bulk items for errors and classifies them.
+         * @return the analysis result, or null if no error items were found
+         */
+        private BulkResponseAnalysis classifyItemErrors(com.fasterxml.jackson.databind.JsonNode items) {
             boolean hasAnyError = false;
-            boolean hasRetryableError = false;
             for (var item : items) {
-                // Each item has one field: the action (index, create, update, delete)
                 var actionNode = item.fields().hasNext() ? item.fields().next().getValue() : null;
                 if (actionNode == null) continue;
 
@@ -114,23 +126,12 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 var errorType = typeNode != null ? typeNode.asText() : null;
 
                 if (!BulkItemErrorClassifier.isNonRetryable(errorType)) {
-                    hasRetryableError = true;
                     log.atDebug().setMessage("Found retryable bulk item error type: {}")
                         .addArgument(errorType).log();
-                    break; // One retryable error is enough to decide
-                }
-            }
-
-            if (!hasAnyError) {
-                // Trust the top-level "errors" field if no individual error items were found
-                if (errorsNode != null && errorsNode.asBoolean()) {
                     return BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
                 }
-                return BulkResponseAnalysis.NO_ERRORS;
             }
-            return hasRetryableError
-                ? BulkResponseAnalysis.HAS_RETRYABLE_ERRORS
-                : BulkResponseAnalysis.ONLY_NON_RETRYABLE_ERRORS;
+            return hasAnyError ? BulkResponseAnalysis.ONLY_NON_RETRYABLE_ERRORS : null;
         }
     }
 
