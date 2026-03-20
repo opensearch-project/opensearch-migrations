@@ -352,7 +352,7 @@ class RegistryImageBuildUtils {
                             "-t ${primaryDest}",
                             *(versionTaggedDest ? ["-t", "${versionTaggedDest}"] : []),
                             "--push",
-                            "--cache-to=type=registry,ref=${cacheDestination}${suffix},mode=max",
+                            "--cache-to=type=registry,ref=${cacheDestination}${suffix},mode=max,ignore-error=true",
                             "--cache-from=type=registry,ref=${cacheDestination}${suffix}"
                     ]
                     buildArgFlags.each { fullArgs.add(it) }
@@ -382,7 +382,7 @@ class RegistryImageBuildUtils {
                         "-t ${primaryDest}",
                         *(versionTaggedDest ? ["-t", "${versionTaggedDest}"] : []),
                         "--push",
-                        "--cache-to=type=registry,ref=${cacheDestination},mode=max",
+                        "--cache-to=type=registry,ref=${cacheDestination},mode=max,ignore-error=true",
                         "--cache-from=type=registry,ref=${cacheDestination}",
                         "--cache-from=type=registry,ref=${cacheDestination}_amd64",
                         "--cache-from=type=registry,ref=${cacheDestination}_arm64"
