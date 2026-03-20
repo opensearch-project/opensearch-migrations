@@ -28,7 +28,7 @@ def call(Map config = [:]) {
         }
 
         options {
-            timeout(time: 3, unit: 'HOURS')
+            timeout(time: 4, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
         }
@@ -78,6 +78,28 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Cleanup Previous MA Deployment') {
+                steps {
+                    timeout(time: 3, unit: 'MINUTES') {
+                        script {
+                            sh "kubectl config unset current-context || true"
+                            sh """
+                                # Delete all webhook configurations first — stale webhooks can block all API calls
+                                kubectl --context=minikube delete mutatingwebhookconfigurations --all --ignore-not-found || true
+                                kubectl --context=minikube delete validatingwebhookconfigurations --all --ignore-not-found || true
+
+                                # Helm uninstall with --no-hooks to avoid failing pre-delete hooks on terminating namespaces
+                                helm --kube-context=minikube uninstall ma -n ma --no-hooks || true
+
+                                # Force-delete namespaces if they still exist
+                                kubectl --context=minikube delete namespace kyverno-ma --ignore-not-found --grace-period=0 || true
+                                kubectl --context=minikube delete namespace ma --ignore-not-found --grace-period=0 --force || true
+                            """
+                        }
+                    }
+                }
+            }
+
             stage('Build Docker Images (BuildKit)') {
                 steps {
                     timeout(time: 30, unit: 'MINUTES') {
@@ -94,31 +116,9 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Cleanup Previous MA Deployment') {
-                steps {
-                    timeout(time: 3, unit: 'MINUTES') {
-                        script {
-                            sh "kubectl config unset current-context || true"
-                            sh """
-                                # Attempt clean helm uninstall first (triggers hook-based cleanup)
-                                helm --kube-context=minikube uninstall ma -n ma || true
-
-                                # Delete kyverno webhooks in case helm uninstall didn't run cleanly
-                                kubectl --context=minikube delete mutatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
-                                kubectl --context=minikube delete validatingwebhookconfigurations -l app.kubernetes.io/instance=kyverno --ignore-not-found || true
-
-                                # Force-delete namespaces if they still exist
-                                kubectl --context=minikube delete namespace kyverno-ma --ignore-not-found --grace-period=0 || true
-                                kubectl --context=minikube delete namespace ma --ignore-not-found --grace-period=0 --force || true
-                            """
-                        }
-                    }
-                }
-            }
-
             stage('Perform Python E2E Tests') {
                 steps {
-                    timeout(time: 2, unit: 'HOURS') {
+                    timeout(time: 3, unit: 'HOURS') {
                         dir('libraries/testAutomation') {
                             script {
                                 def sourceVer = sourceVersion ?: params.SOURCE_VERSION
