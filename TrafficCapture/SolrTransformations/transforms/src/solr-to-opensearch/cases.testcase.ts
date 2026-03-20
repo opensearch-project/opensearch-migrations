@@ -183,21 +183,52 @@ export const testCases: TestCase[] = [
   solrTest('field-list-param', {
     description: 'fl parameter with mixed comma/space separators and glob pattern (na*)',
     documents: [
-      { id: '1', name: 'Alice', name_full: 'Alice Smith', price: 100 },
-      { id: '2', name: 'Bob', name_full: 'Bob Jones', price: 200 },
+      { id: '1', name: 'Alice', name_full: 'Alice Smith', price: 100, category: 'user' },
+      { id: '2', name: 'Bob', name_full: 'Bob Jones', price: 200, category: 'admin' },
     ],
-    requestPath: '/solr/testcollection/select?q=*:*&fl=id,na*%20price&wt=json',
+    requestPath: '/solr/testcollection/select?q=*:*&wt=json&fl=' + encodeURIComponent('id,na* price'),
     solrSchema: {
       fields: {
         name: { type: 'text_general' },
         name_full: { type: 'text_general' },
         price: { type: 'pint' },
+        category: { type: 'text_general' },
       },
     },
     opensearchMapping: {
       properties: {
         name: { type: 'text' },
         name_full: { type: 'text' },
+        price: { type: 'integer' },
+        category: { type: 'text' },
+      },
+    },
+  }),
+
+  // ───────────────────────────────────────────────────────────
+  // Sort tests — sort parameter
+  // ───────────────────────────────────────────────────────────
+
+  solrTest('sort-multiple-fields', {
+    description: 'sort parameter with multiple fields',
+    documents: [
+      { id: '1', title: 'a', quantity: 10, price: 200 },
+      { id: '2', title: 'b', quantity: 10, price: 100 },
+      { id: '3', title: 'c', quantity: 5, price: 150 },
+      { id: '4', title: 'd', quantity: 5, price: 50 },
+    ],
+    requestPath: '/solr/testcollection/select?q=*:*&wt=json&sort=' + encodeURIComponent('quantity asc, price desc'),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        quantity: { type: 'pint' },
+        price: { type: 'pint' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        quantity: { type: 'integer' },
         price: { type: 'integer' },
       },
     },
