@@ -25,7 +25,12 @@ export class MigrationInitializer {
      * Generate output files including workflow config, approval ConfigMaps, and concurrency ConfigMaps with semaphores
      */
     async generateOutputFiles(workflows: ARGO_WORKFLOW_SCHEMA, outputDir: string, userConfig: any): Promise<void> {
-        const bundle = await this.generateMigrationBundle(userConfig);
+        const bundle = userConfig == null ? {
+            workflows,
+            approvalConfigMaps: this.generateApprovalConfigMaps(userConfig),
+            concurrencyConfigMaps: this.generateConcurrencyConfigMaps(userConfig),
+            crdResources: this.generateCRDResources(workflows)
+        } : await this.generateMigrationBundle(userConfig);
         await this.writeBundleToFiles(bundle, outputDir);
     }
 
