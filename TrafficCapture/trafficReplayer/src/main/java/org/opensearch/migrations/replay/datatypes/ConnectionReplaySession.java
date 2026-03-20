@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.datatypes;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
@@ -50,6 +51,40 @@ public class ConnectionReplaySession {
      */
     @Setter
     private volatile boolean cancelled = false;
+
+    /**
+     * Tracks completion of the second-to-last request on this connection.
+     * Used to gate transformation of request N on completion of request N-2,
+     * giving the transform a full request's worth of lead time while keeping
+     * signatures fresh (not queued behind multiple requests).
+     * Only accessed from the event loop thread.
+     */
+    private CompletableFuture<Void> previousRequestComplete = CompletableFuture.completedFuture(null);
+    private CompletableFuture<Void> currentRequestComplete = CompletableFuture.completedFuture(null);
+
+    /**
+     * Result of {@link #getTransformGateAndAdvance()}: the gate to wait on before transforming,
+     * and the signal to complete when this request finishes.
+     */
+    @lombok.AllArgsConstructor
+    @lombok.Getter
+    public static class TransformGate {
+        private final CompletableFuture<Void> waitOn;
+        private final CompletableFuture<Void> signalWhenDone;
+    }
+
+    /**
+     * Returns a gate for the next request: a future to wait on (completes when request N-2 finishes)
+     * and a future to signal when this request completes.
+     * Must be called from the event loop thread, in request order.
+     */
+    public TransformGate getTransformGateAndAdvance() {
+        var gate = previousRequestComplete;
+        previousRequestComplete = currentRequestComplete;
+        var myCompletion = new CompletableFuture<Void>();
+        currentRequestComplete = myCompletion;
+        return new TransformGate(gate, myCompletion);
+    }
 
     @SneakyThrows
     public ConnectionReplaySession(

@@ -8,6 +8,7 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
+import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -26,7 +27,6 @@ import lombok.extern.slf4j.Slf4j;
 public class ReplayEngine {
     public static final int BACKPRESSURE_UPDATE_FREQUENCY = 8;
     public static final TimeUnit TIME_UNIT_MILLIS = TimeUnit.MILLISECONDS;
-    public static final Duration EXPECTED_TRANSFORMATION_DURATION = Duration.ofSeconds(1);
     private final RequestSenderOrchestrator networkSendOrchestrator;
     private final BufferedFlowController contentTimeController;
     private final AtomicLong lastCompletedSourceTimeEpochMs;
@@ -153,23 +153,6 @@ public class ReplayEngine {
             .log();
     }
 
-    public <T> TrackedFuture<String, T> scheduleTransformationWork(
-        IReplayContexts.IReplayerHttpTransactionContext requestCtx,
-        Instant originalStart,
-        Supplier<TrackedFuture<String, T>> task
-    ) {
-        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
-        final String label = "processing";
-        var start = timeShifter.transformSourceTimeToRealTime(originalStart);
-        logStartOfWork(requestCtx, newCount, start, label);
-        var result = networkSendOrchestrator.scheduleWork(
-            requestCtx,
-            start.minus(EXPECTED_TRANSFORMATION_DURATION),
-            task
-        );
-        return hookWorkFinishingUpdates(result, originalStart, requestCtx, label);
-    }
-
     public <T> TrackedFuture<String, T> scheduleRequest(
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         Instant originalStart,
@@ -214,6 +197,39 @@ public class ReplayEngine {
             .addArgument(numPackets)
             .log();
         var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets, retryVisitor);
+        return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
+    }
+
+    /**
+     * Schedules a request where transformation is deferred until the connection's sequencer is ready.
+     * This keeps signatures (e.g. SigV4) fresh by running the transform just before sending,
+     * rather than eagerly when the request is first processed.
+     */
+    public <T> TrackedFuture<String, T> scheduleDeferredTransformAndSendRequest(
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Instant originalStart,
+        Instant originalEnd,
+        Supplier<TrackedFuture<String, TransformedOutputAndResult<ByteBufList>>> transformSupplier,
+        java.util.function.Function<TransformedOutputAndResult<ByteBufList>,
+            RequestSenderOrchestrator.RetryVisitor<T>> retryVisitorFactory,
+        Duration quiescentDurationForRequest
+    ) {
+        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
+        final String label = "deferred-transform-request";
+        var start = timeShifter.transformSourceTimeToRealTime(originalStart);
+        if (quiescentDurationForRequest != null) {
+            var quiescentUntil = start.plus(quiescentDurationForRequest);
+            log.atInfo().setMessage("Applying quiescent delay: shifting start from {} to {} for {}")
+                .addArgument(start).addArgument(quiescentUntil).addArgument(ctx).log();
+            start = quiescentUntil;
+        }
+        var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
+        var requestKey = ctx.getReplayerRequestKey();
+        logStartOfWork(requestKey, newCount, start, label);
+
+        var result = networkSendOrchestrator.scheduleDeferredTransformAndSendRequest(
+            requestKey, ctx, start, end, transformSupplier, retryVisitorFactory
+        );
         return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
     }
 

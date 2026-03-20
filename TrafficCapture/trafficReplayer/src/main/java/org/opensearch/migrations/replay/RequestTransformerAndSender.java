@@ -111,31 +111,15 @@ public class RequestTransformerAndSender<T> {
         Supplier<Stream<byte[]>> packetsSupplier,
         Duration quiescentDurationForRequest) {
         try {
-            var requestReadyFuture = replayEngine.scheduleTransformationWork(
+            return replayEngine.scheduleDeferredTransformAndSendRequest(
                 ctx,
                 start,
-                () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier)
-            );
-            log.atDebug().setMessage("request transform future for {} = {}")
-                .addArgument(ctx)
-                .addArgument(requestReadyFuture)
-                .log();
-            final Duration effectiveQuiescentDuration = quiescentDurationForRequest;
-            // It might be safer to chain this work directly inside the scheduleWork call above so that the
-            // read buffer horizons aren't set after the transformation work finishes, but after the packets
-            // are fully handled
-            return requestReadyFuture.thenCompose(
-                transformedRequest -> replayEngine.scheduleRequest(
-                    ctx,
-                    start,
-                    end,
-                    transformedRequest.transformedOutput.size(),
-                    transformedRequest.transformedOutput,
-                    getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
-                        arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx)),
-                    effectiveQuiescentDuration
-                ),
-                () -> "transitioning transformed packets onto the wire"
+                end,
+                () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier),
+                transformedRequest -> getRetryCheckVisitor(transformedRequest,
+                    finishedAccumulatingResponseFuture,
+                    arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx)),
+                quiescentDurationForRequest
             );
         } catch (Exception e) {
             log.debug("Caught exception in transformAndSendRequest, so failing future");
