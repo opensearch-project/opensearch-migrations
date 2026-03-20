@@ -29,9 +29,9 @@ import reactor.core.scheduler.Schedulers;
  * {@link DocumentSource} that reads documents from a Solr backup directory
  * containing raw Lucene index files, with schema-derived mappings.
  *
- * <p>Requires both a backup directory (Lucene files) and a Solr schema
- * (JSON from {@code /schema?wt=json} or the {@code managed-schema} file).
- * The schema is always converted to OpenSearch mappings via {@link SolrSchemaConverter}.
+ * <p>Supports both single-shard backups (flat directory with segments_N) and
+ * multi-shard SolrCloud backups (subdirectories per shard, each containing
+ * a {@code data/index/} with segments_N).
  */
 @Slf4j
 public class SolrBackupSource implements DocumentSource {
@@ -40,11 +40,6 @@ public class SolrBackupSource implements DocumentSource {
     private final String collectionName;
     private final JsonNode solrSchema;
 
-    /**
-     * @param backupDir      path to the Solr backup directory containing Lucene index files
-     * @param collectionName the name to use for this collection in the target
-     * @param solrSchema     Solr schema JSON (the "schema" object from /schema?wt=json response)
-     */
     public SolrBackupSource(Path backupDir, String collectionName, JsonNode solrSchema) {
         this.backupDir = backupDir;
         this.collectionName = collectionName;
@@ -58,28 +53,94 @@ public class SolrBackupSource implements DocumentSource {
 
     @Override
     public List<Partition> listPartitions(String collectionName) {
-        return List.of(new SolrShardPartition(collectionName, "shard1"));
+        var shardDirs = discoverShardDirs();
+        return shardDirs.stream()
+            .map(dir -> (Partition) new SolrShardPartition(collectionName, dir.getFileName().toString(), dir))
+            .toList();
     }
 
     @Override
     public CollectionMetadata readCollectionMetadata(String collectionName) {
         var fields = solrSchema.path("fields");
         var mappings = SolrSchemaConverter.convertToOpenSearchMappings(fields);
-        log.info("Converted Solr schema to OpenSearch mappings: {} fields", mappings.path("properties").size());
-        return new CollectionMetadata(collectionName, 1, Map.of(
+        var partitionCount = listPartitions(collectionName).size();
+        log.info("Converted Solr schema to OpenSearch mappings: {} fields, {} shards",
+            mappings.path("properties").size(), partitionCount);
+        return new CollectionMetadata(collectionName, partitionCount, Map.of(
             CollectionMetadata.ES_MAPPINGS, mappings
         ));
     }
 
     @Override
     public Flux<Document> readDocuments(Partition partition, long startingDocOffset) {
+        var solrPartition = (SolrShardPartition) partition;
+        var indexDir = solrPartition.indexPath();
+        return readLuceneIndex(indexDir, startingDocOffset);
+    }
+
+    /**
+     * Discover shard directories from the backup. Supports:
+     * <ol>
+     *   <li>Flat directory: segments_N at top level → single shard</li>
+     *   <li>SolrCloud backup: shard1/data/index/, shard2/data/index/, etc.</li>
+     * </ol>
+     */
+    List<Path> discoverShardDirs() {
+        // Check if this is a flat backup (segments_N at top level)
+        if (hasSegmentsFile(backupDir)) {
+            return List.of(backupDir);
+        }
+
+        // Look for SolrCloud shard structure: shardN/data/index/
+        try (var dirs = Files.list(backupDir)) {
+            var shardDirs = dirs
+                .filter(Files::isDirectory)
+                .sorted()
+                .flatMap(shardDir -> {
+                    // Direct: shardN/ contains segments_N
+                    if (hasSegmentsFile(shardDir)) {
+                        return java.util.stream.Stream.of(shardDir);
+                    }
+                    // SolrCloud: shardN/data/index/ contains segments_N
+                    var indexPath = shardDir.resolve("data").resolve("index");
+                    if (hasSegmentsFile(indexPath)) {
+                        return java.util.stream.Stream.of(indexPath);
+                    }
+                    return java.util.stream.Stream.empty();
+                })
+                .toList();
+
+            if (!shardDirs.isEmpty()) {
+                log.info("Discovered {} shard(s) in backup: {}", shardDirs.size(), backupDir);
+                return shardDirs;
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to list backup directory: " + backupDir, e);
+        }
+
+        // Fallback: treat entire directory as single shard
+        return List.of(backupDir);
+    }
+
+    private static boolean hasSegmentsFile(Path dir) {
+        if (!Files.isDirectory(dir)) {
+            return false;
+        }
+        try (var stream = Files.list(dir)) {
+            return stream.anyMatch(p -> p.getFileName().toString().startsWith("segments_"));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private Flux<Document> readLuceneIndex(Path indexDir, long startingDocOffset) {
         try {
-            var reader = new IndexReader9(backupDir, false, null);
-            var segmentsFile = findSegmentsFile();
+            var reader = new IndexReader9(indexDir, false, null);
+            var segmentsFile = findSegmentsFile(indexDir);
             var directoryReader = reader.getReader(segmentsFile);
 
             log.info("Reading Solr backup: {} docs in {} segments from {}",
-                directoryReader.maxDoc(), directoryReader.leaves().size(), backupDir);
+                directoryReader.maxDoc(), directoryReader.leaves().size(), indexDir);
 
             var scheduler = Schedulers.newBoundedElastic(10, Integer.MAX_VALUE, "solrReader");
 
@@ -115,20 +176,20 @@ public class SolrBackupSource implements DocumentSource {
                 .map(SolrBackupSource::toDocument)
                 .doFinally(s -> scheduler.dispose());
         } catch (IOException e) {
-            return Flux.error(new RuntimeException("Failed to open Solr backup: " + backupDir, e));
+            return Flux.error(new RuntimeException("Failed to open Solr backup: " + indexDir, e));
         }
     }
 
-    private String findSegmentsFile() {
-        try (var stream = Files.list(backupDir)) {
+    private static String findSegmentsFile(Path dir) {
+        try (var stream = Files.list(dir)) {
             return stream
                 .map(p -> p.getFileName().toString())
                 .filter(name -> name.startsWith("segments_"))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException(
-                    "No segments_N file found in Solr backup: " + backupDir));
+                    "No segments_N file found in: " + dir));
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to list Solr backup directory: " + backupDir, e);
+            throw new IllegalStateException("Failed to list directory: " + dir, e);
         }
     }
 
