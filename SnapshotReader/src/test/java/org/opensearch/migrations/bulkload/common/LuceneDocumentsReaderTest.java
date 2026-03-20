@@ -299,7 +299,7 @@ public class LuceneDocumentsReaderTest {
 
         // Verify results
         var expectedConcurrentSegments = 1; // Segment concurrency disabled for preserved ordering
-
+        var expectedConcurrentDocReads = 100; // Matches SEGMENT_READ_CONCURRENCY in LuceneReader
         assertNotNull(actualDocuments);
         assertEquals(numSegments * docsPerSegment, actualDocuments.size());
         assertEquals(expectedConcurrentSegments, observedConcurrentSegments.get(), "Expected concurrent open segments equal to " + expectedConcurrentSegments);
