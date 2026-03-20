@@ -6,6 +6,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -15,11 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Creates SolrCloud collection backups via the Collections API.
- *
- * <p>For each collection, calls:
- * {@code /solr/admin/collections?action=BACKUP&name=<name>&collection=<coll>&location=<path>&async=<id>}
- * and polls status via:
- * {@code /solr/admin/collections?action=REQUESTSTATUS&requestid=<id>}
+ * Supports optional Basic Auth.
  */
 @Slf4j
 public class SolrSnapshotCreator {
@@ -33,12 +30,24 @@ public class SolrSnapshotCreator {
     private final String backupName;
     private final String backupLocation;
     private final List<String> collections;
+    private final String authHeader;
 
     public SolrSnapshotCreator(
         String solrBaseUrl,
         String backupName,
         String backupLocation,
         List<String> collections
+    ) {
+        this(solrBaseUrl, backupName, backupLocation, collections, null, null);
+    }
+
+    public SolrSnapshotCreator(
+        String solrBaseUrl,
+        String backupName,
+        String backupLocation,
+        List<String> collections,
+        String username,
+        String password
     ) {
         this.solrBaseUrl = solrBaseUrl.endsWith("/")
             ? solrBaseUrl.substring(0, solrBaseUrl.length() - 1) : solrBaseUrl;
@@ -48,6 +57,11 @@ public class SolrSnapshotCreator {
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
+        if (username != null && password != null) {
+            this.authHeader = "Basic " + Base64.getEncoder().encodeToString((username + ":" + password).getBytes());
+        } else {
+            this.authHeader = null;
+        }
     }
 
     /** No-op for SolrCloud — backup location is specified per-request. */
@@ -96,7 +110,6 @@ public class SolrSnapshotCreator {
                 var msg = response.path(STATUS_FIELD).path("msg").asText(state);
                 throw new SolrBackupFailed("Backup failed for collection '" + collection + "': " + msg);
             }
-            // Unknown state — treat as in-progress
             log.warn("Unknown backup state '{}' for collection '{}', treating as in-progress", state, collection);
             return false;
         }
@@ -104,13 +117,19 @@ public class SolrSnapshotCreator {
     }
 
     private JsonNode getJson(String url) {
-        var request = HttpRequest.newBuilder()
+        var builder = HttpRequest.newBuilder()
             .uri(URI.create(url))
             .GET()
-            .timeout(Duration.ofSeconds(30))
-            .build();
+            .timeout(Duration.ofSeconds(30));
+        if (authHeader != null) {
+            builder.header("Authorization", authHeader);
+        }
+        var request = builder.build();
         try {
             var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 401 || response.statusCode() == 403) {
+                throw new SolrBackupFailed("Solr authentication failed (HTTP " + response.statusCode() + ") for " + url);
+            }
             if (response.statusCode() != 200) {
                 throw new SolrBackupFailed("Solr returned HTTP " + response.statusCode() + " for " + url);
             }
