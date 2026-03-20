@@ -102,25 +102,25 @@ class OpenSearchDefaultRetryTest {
 
     @ParameterizedTest
     @CsvSource(value = {
+        // No errors on either side
         "200, 200, false, false, 0, DONE",
         "200, 200, null,  null,  0, DONE",
         "200, 200, null,  false, 0, DONE",
-        "200, 200, true,  true,  0, RETRY",
-        "200, 200, true,  null,  0, DONE",
+        // Target has no errors
         "200, 200, true,  false, 0, DONE",
-        "200, 200, false, true,  0, RETRY",
+
+        // Non-bulk status codes
         "200, 404, false, false, 0, RETRY",
         "200, 404, true,  true,  0, RETRY",
-
-        "200, 200, false, true,  5, DONE",
-        "200, 404, false, false, 5, DONE",
-        "200, 404, true,  true,  5, DONE",
-
         "404, 200, false, false, 0, DONE",
         "200, 401, false, false, 0, DONE",
         "200, 403, false, false, 0, DONE",
         "200, 500, false, false, 0, RETRY",
-        "200, 429, false, false, 0, RETRY"
+        "200, 429, false, false, 0, RETRY",
+
+        // Max retries exceeded
+        "200, 404, false, false, 5, DONE",
+        "200, 404, true,  true,  5, DONE",
     })
     public void testBulkResults(int sourceStatus, int targetStatus,
                                 String sourceErrorStr, String targetErrorStr, int previousAttempts,
@@ -141,6 +141,55 @@ class OpenSearchDefaultRetryTest {
             TextTrackedFuture.completedFuture(new RetryTestUtils.TestRequestResponsePair(sourceBytes),
                 () -> "test future"));
         Assertions.assertEquals(expectedDirective, determination.get());
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {
+        // Retryable item error -> RETRY
+        "unavailable_shards_exception, RETRY",
+        // Non-retryable item error -> DONE
+        "version_conflict_engine_exception, DONE",
+        // Retryable error even when source also had errors -> still RETRY
+        "unavailable_shards_exception, RETRY",
+    })
+    public void testBulkWithItemErrors(String targetErrorType,
+                                       RequestSenderOrchestrator.RetryDirective expectedDirective)
+        throws Exception
+    {
+        var retryChecker = new OpenSearchDefaultRetry();
+        var sourceBytes = makeBulkResponse(200, false).getBytes(StandardCharsets.UTF_8);
+        var targetBytes = makeBulkResponse(200, true, new String[]{targetErrorType})
+            .getBytes(StandardCharsets.UTF_8);
+        var aggregatedResponse = AggregatedRawResponse.builder(Instant.now())
+            .addHttpParsedResponseObject(
+                HttpByteBufFormatter.parseHttpResponseFromBufs(Stream.of(Unpooled.wrappedBuffer(targetBytes)), 0))
+            .addResponsePacket(targetBytes)
+            .build();
+        var determination = retryChecker.shouldRetry(Unpooled.wrappedBuffer(BULK_REQUEST.getBytes(StandardCharsets.UTF_8)),
+            List.of(),
+            aggregatedResponse,
+            TextTrackedFuture.completedFuture(new RetryTestUtils.TestRequestResponsePair(sourceBytes),
+                () -> "test future"));
+        Assertions.assertEquals(expectedDirective, determination.get());
+    }
+
+    @Test
+    public void testBulkWithRetryableItemErrorExceedsMaxRetries() throws Exception {
+        var retryChecker = new OpenSearchDefaultRetry();
+        var sourceBytes = makeBulkResponse(200, false).getBytes(StandardCharsets.UTF_8);
+        var targetBytes = makeBulkResponse(200, true, new String[]{"unavailable_shards_exception"})
+            .getBytes(StandardCharsets.UTF_8);
+        var aggregatedResponse = AggregatedRawResponse.builder(Instant.now())
+            .addHttpParsedResponseObject(
+                HttpByteBufFormatter.parseHttpResponseFromBufs(Stream.of(Unpooled.wrappedBuffer(targetBytes)), 0))
+            .addResponsePacket(targetBytes)
+            .build();
+        var determination = retryChecker.shouldRetry(Unpooled.wrappedBuffer(BULK_REQUEST.getBytes(StandardCharsets.UTF_8)),
+            IntStream.range(0, 5).mapToObj(i -> (AggregatedRawResponse) null).collect(Collectors.toList()),
+            aggregatedResponse,
+            TextTrackedFuture.completedFuture(new RetryTestUtils.TestRequestResponsePair(sourceBytes),
+                () -> "test future"));
+        Assertions.assertEquals(RequestSenderOrchestrator.RetryDirective.DONE, determination.get());
     }
     @ParameterizedTest
     @CsvSource(value = {
