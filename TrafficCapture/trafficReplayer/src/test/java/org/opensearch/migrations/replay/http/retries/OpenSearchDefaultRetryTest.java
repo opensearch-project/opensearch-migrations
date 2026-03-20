@@ -105,7 +105,7 @@ class OpenSearchDefaultRetryTest {
         "200, 200, false, false, 0, DONE",
         "200, 200, null,  null,  0, DONE",
         "200, 200, null,  false, 0, DONE",
-        "200, 200, true,  true,  0, DONE",
+        "200, 200, true,  true,  0, RETRY",
         "200, 200, true,  null,  0, DONE",
         "200, 200, true,  false, 0, DONE",
         "200, 200, false, true,  0, RETRY",
