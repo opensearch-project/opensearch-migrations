@@ -141,7 +141,7 @@ class RegistryImageBuildUtils {
 
                     // For intermediate images (built in the same pipeline), resolve the
                     // digest at execution time to ensure reproducible builds.
-                    if (baseEndpoint == intermediateRegistry.hostUrl) {
+                    if (baseEndpoint == intermediateRegistry.hostUrl && !intermediateRegistry.isEcr()) {
                         project.tasks.named("jib").configure {
                             doFirst {
                                 project.jib.from.image = RegistryImageBuildUtils.resolveDigest(baseImage, project.jib.allowInsecureRegistries)
