@@ -588,7 +588,7 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
     z.object({
         skipApprovals : z.boolean().default(false).optional(), // TODO - format
-        kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({"default": {autoCreate: {}}}).optional(),
+        kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional(),
         sourceClusters: SOURCE_CLUSTERS_MAP,
         targetClusters: TARGET_CLUSTERS_MAP,
         snapshotMigrationConfigs: z.array(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG),
@@ -642,10 +642,11 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     });
                 }
                 const kafkaRef = proxyConfig.kafka;
-                if (kafkaRef && !(kafkaRef in (data.kafkaClusterConfiguration ?? {}))) {
+                const kafkaClusters = data.kafkaClusterConfiguration ?? {};
+                if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
-                        message: `Proxy '${proxyName}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(data.kafkaClusterConfiguration ?? {}).join(', ') || '(none)'}`,
+                        message: `Proxy '${proxyName}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}`,
                         path: ['traffic', 'proxies', proxyName, 'kafka']
                     });
                 }
