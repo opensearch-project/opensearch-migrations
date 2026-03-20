@@ -539,6 +539,35 @@
         }
       },
       {
+        "name": "deletedeployment",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "deploymentName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.deploymentName}}\"\n",
+          "action": "delete",
+          "flags": [
+            "--ignore-not-found"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "createtrafficreplay",
         "inputs": {
           "parameters": [

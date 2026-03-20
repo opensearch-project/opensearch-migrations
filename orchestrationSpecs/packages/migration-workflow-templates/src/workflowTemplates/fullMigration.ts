@@ -336,50 +336,55 @@ export const FullMigration = WorkflowBuilder.create({
                     }
                 }
             )
-            .addStep("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c => {
-                    const snapshotMigrationConfig = expr.deserializeRecord(b.inputs.snapshotMigrationConfig);
-                    const snapshotNameResolution = expr.get(snapshotMigrationConfig, "snapshotNameResolution");
-                    const resolvedSnapshotName = expr.ternary(
-                        expr.hasKey(snapshotNameResolution, "externalSnapshotName"),
-                        expr.getLoose(snapshotNameResolution, "externalSnapshotName"),
-                        c.steps.readSnapshotName.outputs.snapshotName
-                    );
-                    const snapshotRepoConfig = expr.get(snapshotMigrationConfig, "snapshotConfig");
-
-                    return c.register({
+            // Parallel: run migration alongside teardown watcher
+            // If external reset fires, teardown watcher completes and the migration
+            // continues independently (with continueOn) until its resources are cleaned up.
+            // If migration completes naturally, selfTeardown satisfies the watcher.
+            .addStepGroup(g => g
+                .addStep("teardownWatcher", ResourceManagement, "waitForTeardown", c =>
+                    c.register({
                         ...selectInputsForRegister(b, c),
-                        ...selectInputsFieldsAsExpressionRecord(c.item, c,
-                            getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
-                        sourceVersion: expr.get(snapshotMigrationConfig, "sourceVersion"),
-                        sourceLabel: expr.get(snapshotMigrationConfig, "sourceLabel"),
-                        targetConfig: expr.serialize(expr.get(snapshotMigrationConfig, "targetConfig")),
-                        snapshotConfig: expr.serialize(expr.makeDict({
-                            snapshotName: resolvedSnapshotName,
-                            label: expr.get(snapshotRepoConfig, "label"),
-                            repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
-                        })),
-                        migrationLabel: expr.get(c.item, "label"),
-                        groupName_view: expr.get(c.item, "label")
-                    });
-                }, {
-                    loopWith: makeParameterLoop(
-                        expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "migrations"))
-                }
+                        resourceName: b.inputs.resourceName,
+                        resourceKind: expr.literal("SnapshotMigration"),
+                    })
+                )
+                .addStep("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c => {
+                        const snapshotMigrationConfig = expr.deserializeRecord(b.inputs.snapshotMigrationConfig);
+                        const snapshotNameResolution = expr.get(snapshotMigrationConfig, "snapshotNameResolution");
+                        const resolvedSnapshotName = expr.ternary(
+                            expr.hasKey(snapshotNameResolution, "externalSnapshotName"),
+                            expr.getLoose(snapshotNameResolution, "externalSnapshotName"),
+                            c.steps.readSnapshotName.outputs.snapshotName
+                        );
+                        const snapshotRepoConfig = expr.get(snapshotMigrationConfig, "snapshotConfig");
+
+                        return c.register({
+                            ...selectInputsForRegister(b, c),
+                            ...selectInputsFieldsAsExpressionRecord(c.item, c,
+                                getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
+                            sourceVersion: expr.get(snapshotMigrationConfig, "sourceVersion"),
+                            sourceLabel: expr.get(snapshotMigrationConfig, "sourceLabel"),
+                            targetConfig: expr.serialize(expr.get(snapshotMigrationConfig, "targetConfig")),
+                            snapshotConfig: expr.serialize(expr.makeDict({
+                                snapshotName: resolvedSnapshotName,
+                                label: expr.get(snapshotRepoConfig, "label"),
+                                repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
+                            })),
+                            migrationLabel: expr.get(c.item, "label"),
+                            groupName_view: expr.get(c.item, "label")
+                        });
+                    }, {
+                        loopWith: makeParameterLoop(
+                            expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "migrations")),
+                        continueOn: {failed: true}
+                    }
+                )
             )
+            // After parallel group: patch Ready + self-teardown for natural completion
             .addStep("patchSnapshotMigration", ResourceManagement, "patchSnapshotMigrationReady", c =>
                 c.register({...selectInputsForRegister(b, c)})
             )
-            // Natural completion: self-teardown so waitForTeardown resolves immediately
             .addStep("selfTeardown", ResourceManagement, "patchTeardown", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    resourceName: b.inputs.resourceName,
-                    resourceKind: expr.literal("SnapshotMigration"),
-                })
-            )
-            // Wait for teardown signal (already satisfied by selfTeardown above,
-            // or by external reset if teardown was triggered before natural completion)
-            .addStep("waitForTeardown", ResourceManagement, "waitForTeardown", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.resourceName,

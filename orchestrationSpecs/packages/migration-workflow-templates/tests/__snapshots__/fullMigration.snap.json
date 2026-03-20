@@ -814,6 +814,25 @@
           ],
           [
             {
+              "templateRef": {
+                "template": "waitforteardown",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "SnapshotMigration"
+                  }
+                ]
+              },
+              "name": "teardownWatcher"
+            },
+            {
               "template": "migratefromsnapshot",
               "withParam": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrations']}}",
               "arguments": {
@@ -900,7 +919,10 @@
                   }
                 ]
               },
-              "name": "migrateFromSnapshot"
+              "name": "migrateFromSnapshot",
+              "continueOn": {
+                "failed": true
+              }
             }
           ],
           [
@@ -939,27 +961,6 @@
                 ]
               },
               "name": "selfTeardown"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "waitforteardown",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.resourceName}}"
-                  },
-                  {
-                    "name": "resourceKind",
-                    "value": "SnapshotMigration"
-                  }
-                ]
-              },
-              "name": "waitForTeardown"
             }
           ]
         ],

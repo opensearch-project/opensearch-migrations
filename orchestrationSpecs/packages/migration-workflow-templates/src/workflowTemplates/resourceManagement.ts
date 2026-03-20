@@ -277,6 +277,22 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
 
+    .addTemplate("deleteDeployment", t => t
+        .addRequiredInput("deploymentName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "delete",
+                flags: ["--ignore-not-found"],
+                manifest: {
+                    apiVersion: "apps/v1",
+                    kind: "Deployment",
+                    metadata: {name: b.inputs.deploymentName}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
     .addTemplate("createTrafficReplay", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addResourceTask(b => b
