@@ -179,16 +179,8 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                     return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
                         () -> "bulk response has only non-retryable errors (e.g. version_conflict), not retrying");
                 case HAS_RETRYABLE_ERRORS:
-                    return reconstructedSourceTransactionFuture.thenCompose(rrp ->
-                            TextTrackedFuture.completedFuture(
-                                Optional.ofNullable(rrp.getResponseData())
-                                    .map(sourceResponse ->
-                                        analyzeBulkResponse(sourceResponse.asByteBuf()) == BulkResponseAnalysis.NO_ERRORS ?
-                                            RequestSenderOrchestrator.RetryDirective.RETRY :
-                                            RequestSenderOrchestrator.RetryDirective.DONE)
-                                    .orElse(RequestSenderOrchestrator.RetryDirective.DONE),
-                                () -> "evaluating retry status dependent upon source bulk response analysis"),
-                        () -> "checking the accumulated source response value");
+                    return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.RETRY,
+                        () -> "bulk response has retryable errors, retrying");
                 default:
                     break;
             }
