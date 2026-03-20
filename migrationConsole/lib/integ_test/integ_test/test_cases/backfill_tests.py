@@ -45,6 +45,10 @@ class Test0006OpenSearchBenchmarkBackfill(MATestBase):
     def prepare_clusters(self):
         # Run OSB workloads against source cluster
         self.source_operations.run_test_benchmarks(cluster=self.source_cluster)
+        # Backfill migrations need more time for the monitor to poll the inner workflow.
+        # The default of 33 retries (33 min with 60s backoff) is insufficient for
+        # resource-constrained environments like minikube.
+        self.parameters["monitor-retry-limit"] = "60"
 
     def workflow_perform_migrations(self, timeout_seconds: int = 600):
         super().workflow_perform_migrations(timeout_seconds=timeout_seconds)
