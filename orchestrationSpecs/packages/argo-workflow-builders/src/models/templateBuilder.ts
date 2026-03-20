@@ -314,7 +314,7 @@ export class TemplateBuilder<
         ) => WaitForExistingResourceBuilder<ParentWorkflowScope, InputParamsScope, FinalBody, FinalOut>>
     ): WaitForExistingResourceBuilder<ParentWorkflowScope, InputParamsScope, FinalBody, FinalOut> {
         const fn = builderFn as any;
-        return fn(new WaitForExistingResourceBuilder(this.parentWorkflowScope, this.inputScope, {}, {}, undefined));
+        return fn(new WaitForExistingResourceBuilder(this.parentWorkflowScope, this.inputScope, {}, {}, {}, undefined));
     }
 
     getTemplateSignatureScope(): InputParamsScope {

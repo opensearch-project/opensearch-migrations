@@ -26,9 +26,21 @@ export const boolRule: TransformRuleFn = (
   node: ASTNode,
   transformChild: TransformChild,
 ): Map<string, any> => {
-  // TODO: implement
-  // 1. Transform each child in and/or/not via transformChild
-  // 2. Build Map{"bool" → Map{"must" → [...], "should" → [...], "must_not" → [...]}}
-  // 3. Omit empty clause arrays from the output
-  throw new Error('Not implemented');
+  if (node.type !== 'bool') {
+    throw new Error(`boolRule called with wrong node type: ${node.type}`);
+  }
+  const { and, or, not } = node;
+  const boolMap = new Map<string, any>();
+
+  if (and.length > 0) {
+    boolMap.set('must', and.map(transformChild));
+  }
+  if (or.length > 0) {
+    boolMap.set('should', or.map(transformChild));
+  }
+  if (not.length > 0) {
+    boolMap.set('must_not', not.map(transformChild));
+  }
+
+  return new Map([['bool', boolMap]]);
 };

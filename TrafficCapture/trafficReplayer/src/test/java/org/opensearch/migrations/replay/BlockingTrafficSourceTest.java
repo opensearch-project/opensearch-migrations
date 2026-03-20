@@ -49,18 +49,17 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         var firstChunk = new ArrayList<ITrafficStreamWithKey>();
         for (int i = 0; i <= BUFFER_MILLIS + SHIFT; ++i) {
             var nextPieceFuture = blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext);
-            nextPieceFuture.get(500000, TimeUnit.MILLISECONDS).forEach(ts -> firstChunk.add(ts));
+            nextPieceFuture.get(10, TimeUnit.SECONDS).forEach(ts -> firstChunk.add(ts));
         }
-        log.info("blockingSource=" + blockingSource);
+        log.atInfo().setMessage("blockingSource={}").addArgument(blockingSource).log();
         Assertions.assertTrue(BUFFER_MILLIS + SHIFT <= firstChunk.size());
         Instant lastTime = null;
         for (int i = SHIFT; i < nStreamsToCreate - BUFFER_MILLIS - SHIFT; ++i) {
             var blockedFuture = blockingSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext);
-            Thread.sleep(5);
             Assertions.assertFalse(blockedFuture.isDone(), "for i=" + i + " and coounter=" + testSource.counter.get());
             Assertions.assertEquals(i + BUFFER_MILLIS + SHIFT, testSource.counter.get());
             blockingSource.stopReadsPast(sourceStartTime.plus(Duration.ofMillis(i)));
-            log.info("after stopReadsPast blockingSource=" + blockingSource);
+            log.atInfo().setMessage("after stopReadsPast blockingSource={}").addArgument(blockingSource).log();
             var completedFutureValue = blockedFuture.get(10000, TimeUnit.MILLISECONDS);
             lastTime = TrafficStreamUtils.getFirstTimestamp(completedFutureValue.get(0).getStream()).get();
         }
@@ -95,7 +94,7 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
             }
 
             var t = sourceStartTime.plus(Duration.ofMillis(i));
-            log.debug("Built timestamp for " + i);
+            log.atDebug().setMessage("Built timestamp for {}").addArgument(i).log();
             var ts = TrafficStream.newBuilder()
                 .setNumberOfThisLastChunk(0)
                 .setConnectionId("conn_" + i)

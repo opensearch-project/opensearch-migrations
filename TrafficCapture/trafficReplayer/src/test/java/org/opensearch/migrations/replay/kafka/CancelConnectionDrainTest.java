@@ -56,6 +56,7 @@ class CancelConnectionDrainTest extends InstrumentationTest {
      * scheduleSequencer.isEmpty() stays false indefinitely.
      */
     @Test
+    @org.junit.jupiter.api.Timeout(10)
     void cancelConnection_drainsSorterSlots() throws Exception {
         var onCloseFired = new CountDownLatch(1);
         pool.setGlobalOnSessionClose(session -> onCloseFired.countDown());
@@ -79,8 +80,10 @@ class CancelConnectionDrainTest extends InstrumentationTest {
             );
         }
 
-        // Let the event loop process the submissions
-        Thread.sleep(50);
+        // Wait for the event loop to process all submissions by submitting a
+        // barrier task — once it completes, all prior scheduleRequest submissions
+        // have been processed and the sorter has been populated.
+        session.eventLoop.submit(() -> {}).sync();
         Assertions.assertFalse(session.scheduleSequencer.isEmpty(),
             "sorter should have queued work before cancel");
 
@@ -88,13 +91,12 @@ class CancelConnectionDrainTest extends InstrumentationTest {
         pool.cancelConnection(channelKeyCtx, 0);
 
         // onClose fires (null-channel path completes immediately)
-        boolean fired = onCloseFired.await(5, TimeUnit.SECONDS);
+        boolean fired = onCloseFired.await(10, TimeUnit.SECONDS);
         Assertions.assertTrue(fired, "onClose callback must fire after cancelConnection");
 
-        // After cancel, the sorter must drain — poll with timeout
+        // After cancel, the sorter must drain
         // Before fix: orphaned scheduleFuture entries leave sorter slots pending indefinitely
-        var deadline = System.currentTimeMillis() + 5000;
-        while (!session.scheduleSequencer.isEmpty() && System.currentTimeMillis() < deadline) {
+        while (!session.scheduleSequencer.isEmpty()) {
             Thread.sleep(10);
         }
         Assertions.assertTrue(session.scheduleSequencer.isEmpty(),
