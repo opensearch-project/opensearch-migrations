@@ -1,6 +1,8 @@
 package org.opensearch.migrations.replay.http.retries;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -12,11 +14,7 @@ import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParseException;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonToken;
-import com.fasterxml.jackson.core.async.ByteBufferFeeder;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -25,7 +23,6 @@ import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -33,92 +30,116 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
     private static final Pattern bulkPathMatcher = Pattern.compile("^(/[^/]*)?/_bulk(/.*)?$");
 
-    private static class BulkErrorFindingHandler extends ChannelInboundHandlerAdapter {
-        private final JsonParser parser;
-        private final ByteBufferFeeder feeder;
-        private Boolean errorField = null;
+    enum BulkResponseAnalysis {
+        /** No errors at all */
+        NO_ERRORS,
+        /** Has errors, but at least one is retryable */
+        HAS_RETRYABLE_ERRORS,
+        /** Has errors, but ALL are non-retryable */
+        ONLY_NON_RETRYABLE_ERRORS
+    }
 
-        @SneakyThrows
-        public BulkErrorFindingHandler() {
-            JsonFactory jsonFactory = new JsonFactory();
-            parser = jsonFactory.createNonBlockingByteBufferParser();
-            feeder = (ByteBufferFeeder) parser.getNonBlockingInputFeeder();
-        }
+    private static class BulkResponseAnalyzer extends ChannelInboundHandlerAdapter {
+        private final ByteArrayOutputStream bodyBytes = new ByteArrayOutputStream();
+        private BulkResponseAnalysis result = null;
+        private int statusCode = -1;
 
-        /**
-         * @return true iff the "errors" field was present at the root and its value was false.  false otherwise.
-         */
-        boolean hadNoErrors() {
-            return errorField != null && !errorField;
+        BulkResponseAnalysis getAnalysis() {
+            return result;
         }
 
         @Override
         public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
-            if (msg instanceof HttpResponse && errorField == null) {
-                var statusCode = ((HttpResponse) msg).status().code();
+            if (msg instanceof HttpResponse) {
+                statusCode = ((HttpResponse) msg).status().code();
                 if (statusCode != 200) {
-                    log.atDebug().setMessage("Bulk response status {} is not 200, treating as error")
+                    log.atDebug().setMessage("Bulk response status {} is not 200, treating as retryable error")
                         .addArgument(statusCode).log();
-                    errorField = true;
+                    result = BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
                 }
             }
-            if (msg instanceof HttpContent && errorField == null) {
-                log.atDebug().setMessage("body contents: {}")
-                    .addArgument(((HttpContent) msg).content().duplicate()).log();
-                feeder.feedInput(((HttpContent) msg).content().nioBuffer());
-                consumeInput();
+            if (msg instanceof HttpContent && result == null) {
+                var content = ((HttpContent) msg).content();
+                var readable = content.readableBytes();
+                if (readable > 0) {
+                    var bytes = new byte[readable];
+                    content.getBytes(content.readerIndex(), bytes);
+                    bodyBytes.write(bytes);
+                }
                 if (msg instanceof LastHttpContent) {
-                    feeder.endOfInput();
-                    consumeInput();
+                    result = analyzeBody(bodyBytes.toString(StandardCharsets.UTF_8));
                 }
             }
-            ctx.fireChannelRead(msg); // Pass other messages down the pipeline
+            ctx.fireChannelRead(msg);
         }
 
-        private void consumeInput() throws IOException {
-            if (errorField != null) {
-                return;
-            }
+        private BulkResponseAnalysis analyzeBody(String body) {
             try {
-                parseJsonTokens();
-            } catch (JsonParseException e) {
+                return doAnalyzeBody(body);
+            } catch (Exception e) {
                 log.atWarn().setCause(e)
-                    .setMessage("Response body is not valid JSON, treating as error response")
+                    .setMessage("Failed to parse bulk response body, treating as retryable")
                     .log();
-                errorField = true;
+                return BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
             }
         }
 
-        private void parseJsonTokens() throws IOException {
-            JsonToken token;
-            while (!parser.isClosed() &&
-                ((token = parser.nextToken()) != null) &&
-                token != JsonToken.NOT_AVAILABLE)
-            {
-                JsonToken finalToken = token;
-                log.atTrace().setMessage("Got token: {}").addArgument(finalToken).log();
-                if (token == JsonToken.FIELD_NAME && "errors".equals(parser.currentName())) {
-                    parser.nextToken();
-                    errorField = parser.getValueAsBoolean();
-                    break;
-                } else if (parser.getParsingContext().inRoot() && token == JsonToken.END_OBJECT) {
-                    break;
-                } else if (token != JsonToken.START_OBJECT &&
-                    token != JsonToken.END_OBJECT &&
-                    !parser.getParsingContext().inRoot())
-                {
-                    // Skip non-root level content
-                    parser.skipChildren();
+        private BulkResponseAnalysis doAnalyzeBody(String body) throws IOException {
+            var mapper = new ObjectMapper();
+            var root = mapper.readTree(body);
+
+            var errorsNode = root.get("errors");
+            if (errorsNode != null && !errorsNode.asBoolean()) {
+                return BulkResponseAnalysis.NO_ERRORS;
+            }
+
+            var items = root.get("items");
+            if (items == null || !items.isArray()) {
+                // No items to inspect — if errors was true/missing, treat as retryable
+                return errorsNode != null ? BulkResponseAnalysis.HAS_RETRYABLE_ERRORS : BulkResponseAnalysis.NO_ERRORS;
+            }
+
+            boolean hasAnyError = false;
+            boolean hasRetryableError = false;
+            for (var item : items) {
+                // Each item has one field: the action (index, create, update, delete)
+                var actionNode = item.fields().hasNext() ? item.fields().next().getValue() : null;
+                if (actionNode == null) continue;
+
+                var errorNode = actionNode.get("error");
+                if (errorNode == null || !errorNode.isObject()) continue;
+
+                hasAnyError = true;
+                var typeNode = errorNode.get("type");
+                var errorType = typeNode != null ? typeNode.asText() : null;
+
+                if (!BulkItemErrorClassifier.isNonRetryable(errorType)) {
+                    hasRetryableError = true;
+                    log.atDebug().setMessage("Found retryable bulk item error type: {}")
+                        .addArgument(errorType).log();
+                    break; // One retryable error is enough to decide
                 }
             }
+
+            if (!hasAnyError) {
+                // Trust the top-level "errors" field if no individual error items were found
+                if (errorsNode != null && errorsNode.asBoolean()) {
+                    return BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
+                }
+                return BulkResponseAnalysis.NO_ERRORS;
+            }
+            return hasRetryableError
+                ? BulkResponseAnalysis.HAS_RETRYABLE_ERRORS
+                : BulkResponseAnalysis.ONLY_NON_RETRYABLE_ERRORS;
         }
     }
 
-    boolean bulkResponseHadNoErrors(ByteBuf responseByteBuf) {
-        var errorFieldFinderHandler = new BulkErrorFindingHandler();
+    BulkResponseAnalysis analyzeBulkResponse(ByteBuf responseByteBuf) {
+        var analyzer = new BulkResponseAnalyzer();
         HttpByteBufFormatter.processHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
-            Stream.of(responseByteBuf), errorFieldFinderHandler);
-        return errorFieldFinderHandler.hadNoErrors();
+            Stream.of(responseByteBuf), analyzer);
+        var analysis = analyzer.getAnalysis();
+        return analysis != null ? analysis : BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
     }
 
 
@@ -148,20 +169,27 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         // do a more granular check.  If the raw response wasn't present, then just push it to the superclass
         // since it isn't going to be any kind of response, let alone a bulk one
         if (targetStatusCode.map(code -> code == 200).orElse(false)) {
-            if (bulkResponseHadNoErrors(currentResponse.getResponseAsByteBuf())) {
-                return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
-                    () -> "no errors found in the target response, so not retrying");
-            } else {
-                return reconstructedSourceTransactionFuture.thenCompose(rrp ->
-                        TextTrackedFuture.completedFuture(
-                            Optional.ofNullable(rrp.getResponseData())
-                                .map(sourceResponse ->
-                                    bulkResponseHadNoErrors(sourceResponse.asByteBuf()) ?
-                                        RequestSenderOrchestrator.RetryDirective.RETRY :
-                                        RequestSenderOrchestrator.RetryDirective.DONE)
-                                .orElse(RequestSenderOrchestrator.RetryDirective.DONE),
-                            () -> "evaluating retry status dependent upon source error field"),
-                    () -> "checking the accumulated source response value");
+            var analysis = analyzeBulkResponse(currentResponse.getResponseAsByteBuf());
+            switch (analysis) {
+                case NO_ERRORS:
+                    return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
+                        () -> "no errors found in the bulk response");
+                case ONLY_NON_RETRYABLE_ERRORS:
+                    return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
+                        () -> "bulk response has only non-retryable errors (e.g. version_conflict), not retrying");
+                case HAS_RETRYABLE_ERRORS:
+                    return reconstructedSourceTransactionFuture.thenCompose(rrp ->
+                            TextTrackedFuture.completedFuture(
+                                Optional.ofNullable(rrp.getResponseData())
+                                    .map(sourceResponse ->
+                                        analyzeBulkResponse(sourceResponse.asByteBuf()) == BulkResponseAnalysis.NO_ERRORS ?
+                                            RequestSenderOrchestrator.RetryDirective.RETRY :
+                                            RequestSenderOrchestrator.RetryDirective.DONE)
+                                    .orElse(RequestSenderOrchestrator.RetryDirective.DONE),
+                                () -> "evaluating retry status dependent upon source bulk response analysis"),
+                        () -> "checking the accumulated source response value");
+                default:
+                    break;
             }
         }
 
