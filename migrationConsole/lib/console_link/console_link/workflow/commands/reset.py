@@ -126,6 +126,7 @@ def _reset_all(namespace, workflow_name, argo_server, token, insecure):
 
 @click.command(name="reset")
 @click.argument('path', required=False, default=None)
+@click.option('--all', 'reset_all', is_flag=True, default=False, help='Teardown all resources and delete workflow')
 @click.option('--workflow-name', default=DEFAULT_WORKFLOW_NAME, shell_complete=get_workflow_completions)
 @click.option(
     '--argo-server',
@@ -140,45 +141,51 @@ def _reset_all(namespace, workflow_name, argo_server, token, insecure):
 @click.option('--insecure', is_flag=True, default=False)
 @click.option('--token', help='Bearer token for authentication')
 @click.pass_context
-def reset_command(ctx, path, workflow_name, argo_server, namespace, insecure, token):
+def reset_command(ctx, path, reset_all, workflow_name, argo_server, namespace, insecure, token):
     """Reset workflow resources by signaling teardown via CRD status.
 
     With no arguments, lists migration CRDs and their status.
     With a NAME, patches matching CRDs to Teardown phase.
-    With '*', patches all non-Teardown CRDs, waits for workflow completion, deletes workflow.
+    With --all, patches all non-Teardown CRDs, waits for workflow completion, deletes workflow.
 
     Example:
         workflow reset                     # list resettable resources
         workflow reset source-proxy        # teardown just capture proxy
-        workflow reset *                   # teardown everything and delete workflow
+        workflow reset --all               # teardown everything and delete workflow
     """
     try:
         load_k8s_config()
+
+        # Treat '*' same as --all
+        if path == '*':
+            reset_all = True
+            path = None
+
         crds = _list_migration_crds(namespace)
 
-        if not crds:
+        if not crds and not reset_all:
             click.echo("No migration resources found.")
             return
 
-        if path is None:
+        if path is None and not reset_all:
             _show_resources(namespace, crds)
             return
 
         # Find CRDs to patch
-        if path == '*':
+        if reset_all:
             targets = [(p, n, ph) for p, n, ph in crds if ph != 'Teardown']
         else:
             targets = [(p, n, ph) for p, n, ph in crds if n == path and ph != 'Teardown']
 
-        if not targets:
+        if targets:
+            if not _patch_targets(namespace, targets):
+                ctx.exit(ExitCode.FAILURE.value)
+                return
+        elif not reset_all:
             click.echo(f"No resources to teardown matching '{path}'.")
             return
 
-        if not _patch_targets(namespace, targets):
-            ctx.exit(ExitCode.FAILURE.value)
-            return
-
-        if path == '*':
+        if reset_all:
             _reset_all(namespace, workflow_name, argo_server, token, insecure)
 
     except Exception as e:

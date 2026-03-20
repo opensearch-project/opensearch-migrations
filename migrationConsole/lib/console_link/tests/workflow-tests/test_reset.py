@@ -131,7 +131,7 @@ class TestResetCommandPatch:
         mock_delete.return_value = True
 
         runner = CliRunner()
-        result = runner.invoke(workflow_cli, ['reset', '*'])
+        result = runner.invoke(workflow_cli, ['reset', '--all'])
         assert result.exit_code == 0
         assert mock_patch.call_count == 2
         mock_del_deps.assert_called_once_with('ma')
