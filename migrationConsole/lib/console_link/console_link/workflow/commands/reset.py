@@ -70,7 +70,7 @@ def _show_resources(namespace, crds):
         click.echo(f"  approvalgate/{name:<30} ({phase})")
     click.echo()
     click.echo("Use 'workflow reset <name>' to teardown a resource.")
-    click.echo("Use 'workflow reset *' to teardown all and delete the workflow.")
+    click.echo("Use 'workflow reset --all' to teardown all and delete the workflow.")
 
 
 def _patch_targets(namespace, targets):
@@ -155,11 +155,6 @@ def reset_command(ctx, path, reset_all, workflow_name, argo_server, namespace, i
     """
     try:
         load_k8s_config()
-
-        # Treat '*' same as --all
-        if path == '*':
-            reset_all = True
-            path = None
 
         crds = _list_migration_crds(namespace)
 
