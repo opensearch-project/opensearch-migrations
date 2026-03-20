@@ -76,15 +76,10 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
 
 ### Platforms
-
-| Platform | Source | Target |
-|----------|--------|--------|
-| Self-managed (on-premises or cloud-hosted) | ✓ | ✓ |
-| Amazon OpenSearch Service | ✓ | ✓ |
-| Amazon OpenSearch Serverless | ✗ | ✓ |
-| Elastic Cloud | ✓ | ✓ |
-
-> **Note:** Amazon OpenSearch Serverless TIMESERIES and VECTOR collection types use server-generated document IDs; SEARCH collections preserve source IDs.
+  - Self-managed (cloud provider hosted)
+  - Self-managed (on-premises)
+  - Managed cloud offerings (e.g., Amazon OpenSearch)
+  - Managed serverless cloud offerings (e.g. Amazon OpenSearch Serverless)
 
 ### Performance Limitations
 A performance test was performed on 03/10/25 alongside [PR 1337](https://github.com/opensearch-project/opensearch-migrations/pull/1337)
