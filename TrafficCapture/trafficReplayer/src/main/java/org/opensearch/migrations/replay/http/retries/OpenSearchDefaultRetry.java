@@ -181,8 +181,6 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 case HAS_RETRYABLE_ERRORS:
                     return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.RETRY,
                         () -> "bulk response has retryable errors, retrying");
-                default:
-                    break;
             }
         }
 
