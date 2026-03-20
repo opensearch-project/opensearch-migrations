@@ -1457,7 +1457,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           }
         ]
       },
-      "default": {}
+      "default": {
+        "default": {
+          "autoCreate": {}
+        }
+      }
     },
     "sourceClusters": {
       "type": "object",
