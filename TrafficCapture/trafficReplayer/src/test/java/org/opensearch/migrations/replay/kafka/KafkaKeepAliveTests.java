@@ -34,8 +34,8 @@ import org.testcontainers.kafka.ConfluentKafkaContainer;
 public class KafkaKeepAliveTests extends InstrumentationTest {
     public static final String TEST_GROUP_CONSUMER_ID = "TEST_GROUP_CONSUMER_ID";
     public static final String HEARTBEAT_INTERVAL_MS_KEY = "heartbeat.interval.ms";
-    public static final long MAX_POLL_INTERVAL_MS = 1000;
-    public static final long HEARTBEAT_INTERVAL_MS = 300;
+    public static final long MAX_POLL_INTERVAL_MS = 500;
+    public static final long HEARTBEAT_INTERVAL_MS = 150;
     public static final String testTopicName = "TEST_TOPIC";
 
     Producer<String, byte[]> kafkaProducer;
