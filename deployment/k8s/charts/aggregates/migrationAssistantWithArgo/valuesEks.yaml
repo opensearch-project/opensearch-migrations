@@ -26,21 +26,6 @@ defaultBucketConfiguration:
   snapshotRoleArn: ""
   bucketOperationImagePullPolicy: "IfNotPresent"
 
-# Immutable image tags (git SHA) allow IfNotPresent — each build has a unique tag
-images:
-  captureProxy:
-    pullPolicy: IfNotPresent
-  trafficReplayer:
-    pullPolicy: IfNotPresent
-  reindexFromSnapshot:
-    pullPolicy: IfNotPresent
-  migrationConsole:
-    pullPolicy: IfNotPresent
-  installer:
-    pullPolicy: IfNotPresent
-  coordinatorCluster:
-    pullPolicy: IfNotPresent
-
 # For OTEL Daemonset
 otelConfiguration:
   env:

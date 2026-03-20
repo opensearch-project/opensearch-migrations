@@ -415,14 +415,13 @@ fi
 
 TOOLS_ARCH=$(uname -m)
 
-# --- compute immutable image tag ---
-# Use git short SHA for a unique, immutable tag per commit. This allows
-# pullPolicy: IfNotPresent since each build produces a distinct tag.
-# Override with --image-tag for local dev iterations on the same commit.
+# --- compute image tag ---
+# Default to "latest" for simple dev workflows (build, delete pod, done).
+# CI passes --image-tag with a git SHA for immutable, reproducible deploys.
 if [[ -n "$image_tag" ]]; then
   IMAGE_TAG="$image_tag"
 else
-  IMAGE_TAG=$(git -C "$base_dir" rev-parse --short HEAD 2>/dev/null || echo "latest")
+  IMAGE_TAG="latest"
 fi
 echo "Image tag: $IMAGE_TAG"
 case "$TOOLS_ARCH" in
@@ -1030,6 +1029,8 @@ if [[ "$build_images" == "true" ]]; then
     echo "Buildkit already configured and healthy, skipping setup"
   else
     echo "Setting up buildkit for local builds..."
+    # Remove stale builder if it exists but failed health check above (e.g. orphaned
+    # from a previous interrupted run). This is safe — the builder is recreated below.
     docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
     "${base_dir}/buildImages/setUpK8sImageBuildServices.sh"
   fi
@@ -1230,6 +1231,8 @@ if [[ -n "$extra_helm_values" ]]; then
     EXTRA_VALUES_FLAGS="$EXTRA_VALUES_FLAGS -f $f"
   done
 fi
+# Suppress trace to avoid leaking helm values in logs
+set +x
 helm install "$namespace" "${ma_chart_dir}" \
   --kube-context="${KUBE_CONTEXT}" \
   --namespace $namespace \
@@ -1244,6 +1247,7 @@ helm install "$namespace" "${ma_chart_dir}" \
   $IMAGE_FLAGS \
   $TLS_HELM_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
+set -x
 
 kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null 2>&1
 
