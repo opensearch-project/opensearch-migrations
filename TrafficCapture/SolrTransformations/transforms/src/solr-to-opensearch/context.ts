@@ -32,6 +32,10 @@ export interface RequestContext {
   params: URLSearchParams;
   /** The request body as a Java Map — use .get()/.set() for access. */
   body: JavaMap;
+  /** Target name — 'opensearch', 'solr', etc. Set by the shim proxy. */
+  targetName?: string;
+  /** True when multiple targets are active (dual-mode validation). */
+  dualMode?: boolean;
 }
 
 /** Parsed once from the bundled {request, response}. Shared across all response micro-transforms. */
@@ -43,6 +47,10 @@ export interface ResponseContext {
   requestParams: URLSearchParams;
   /** The response body as a Java Map — use .get()/.set() for access. */
   responseBody: JavaMap;
+  /** Target name — 'opensearch', 'solr', etc. Set by the shim proxy. */
+  targetName?: string;
+  /** True when multiple targets are active (dual-mode validation). */
+  dualMode?: boolean;
 }
 
 const ENDPOINT_PATTERNS: [RegExp, SolrEndpoint][] = [
@@ -82,6 +90,8 @@ export function buildRequestContext(msg: JavaMap): RequestContext {
     collection: /\/solr\/([^/]+)\//.exec(uri)?.[1],
     params: parseParams(uri),
     body: getBodyMap(msg.get('payload')),
+    targetName: msg.get('_targetName') || 'opensearch',
+    dualMode: !!msg.get('_dualMode'),
   };
 }
 
@@ -94,5 +104,7 @@ export function buildResponseContext(request: JavaMap, response: JavaMap): Respo
     collection: /\/solr\/([^/]+)\//.exec(uri)?.[1],
     requestParams: parseParams(uri),
     responseBody: getBodyMap(response.get('payload')),
+    targetName: request.get('_targetName') || 'opensearch',
+    dualMode: !!request.get('_dualMode'),
   };
 }

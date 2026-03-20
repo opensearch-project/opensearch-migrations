@@ -156,10 +156,13 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         Map<String, Object> requestMap
     ) {
         Map<String, CompletableFuture<TargetResponse>> futures = new LinkedHashMap<>();
+        boolean dualMode = activeTargets.size() > 1;
         for (String name : activeTargets) {
             Target target = targets.get(name);
             Map<String, Object> targetRequestMap = target.requestTransform() != null
                 ? deepCopyMap(requestMap) : requestMap;
+            targetRequestMap.put("_targetName", name);
+            targetRequestMap.put("_dualMode", dualMode);
             futures.put(name, dispatchToTarget(target, targetRequestMap, requestMap));
         }
         return futures;

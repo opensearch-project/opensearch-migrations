@@ -11,6 +11,7 @@ import type { RequestContext, ResponseContext } from './context';
 
 import * as selectUri from './features/select-uri';
 import * as queryQ from './features/query-q';
+import * as cursorPagination from './features/cursor-pagination';
 import * as fieldList from './features/field-list';
 import * as jsonFacets from './features/json-facets';
 import * as hitsToDocs from './features/hits-to-docs';
@@ -23,7 +24,8 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
     select: [
       selectUri.request, // URI rewrite — must be first
       queryQ.request, // q=... → query DSL
-      jsonFacets.request, // json.facet → aggs,
+      cursorPagination.request, // cursorMark → search_after (after query-q sets from)
+      jsonFacets.request, // json.facet → aggs
       fieldList.request, // fl=... → _source
     ],
   },
@@ -33,6 +35,7 @@ export const responseRegistry: TransformRegistry<ResponseContext> = {
   global: [],
   byEndpoint: {
     select: [
+      cursorPagination.response, // nextCursorMark from last hit (before hits deleted)
       hitsToDocs.response, // hits.hits → response.docs
       aggsToFacets.response, // aggregations → facets
       responseHeader.response, // synthesize responseHeader
