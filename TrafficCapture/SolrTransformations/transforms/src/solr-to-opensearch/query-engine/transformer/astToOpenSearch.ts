@@ -36,6 +36,20 @@
  */
 
 import type { ASTNode } from '../ast/nodes';
+import type { TransformRuleFn } from './types';
+import { boolRule } from './rules/boolRule';
+
+/**
+ * Registry of transform functions, keyed by AST node type.
+ *
+ * To add support for a new AST node type:
+ *   1. Create a TransformRuleFn in transformer/rules/
+ *   2. Register it here with the node's `type` discriminant as the key
+ */
+const rules: Record<string, TransformRuleFn> = {
+  bool: boolRule,
+  // TODO: register remaining rules as they are implemented
+};
 
 /**
  * Transform an AST node into an OpenSearch DSL Map.
@@ -47,14 +61,15 @@ import type { ASTNode } from '../ast/nodes';
  *
  * @param node - The AST node to transform
  * @returns A nested Map structure representing OpenSearch Query DSL
+ * @throws Error if no rule is registered for the node type — the orchestrator
+ *         catches this and handles it based on the translation mode:
+ *         - passthrough-on-error: returns query_string passthrough + warning
+ *         - partial: skips the node, adds a warning, continues translating
  */
 export function transformNode(node: ASTNode): Map<string, any> {
-  // TODO: implement
-  // 1. Look up TransformRuleFn by node.type from the rules registry
-  // 2. Call rule(node, transformNode) for recursive dispatch
-  // 3. Throw if no rule registered for the node type — the orchestrator
-  //    catches this and handles it based on the translation mode:
-  //    - passthrough-on-error: returns query_string passthrough + warning
-  //    - partial: skips the node, adds a warning, continues translating
-  throw new Error('Not implemented');
+  const rule = rules[node.type];
+  if (!rule) {
+    throw new Error(`No transform rule registered for node type: ${node.type}`);
+  }
+  return rule(node, transformNode);
 }
