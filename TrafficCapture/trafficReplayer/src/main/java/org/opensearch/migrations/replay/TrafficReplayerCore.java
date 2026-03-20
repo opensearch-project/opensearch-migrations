@@ -140,7 +140,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     );
 
             assert !allWorkFinishedForTransactionFuture.future.isDone();
-            log.trace("Adding " + requestKey + " to targetTransactionInProgressMap");
+            log.atTrace().setMessage("Adding {} to targetTransactionInProgressMap").addArgument(requestKey).log();
             requestWorkTracker.put(requestKey, allWorkFinishedForTransactionFuture);
 
             return finishedAccumulatingResponseFuture.future::complete;
@@ -232,7 +232,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             } finally {
                 var requestKey = context.getReplayerRequestKey();
                 requestWorkTracker.remove(requestKey);
-                log.trace("removed rrPair.requestData to " + "targetTransactionInProgressMap for " + requestKey);
+                log.atTrace().setMessage("removed rrPair.requestData from targetTransactionInProgressMap for {}").addArgument(requestKey).log();
             }
         }
 

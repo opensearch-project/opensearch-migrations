@@ -67,7 +67,6 @@ public class KafkaTrafficCaptureSourceLongTermTest extends InstrumentationTest {
         }, 0, PRODUCER_SLEEP_INTERVAL_MS, TimeUnit.MILLISECONDS);
 
         for (int i = 0; i < TEST_RECORD_COUNT;) {
-            Thread.sleep(getSleepAmountMsForProducerRun(i));
             var nextChunkFuture = kafkaTrafficCaptureSource.readNextTrafficStreamChunk(
                 rootContext::createReadChunkContext
             );
@@ -101,7 +100,4 @@ public class KafkaTrafficCaptureSourceLongTermTest extends InstrumentationTest {
         });
     }
 
-    private long getSleepAmountMsForProducerRun(int i) {
-        return 1 * 1000;
-    }
 }
