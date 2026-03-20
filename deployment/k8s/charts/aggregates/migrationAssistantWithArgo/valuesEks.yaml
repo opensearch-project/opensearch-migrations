@@ -24,19 +24,7 @@ defaultBucketConfiguration:
   emptyBeforeDelete: true
   endpoint: ""
   snapshotRoleArn: ""
-
-# Useful for updating images while developing
-#images:
-#  captureProxy:
-#    pullPolicy: Always
-#  trafficReplayer:
-#    pullPolicy: Always
-#  reindexFromSnapshot:
-#    pullPolicy: Always
-#  migrationConsole:
-#    pullPolicy: Always
-#  installer:
-#    pullPolicy: Always
+  bucketOperationImagePullPolicy: "IfNotPresent"
 
 # For OTEL Daemonset
 otelConfiguration:
