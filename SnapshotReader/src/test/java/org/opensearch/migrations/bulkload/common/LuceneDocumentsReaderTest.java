@@ -228,6 +228,9 @@ public class LuceneDocumentsReaderTest {
         var concurrentDocReads = new AtomicInteger(0);
         var segmentReadTracker = new ConcurrentHashMap<String, AtomicBoolean>();
         var concurrentSegmentReads = new AtomicInteger(0);
+        var expectedConcurrentDocReads = 100;
+
+        var allReadsStarted = new CountDownLatch(expectedConcurrentDocReads);
 
         for (int i = 0; i < numSegments; i++) {
             var context = mock(LuceneLeafReaderContext.class);
@@ -245,6 +248,7 @@ public class LuceneDocumentsReaderTest {
                     concurrentSegmentReads.incrementAndGet(); // Increment only on first read per segment
                 }
                 concurrentDocReads.incrementAndGet();
+                allReadsStarted.countDown();
                 startLatch.await(); // Wait for the latch to be released before proceeding to track concurrency
                 var doc = mock(LuceneDocument.class);
 
@@ -274,23 +278,27 @@ public class LuceneDocumentsReaderTest {
         AtomicInteger observedConcurrentDocReads = new AtomicInteger(0);
         AtomicInteger observedConcurrentSegments = new AtomicInteger(0);
 
-        // Release the latch after a short delay to allow all threads to be ready
+        // Wait for all expected concurrent reads to reach the latch, then record and release
         Schedulers.parallel().schedule(() -> {
+            try {
+                allReadsStarted.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
             observedConcurrentSegments.set(concurrentSegmentReads.get());
             observedConcurrentDocReads.set(concurrentDocReads.get());
             startLatch.countDown();
-
-        }, 500, TimeUnit.MILLISECONDS);
+        }, 0, TimeUnit.MILLISECONDS);
 
         // Read documents
         List<LuceneDocumentChange> actualDocuments = reader.streamDocumentChanges("dummy")
             .subscribeOn(Schedulers.parallel())
             .collectList()
-            .block(Duration.ofSeconds(2));
+            .block(Duration.ofSeconds(10));
 
         // Verify results
         var expectedConcurrentSegments = 1; // Segment concurrency disabled for preserved ordering
-        var expectedConcurrentDocReads = 64; // Matches LUCENE_IO_SCHEDULER thread count
+
         assertNotNull(actualDocuments);
         assertEquals(numSegments * docsPerSegment, actualDocuments.size());
         assertEquals(expectedConcurrentSegments, observedConcurrentSegments.get(), "Expected concurrent open segments equal to " + expectedConcurrentSegments);

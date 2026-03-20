@@ -108,4 +108,61 @@ public class TypeMappingsSanitizationMetadataTest {
             Assertions.assertEquals(expectedJson, resultJson, "Keep transformation did not match expected output");
         }
     }
+
+    private static String makeMetadataRequestWithDynamic(String indexName, String type1, boolean dynamic1,
+                                                          String type2, boolean dynamic2) {
+        StringBuilder json = new StringBuilder();
+        json.append("{\n");
+        json.append("  \"type\": \"org.opensearch.migrations.bulkload.version_es_6_8.IndexMetadataData_ES_6_8\",\n");
+        json.append("  \"name\": \"").append(indexName).append("\",\n");
+        json.append("  \"body\": {\n");
+        json.append("    \"mappings\": {\n");
+        json.append("      \"").append(type1).append("\": {\n");
+        json.append("        \"dynamic\": ").append(dynamic1).append(",\n");
+        json.append("        \"properties\": {\n");
+        json.append("          \"field1\": { \"type\": \"text\" }\n");
+        json.append("        }\n");
+        json.append("      }\n");
+        if (type2 != null) {
+            json.append("      ,\n");
+            json.append("      \"").append(type2).append("\": {\n");
+            json.append("        \"dynamic\": ").append(dynamic2).append(",\n");
+            json.append("        \"properties\": {\n");
+            json.append("          \"field2\": { \"type\": \"keyword\" }\n");
+            json.append("        }\n");
+            json.append("      }\n");
+        }
+        json.append("    }\n");
+        json.append("  }\n");
+        json.append("}\n");
+        return json.toString();
+    }
+
+    @Test
+    public void testSplitTypeMappingsPreservesDynamicFalse() throws Exception {
+        String inputJson = makeMetadataRequestWithDynamic("split", "type1", false, "type2", false);
+        try (var transformer = makeIndexTypeMappingRewriter()) {
+            Object result = transformer.transformJson(OBJECT_MAPPER.readValue(inputJson, LinkedHashMap.class));
+            String resultJson = OBJECT_MAPPER.writeValueAsString(result);
+            Assertions.assertTrue(resultJson.contains("\"dynamic\":false"),
+                "Split transformation should preserve dynamic=false, got: " + resultJson);
+            // Both split targets should have dynamic=false
+            String expectedJson = "[" +
+                "{\"type\":\"org.opensearch.migrations.bulkload.version_es_6_8.IndexMetadataData_ES_6_8\",\"name\":\"split_a\",\"body\":{\"mappings\":{\"_doc\":{\"dynamic\":false,\"properties\":{\"field1\":{\"type\":\"text\"}}}}}}," +
+                "{\"type\":\"org.opensearch.migrations.bulkload.version_es_6_8.IndexMetadataData_ES_6_8\",\"name\":\"split_b\",\"body\":{\"mappings\":{\"_doc\":{\"dynamic\":false,\"properties\":{\"field2\":{\"type\":\"keyword\"}}}}}}" +
+                "]";
+            Assertions.assertEquals(expectedJson, resultJson);
+        }
+    }
+
+    @Test
+    public void testUnionTypeMappingsPreservesDynamicFalse() throws Exception {
+        String inputJson = makeMetadataRequestWithDynamic("union", "type1", false, "type2", false);
+        try (var transformer = makeIndexTypeMappingRewriter()) {
+            Object result = transformer.transformJson(OBJECT_MAPPER.readValue(inputJson, LinkedHashMap.class));
+            String resultJson = OBJECT_MAPPER.writeValueAsString(result);
+            Assertions.assertTrue(resultJson.contains("\"dynamic\":false"),
+                "Union transformation should preserve dynamic=false, got: " + resultJson);
+        }
+    }
 }

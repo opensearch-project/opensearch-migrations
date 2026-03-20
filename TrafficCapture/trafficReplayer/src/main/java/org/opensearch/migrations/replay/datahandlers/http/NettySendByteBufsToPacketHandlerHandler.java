@@ -47,8 +47,8 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
 
     @Override
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
-        log.debug("Handler removed for context " + ctx + " hash=" + System.identityHashCode(ctx));
-        log.trace("HR: old currentFuture=" + currentFuture);
+        log.atDebug().setMessage("Handler removed for context {} hash={}").addArgument(ctx).addArgument(() -> System.identityHashCode(ctx)).log();
+        log.atTrace().setMessage("HR: old currentFuture={}").addArgument(currentFuture).log();
         if (currentFuture.future.isDone()) {
             if (currentFuture.future.isCompletedExceptionally()) {
                 packetReceiverCompletionFutureRef.set(
@@ -99,7 +99,7 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
             () -> "Waiting for packetReceiver.finalizeRequest() and will return once that is done"
         );
         packetReceiverCompletionFutureRef.set(packetReceiverCompletionFuture);
-        log.trace("HR: new currentFuture=" + currentFuture);
+        log.atTrace().setMessage("HR: new currentFuture={}").addArgument(currentFuture).log();
         super.handlerRemoved(ctx);
     }
 
@@ -195,7 +195,7 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
                     + numBytesToSend
                     + " bytes "
             );
-            log.trace("CR: new currentFuture=" + currentFuture);
+            log.atTrace().setMessage("CR: new currentFuture={}").addArgument(currentFuture).log();
         } else if (msg instanceof LastHttpContent || msg instanceof EndOfInput) {
             currentFuture = currentFuture.map(
                 cf -> cf.thenApply(ignore -> true),

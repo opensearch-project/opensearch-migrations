@@ -144,9 +144,8 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                     Duration.ofSeconds(5)
                 );
                 Assertions.assertEquals(numRequests, tuplesReceived.size());
-                Thread.sleep(1000);
-                checkSpansForSimpleReplayedTransactions(rootContext.inMemoryInstrumentationBundle, numRequests);
                 tr.shutdown(null).get();
+                checkSpansForSimpleReplayedTransactions(rootContext.inMemoryInstrumentationBundle, numRequests);
             }
         }
     }
