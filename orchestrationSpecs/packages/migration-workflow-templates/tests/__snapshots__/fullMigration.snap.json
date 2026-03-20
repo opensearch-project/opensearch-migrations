@@ -276,6 +276,12 @@
               "name": "imageMigrationConsolePullPolicy"
             },
             {
+              "name": "imageSnapshotFuseLocation"
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy"
+            },
+            {
               "name": "imageCoordinatorClusterLocation"
             },
             {
@@ -413,6 +419,12 @@
               "name": "imageMigrationConsolePullPolicy"
             },
             {
+              "name": "imageSnapshotFuseLocation"
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy"
+            },
+            {
               "name": "imageCoordinatorClusterLocation"
             },
             {
@@ -470,6 +482,14 @@
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageSnapshotFuseLocation",
+                    "value": "{{inputs.parameters.imageSnapshotFuseLocation}}"
+                  },
+                  {
+                    "name": "imageSnapshotFusePullPolicy",
+                    "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}"
                   },
                   {
                     "name": "imageCoordinatorClusterLocation",
@@ -555,6 +575,12 @@
             },
             {
               "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageSnapshotFuseLocation"
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy"
             },
             {
               "name": "imageCoordinatorClusterLocation"
@@ -662,6 +688,14 @@
                     "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
                   },
                   {
+                    "name": "imageSnapshotFuseLocation",
+                    "value": "{{inputs.parameters.imageSnapshotFuseLocation}}"
+                  },
+                  {
+                    "name": "imageSnapshotFusePullPolicy",
+                    "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}"
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
                   },
@@ -737,6 +771,12 @@
             },
             {
               "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageSnapshotFuseLocation"
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy"
             },
             {
               "name": "imageCoordinatorClusterLocation"
@@ -836,6 +876,14 @@
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageSnapshotFuseLocation",
+                    "value": "{{inputs.parameters.imageSnapshotFuseLocation}}"
+                  },
+                  {
+                    "name": "imageSnapshotFusePullPolicy",
+                    "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}"
                   },
                   {
                     "name": "imageCoordinatorClusterLocation",
@@ -1156,6 +1204,24 @@
               }
             },
             {
+              "name": "imageSnapshotFuseLocation",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "snapshotFuseImage"
+                }
+              }
+            },
+            {
+              "name": "imageSnapshotFusePullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "snapshotFusePullPolicy"
+                }
+              }
+            },
+            {
               "name": "imageCoordinatorClusterLocation",
               "valueFrom": {
                 "configMapKeyRef": {
@@ -1306,6 +1372,14 @@
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
+                    "name": "imageSnapshotFuseLocation",
+                    "value": "{{inputs.parameters.imageSnapshotFuseLocation}}"
+                  },
+                  {
+                    "name": "imageSnapshotFusePullPolicy",
+                    "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}"
+                  },
+                  {
                     "name": "imageCoordinatorClusterLocation",
                     "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
                   },
@@ -1369,6 +1443,14 @@
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageSnapshotFuseLocation",
+                    "value": "{{inputs.parameters.imageSnapshotFuseLocation}}"
+                  },
+                  {
+                    "name": "imageSnapshotFusePullPolicy",
+                    "value": "{{inputs.parameters.imageSnapshotFusePullPolicy}}"
                   },
                   {
                     "name": "imageCoordinatorClusterLocation",

@@ -1,0 +1,58 @@
+# Standalone test pod for verifying snapshot-fuse works with the S3 CSI mount.
+# This pod mounts the S3 snapshot PVC and runs the FUSE daemon + a test container.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: snapshot-fuse-test
+  labels:
+    app: snapshot-fuse-test
+spec:
+  serviceAccountName: argo-workflow-executor
+  containers:
+  # FUSE sidecar: translates snapshot blobs → virtual Lucene files
+  - name: snapshot-fuse
+    image: snapshot-fuse:latest
+    imagePullPolicy: IfNotPresent
+    args:
+    - "--repo-root=/mnt/s3"
+    - "--snapshot-name=rfs-snapshot"
+    - "--mount-point=/mnt/lucene"
+    env:
+    - name: RUST_LOG
+      value: "info"
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - name: snapshot-s3
+      mountPath: /mnt/s3
+      readOnly: true
+    - name: lucene-fuse
+      mountPath: /mnt/lucene
+      mountPropagation: Bidirectional
+
+  # Test container: verifies the FUSE mount has Lucene files
+  - name: test
+    image: busybox:latest
+    command: ["sh", "-c"]
+    args:
+    - |
+      echo "Waiting for FUSE mount..."
+      sleep 5
+      echo "=== Listing /mnt/lucene ==="
+      ls -la /mnt/lucene/ || echo "Mount not ready yet"
+      echo "=== Listing index dirs ==="
+      find /mnt/lucene -maxdepth 3 -type f 2>/dev/null | head -20
+      echo "=== Done ==="
+      sleep infinity
+    volumeMounts:
+    - name: lucene-fuse
+      mountPath: /mnt/lucene
+      mountPropagation: HostToContainer
+
+  volumes:
+  - name: snapshot-s3
+    persistentVolumeClaim:
+      claimName: s3-snapshot
+      readOnly: true
+  - name: lucene-fuse
+    emptyDir: {}
