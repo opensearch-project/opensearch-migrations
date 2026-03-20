@@ -30,21 +30,21 @@ images:
     repository: localhost:5000/migrations/migration_console
     pullPolicy: Always
 
+# Zero out installer resources to match Kyverno zero-resource-requests policy.
+# Prevents Kyverno from mutating the pod spec, which breaks job finalizer removal.
+installer:
+  resources:
+    requests:
+      cpu: "0"
+      memory: "0"
+    limits:
+      cpu: "0"
+      memory: "0"
+
 # Kyverno chart configuration
 charts:
   kyverno:
     values:
-      cleanupJobs:
-        admissionReports:
-          image:
-            registry: ""
-            repository: localhost:5000/migrations/migration_console
-            tag: latest
-        clusterAdmissionReports:
-          image:
-            registry: ""
-            repository: localhost:5000/migrations/migration_console
-            tag: latest
       webhooksCleanup:
         image:
           registry: ""

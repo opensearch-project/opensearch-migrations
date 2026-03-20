@@ -436,8 +436,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     snapshotK8sLabel: b.inputs.snapshotK8sLabel,
                     fromSnapshotMigrationK8sLabel: b.inputs.fromSnapshotMigrationK8sLabel,
                     taskK8sLabel: b.inputs.taskK8sLabel,
-                }),
-                successCondition: "status.readyReplicas > 0"
+                })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
