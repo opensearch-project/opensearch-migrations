@@ -118,7 +118,7 @@ class SecretStore:
                 logger.info(f"Created secret: {basic_creds_resource_name}")
                 return f"Secret created: {basic_creds_resource_name}"
             else:
-                logger.error(f"Kubernetes API error saving secret {basic_creds_resource_name}: {e}")
+                logger.error("Kubernetes API error saving secret", exc_info=True)
                 raise
 
     def load_secret(
