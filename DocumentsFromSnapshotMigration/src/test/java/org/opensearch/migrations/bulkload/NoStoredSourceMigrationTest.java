@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload;
 
 import java.io.File;
 import java.math.BigInteger;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -355,7 +356,7 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                 new AtomicInteger(), new Random(1), docCtx,
                 sourceCluster.getContainerVersion().getVersion(),
                 targetCluster.getContainerVersion().getVersion(), null
-            ));
+            ), Duration.ofMinutes(10));
 
             targetOps.post("/_refresh", null);
             String response = targetOps.get("/" + indexName + "/_search").getValue();
