@@ -123,18 +123,18 @@ That helper script:
 
 ### Workflow naming behavior
 
-By default, the helper creates a fixed workflow name:
-
-```yaml
-metadata:
-  name: migration-workflow
-```
-
-If `USE_GENERATE_NAME=true`, it switches to:
+By default, the helper uses `generateName` so repeated submissions do not collide on a fixed workflow name:
 
 ```yaml
 metadata:
   generateName: full-migration-<nonce>- 
+```
+
+If `USE_GENERATE_NAME=false` (or `0`), it switches back to the historical fixed name behavior:
+
+```yaml
+metadata:
+  name: migration-workflow
 ```
 
 Agent-facing docs and automation should call out this distinction explicitly, because monitoring and cleanup logic differ depending on whether the workflow name is fixed or generated.
