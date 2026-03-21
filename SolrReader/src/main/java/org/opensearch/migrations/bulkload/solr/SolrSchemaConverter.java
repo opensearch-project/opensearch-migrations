@@ -1,14 +1,20 @@
 package org.opensearch.migrations.bulkload.solr;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.extern.slf4j.Slf4j;
 
 /**
- * Converts Solr schema field definitions to OpenSearch-compatible mappings.
+ * Converts Solr schema definitions to OpenSearch-compatible mappings.
+ * Handles explicit fields, dynamic fields, copyFields, fieldType class resolution,
+ * and date format mapping.
  */
+@Slf4j
 public final class SolrSchemaConverter {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -22,6 +28,7 @@ public final class SolrSchemaConverter {
     private static final String OS_KEYWORD = "keyword";
     private static final String OS_TEXT = "text";
 
+    /** Maps Solr field type names to OpenSearch types. */
     private static final Map<String, String> SOLR_TO_OS_TYPE = Map.ofEntries(
         Map.entry("string", OS_KEYWORD),
         Map.entry("strings", OS_KEYWORD),
@@ -49,33 +56,191 @@ public final class SolrSchemaConverter {
         Map.entry("binary", "binary")
     );
 
+    /** Maps Solr fieldType Java class names to OpenSearch types (fallback when type name isn't in SOLR_TO_OS_TYPE). */
+    private static final Map<String, String> SOLR_CLASS_TO_OS_TYPE = Map.ofEntries(
+        Map.entry("solr.StrField", OS_KEYWORD),
+        Map.entry("solr.TextField", OS_TEXT),
+        Map.entry("solr.BoolField", OS_BOOLEAN),
+        Map.entry("solr.IntPointField", OS_INTEGER),
+        Map.entry("solr.LongPointField", OS_LONG),
+        Map.entry("solr.FloatPointField", OS_FLOAT),
+        Map.entry("solr.DoublePointField", OS_DOUBLE),
+        Map.entry("solr.DatePointField", OS_DATE),
+        Map.entry("solr.TrieIntField", OS_INTEGER),
+        Map.entry("solr.TrieLongField", OS_LONG),
+        Map.entry("solr.TrieFloatField", OS_FLOAT),
+        Map.entry("solr.TrieDoubleField", OS_DOUBLE),
+        Map.entry("solr.TrieDateField", OS_DATE),
+        Map.entry("solr.BinaryField", "binary"),
+        Map.entry("solr.UUIDField", OS_KEYWORD)
+    );
+
+    /** Date format for OpenSearch — accepts both ISO 8601 and epoch millis. */
+    static final String OS_DATE_FORMAT = "strict_date_optional_time||epoch_millis";
+
     private SolrSchemaConverter() {}
 
     /**
      * Convert Solr schema fields array to OpenSearch mappings ObjectNode.
+     * Simple overload for backward compatibility — no dynamic fields or fieldTypes.
      */
     public static ObjectNode convertToOpenSearchMappings(JsonNode solrFields) {
+        return convertToOpenSearchMappings(solrFields, null, null, null);
+    }
+
+    /**
+     * Convert a full Solr schema to OpenSearch mappings, including dynamic fields,
+     * copyFields, and fieldType class resolution.
+     *
+     * @param solrFields      the "fields" array from the Solr schema
+     * @param dynamicFields   the "dynamicFields" array (nullable)
+     * @param copyFields      the "copyFields" array (nullable)
+     * @param fieldTypes      the "fieldTypes" array (nullable) — used for class-based type resolution
+     */
+    public static ObjectNode convertToOpenSearchMappings(
+        JsonNode solrFields, JsonNode dynamicFields, JsonNode copyFields, JsonNode fieldTypes
+    ) {
+        // Build fieldType name → class lookup
+        var typeClassMap = buildFieldTypeClassMap(fieldTypes);
+
         ObjectNode mappings = MAPPER.createObjectNode();
         ObjectNode properties = MAPPER.createObjectNode();
 
+        // 1. Explicit fields
         if (solrFields != null && solrFields.isArray()) {
             for (var field : solrFields) {
                 var name = field.path("name").asText();
                 var type = field.path("type").asText();
-
-                // Skip Solr internal fields
-                if (name.startsWith("_") && !name.equals("id")) {
+                if (isInternalField(name)) {
                     continue;
                 }
-
-                var osType = SOLR_TO_OS_TYPE.getOrDefault(type, OS_TEXT);
-                ObjectNode fieldMapping = MAPPER.createObjectNode();
-                fieldMapping.put("type", osType);
+                var fieldMapping = resolveFieldMapping(type, typeClassMap);
                 properties.set(name, fieldMapping);
             }
         }
 
+        // 2. Dynamic fields → dynamic_templates
+        var dynamicTemplates = MAPPER.createArrayNode();
+        if (dynamicFields != null && dynamicFields.isArray()) {
+            for (var dynField : dynamicFields) {
+                var pattern = dynField.path("name").asText();
+                var type = dynField.path("type").asText();
+                if (pattern.isEmpty() || type.isEmpty()) {
+                    continue;
+                }
+                var osType = resolveOsType(type, typeClassMap);
+                var template = buildDynamicTemplate(pattern, osType);
+                if (template != null) {
+                    dynamicTemplates.add(template);
+                }
+            }
+        }
+
+        // 3. CopyFields → add destination fields if not already present
+        if (copyFields != null && copyFields.isArray()) {
+            for (var cf : copyFields) {
+                var dest = cf.path("dest").asText();
+                if (!dest.isEmpty() && !properties.has(dest) && !isInternalField(dest)) {
+                    // copyField destinations are typically catch-all text fields
+                    var fieldMapping = MAPPER.createObjectNode();
+                    fieldMapping.put("type", OS_TEXT);
+                    properties.set(dest, fieldMapping);
+                }
+            }
+        }
+
         mappings.set("properties", properties);
+        if (!dynamicTemplates.isEmpty()) {
+            mappings.set("dynamic_templates", dynamicTemplates);
+        }
         return mappings;
+    }
+
+    private static ObjectNode resolveFieldMapping(String solrType, Map<String, String> typeClassMap) {
+        var osType = resolveOsType(solrType, typeClassMap);
+        ObjectNode fieldMapping = MAPPER.createObjectNode();
+        fieldMapping.put("type", osType);
+        if (OS_DATE.equals(osType)) {
+            fieldMapping.put("format", OS_DATE_FORMAT);
+        }
+        return fieldMapping;
+    }
+
+    static String resolveOsType(String solrType, Map<String, String> typeClassMap) {
+        // First: direct type name lookup
+        var osType = SOLR_TO_OS_TYPE.get(solrType);
+        if (osType != null) {
+            return osType;
+        }
+        // Second: resolve via fieldType class
+        if (typeClassMap != null) {
+            var className = typeClassMap.get(solrType);
+            if (className != null) {
+                osType = SOLR_CLASS_TO_OS_TYPE.get(className);
+                if (osType != null) {
+                    return osType;
+                }
+                // Check if class name contains known patterns
+                for (var entry : SOLR_CLASS_TO_OS_TYPE.entrySet()) {
+                    if (className.endsWith(entry.getKey().substring(entry.getKey().lastIndexOf('.')))) {
+                        return entry.getValue();
+                    }
+                }
+            }
+        }
+        // Fallback
+        return OS_TEXT;
+    }
+
+    private static Map<String, String> buildFieldTypeClassMap(JsonNode fieldTypes) {
+        if (fieldTypes == null || !fieldTypes.isArray()) {
+            return Map.of();
+        }
+        var map = new LinkedHashMap<String, String>();
+        for (var ft : fieldTypes) {
+            var name = ft.path("name").asText();
+            var className = ft.path("class").asText();
+            if (!name.isEmpty() && !className.isEmpty()) {
+                map.put(name, className);
+            }
+        }
+        return map;
+    }
+
+    /**
+     * Build an OpenSearch dynamic_template from a Solr dynamic field pattern.
+     * Solr patterns: "*_s" (suffix), "attr_*" (prefix).
+     */
+    static ObjectNode buildDynamicTemplate(String solrPattern, String osType) {
+        String matchPattern;
+        String templateName;
+
+        if (solrPattern.startsWith("*")) {
+            // Suffix pattern: *_s → match anything ending with _s
+            matchPattern = "*" + solrPattern.substring(1);
+            templateName = "solr_dyn_" + solrPattern.substring(1).replaceAll("[^a-zA-Z0-9]", "_");
+        } else if (solrPattern.endsWith("*")) {
+            // Prefix pattern: attr_* → match anything starting with attr_
+            matchPattern = solrPattern;
+            templateName = "solr_dyn_" + solrPattern.substring(0, solrPattern.length() - 1).replaceAll("[^a-zA-Z0-9]", "_");
+        } else {
+            return null; // Not a valid dynamic field pattern
+        }
+
+        var template = MAPPER.createObjectNode();
+        var inner = MAPPER.createObjectNode();
+        inner.put("match", matchPattern);
+        var mapping = MAPPER.createObjectNode();
+        mapping.put("type", osType);
+        if (OS_DATE.equals(osType)) {
+            mapping.put("format", OS_DATE_FORMAT);
+        }
+        inner.set("mapping", mapping);
+        template.set(templateName, inner);
+        return template;
+    }
+
+    private static boolean isInternalField(String name) {
+        return name.startsWith("_") && !"id".equals(name);
     }
 }

@@ -9,7 +9,9 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrClient;
 import org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator;
+import org.opensearch.migrations.bulkload.solr.SolrStandaloneBackupCreator;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
@@ -188,17 +190,52 @@ public class CreateSnapshot {
         if (arguments.solrCollections.isEmpty()) {
             throw new ParameterException("--solr-collections is required when --source-type=solr");
         }
+        var solrUrl = arguments.sourceArgs.toConnectionContext().getUri().toString();
+        var username = arguments.sourceArgs.getUsername();
+        var password = arguments.sourceArgs.getPassword();
+
+        if (isSolrCloud(solrUrl, username, password)) {
+            runSolrCloudBackup(solrUrl, backupLocation, username, password);
+        } else {
+            runSolrStandaloneBackup(solrUrl, backupLocation, username, password);
+        }
+    }
+
+    private boolean isSolrCloud(String solrUrl, String username, String password) {
+        try {
+            var client = new SolrClient(solrUrl, username, password, 1);
+            return client.isSolrCloud();
+        } catch (Exception e) {
+            log.info("SolrCloud detection failed, assuming standalone: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private void runSolrCloudBackup(String solrUrl, String backupLocation, String username, String password) {
+        log.info("Detected SolrCloud — using Collections API backup");
         var solrCreator = new SolrSnapshotCreator(
-            arguments.sourceArgs.toConnectionContext().getUri().toString(),
-            arguments.snapshotName,
-            backupLocation,
-            arguments.solrCollections
+            solrUrl, arguments.snapshotName, backupLocation,
+            arguments.solrCollections, username, password
         );
         solrCreator.registerRepo();
         solrCreator.createSnapshot();
+        waitForCompletion(solrCreator::isSnapshotFinished);
+    }
+
+    private void runSolrStandaloneBackup(String solrUrl, String backupLocation, String username, String password) {
+        log.info("Detected standalone Solr — using replication API backup");
+        var creator = new SolrStandaloneBackupCreator(
+            solrUrl, arguments.snapshotName, backupLocation,
+            arguments.solrCollections, username, password
+        );
+        creator.createBackup();
+        waitForCompletion(creator::isBackupFinished);
+    }
+
+    private void waitForCompletion(java.util.function.BooleanSupplier isFinished) {
         if (!arguments.noWait) {
             log.info("Waiting for Solr backup to complete...");
-            while (!solrCreator.isSnapshotFinished()) {
+            while (!isFinished.getAsBoolean()) {
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException e) {

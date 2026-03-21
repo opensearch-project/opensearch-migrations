@@ -61,8 +61,12 @@ public class SolrBackupSource implements DocumentSource {
 
     @Override
     public CollectionMetadata readCollectionMetadata(String collectionName) {
-        var fields = solrSchema.path("fields");
-        var mappings = SolrSchemaConverter.convertToOpenSearchMappings(fields);
+        var mappings = SolrSchemaConverter.convertToOpenSearchMappings(
+            solrSchema.path("fields"),
+            solrSchema.path("dynamicFields"),
+            solrSchema.path("copyFields"),
+            solrSchema.path("fieldTypes")
+        );
         var partitionCount = listPartitions(collectionName).size();
         log.info("Converted Solr schema to OpenSearch mappings: {} fields, {} shards",
             mappings.path("properties").size(), partitionCount);
