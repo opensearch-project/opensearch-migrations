@@ -20,7 +20,6 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
-import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -49,14 +48,6 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
         @Override
         public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
-            if (msg instanceof HttpResponse) {
-                var code = ((HttpResponse) msg).status().code();
-                if (code != 200) {
-                    log.atDebug().setMessage("Bulk response status {} is not 200, treating as retryable error")
-                        .addArgument(code).log();
-                    result = BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
-                }
-            }
             if (msg instanceof HttpContent && result == null) {
                 var content = ((HttpContent) msg).content();
                 var readable = content.readableBytes();
