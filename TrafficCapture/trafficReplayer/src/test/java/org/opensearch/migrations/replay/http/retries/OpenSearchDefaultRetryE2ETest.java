@@ -254,4 +254,39 @@ public class OpenSearchDefaultRetryE2ETest {
         }
     }
 
+    @Test
+    public void testBulk200WithErrorsTrueButNoItemsFieldIsRetried() throws Exception {
+        // Non-OpenSearch target may return 200 with errors:true but no items array.
+        // Missing items field with errors=true -> HAS_RETRYABLE_ERRORS -> retry.
+        var requestCount = new AtomicInteger();
+        String noItems = "{\"took\":1,\"errors\":true}";
+        try (var rootContext = TestContext.withAllTracking();
+             var httpServer = SimpleHttpServer.makeServer(false, r ->
+                 requestCount.incrementAndGet() <= 1
+                     ? makeBulkJsonResponse(noItems)
+                     : makeBulkJsonResponse(bulkResponseNoErrors())))
+        {
+            var result = sendBulkRequest(httpServer, rootContext).get();
+            Assertions.assertEquals(2, result.responses().size());
+        }
+    }
+
+    @Test
+    public void testBulk200WithNoErrorsFieldAndNoItemsIsNotRetried() throws Exception {
+        // Non-standard response with neither errors nor items field.
+        // No errors field + no items -> NO_ERRORS -> DONE (no retry).
+        var requestCount = new AtomicInteger();
+        String minimal = "{\"took\":1}";
+        try (var rootContext = TestContext.withAllTracking();
+             var httpServer = SimpleHttpServer.makeServer(false, r -> {
+                 requestCount.incrementAndGet();
+                 return makeBulkJsonResponse(minimal);
+             }))
+        {
+            var result = sendBulkRequest(httpServer, rootContext).get();
+            Assertions.assertEquals(1, result.responses().size());
+            Assertions.assertEquals(1, requestCount.get());
+        }
+    }
+
 }
