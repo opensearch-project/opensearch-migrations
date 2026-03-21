@@ -182,4 +182,54 @@ public class OpenSearchDefaultRetryE2ETest {
             Assertions.assertEquals(1, requestCount.get());
         }
     }
+
+    @Test
+    public void testBulk429IsRetried() throws Exception {
+        var requestCount = new AtomicInteger();
+        try (var rootContext = TestContext.withAllTracking();
+             var httpServer = SimpleHttpServer.makeServer(false, r ->
+                 requestCount.incrementAndGet() <= 1
+                     ? new SimpleHttpResponse(Map.of(), "rate limited".getBytes(StandardCharsets.UTF_8), "Too Many Requests", 429)
+                     : makeBulkJsonResponse(bulkResponseNoErrors())))
+        {
+            var result = sendBulkRequest(httpServer, rootContext).get();
+            Assertions.assertEquals(2, result.responses().size());
+            Assertions.assertEquals(429, result.responses().get(0).getRawResponse().status().code());
+            Assertions.assertEquals(200, result.responses().get(1).getRawResponse().status().code());
+        }
+    }
+
+    @Test
+    public void testBulkErrorWithMissingTypeFieldIsRetryable() throws Exception {
+        // Error object without a "type" field -> unknown error -> retryable
+        var requestCount = new AtomicInteger();
+        String noTypeError = "{\"took\":1,\"errors\":true,\"items\":[" +
+            "{\"index\":{\"_id\":\"1\",\"status\":500,\"error\":{\"reason\":\"no type field here\"}}}" +
+            "]}";
+        try (var rootContext = TestContext.withAllTracking();
+             var httpServer = SimpleHttpServer.makeServer(false, r ->
+                 requestCount.incrementAndGet() <= 1
+                     ? makeBulkJsonResponse(noTypeError)
+                     : makeBulkJsonResponse(bulkResponseNoErrors())))
+        {
+            var result = sendBulkRequest(httpServer, rootContext).get();
+            Assertions.assertEquals(2, result.responses().size());
+        }
+    }
+
+    @Test
+    public void testBulk500IsRetried() throws Exception {
+        var requestCount = new AtomicInteger();
+        try (var rootContext = TestContext.withAllTracking();
+             var httpServer = SimpleHttpServer.makeServer(false, r ->
+                 requestCount.incrementAndGet() <= 1
+                     ? new SimpleHttpResponse(Map.of(), "error".getBytes(StandardCharsets.UTF_8), "Internal Server Error", 500)
+                     : makeBulkJsonResponse(bulkResponseNoErrors())))
+        {
+            var result = sendBulkRequest(httpServer, rootContext).get();
+            Assertions.assertEquals(2, result.responses().size());
+            Assertions.assertEquals(500, result.responses().get(0).getRawResponse().status().code());
+            Assertions.assertEquals(200, result.responses().get(1).getRawResponse().status().code());
+        }
+    }
 }

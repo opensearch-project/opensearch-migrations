@@ -171,17 +171,13 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         // since it isn't going to be any kind of response, let alone a bulk one
         if (targetStatusCode.map(code -> code == 200).orElse(false)) {
             var analysis = analyzeBulkResponse(currentResponse.getResponseAsByteBuf());
-            switch (analysis) {
-                case NO_ERRORS:
-                    return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
-                        () -> "no errors found in the bulk response");
-                case ONLY_NON_RETRYABLE_ERRORS:
-                    return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
-                        () -> "bulk response has only non-retryable errors (e.g. version_conflict), not retrying");
-                case HAS_RETRYABLE_ERRORS:
-                    return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.RETRY,
-                        () -> "bulk response has retryable errors, retrying");
+            if (analysis == BulkResponseAnalysis.HAS_RETRYABLE_ERRORS) {
+                return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.RETRY,
+                    () -> "bulk response has retryable errors, retrying");
             }
+            // NO_ERRORS or ONLY_NON_RETRYABLE_ERRORS — nothing to retry
+            return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
+                () -> "bulk response has no retryable errors");
         }
 
         return super.shouldRetry(targetRequestBytes, currentResponse, reconstructedSourceTransactionFuture);
