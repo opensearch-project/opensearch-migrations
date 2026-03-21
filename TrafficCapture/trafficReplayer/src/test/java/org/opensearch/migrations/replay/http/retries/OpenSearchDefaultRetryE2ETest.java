@@ -233,4 +233,25 @@ public class OpenSearchDefaultRetryE2ETest {
         }
     }
 
+    @Test
+    public void testBulk200WithNonJsonBodyIsRetried() throws Exception {
+        // The traffic replayer may target non-OpenSearch endpoints that return 200 with
+        // a non-JSON body (e.g. HTML from a proxy, plain text from a load balancer).
+        // The JSON parse failure in analyzeBulkResponse should treat this as retryable.
+        var requestCount = new AtomicInteger();
+        var htmlBody = "<html><body>Service Unavailable</body></html>";
+        try (var rootContext = TestContext.withAllTracking();
+             var httpServer = SimpleHttpServer.makeServer(false, r ->
+                 requestCount.incrementAndGet() <= 1
+                     ? new SimpleHttpResponse(
+                         Map.of("Content-Type", "text/html", "Content-Length", "" + htmlBody.length()),
+                         htmlBody.getBytes(StandardCharsets.UTF_8), "OK", 200)
+                     : makeBulkJsonResponse(bulkResponseNoErrors())))
+        {
+            var result = sendBulkRequest(httpServer, rootContext).get();
+            Assertions.assertEquals(2, result.responses().size());
+            Assertions.assertEquals(200, result.responses().get(1).getRawResponse().status().code());
+        }
+    }
+
 }
