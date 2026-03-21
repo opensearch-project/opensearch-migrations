@@ -105,6 +105,19 @@ public class OpenSearchDefaultRetryE2ETest {
             }, () -> "cleanup");
     }
 
+    /**
+     * Gets the result and exercises the TrackedFuture diagnostic supplier chain
+     * (via toString) to ensure no exceptions in the tracing lambdas.
+     */
+    private TransformedTargetRequestAndResponseList getResultAndVerifyDiagnostics(
+        TrackedFuture<String, TransformedTargetRequestAndResponseList> future) throws Exception
+    {
+        var result = future.get();
+        // Force evaluation of all diagnostic suppliers in the future chain
+        Assertions.assertDoesNotThrow(() -> future.toString());
+        return result;
+    }
+
     @Test
     public void testRetryableErrorIsRetriedThenSucceeds() throws Exception {
         var requestCount = new AtomicInteger();
@@ -114,7 +127,7 @@ public class OpenSearchDefaultRetryE2ETest {
                      ? makeBulkJsonResponse(bulkResponseWithRetryableError())
                      : makeBulkJsonResponse(bulkResponseNoErrors())))
         {
-            var result = sendBulkRequest(httpServer, rootContext).get();
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
             Assertions.assertEquals(3, result.responses().size());
             // First 2 responses have errors, 3rd succeeds
             Assertions.assertEquals(200, result.responses().get(2).getRawResponse().status().code());
@@ -130,7 +143,7 @@ public class OpenSearchDefaultRetryE2ETest {
                  return makeBulkJsonResponse(bulkResponseWithNonRetryableError());
              }))
         {
-            var result = sendBulkRequest(httpServer, rootContext).get();
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
             // Should NOT retry — only 1 request sent
             Assertions.assertEquals(1, result.responses().size());
             Assertions.assertEquals(1, requestCount.get());
@@ -146,7 +159,7 @@ public class OpenSearchDefaultRetryE2ETest {
                      ? makeBulkJsonResponse(bulkResponseWithMixedErrors())
                      : makeBulkJsonResponse(bulkResponseNoErrors())))
         {
-            var result = sendBulkRequest(httpServer, rootContext).get();
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
             // First response has mixed errors (including retryable) -> retried, second succeeds
             Assertions.assertEquals(2, result.responses().size());
         }
@@ -161,7 +174,7 @@ public class OpenSearchDefaultRetryE2ETest {
                  return makeBulkJsonResponse(bulkResponseWithRetryableError());
              }))
         {
-            var result = sendBulkRequest(httpServer, rootContext).get();
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
             // Should retry up to MAX_RETRIES then give up
             Assertions.assertEquals(DefaultRetry.MAX_RETRIES, result.responses().size());
             Assertions.assertEquals(DefaultRetry.MAX_RETRIES, requestCount.get());
@@ -177,7 +190,7 @@ public class OpenSearchDefaultRetryE2ETest {
                  return makeBulkJsonResponse(bulkResponseNoErrors());
              }))
         {
-            var result = sendBulkRequest(httpServer, rootContext).get();
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
             Assertions.assertEquals(1, result.responses().size());
             Assertions.assertEquals(1, requestCount.get());
         }
@@ -192,7 +205,7 @@ public class OpenSearchDefaultRetryE2ETest {
                      ? new SimpleHttpResponse(Map.of(), "rate limited".getBytes(StandardCharsets.UTF_8), "Too Many Requests", 429)
                      : makeBulkJsonResponse(bulkResponseNoErrors())))
         {
-            var result = sendBulkRequest(httpServer, rootContext).get();
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
             Assertions.assertEquals(2, result.responses().size());
             Assertions.assertEquals(429, result.responses().get(0).getRawResponse().status().code());
             Assertions.assertEquals(200, result.responses().get(1).getRawResponse().status().code());
@@ -212,7 +225,7 @@ public class OpenSearchDefaultRetryE2ETest {
                      ? makeBulkJsonResponse(noTypeError)
                      : makeBulkJsonResponse(bulkResponseNoErrors())))
         {
-            var result = sendBulkRequest(httpServer, rootContext).get();
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
             Assertions.assertEquals(2, result.responses().size());
         }
     }
@@ -226,7 +239,7 @@ public class OpenSearchDefaultRetryE2ETest {
                      ? new SimpleHttpResponse(Map.of(), "error".getBytes(StandardCharsets.UTF_8), "Internal Server Error", 500)
                      : makeBulkJsonResponse(bulkResponseNoErrors())))
         {
-            var result = sendBulkRequest(httpServer, rootContext).get();
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
             Assertions.assertEquals(2, result.responses().size());
             Assertions.assertEquals(500, result.responses().get(0).getRawResponse().status().code());
             Assertions.assertEquals(200, result.responses().get(1).getRawResponse().status().code());
@@ -248,7 +261,7 @@ public class OpenSearchDefaultRetryE2ETest {
                          htmlBody.getBytes(StandardCharsets.UTF_8), "OK", 200)
                      : makeBulkJsonResponse(bulkResponseNoErrors())))
         {
-            var result = sendBulkRequest(httpServer, rootContext).get();
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
             Assertions.assertEquals(2, result.responses().size());
             Assertions.assertEquals(200, result.responses().get(1).getRawResponse().status().code());
         }
@@ -266,7 +279,7 @@ public class OpenSearchDefaultRetryE2ETest {
                      ? makeBulkJsonResponse(noItems)
                      : makeBulkJsonResponse(bulkResponseNoErrors())))
         {
-            var result = sendBulkRequest(httpServer, rootContext).get();
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
             Assertions.assertEquals(2, result.responses().size());
         }
     }
@@ -283,7 +296,7 @@ public class OpenSearchDefaultRetryE2ETest {
                  return makeBulkJsonResponse(minimal);
              }))
         {
-            var result = sendBulkRequest(httpServer, rootContext).get();
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
             Assertions.assertEquals(1, result.responses().size());
             Assertions.assertEquals(1, requestCount.get());
         }
