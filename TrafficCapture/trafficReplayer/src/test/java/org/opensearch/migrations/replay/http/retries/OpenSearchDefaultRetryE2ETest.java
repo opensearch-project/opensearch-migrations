@@ -232,4 +232,25 @@ public class OpenSearchDefaultRetryE2ETest {
             Assertions.assertEquals(200, result.responses().get(1).getRawResponse().status().code());
         }
     }
+
+    @Test
+    public void testBulk200WithNonJsonBodyIsRetried() throws Exception {
+        // A proxy or load balancer may return 200 with a non-JSON body (e.g. HTML or plain text).
+        // The JSON parse failure should be treated as retryable.
+        var requestCount = new AtomicInteger();
+        String plainTextBody = "Too many requests, please try again later";
+        try (var rootContext = TestContext.withAllTracking();
+             var httpServer = SimpleHttpServer.makeServer(false, r ->
+                 requestCount.incrementAndGet() <= 1
+                     ? new SimpleHttpResponse(
+                         Map.of("Content-Type", "text/plain", "Content-Length", "" + plainTextBody.length()),
+                         plainTextBody.getBytes(StandardCharsets.UTF_8), "OK", 200)
+                     : makeBulkJsonResponse(bulkResponseNoErrors())))
+        {
+            var result = sendBulkRequest(httpServer, rootContext).get();
+            Assertions.assertEquals(2, result.responses().size());
+            Assertions.assertEquals(200, result.responses().get(0).getRawResponse().status().code());
+            Assertions.assertEquals(200, result.responses().get(1).getRawResponse().status().code());
+        }
+    }
 }
