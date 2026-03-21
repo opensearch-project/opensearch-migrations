@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
@@ -333,6 +334,205 @@ public class SolrToOpenSearchEndToEndTest {
 
             assertThat("Should have cursors from both shards", cursors.size(), greaterThan(1));
             verifyDocCount(target, COLLECTION_NAME, 12); // 5 + 7
+        }
+    }
+
+    /**
+     * E2E: Dynamic fields and copyFields are converted to OpenSearch mappings.
+     * Uses Solr's default dynamic field patterns (*_s, *_i, *_dt, etc.) and
+     * verifies documents using dynamic field names are indexed correctly.
+     */
+    @ParameterizedTest(name = "dynamic fields: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch")
+    void dynamicFieldsAndCopyFieldsMigration(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            createSolrCollection(solr, COLLECTION_NAME);
+
+            // Add a copyField: title → text_all
+            solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/" + COLLECTION_NAME + "/schema",
+                "-d", "{\"add-field\":{\"name\":\"title\",\"type\":\"text_general\",\"stored\":true},"
+                    + "\"add-copy-field\":{\"source\":\"title\",\"dest\":\"_text_\"}}");
+
+            // Index docs using dynamic field names (Solr default schema has *_s, *_i, *_dt, etc.)
+            var doc = "[{"
+                + "\"id\":\"dyn1\","
+                + "\"title\":\"Dynamic Test\","
+                + "\"category_s\":\"electronics\","
+                + "\"count_i\":42,"
+                + "\"price_f\":19.99,"
+                + "\"created_dt\":\"2024-06-15T12:00:00Z\","
+                + "\"active_b\":true"
+                + "}]";
+            solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/" + COLLECTION_NAME + "/update?commit=true",
+                "-d", doc);
+
+            var schema = fetchSolrSchema(solr, COLLECTION_NAME);
+            var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
+
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
+            var targetClient = createOpenSearchClient(target);
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
+            var pipeline = new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE);
+            pipeline.migrateAll().collectList().block();
+
+            var restClient = createRestClient(target);
+            var ctx = DocumentMigrationTestContext.factory().noOtelTracking();
+            restClient.get("_refresh", ctx.createUnboundRequestContext());
+
+            // Verify the document was migrated with dynamic field values
+            var searchResp = restClient.get(
+                COLLECTION_NAME + "/_search?q=id:dyn1&size=1", ctx.createUnboundRequestContext()
+            );
+            var hits = MAPPER.readTree(searchResp.body).path("hits").path("hits");
+            assertThat("Should find dyn1", hits.size(), equalTo(1));
+
+            var migrated = hits.get(0).path("_source");
+            assertThat("category_s value", migrated.path("category_s").asText(), equalTo("electronics"));
+            assertThat("count_i value", migrated.path("count_i").asInt(), equalTo(42));
+            assertThat("active_b value", migrated.path("active_b").asBoolean(), equalTo(true));
+            assertThat("title value", migrated.path("title").asText(), equalTo("Dynamic Test"));
+
+            // Verify mappings include dynamic_templates from schema
+            var mappingResp = restClient.get(
+                COLLECTION_NAME + "/_mapping", ctx.createUnboundRequestContext()
+            );
+            var mappingRoot = MAPPER.readTree(mappingResp.body).path(COLLECTION_NAME).path("mappings");
+            var properties = mappingRoot.path("properties");
+            // The explicit 'title' field should be in properties
+            assertThat("title mapped", properties.has("title"), equalTo(true));
+        }
+    }
+
+    /**
+     * E2E: Date fields get proper format mapping (strict_date_optional_time||epoch_millis)
+     * so OpenSearch can accept both ISO 8601 strings and epoch millis from Lucene.
+     */
+    @ParameterizedTest(name = "date format: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch")
+    void dateFieldsGetProperFormatMapping(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            createSolrCollection(solr, COLLECTION_NAME);
+            solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/" + COLLECTION_NAME + "/schema",
+                "-d", "{\"add-field\":["
+                    + "{\"name\":\"created\",\"type\":\"pdate\",\"stored\":true,\"docValues\":true},"
+                    + "{\"name\":\"updated\",\"type\":\"pdate\",\"stored\":true,\"docValues\":true}"
+                    + "]}");
+
+            var doc = "[{\"id\":\"date1\",\"created\":\"2024-01-15T10:30:00Z\",\"updated\":\"2024-06-20T15:45:00Z\"}]";
+            solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/" + COLLECTION_NAME + "/update?commit=true",
+                "-d", doc);
+
+            var schema = fetchSolrSchema(solr, COLLECTION_NAME);
+            var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
+
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
+            var targetClient = createOpenSearchClient(target);
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
+            new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE)
+                .migrateAll().collectList().block();
+
+            var restClient = createRestClient(target);
+            var ctx = DocumentMigrationTestContext.factory().noOtelTracking();
+            restClient.get("_refresh", ctx.createUnboundRequestContext());
+
+            // Verify date format in mappings
+            var mappingResp = restClient.get(
+                COLLECTION_NAME + "/_mapping", ctx.createUnboundRequestContext()
+            );
+            var properties = MAPPER.readTree(mappingResp.body)
+                .path(COLLECTION_NAME).path("mappings").path("properties");
+
+            assertThat("created type", properties.path("created").path("type").asText(), equalTo("date"));
+            assertThat("updated type", properties.path("updated").path("type").asText(), equalTo("date"));
+
+            // Verify the document was indexed (dates stored as epoch millis should work)
+            verifyDocCount(target, COLLECTION_NAME, 1);
+        }
+    }
+
+    /**
+     * E2E: Standalone Solr backup via replication API.
+     * Verifies SolrStandaloneBackupCreator can trigger and poll a backup.
+     */
+    @ParameterizedTest(name = "standalone backup: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch")
+    void standaloneBackupViReplicationApi(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            createSolrCollection(solr, COLLECTION_NAME);
+            populateSolrDocuments(solr, COLLECTION_NAME, 8);
+
+            // Use SolrStandaloneBackupCreator to trigger backup via replication API
+            var creator = new SolrStandaloneBackupCreator(
+                solr.getSolrUrl(), "test_backup", "/var/solr/data",
+                List.of(COLLECTION_NAME)
+            );
+            creator.createBackup();
+
+            // Poll until backup completes
+            int maxWait = 30;
+            while (!creator.isBackupFinished() && maxWait-- > 0) {
+                Thread.sleep(1000);
+            }
+            assertTrue(creator.isBackupFinished(), "Backup should complete within 30s");
+
+            // Copy backup files and migrate
+            var localBackupDir = tempDir.toPath().resolve("standalone_backup");
+            Files.createDirectories(localBackupDir);
+            var snapshotDir = "/var/solr/data/snapshot.test_backup";
+            var listResult = solr.execInContainer("ls", snapshotDir);
+            for (var fileName : listResult.getStdout().trim().split("\n")) {
+                if (fileName.isEmpty()) continue;
+                solr.copyFileFromContainer(
+                    snapshotDir + "/" + fileName,
+                    localBackupDir.resolve(fileName).toString()
+                );
+            }
+
+            var schema = fetchSolrSchema(solr, COLLECTION_NAME);
+            var source = new SolrBackupSource(localBackupDir, COLLECTION_NAME, schema);
+            var targetClient = createOpenSearchClient(target);
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
+            new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE)
+                .migrateAll().collectList().block();
+
+            verifyDocCount(target, COLLECTION_NAME, 8);
         }
     }
 

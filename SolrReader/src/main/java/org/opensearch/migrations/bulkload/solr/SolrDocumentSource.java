@@ -132,8 +132,12 @@ public class SolrDocumentSource implements DocumentSource {
      */
     private Map<String, Object> buildSourceConfig(JsonNode schema) {
         var schemaNode = schema.path("schema");
-        var fields = schemaNode.path("fields");
-        var mappings = SolrSchemaConverter.convertToOpenSearchMappings(fields);
+        var mappings = SolrSchemaConverter.convertToOpenSearchMappings(
+            schemaNode.path("fields"),
+            schemaNode.path("dynamicFields"),
+            schemaNode.path("copyFields"),
+            schemaNode.path("fieldTypes")
+        );
         return Map.of(
             CollectionMetadata.ES_MAPPINGS, mappings,
             "solr.schema", schemaNode

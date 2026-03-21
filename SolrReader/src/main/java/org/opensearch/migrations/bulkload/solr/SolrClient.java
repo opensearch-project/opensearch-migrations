@@ -109,6 +109,16 @@ public class SolrClient implements AutoCloseable {
         }
     }
 
+    /** Check if this Solr instance is running in SolrCloud mode. */
+    public boolean isSolrCloud() {
+        try {
+            var node = getJson(baseUrl + "/solr/admin/collections?action=LIST&wt=json");
+            return node.has("collections");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private JsonNode getJson(String url) throws IOException {
         return getJsonWithRetry(url, 0);
     }
