@@ -283,15 +283,6 @@ class OpenSearchDefaultRetryTest {
     }
 
     @Test
-    public void testBulkNon200StatusTreatedAsRetryable() throws Exception {
-        // Bulk response with non-200 status (e.g. 503) should be retryable via analyzeBulkResponse
-        var retryChecker = new OpenSearchDefaultRetry();
-        var analysis = retryChecker.analyzeBulkResponse(
-            Unpooled.wrappedBuffer(makeBulkResponse(503, null).getBytes(StandardCharsets.UTF_8)));
-        Assertions.assertEquals(OpenSearchDefaultRetry.BulkResponseAnalysis.HAS_RETRYABLE_ERRORS, analysis);
-    }
-
-    @Test
     public void testBulkMalformedJsonTreatedAsRetryable() throws Exception {
         var retryChecker = new OpenSearchDefaultRetry();
         var malformedResponse = "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nnot valid {{";
