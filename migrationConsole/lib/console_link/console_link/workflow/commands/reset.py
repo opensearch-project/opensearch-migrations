@@ -70,7 +70,7 @@ def _patch_teardown(namespace, plural, name):
         return False
 
 
-def _show_resources(namespace, crds):
+def _show_resources(crds):
     """List mode: show all migration CRDs with friendly display names."""
     click.echo("Migration resources:")
     for plural, name, phase in crds:
@@ -180,7 +180,7 @@ def reset_command(ctx, path, reset_all, workflow_name, argo_server, namespace, i
             return
 
         if path is None and not reset_all:
-            _show_resources(namespace, crds)
+            _show_resources(crds)
             return
 
         # Find CRDs to patch
