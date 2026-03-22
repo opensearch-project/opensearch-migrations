@@ -22,8 +22,6 @@ from ..tree_utils import (
     filter_tree_nodes,
     display_workflow_tree,
     get_node_input_parameter,
-    get_step_status_output,
-    ArtifactRef,
     WorkflowDisplayer
 )
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
@@ -135,7 +133,10 @@ class StatusCommandHandler:
         # Pre-resolve artifact references in workflow data so the display layer
         # only deals with plain strings.  Large outputs (e.g. migration status)
         # are stored as S3 artifacts; we fetch them here via the Argo Server API.
-        self._resolve_artifacts_in_workflow_data(workflow_data, argo_server, namespace, insecure)
+        self.service.resolve_workflow_artifacts(
+            workflow_data, argo_server, namespace,
+            token=self.data_fetcher.token, insecure=insecure
+        )
 
         # Extract status info from workflow data
         status = workflow_data.get('status', {})
@@ -148,36 +149,6 @@ class StatusCommandHandler:
             status.get('finishedAt'),
             filtered_tree,
             workflow_data)
-
-    def _resolve_artifacts_in_workflow_data(self, workflow_data: Dict[str, Any],
-                                            argo_server: str, namespace: str,
-                                            insecure: bool) -> None:
-        """Resolve artifact-backed statusOutput values into inline parameters.
-
-        Mutates workflow_data in place so downstream code only sees plain strings.
-        """
-        workflow_name = workflow_data.get('metadata', {}).get('name', '')
-        token = self.data_fetcher.token
-        nodes = workflow_data.get('status', {}).get('nodes', {})
-
-        for node_id, node in nodes.items():
-            result = get_step_status_output(workflow_data, node_id)
-            if not isinstance(result, ArtifactRef):
-                continue
-            content = self.service.get_artifact_content(
-                workflow_name=workflow_name,
-                node_id=result.node_id,
-                artifact_name=result.artifact_name,
-                namespace=namespace,
-                argo_server=argo_server,
-                token=token,
-                insecure=insecure
-            )
-            if content is not None:
-                # Inject as a parameter so display_workflow_tree reads it directly
-                outputs = node.setdefault('outputs', {})
-                params = outputs.setdefault('parameters', [])
-                params.append({'name': 'statusOutput', 'value': content})
 
 
 class WorkflowDataFetcher:

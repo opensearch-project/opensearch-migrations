@@ -798,6 +798,43 @@ class WorkflowService:
             error=error_msg
         )
 
+    def resolve_workflow_artifacts(
+        self,
+        workflow_data: Dict[str, Any],
+        argo_server: str,
+        namespace: str,
+        token: Optional[str] = None,
+        insecure: bool = False
+    ) -> None:
+        """Resolve artifact-backed statusOutput values into inline parameters.
+
+        Mutates workflow_data in place so downstream code only sees plain strings.
+        For each node that has a statusOutput artifact, fetches the content from
+        the Argo Server API and injects it as a parameter.
+        """
+        from ..tree_utils import get_step_status_output, ArtifactRef
+
+        workflow_name = workflow_data.get('metadata', {}).get('name', '')
+        nodes = workflow_data.get('status', {}).get('nodes', {})
+
+        for node_id, node in nodes.items():
+            result = get_step_status_output(workflow_data, node_id)
+            if not isinstance(result, ArtifactRef):
+                continue
+            content = self.get_artifact_content(
+                workflow_name=workflow_name,
+                node_id=result.node_id,
+                artifact_name=result.artifact_name,
+                namespace=namespace,
+                argo_server=argo_server,
+                token=token,
+                insecure=insecure
+            )
+            if content is not None:
+                outputs = node.setdefault('outputs', {})
+                params = outputs.setdefault('parameters', [])
+                params.append({'name': 'statusOutput', 'value': content})
+
     def get_artifact_content(
         self,
         workflow_name: str,
