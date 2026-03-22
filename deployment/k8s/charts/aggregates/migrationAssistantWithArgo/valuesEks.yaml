@@ -125,13 +125,9 @@ otelConfiguration:
 charts:
   argo-workflows:
     values:
-      useStaticCredentials: false
       artifactRepository:
         s3:
-          insecure: false
           useSDKCreds: true
-          accessKeySecret: null
-          secretKeySecret: null
 
   fluent-bit:
     values:
