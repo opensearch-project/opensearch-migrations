@@ -410,4 +410,42 @@ class OpenSearchDefaultRetryTest {
                 determination.get());
         }
     }
+
+    @Test
+    public void testStreamingShortCircuitsOnErrorsFalse() {
+        // Feed "errors":false in the first chunk, then a large items payload in a second chunk.
+        // The analyzer should resolve after the first chunk without needing the second.
+        var analyzer = new OpenSearchDefaultRetry.BulkResponseAnalyzer();
+        var channel = new io.netty.channel.embedded.EmbeddedChannel(analyzer);
+
+        var chunk1 = "{\"errors\":false,\"items\":[";
+        channel.writeInbound(new io.netty.handler.codec.http.DefaultHttpContent(
+            Unpooled.wrappedBuffer(chunk1.getBytes(StandardCharsets.UTF_8))));
+
+        // Result should already be determined after first chunk — no need to see items
+        Assertions.assertNotNull(analyzer.getAnalysis(),
+            "Streaming analyzer should resolve after seeing errors:false without waiting for items");
+        Assertions.assertEquals(OpenSearchDefaultRetry.BulkResponseAnalysis.NO_ERRORS, analyzer.getAnalysis());
+
+        channel.finishAndReleaseAll();
+    }
+
+    @Test
+    public void testStreamingShortCircuitsOnFirstRetryableError() {
+        // Feed errors:true + first item with retryable error. Analyzer should resolve
+        // without needing to see remaining items.
+        var analyzer = new OpenSearchDefaultRetry.BulkResponseAnalyzer();
+        var channel = new io.netty.channel.embedded.EmbeddedChannel(analyzer);
+
+        var chunk1 = "{\"errors\":true,\"items\":[" +
+            "{\"index\":{\"_id\":\"1\",\"error\":{\"type\":\"unavailable_shards_exception\",\"reason\":\"test\"}}},";
+        channel.writeInbound(new io.netty.handler.codec.http.DefaultHttpContent(
+            Unpooled.wrappedBuffer(chunk1.getBytes(StandardCharsets.UTF_8))));
+
+        Assertions.assertNotNull(analyzer.getAnalysis(),
+            "Streaming analyzer should resolve after seeing first retryable error");
+        Assertions.assertEquals(OpenSearchDefaultRetry.BulkResponseAnalysis.HAS_RETRYABLE_ERRORS, analyzer.getAnalysis());
+
+        channel.finishAndReleaseAll();
+    }
 }
