@@ -302,4 +302,31 @@ public class OpenSearchDefaultRetryE2ETest {
         }
     }
 
+    @Test
+    public void testStreamingAnalysisShortCircuitsOnErrorsFalse() throws Exception {
+        // Verify the analyzer can resolve with "errors":false without needing the full items array.
+        // Build a response where "errors":false appears before a large items array.
+        var sb = new StringBuilder();
+        sb.append("{\"errors\":false,\"took\":1,\"items\":[");
+        for (int i = 0; i < 10_000; i++) {
+            if (i > 0) sb.append(",");
+            sb.append("{\"index\":{\"_id\":\"").append(i).append("\",\"result\":\"created\",\"status\":201}}");
+        }
+        sb.append("]}");
+        var largeBody = sb.toString();
+
+        var requestCount = new AtomicInteger();
+        try (var rootContext = TestContext.withAllTracking();
+             var httpServer = SimpleHttpServer.makeServer(false, r -> {
+                 requestCount.incrementAndGet();
+                 return makeBulkJsonResponse(largeBody);
+             }))
+        {
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
+            // errors:false -> NO_ERRORS -> DONE, no retry
+            Assertions.assertEquals(1, result.responses().size());
+            Assertions.assertEquals(1, requestCount.get());
+        }
+    }
+
 }
