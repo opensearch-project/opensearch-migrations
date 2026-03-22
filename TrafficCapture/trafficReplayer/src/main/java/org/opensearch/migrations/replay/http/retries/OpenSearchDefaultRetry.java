@@ -45,7 +45,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
      * Uses Jackson's non-blocking parser to avoid buffering the entire response body.
      * Short-circuits as soon as a determination can be made (e.g. "errors":false).
      */
-    private static class BulkResponseAnalyzer extends ChannelInboundHandlerAdapter {
+    static class BulkResponseAnalyzer extends ChannelInboundHandlerAdapter {
         private final JsonParser parser;
         private final ByteBufferFeeder feeder;
         private BulkResponseAnalysis result = null;
