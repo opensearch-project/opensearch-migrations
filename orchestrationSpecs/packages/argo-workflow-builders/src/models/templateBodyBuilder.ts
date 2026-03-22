@@ -15,6 +15,8 @@ import {PlainObject} from "./plainObject";
 import {AllowLiteralOrExpression, BaseExpression, isExpression, toExpression} from "./expression";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
 import {SynchronizationConfig} from "./synchronization";
+import {INTERNAL} from "./taskBuilder";
+import type {KeyFor} from "./taskBuilder";
 
 export type RetryParameters = GenericScope;
 
@@ -117,7 +119,8 @@ export abstract class TemplateBodyBuilder<
         protected readonly bodyScope: BodyScope,
         public readonly outputsScope: OutputParamsScope,
         protected readonly synchronization: SynchronizationConfig | undefined,
-        protected readonly rebind: TemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext>
+        protected readonly rebind: TemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext>,
+        protected onExitTemplateName: string | undefined = undefined
     ) {}
 
     addOutputs<NewOutputScope extends OutputParametersRecord>(
@@ -218,12 +221,30 @@ export abstract class TemplateBodyBuilder<
 
     protected abstract getBody(): Record<string, any>;
 
+    /**
+     * Set an onExit handler that runs when this template completes (success or failure).
+     * References a template within the same WorkflowTemplate by name.
+     */
+    public addOnExit<
+        K extends KeyFor<ParentWorkflowScope, typeof INTERNAL>
+    >(
+        source: typeof INTERNAL,
+        key: K
+    ): this {
+        if (this.onExitTemplateName !== undefined) {
+            throw new Error(`onExit handler already set to "${this.onExitTemplateName}"; only one onExit handler is allowed per template`);
+        }
+        this.onExitTemplateName = key as string;
+        return this;
+    }
+
     getFullTemplateScope() {
         return {
             inputs: this.inputsScope,
             outputs: this.outputsScope,
             body: this.getBody(),
-            synchronization: this.synchronization
+            synchronization: this.synchronization,
+            onExit: this.onExitTemplateName
         };
     }
 }
@@ -298,7 +319,8 @@ export abstract class RetryableTemplateBodyBuilder<
             outputs: this.outputsScope,
             retryStrategy: this.retryParameters,
             body: this.getBody(),
-            synchronization: this.synchronization
+            synchronization: this.synchronization,
+            onExit: this.onExitTemplateName
         };
     }
 }

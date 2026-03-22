@@ -263,15 +263,11 @@
         }
       },
       {
-        "name": "deleterfscoordinator",
+        "name": "deleterfscoordinatorresources",
         "inputs": {
           "parameters": [
             {
               "name": "clusterName"
-            },
-            {
-              "name": "groupName_view",
-              "value": "Stop RFS OpenSearch cluster for worker coordination"
             }
           ]
         },
@@ -301,10 +297,30 @@
               },
               "name": "deleteService"
             }
-          ],
+          ]
+        ],
+        "onExit": "deleterfscoordinatorsecret",
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deleterfscoordinator",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "groupName_view",
+              "value": "Stop RFS OpenSearch cluster for worker coordination"
+            }
+          ]
+        },
+        "steps": [
           [
             {
-              "template": "deleterfscoordinatorsecret",
+              "template": "deleterfscoordinatorresources",
               "arguments": {
                 "parameters": [
                   {
@@ -313,7 +329,7 @@
                   }
                 ]
               },
-              "name": "deleteSecret"
+              "name": "deleteRfsCoordinatorResources"
             }
           ]
         ],

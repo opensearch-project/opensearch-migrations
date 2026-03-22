@@ -314,9 +314,8 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
-    .addTemplate("deleteRfsCoordinator", t => t
+    .addTemplate("deleteRfsCoordinatorResources", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addOptionalInput("groupName_view", c => "Stop RFS OpenSearch cluster for worker coordination")
         .addSteps(b => b
             .addStepGroup(g => g
                 .addStep("deleteStatefulSet", INTERNAL, "deleteRfsCoordinatorStatefulSet", c =>
@@ -324,10 +323,16 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
                 .addStep("deleteService", INTERNAL, "deleteRfsCoordinatorService", c =>
                     c.register({clusterName: b.inputs.clusterName}))
             )
-            .addStepGroup(g => g
-                .addStep("deleteSecret", INTERNAL, "deleteRfsCoordinatorSecret", c =>
-                    c.register({clusterName: b.inputs.clusterName}))
-            )
+        )
+        .addOnExit(INTERNAL, "deleteRfsCoordinatorSecret")
+    )
+
+    .addTemplate("deleteRfsCoordinator", t => t
+        .addRequiredInput("clusterName", typeToken<string>())
+        .addOptionalInput("groupName_view", c => "Stop RFS OpenSearch cluster for worker coordination")
+        .addSteps(b => b
+            .addStep("deleteRfsCoordinatorResources", INTERNAL, "deleteRfsCoordinatorResources", c =>
+                c.register({clusterName: b.inputs.clusterName}))
         )
     )
 

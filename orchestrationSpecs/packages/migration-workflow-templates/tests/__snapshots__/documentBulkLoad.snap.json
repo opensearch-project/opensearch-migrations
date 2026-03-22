@@ -578,22 +578,9 @@
               },
               "name": "waitForCompletion"
             }
-          ],
-          [
-            {
-              "template": "stophistoricalbackfill",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "sessionName",
-                    "value": "{{inputs.parameters.sessionName}}"
-                  }
-                ]
-              },
-              "name": "stopHistoricalBackfill"
-            }
           ]
         ],
+        "onExit": "stophistoricalbackfill",
         "outputs": {
           "parameters": []
         }
@@ -611,7 +598,43 @@
         }
       },
       {
-        "name": "setupandrunbulkload",
+        "name": "cleanuprfscoordinator",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "documentBackfillConfig"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "deleterfscoordinator",
+                "name": "rfs-coordinator-cluster"
+              },
+              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}"
+                  }
+                ]
+              },
+              "name": "cleanupRfsCoordinator"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "setupandrunbulkloadinternal",
         "inputs": {
           "parameters": [
             {
@@ -735,23 +758,119 @@
               },
               "name": "runBulkLoad"
             }
-          ],
+          ]
+        ],
+        "onExit": "cleanuprfscoordinator",
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "setupandrunbulkload",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sourceVersion"
+            },
+            {
+              "name": "sourceLabel"
+            },
+            {
+              "name": "targetConfig"
+            },
+            {
+              "name": "snapshotConfig"
+            },
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "documentBackfillConfig"
+            },
+            {
+              "name": "migrationLabel"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageCoordinatorClusterLocation"
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy"
+            }
+          ]
+        },
+        "steps": [
           [
             {
-              "templateRef": {
-                "template": "deleterfscoordinator",
-                "name": "rfs-coordinator-cluster"
-              },
-              "when": "{{=!(fromJSON(inputs.parameters.documentBackfillConfig)['useTargetClusterForWorkCoordination'])}}",
+              "template": "setupandrunbulkloadinternal",
               "arguments": {
                 "parameters": [
                   {
-                    "name": "clusterName",
-                    "value": "{{=inputs.parameters.sessionName+'-rfs-coordinator'}}"
+                    "name": "sourceVersion",
+                    "value": "{{inputs.parameters.sourceVersion}}"
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceLabel}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "documentBackfillConfig",
+                    "value": "{{inputs.parameters.documentBackfillConfig}}"
+                  },
+                  {
+                    "name": "migrationLabel",
+                    "value": "{{inputs.parameters.migrationLabel}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
                   }
                 ]
               },
-              "name": "cleanupRfsCoordinator"
+              "name": "setupAndRunBulkLoadInternal"
             }
           ]
         ],

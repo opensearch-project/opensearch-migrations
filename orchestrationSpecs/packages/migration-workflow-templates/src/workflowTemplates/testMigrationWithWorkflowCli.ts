@@ -131,14 +131,19 @@ fi
                 c.register({
                     ...selectInputsForRegister(b, c),
                     migrationConfigBase64: b.inputs.migrationConfigBase64,
-                })
+                }),
+                {continueOn: {failed: true}}
             )
 
             // Step 2: Monitor workflow to completion (with retry on exit code 1)
             .addStep("monitorWorkflow", INTERNAL, "monitorWorkflow", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                })
+                }),
+                {
+                    continueOn: {failed: true},
+                    when: c => ({templateExp: expr.equals(c.configureAndSubmitWorkflow.status, "Succeeded")})
+                }
             )
 
             // Step 3: Evaluate workflow result (check for SUCCESS in output)
@@ -146,7 +151,11 @@ fi
                 c.register({
                     ...selectInputsForRegister(b, c),
                     monitorResult: c.steps.monitorWorkflow.outputs.monitorResult,
-                })
+                }),
+                {
+                    continueOn: {failed: true},
+                    when: c => ({templateExp: expr.equals(c.monitorWorkflow.status, "Succeeded")})
+                }
             )
 
             // Step 4: Delete the migration workflow (skipped when keepMigrationWorkflow=true)
