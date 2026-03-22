@@ -469,7 +469,9 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
             # Get statusOutput for all nodes that might have it
             status_output = get_step_status_output(workflow_data, node['id']) if workflow_data else ""
 
-            # Resolve artifact references
+            # Resolve artifact references — large outputs (e.g. migration status)
+            # are stored as S3 artifacts rather than inline parameters. The resolver
+            # fetches content via the Argo Server artifact API on demand.
             if isinstance(status_output, ArtifactRef) and artifact_resolver:
                 status_output = artifact_resolver(status_output) or ""
             elif isinstance(status_output, ArtifactRef):

@@ -370,6 +370,8 @@ export class ContainerBuilder<
             this.outputArtifacts);
     }
 
+    // TODO: Add duplicate-name blocking (like addExpressionOutput's UniqueNameConstraintAtDeclaration)
+    // so that calling addArtifactOutput with the same name twice is a compile-time error.
     addArtifactOutput(
         name: string, path: string
     ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands> {

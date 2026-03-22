@@ -320,18 +320,15 @@ charts:
     repository: "https://argoproj.github.io/argo-helm"
     values:
       fullnameOverride: "argo"
-      useStaticCredentials: true
+      # Credentials are configured per-environment:
+      # - valuesForLocalK8s.yaml: static credentials for LocalStack
+      # - valuesEks.yaml: SDK credentials (IAM roles)
+      useStaticCredentials: false
       artifactRepository:
         archiveLogs: true
         s3:
-          insecure: true
+          insecure: false
           keyFormat: "argo-artifacts/{{workflow.name}}/{{pod.name}}"
-          accessKeySecret:
-            name: argo-artifact-s3-creds
-            key: accessKey
-          secretKeySecret:
-            name: argo-artifact-s3-creds
-            key: secretKey
       images:
         # Override appVersion v3.7.8 to v3.7.9 to incorporate retry delay overflow fix
         # https://github.com/argoproj/argo-workflows/pull/15277
