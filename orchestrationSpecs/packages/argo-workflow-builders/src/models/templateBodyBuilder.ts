@@ -231,6 +231,9 @@ export abstract class TemplateBodyBuilder<
         source: typeof INTERNAL,
         key: K
     ): this {
+        if (this.onExitTemplateName !== undefined) {
+            throw new Error(`onExit handler already set to "${this.onExitTemplateName}"; only one onExit handler is allowed per template`);
+        }
         this.onExitTemplateName = key as string;
         return this;
     }
