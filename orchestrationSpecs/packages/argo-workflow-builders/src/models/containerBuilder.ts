@@ -10,7 +10,7 @@
  * working automatically without forcing developers to manually specify types.
  */
 
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
+import {InputParametersRecord, OutputArtifactDef, OutputArtifactsRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {
     DataOrConfigMapScope,
     DataScope, ExpressionOrConfigMapValue,
@@ -22,7 +22,7 @@ import {
 } from "./workflowTypes";
 import {inputsToEnvVars, TypescriptError} from "../utils";
 import {RetryParameters, RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
-import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint} from "./scopeConstraints";
+import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint, UniqueNameConstraintAtDeclaration} from "./scopeConstraints";
 import {PlainObject} from "./plainObject";
 import {AllowLiteralOrExpression, BaseExpression, expr, toExpression} from "./expression";
 import {TypeToken} from "./sharedTypes";
@@ -164,13 +164,14 @@ export class ContainerBuilder<
     VolumeScope extends GenericScope,
     EnvScope extends DataOrConfigMapScope,
     OutputParamsScope extends OutputParametersRecord,
-    PodConfigBrands extends {} = {}
+    PodConfigBrands extends {} = {},
+    ArtifactScope extends GenericScope = {}
 > extends RetryableTemplateBodyBuilder<
     ParentWorkflowScope,
     InputParamsScope,
     ContainerScope,
     OutputParamsScope,
-    ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, any, PodConfigBrands>,
+    ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, any, PodConfigBrands, any>,
     GenericScope
 > {
     constructor(
@@ -182,7 +183,8 @@ export class ContainerBuilder<
         outputsScope: OutputParamsScope,
         retryParameters: RetryParameters,
         synchronization: SynchronizationConfig | undefined,
-        public readonly podConfig: PodConfigData = {}
+        public readonly podConfig: PodConfigData = {},
+        outputArtifacts: OutputArtifactsRecord = {}
     ) {
         const templateRebind: RetryableTemplateRebinder<
             ParentWorkflowScope,
@@ -190,10 +192,10 @@ export class ContainerBuilder<
             GenericScope
         > = (ctx, inputs, body, outputs, retry, synchronization) =>
             new ContainerBuilder(
-                ctx, inputs, body, this.volumeScope, this.envScope, outputs, retry, synchronization, this.podConfig
+                ctx, inputs, body, this.volumeScope, this.envScope, outputs, retry, synchronization, this.podConfig, this.outputArtifacts
             ) as any;
 
-        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind, outputArtifacts);
     }
 
     /** Helper to create a new builder with updated fields */
@@ -221,7 +223,8 @@ export class ContainerBuilder<
             updates.outputs ?? this.outputsScope as unknown as NewOutput,
             updates.retry ?? this.retryParameters,
             updates.sync !== undefined ? updates.sync : this.synchronization,
-            updates.podConfig ?? this.podConfig
+            updates.podConfig ?? this.podConfig,
+            this.outputArtifacts
         );
     }
 
@@ -282,7 +285,8 @@ export class ContainerBuilder<
             this.outputsScope,
             this.retryParameters,
             this.synchronization,
-            this.podConfig
+            this.podConfig,
+            this.outputArtifacts
         );
     }
 
@@ -296,7 +300,10 @@ export class ContainerBuilder<
             OutputParamsScope,
             PodConfigBrands
         > {
-        return new ContainerBuilder(this.parentWorkflowScope, this.inputsScope, {
+        return new ContainerBuilder(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            {
                 ...this.bodyScope,
                 command: strArr.map(s=>toExpression(s))
             },
@@ -305,7 +312,8 @@ export class ContainerBuilder<
             this.outputsScope,
             this.retryParameters,
             this.synchronization,
-            this.podConfig
+            this.podConfig,
+            this.outputArtifacts
         );
     }
 
@@ -319,7 +327,10 @@ export class ContainerBuilder<
             OutputParamsScope,
             PodConfigBrands
         > {
-        return new ContainerBuilder(this.parentWorkflowScope, this.inputsScope, {
+        return new ContainerBuilder(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            {
                 ...this.bodyScope,
                 args: a
             },
@@ -328,12 +339,13 @@ export class ContainerBuilder<
             this.outputsScope,
             this.retryParameters,
             this.synchronization,
-            this.podConfig
+            this.podConfig,
+            this.outputArtifacts
         );
     }
 
     addPathOutput<T extends PlainObject, Name extends string>(
-        name: Name, pathValue: string, t: TypeToken<T>, descriptionValue?: string
+        name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>, pathValue: string, t: TypeToken<T>, descriptionValue?: string
     ):
         ContainerBuilder<
             ParentWorkflowScope,
@@ -371,7 +383,30 @@ export class ContainerBuilder<
             newOutputs,
             this.retryParameters,
             this.synchronization,
-            this.podConfig);
+            this.podConfig,
+            this.outputArtifacts);
+    }
+
+    addArtifactOutput<Name extends string>(
+        name: UniqueNameConstraintAtDeclaration<Name, ArtifactScope>,
+        path: string
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands, ExtendScope<ArtifactScope, { [K in Name]: OutputArtifactDef }>> {
+        const newArtifacts: OutputArtifactsRecord = {
+            ...this.outputArtifacts,
+            [name as string]: { name, path, archive: { none: {} } } as OutputArtifactDef
+        };
+        return new ContainerBuilder(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            this.bodyScope,
+            this.volumeScope,
+            this.envScope,
+            this.outputsScope,
+            this.retryParameters,
+            this.synchronization,
+            this.podConfig,
+            newArtifacts
+        ) as any;
     }
 
     addVolumesFromRecord<
@@ -396,7 +431,9 @@ export class ContainerBuilder<
             this.outputsScope,
             this.retryParameters,
             this.synchronization,
-            this.podConfig);
+            this.podConfig,
+            this.outputArtifacts
+        );
     }
 
     addEnvVar<Name extends string>(
@@ -440,7 +477,9 @@ export class ContainerBuilder<
             this.outputsScope,
             this.retryParameters,
             this.synchronization,
-            this.podConfig);
+            this.podConfig,
+            this.outputArtifacts
+        );
     }
 
     addEnvVars<NewEnvScope extends DataOrConfigMapScope>(
@@ -459,7 +498,8 @@ export class ContainerBuilder<
             this.outputsScope,
             this.retryParameters,
             this.synchronization,
-            this.podConfig
+            this.podConfig,
+            this.outputArtifacts
         );
         return builderFn(emptyEnvBuilder) as any;
     }
@@ -494,7 +534,8 @@ export class ContainerBuilder<
             this.outputsScope,
             this.retryParameters,
             this.synchronization,
-            this.podConfig
+            this.podConfig,
+            this.outputArtifacts
         );
     }
 
@@ -535,7 +576,8 @@ export class ContainerBuilder<
             this.outputsScope,
             this.retryParameters,
             this.synchronization,
-            this.podConfig
+            this.podConfig,
+            this.outputArtifacts
         ) as any;
     }
 
@@ -563,7 +605,8 @@ export class ContainerBuilder<
             this.outputsScope,
             this.retryParameters,
             this.synchronization,
-            this.podConfig
+            this.podConfig,
+            this.outputArtifacts
         );
     }
 
