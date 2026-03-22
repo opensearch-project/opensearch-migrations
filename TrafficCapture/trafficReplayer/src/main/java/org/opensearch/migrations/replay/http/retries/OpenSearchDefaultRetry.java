@@ -1,8 +1,6 @@
 package org.opensearch.migrations.replay.http.retries;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -14,7 +12,10 @@ import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.core.async.ByteBufferFeeder;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -22,6 +23,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -38,9 +40,34 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         ONLY_NON_RETRYABLE_ERRORS
     }
 
+    /**
+     * Streaming JSON analyzer that processes bulk response chunks as they arrive.
+     * Uses Jackson's non-blocking parser to avoid buffering the entire response body.
+     * Short-circuits as soon as a determination can be made (e.g. "errors":false).
+     */
     private static class BulkResponseAnalyzer extends ChannelInboundHandlerAdapter {
-        private final ByteArrayOutputStream bodyBytes = new ByteArrayOutputStream();
+        private final JsonParser parser;
+        private final ByteBufferFeeder feeder;
         private BulkResponseAnalysis result = null;
+
+        // Parsing state
+        private Boolean errorsFieldValue = null;
+        private boolean inItems = false;
+        private int itemDepth = 0;
+        private boolean inErrorObject = false;
+        private int errorObjectDepth = 0;
+        private boolean hasAnyError = false;
+        private boolean hasRetryableError = false;
+        private String pendingFieldName = null;
+
+        private boolean foundTypeInCurrentError = false;
+
+        @SneakyThrows
+        public BulkResponseAnalyzer() {
+            var jsonFactory = new JsonFactory();
+            parser = jsonFactory.createNonBlockingByteBufferParser();
+            feeder = (ByteBufferFeeder) parser.getNonBlockingInputFeeder();
+        }
 
         BulkResponseAnalysis getAnalysis() {
             return result;
@@ -49,80 +76,130 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         @Override
         public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
             if (msg instanceof HttpContent && result == null) {
-                var content = ((HttpContent) msg).content();
-                var readable = content.readableBytes();
-                if (readable > 0) {
-                    var bytes = new byte[readable];
-                    content.getBytes(content.readerIndex(), bytes);
-                    bodyBytes.write(bytes);
-                }
+                feeder.feedInput(((HttpContent) msg).content().nioBuffer());
+                consumeTokens();
                 if (msg instanceof LastHttpContent) {
-                    result = analyzeBody(bodyBytes.toString(StandardCharsets.UTF_8));
+                    feeder.endOfInput();
+                    consumeTokens();
+                    if (result == null) {
+                        result = finalizeAnalysis();
+                    }
                 }
             }
             ctx.fireChannelRead(msg);
         }
 
-        private BulkResponseAnalysis analyzeBody(String body) {
+        private void consumeTokens() {
+            if (result != null) {
+                return;
+            }
             try {
-                return doAnalyzeBody(body);
+                parseTokens();
             } catch (Exception e) {
                 log.atWarn().setCause(e)
                     .setMessage("Failed to parse bulk response body, treating as retryable")
                     .log();
-                return BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
+                result = BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
             }
         }
 
-        private BulkResponseAnalysis doAnalyzeBody(String body) throws IOException {
-            var mapper = new ObjectMapper();
-            var root = mapper.readTree(body);
+        @SuppressWarnings("java:S3776") // Cognitive complexity — streaming parser requires state tracking
+        private void parseTokens() throws IOException {
+            JsonToken token;
+            while (result == null
+                && !parser.isClosed()
+                && (token = parser.nextToken()) != null
+                && token != JsonToken.NOT_AVAILABLE)
+            {
+                if (token == JsonToken.FIELD_NAME) {
+                    pendingFieldName = parser.currentName();
+                    continue;
+                }
 
-            var errorsNode = root.get("errors");
-            if (errorsNode != null && !errorsNode.asBoolean()) {
-                return BulkResponseAnalysis.NO_ERRORS;
-            }
+                // Root-level "errors" field
+                if ("errors".equals(pendingFieldName) && !inItems) {
+                    errorsFieldValue = parser.getValueAsBoolean();
+                    if (!errorsFieldValue) {
+                        result = BulkResponseAnalysis.NO_ERRORS;
+                        return;
+                    }
+                    pendingFieldName = null;
+                    continue;
+                }
 
-            var items = root.get("items");
-            if (items == null || !items.isArray()) {
-                return errorsNode != null ? BulkResponseAnalysis.HAS_RETRYABLE_ERRORS : BulkResponseAnalysis.NO_ERRORS;
-            }
+                // Entering "items" array
+                if ("items".equals(pendingFieldName) && token == JsonToken.START_ARRAY) {
+                    inItems = true;
+                    pendingFieldName = null;
+                    continue;
+                }
 
-            var itemAnalysis = classifyItemErrors(items);
-            if (itemAnalysis != null) {
-                return itemAnalysis;
+                if (inItems) {
+                    processItemToken(token);
+                    if (hasRetryableError) {
+                        result = BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
+                        return;
+                    }
+                }
+                pendingFieldName = null;
             }
-            // No error items found — trust the top-level "errors" field
-            if (errorsNode != null && errorsNode.asBoolean()) {
-                return BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
-            }
-            return BulkResponseAnalysis.NO_ERRORS;
         }
 
-        /**
-         * Scans bulk items for errors and classifies them.
-         * @return the analysis result, or null if no error items were found
-         */
-        private BulkResponseAnalysis classifyItemErrors(com.fasterxml.jackson.databind.JsonNode items) {
-            boolean hasAnyError = false;
-            for (var item : items) {
-                var actionNode = item.fields().hasNext() ? item.fields().next().getValue() : null;
-                if (actionNode == null) continue;
+        private void processItemToken(JsonToken token) throws IOException {
+            if (token == JsonToken.END_ARRAY && itemDepth == 0) {
+                inItems = false;
+                return;
+            }
 
-                var errorNode = actionNode.get("error");
-                if (errorNode == null || !errorNode.isObject()) continue;
+            if (token == JsonToken.START_OBJECT) {
+                itemDepth++;
+            } else if (token == JsonToken.END_OBJECT) {
+                if (inErrorObject && itemDepth == errorObjectDepth) {
+                    if (!foundTypeInCurrentError) {
+                        // Error object without a "type" field — can't classify, treat as retryable
+                        hasRetryableError = true;
+                    }
+                    inErrorObject = false;
+                }
+                itemDepth--;
+            }
 
+            if (inErrorObject && "type".equals(pendingFieldName) && token.isScalarValue()) {
                 hasAnyError = true;
-                var typeNode = errorNode.get("type");
-                var errorType = typeNode != null ? typeNode.asText() : null;
-
+                foundTypeInCurrentError = true;
+                var errorType = parser.getValueAsString();
                 if (!BulkItemErrorClassifier.isNonRetryable(errorType)) {
                     log.atDebug().setMessage("Found retryable bulk item error type: {}")
                         .addArgument(errorType).log();
-                    return BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
+                    hasRetryableError = true;
                 }
+            } else if ("error".equals(pendingFieldName) && token == JsonToken.START_OBJECT) {
+                hasAnyError = true;
+                inErrorObject = true;
+                errorObjectDepth = itemDepth;
+                foundTypeInCurrentError = false;
+            } else if ("error".equals(pendingFieldName) && token.isScalarValue()) {
+                // error as a string value (not object) — treat as retryable since we can't classify
+                hasAnyError = true;
+                hasRetryableError = true;
             }
-            return hasAnyError ? BulkResponseAnalysis.ONLY_NON_RETRYABLE_ERRORS : null;
+        }
+
+        private BulkResponseAnalysis finalizeAnalysis() {
+            if (errorsFieldValue != null && !errorsFieldValue) {
+                return BulkResponseAnalysis.NO_ERRORS;
+            }
+            if (hasRetryableError) {
+                return BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
+            }
+            if (hasAnyError) {
+                return BulkResponseAnalysis.ONLY_NON_RETRYABLE_ERRORS;
+            }
+            // No error items found — trust the top-level "errors" field
+            if (errorsFieldValue != null && errorsFieldValue) {
+                return BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
+            }
+            return BulkResponseAnalysis.NO_ERRORS;
         }
     }
 
