@@ -130,11 +130,11 @@ class StatusCommandHandler:
             self.live_check_processor.enrich_tree_with_live_checks(tree_nodes)
         filtered_tree = filter_tree_nodes(tree_nodes)
 
-        # Pre-resolve artifact references in workflow data so the display layer
-        # only deals with plain strings.  Large outputs (e.g. migration status)
-        # are stored as S3 artifacts; we fetch them here via the Argo Server API.
-        self.service.resolve_workflow_artifacts(
-            workflow_data, argo_server, namespace,
+        # Create a lazy resolver — artifacts are only fetched when a node is
+        # actually rendered and has an artifact output (not eagerly for all nodes).
+        workflow_name = workflow_data.get('metadata', {}).get('name', '')
+        artifact_resolver = self.service.create_artifact_resolver(
+            workflow_name, namespace, argo_server,
             token=self.data_fetcher.token, insecure=insecure
         )
 
@@ -148,7 +148,8 @@ class StatusCommandHandler:
             status.get('startedAt'),
             status.get('finishedAt'),
             filtered_tree,
-            workflow_data)
+            workflow_data,
+            artifact_resolver=artifact_resolver)
 
 
 class WorkflowDataFetcher:
@@ -307,11 +308,12 @@ class StatusWorkflowDisplayer(WorkflowDisplayer):
 
     def display_workflow_status(self, workflow_name: str, phase: str, started_at: str,
                                 finished_at: str, tree_nodes: List[Dict[str, Any]],
-                                workflow_data: Dict[str, Any] = None) -> None:
+                                workflow_data: Dict[str, Any] = None,
+                                artifact_resolver=None) -> None:
         """Display complete workflow status with tree."""
         self.display_workflow_header(workflow_name, phase, started_at, finished_at)
         click.echo("")
-        display_workflow_tree(tree_nodes, workflow_data or {})
+        display_workflow_tree(tree_nodes, workflow_data or {}, artifact_resolver=artifact_resolver)
 
         if phase in ('Running', 'Pending'):
             click.echo("")

@@ -3,7 +3,7 @@
 import logging
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Any, Optional, Union
+from typing import Callable, Dict, List, Any, Optional, Union
 from rich.console import Console
 from rich.tree import Tree
 import json
@@ -23,7 +23,8 @@ class WorkflowDisplayer:
 
     def display_workflow_status(self, workflow_name: str, phase: str, started_at: str,
                                 finished_at: str, tree_nodes: List[Dict[str, Any]],
-                                workflow_data: Dict[str, Any] = None) -> None:
+                                workflow_data: Dict[str, Any] = None,
+                                artifact_resolver: Optional[Callable] = None) -> None:
         """Display complete workflow status. Must be implemented by subclasses."""
         raise NotImplementedError
 
@@ -439,13 +440,15 @@ def _construct_full_label_line(step_name_and_timestamp_str, step_phase, step_typ
 
 
 def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
-                          workflow_data: Optional[Dict] = None) -> None:
+                          workflow_data: Optional[Dict] = None,
+                          artifact_resolver: Optional[Callable[[ArtifactRef], Optional[str]]] = None) -> None:
     """Display workflow tree using Rich with proper nesting and live check results.
 
     Args:
         tree_nodes: List of tree node dictionaries
-        workflow_data: Full workflow data for extracting status outputs (artifact refs
-            must be pre-resolved to strings before calling this function)
+        workflow_data: Full workflow data for extracting status outputs
+        artifact_resolver: Optional callable to lazily resolve artifact content.
+            Only invoked for nodes that are actually rendered and have artifact outputs.
     """
 
     # Sort nodes: by sort_order if present, then by timestamp, then by name
@@ -467,10 +470,10 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
             # Get statusOutput for all nodes that might have it
             status_output = get_step_status_output(workflow_data, node['id']) if workflow_data else ""
 
-            # ArtifactRef values should have been resolved before reaching the
-            # display layer.  Treat any unresolved refs as empty.
+            # Lazily resolve artifact references only for nodes being rendered
             if isinstance(status_output, ArtifactRef):
-                status_output = ""
+                status_output = artifact_resolver(status_output) if artifact_resolver else ""
+                status_output = status_output or ""
 
             # Use Rich formatting for the label
             node_label = get_step_rich_label(node, status_output)

@@ -798,42 +798,33 @@ class WorkflowService:
             error=error_msg
         )
 
-    def resolve_workflow_artifacts(
+    def create_artifact_resolver(
         self,
-        workflow_data: Dict[str, Any],
-        argo_server: str,
+        workflow_name: str,
         namespace: str,
+        argo_server: str,
         token: Optional[str] = None,
         insecure: bool = False
-    ) -> None:
-        """Resolve artifact-backed statusOutput values into inline parameters.
+    ):
+        """Create a lazy artifact resolver for a specific workflow.
 
-        Mutates workflow_data in place so downstream code only sees plain strings.
-        For each node that has a statusOutput artifact, fetches the content from
-        the Argo Server API and injects it as a parameter.
+        Returns a callable that fetches artifact content on demand, only when
+        invoked. Suitable for passing to display functions that may or may not
+        need to resolve each node's artifacts.
         """
-        from ..tree_utils import get_step_status_output, ArtifactRef
+        from ..tree_utils import ArtifactRef
 
-        workflow_name = workflow_data.get('metadata', {}).get('name', '')
-        nodes = workflow_data.get('status', {}).get('nodes', {})
-
-        for node_id, node in nodes.items():
-            result = get_step_status_output(workflow_data, node_id)
-            if not isinstance(result, ArtifactRef):
-                continue
-            content = self.get_artifact_content(
+        def resolver(ref: ArtifactRef) -> Optional[str]:
+            return self.get_artifact_content(
                 workflow_name=workflow_name,
-                node_id=result.node_id,
-                artifact_name=result.artifact_name,
+                node_id=ref.node_id,
+                artifact_name=ref.artifact_name,
                 namespace=namespace,
                 argo_server=argo_server,
                 token=token,
                 insecure=insecure
             )
-            if content is not None:
-                outputs = node.setdefault('outputs', {})
-                params = outputs.setdefault('parameters', [])
-                params.append({'name': 'statusOutput', 'value': content})
+        return resolver
 
     def get_artifact_content(
         self,
