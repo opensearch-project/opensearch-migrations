@@ -22,7 +22,7 @@ import {
 } from "./workflowTypes";
 import {inputsToEnvVars, TypescriptError} from "../utils";
 import {RetryParameters, RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
-import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint} from "./scopeConstraints";
+import {extendScope, FieldGroupConstraint, ScopeIsEmptyConstraint, UniqueNameConstraintAtDeclaration} from "./scopeConstraints";
 import {PlainObject} from "./plainObject";
 import {AllowLiteralOrExpression, BaseExpression, expr, toExpression} from "./expression";
 import {TypeToken} from "./sharedTypes";
@@ -164,13 +164,14 @@ export class ContainerBuilder<
     VolumeScope extends GenericScope,
     EnvScope extends DataOrConfigMapScope,
     OutputParamsScope extends OutputParametersRecord,
-    PodConfigBrands extends {} = {}
+    PodConfigBrands extends {} = {},
+    ArtifactScope extends GenericScope = {}
 > extends RetryableTemplateBodyBuilder<
     ParentWorkflowScope,
     InputParamsScope,
     ContainerScope,
     OutputParamsScope,
-    ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, any, PodConfigBrands>,
+    ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, any, PodConfigBrands, any>,
     GenericScope
 > {
     constructor(
@@ -328,7 +329,7 @@ export class ContainerBuilder<
     }
 
     addPathOutput<T extends PlainObject, Name extends string>(
-        name: Name, pathValue: string, t: TypeToken<T>, descriptionValue?: string
+        name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>, pathValue: string, t: TypeToken<T>, descriptionValue?: string
     ):
         ContainerBuilder<
             ParentWorkflowScope,
@@ -370,14 +371,13 @@ export class ContainerBuilder<
             this.outputArtifacts);
     }
 
-    // TODO: Add duplicate-name blocking (like addExpressionOutput's UniqueNameConstraintAtDeclaration)
-    // so that calling addArtifactOutput with the same name twice is a compile-time error.
-    addArtifactOutput(
-        name: string, path: string
-    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands> {
+    addArtifactOutput<Name extends string>(
+        name: UniqueNameConstraintAtDeclaration<Name, ArtifactScope>,
+        path: string
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands, ExtendScope<ArtifactScope, { [K in Name]: OutputArtifactDef }>> {
         const newArtifacts: OutputArtifactsRecord = {
             ...this.outputArtifacts,
-            [name]: { name, path, archive: { none: {} } } as OutputArtifactDef
+            [name as string]: { name, path, archive: { none: {} } } as OutputArtifactDef
         };
         return new ContainerBuilder(
             this.parentWorkflowScope,
@@ -390,7 +390,7 @@ export class ContainerBuilder<
             this.synchronization,
             this.podConfig,
             newArtifacts
-        );
+        ) as any;
     }
 
     addVolumesFromRecord<
