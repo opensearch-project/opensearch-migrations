@@ -59,6 +59,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         private boolean hasAnyError = false;
         private boolean hasRetryableError = false;
         private String pendingFieldName = null;
+        private boolean parseFailed = false;
 
         private boolean foundTypeInCurrentError = false;
 
@@ -75,13 +76,13 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
         @Override
         public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
-            if (msg instanceof HttpContent && result == null) {
+            if (msg instanceof HttpContent && result == null && !parseFailed) {
                 feeder.feedInput(((HttpContent) msg).content().nioBuffer());
                 consumeTokens();
                 if (msg instanceof LastHttpContent) {
                     feeder.endOfInput();
                     consumeTokens();
-                    if (result == null) {
+                    if (result == null && !parseFailed) {
                         result = finalizeAnalysis();
                     }
                 }
@@ -90,16 +91,16 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         }
 
         private void consumeTokens() {
-            if (result != null) {
+            if (result != null || parseFailed) {
                 return;
             }
             try {
                 parseTokens();
             } catch (Exception e) {
                 log.atWarn().setCause(e)
-                    .setMessage("Failed to parse bulk response body, treating as retryable")
+                    .setMessage("Failed to parse bulk response body, falling back to status code comparison")
                     .log();
-                result = BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
+                parseFailed = true;
             }
         }
 
@@ -211,8 +212,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         var analyzer = new BulkResponseAnalyzer();
         HttpByteBufFormatter.processHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
             Stream.of(responseByteBuf), analyzer);
-        var analysis = analyzer.getAnalysis();
-        return analysis != null ? analysis : BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
+        return analyzer.getAnalysis();
     }
 
 
@@ -243,13 +243,15 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         // since it isn't going to be any kind of response, let alone a bulk one
         if (targetStatusCode.map(code -> code == 200).orElse(false)) {
             var analysis = analyzeBulkResponse(currentResponse.getResponseAsByteBuf());
-            if (analysis == BulkResponseAnalysis.HAS_RETRYABLE_ERRORS) {
-                return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.RETRY,
-                    () -> "bulk response has retryable errors, retrying");
+            if (analysis != null) {
+                if (analysis == BulkResponseAnalysis.HAS_RETRYABLE_ERRORS) {
+                    return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.RETRY,
+                        () -> "bulk response has retryable errors, retrying");
+                }
+                return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
+                    () -> "bulk response has no retryable errors");
             }
-            // NO_ERRORS or ONLY_NON_RETRYABLE_ERRORS — nothing to retry
-            return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
-                () -> "bulk response has no retryable errors");
+            // Couldn't parse response body — fall through to superclass status code comparison
         }
 
         return super.shouldRetry(targetRequestBytes, currentResponse, reconstructedSourceTransactionFuture);

@@ -283,12 +283,12 @@ class OpenSearchDefaultRetryTest {
     }
 
     @Test
-    public void testBulkMalformedJsonTreatedAsRetryable() throws Exception {
+    public void testBulkMalformedJsonFallsToSuperclass() throws Exception {
         var retryChecker = new OpenSearchDefaultRetry();
         var malformedResponse = "HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\nnot valid {{";
         var analysis = retryChecker.analyzeBulkResponse(
             Unpooled.wrappedBuffer(malformedResponse.getBytes(StandardCharsets.UTF_8)));
-        Assertions.assertEquals(OpenSearchDefaultRetry.BulkResponseAnalysis.HAS_RETRYABLE_ERRORS, analysis);
+        Assertions.assertNull(analysis, "Unparseable body should return null to fall through to superclass");
     }
 
     @Test
