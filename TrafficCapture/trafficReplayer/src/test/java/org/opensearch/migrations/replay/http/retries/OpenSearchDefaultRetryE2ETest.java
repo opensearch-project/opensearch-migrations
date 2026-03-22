@@ -247,23 +247,23 @@ public class OpenSearchDefaultRetryE2ETest {
     }
 
     @Test
-    public void testBulk200WithNonJsonBodyIsRetried() throws Exception {
-        // The traffic replayer may target non-OpenSearch endpoints that return 200 with
-        // a non-JSON body (e.g. HTML from a proxy, plain text from a load balancer).
-        // The JSON parse failure in analyzeBulkResponse should treat this as retryable.
+    public void testBulk200WithNonJsonBodyFallsToSuperclass() throws Exception {
+        // Non-OpenSearch target returns 200 with HTML body. Can't parse JSON, so falls
+        // through to superclass which compares source (200) vs target (200) → DONE.
         var requestCount = new AtomicInteger();
         var htmlBody = "<html><body>Service Unavailable</body></html>";
         try (var rootContext = TestContext.withAllTracking();
-             var httpServer = SimpleHttpServer.makeServer(false, r ->
-                 requestCount.incrementAndGet() <= 1
-                     ? new SimpleHttpResponse(
-                         Map.of("Content-Type", "text/html", "Content-Length", "" + htmlBody.length()),
-                         htmlBody.getBytes(StandardCharsets.UTF_8), "OK", 200)
-                     : makeBulkJsonResponse(bulkResponseNoErrors())))
+             var httpServer = SimpleHttpServer.makeServer(false, r -> {
+                 requestCount.incrementAndGet();
+                 return new SimpleHttpResponse(
+                     Map.of("Content-Type", "text/html", "Content-Length", "" + htmlBody.length()),
+                     htmlBody.getBytes(StandardCharsets.UTF_8), "OK", 200);
+             }))
         {
             var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
-            Assertions.assertEquals(2, result.responses().size());
-            Assertions.assertEquals(200, result.responses().get(1).getRawResponse().status().code());
+            // Source was 200, target is 200 → super says DONE (same status)
+            Assertions.assertEquals(1, result.responses().size());
+            Assertions.assertEquals(1, requestCount.get());
         }
     }
 
