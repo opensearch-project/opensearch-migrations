@@ -22,6 +22,7 @@ from ..tree_utils import (
     filter_tree_nodes,
     display_workflow_tree,
     get_node_input_parameter,
+    get_step_status_output,
     ArtifactRef,
     WorkflowDisplayer
 )
@@ -131,20 +132,10 @@ class StatusCommandHandler:
             self.live_check_processor.enrich_tree_with_live_checks(tree_nodes)
         filtered_tree = filter_tree_nodes(tree_nodes)
 
-        # Create artifact resolver using the Argo API
-        workflow_name = workflow_data.get('metadata', {}).get('name', '')
-        token = self.data_fetcher.token
-
-        def artifact_resolver(ref: ArtifactRef) -> Optional[str]:
-            return self.service.get_artifact_content(
-                workflow_name=workflow_name,
-                node_id=ref.node_id,
-                artifact_name=ref.artifact_name,
-                namespace=namespace,
-                argo_server=argo_server,
-                token=token,
-                insecure=insecure
-            )
+        # Pre-resolve artifact references in workflow data so the display layer
+        # only deals with plain strings.  Large outputs (e.g. migration status)
+        # are stored as S3 artifacts; we fetch them here via the Argo Server API.
+        self._resolve_artifacts_in_workflow_data(workflow_data, argo_server, namespace, insecure)
 
         # Extract status info from workflow data
         status = workflow_data.get('status', {})
@@ -156,8 +147,37 @@ class StatusCommandHandler:
             status.get('startedAt'),
             status.get('finishedAt'),
             filtered_tree,
-            workflow_data,
-            artifact_resolver=artifact_resolver)
+            workflow_data)
+
+    def _resolve_artifacts_in_workflow_data(self, workflow_data: Dict[str, Any],
+                                            argo_server: str, namespace: str,
+                                            insecure: bool) -> None:
+        """Resolve artifact-backed statusOutput values into inline parameters.
+
+        Mutates workflow_data in place so downstream code only sees plain strings.
+        """
+        workflow_name = workflow_data.get('metadata', {}).get('name', '')
+        token = self.data_fetcher.token
+        nodes = workflow_data.get('status', {}).get('nodes', {})
+
+        for node_id, node in nodes.items():
+            result = get_step_status_output(workflow_data, node_id)
+            if not isinstance(result, ArtifactRef):
+                continue
+            content = self.service.get_artifact_content(
+                workflow_name=workflow_name,
+                node_id=result.node_id,
+                artifact_name=result.artifact_name,
+                namespace=namespace,
+                argo_server=argo_server,
+                token=token,
+                insecure=insecure
+            )
+            if content is not None:
+                # Inject as a parameter so display_workflow_tree reads it directly
+                outputs = node.setdefault('outputs', {})
+                params = outputs.setdefault('parameters', [])
+                params.append({'name': 'statusOutput', 'value': content})
 
 
 class WorkflowDataFetcher:
@@ -316,12 +336,11 @@ class StatusWorkflowDisplayer(WorkflowDisplayer):
 
     def display_workflow_status(self, workflow_name: str, phase: str, started_at: str,
                                 finished_at: str, tree_nodes: List[Dict[str, Any]],
-                                workflow_data: Dict[str, Any] = None,
-                                artifact_resolver=None) -> None:
+                                workflow_data: Dict[str, Any] = None) -> None:
         """Display complete workflow status with tree."""
         self.display_workflow_header(workflow_name, phase, started_at, finished_at)
         click.echo("")
-        display_workflow_tree(tree_nodes, workflow_data or {}, artifact_resolver=artifact_resolver)
+        display_workflow_tree(tree_nodes, workflow_data or {})
 
         if phase in ('Running', 'Pending'):
             click.echo("")

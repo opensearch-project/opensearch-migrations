@@ -23,8 +23,7 @@ class WorkflowDisplayer:
 
     def display_workflow_status(self, workflow_name: str, phase: str, started_at: str,
                                 finished_at: str, tree_nodes: List[Dict[str, Any]],
-                                workflow_data: Dict[str, Any] = None,
-                                artifact_resolver=None) -> None:
+                                workflow_data: Dict[str, Any] = None) -> None:
         """Display complete workflow status. Must be implemented by subclasses."""
         raise NotImplementedError
 
@@ -440,14 +439,13 @@ def _construct_full_label_line(step_name_and_timestamp_str, step_phase, step_typ
 
 
 def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
-                          workflow_data: Optional[Dict] = None,
-                          artifact_resolver: Optional[Any] = None) -> None:
+                          workflow_data: Optional[Dict] = None) -> None:
     """Display workflow tree using Rich with proper nesting and live check results.
 
     Args:
         tree_nodes: List of tree node dictionaries
-        workflow_data: Full workflow data for extracting status outputs
-        artifact_resolver: Optional callable(ArtifactRef) -> Optional[str] to resolve artifact content
+        workflow_data: Full workflow data for extracting status outputs (artifact refs
+            must be pre-resolved to strings before calling this function)
     """
 
     # Sort nodes: by sort_order if present, then by timestamp, then by name
@@ -469,12 +467,9 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
             # Get statusOutput for all nodes that might have it
             status_output = get_step_status_output(workflow_data, node['id']) if workflow_data else ""
 
-            # Resolve artifact references — large outputs (e.g. migration status)
-            # are stored as S3 artifacts rather than inline parameters. The resolver
-            # fetches content via the Argo Server artifact API on demand.
-            if isinstance(status_output, ArtifactRef) and artifact_resolver:
-                status_output = artifact_resolver(status_output) or ""
-            elif isinstance(status_output, ArtifactRef):
+            # ArtifactRef values should have been resolved before reaching the
+            # display layer.  Treat any unresolved refs as empty.
+            if isinstance(status_output, ArtifactRef):
                 status_output = ""
 
             # Use Rich formatting for the label
