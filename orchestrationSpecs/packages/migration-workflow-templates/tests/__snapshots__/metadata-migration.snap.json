@@ -203,7 +203,7 @@
             },
             {
               "name": "skipApprovalMap",
-              "value": {},
+              "value": "{}",
               "valueFrom": {
                 "configMapKeyRef": {
                   "name": "{{workflow.parameters.approvalConfigMapName}}",
