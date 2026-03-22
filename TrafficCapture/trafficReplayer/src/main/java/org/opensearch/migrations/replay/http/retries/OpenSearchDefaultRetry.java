@@ -119,8 +119,9 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
                 // Root-level "errors" field
                 if ("errors".equals(pendingFieldName) && !inItems) {
-                    errorsFieldValue = parser.getValueAsBoolean();
-                    if (!errorsFieldValue) {
+                    boolean errors = parser.getValueAsBoolean();
+                    errorsFieldValue = errors;
+                    if (!errors) {
                         result = BulkResponseAnalysis.NO_ERRORS;
                         return;
                     }
@@ -201,7 +202,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 return BulkResponseAnalysis.ONLY_NON_RETRYABLE_ERRORS;
             }
             // No error items found — trust the top-level "errors" field
-            if (errorsFieldValue != null && errorsFieldValue) {
+            if (errorsFieldValue != null) {
                 return BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
             }
             return BulkResponseAnalysis.NO_ERRORS;
