@@ -21,7 +21,7 @@ spec:
       - name: migration-image-configmap
         value: "migration-image-config"
       - name: monitor-retry-limit
-        value: "33"  # Default ~30 min, use 900 for ~15 hours
+        value: "132"  # Default ~33 min at 15s intervals, use 3600 for ~15 hours
 
   templates:
     - name: main

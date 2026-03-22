@@ -43,6 +43,7 @@ class DefaultOperationsLibrary:
                 'content': 'This is a sample document for testing OpenSearch.'
             }
         headers = {'Content-Type': 'application/json'}
+        kwargs.setdefault('expected_status_code', 201)
         return execute_api_call(cluster=cluster, method=HttpMethod.PUT, path=f"/{index_name}/{doc_type}/{doc_id}",
                                 data=json.dumps(data), headers=headers, **kwargs)
 

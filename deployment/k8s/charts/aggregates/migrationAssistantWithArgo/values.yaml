@@ -681,7 +681,7 @@ charts:
         enabled: false
 
   kyverno:
-    uninstallTimeout: 120         # Timeout for helm uninstall (seconds), with force-cleanup fallback
+    uninstallTimeout: 30          # Timeout for helm uninstall (seconds), with force-cleanup fallback
     preUninstallCleanup:
       webhooks: true             # Delete mutating/validating webhook configs before uninstall
     postUninstallCleanup:

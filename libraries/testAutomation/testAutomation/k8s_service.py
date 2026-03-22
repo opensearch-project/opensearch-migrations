@@ -56,36 +56,25 @@ class K8sService:
 
     def wait_for_all_healthy_pods(self, timeout: int = 180) -> bool:
         """Waits for all pods in the namespace to be in a ready state,
-        ignoring completed pods, and fails after the specified timeout in seconds.
+        ignoring completed pods and workflow pods, using kubectl wait with long poll.
         """
         logger.info("Waiting for pods to become ready...")
-        start_time = time.time()
-
-        # Exclude Argo workflow pods by label (pods without the label only)
-        argo_exclude_selector = '!workflows.argoproj.io/workflow'
-
-        while time.time() - start_time < timeout:
-            pods = self.k8s_client.list_namespaced_pod(
-                namespace=self.namespace,
-                label_selector=argo_exclude_selector
-            ).items
-
-            # Exclude pods that are in the "Succeeded" phase (Completed jobs)
-            unhealthy_pods = [
-                pod.metadata.name
-                for pod in pods
-                if pod.status.phase != "Succeeded" and not self._is_pod_ready(pod)
-            ]
-            if not unhealthy_pods:
-                logger.info("All non-workflow pods are healthy.")
-                return True
-            logger.info(f"The following pods are not healthy yet: [{', '.join(unhealthy_pods)}]")
-            time.sleep(3)
-
-        raise TimeoutError(
-            f"Timeout reached: Not all pods became healthy within {timeout} seconds. "
-            f"Unhealthy pods: {', '.join(unhealthy_pods)}"
-        )
+        # Use kubectl wait --for=condition=Ready with a long poll instead of short-interval polling.
+        # Exclude Argo workflow pods. kubectl wait handles the server-side watch efficiently.
+        try:
+            self.run_command(self._kubectl_base() + [
+                "wait", "--for=condition=Ready", "pod",
+                "-l", "!workflows.argoproj.io/workflow",
+                "-n", self.namespace,
+                "--field-selector=status.phase!=Succeeded",
+                f"--timeout={timeout}s"
+            ])
+            logger.info("All non-workflow pods are healthy.")
+            return True
+        except Exception as e:
+            raise TimeoutError(
+                f"Timeout reached: Not all pods became healthy within {timeout} seconds. Error: {e}"
+            )
 
     def _is_pod_ready(self, pod: V1Pod) -> bool:
         """Checks if pod is Running and all containers are ready."""
@@ -265,7 +254,7 @@ class K8sService:
             if not result or not result.stdout.strip():
                 logger.info(f"Namespace '{namespace}' deleted successfully")
                 return
-            time.sleep(3)
+            time.sleep(1)
         raise TimeoutError(f"Namespace '{namespace}' still exists after {timeout_seconds}s")
 
     def delete_namespace(self) -> None:
@@ -462,4 +451,11 @@ class K8sService:
         logger.info("Deleting all Argo WorkflowTemplates from all namespaces")
         self.run_command(self._kubectl_base() + [
             "delete", "workflowtemplates", "--all-namespaces", "--all", "--ignore-not-found"
+        ], ignore_errors=True)
+
+    def delete_all_argo_workflows(self) -> None:
+        """Deletes all Argo Workflow instances (not templates) from the namespace."""
+        logger.info("Deleting all Argo Workflows from namespace")
+        self.run_command(self._kubectl_base() + [
+            "delete", "workflows", "--all", "-n", self.namespace, "--ignore-not-found"
         ], ignore_errors=True)

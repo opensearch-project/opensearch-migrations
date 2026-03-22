@@ -430,7 +430,6 @@ spec:
           - |
             # Add Elasticsearch Helm repository
             helm repo add elastic https://helm.elastic.co
-            helm repo update
             
             # Create Elasticsearch configuration for ES 5.6.16
             cat > /tmp/elasticsearch.yml << EOF
@@ -452,7 +451,7 @@ spec:
             protocol: "http"
             replicas: 1
             createCert: false
-            clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
+            clusterHealthCheckParams: "wait_for_status=yellow&timeout=1s"
             resources:
               requests:
                 cpu: "2"
@@ -462,7 +461,8 @@ spec:
                 memory: "4Gi"
             readinessProbe:
               failureThreshold: 5
-              successThreshold: 2
+              successThreshold: 1
+              periodSeconds: 5
             extraEnvs:
               - name: "cluster.initial_master_nodes"
                 value: ""
@@ -530,7 +530,6 @@ spec:
           - |
             # Add Elasticsearch Helm repository
             helm repo add elastic https://helm.elastic.co
-            helm repo update
             
             # Create Elasticsearch configuration for ES 6.8.23 OSS (minimal config)
             cat > /tmp/elasticsearch.yml << EOF
@@ -668,7 +667,6 @@ spec:
           - |
             # Add Elasticsearch Helm repository
             helm repo add elastic https://helm.elastic.co
-            helm repo update
             
             cat > /tmp/elasticsearch.yml << EOF
             network.host: 0.0.0.0
@@ -684,7 +682,7 @@ spec:
             protocol: "http"
             replicas: 1
             createCert: false
-            clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
+            clusterHealthCheckParams: "wait_for_status=yellow&timeout=1s"
             resources:
               requests:
                 cpu: "2"
@@ -694,7 +692,8 @@ spec:
                 memory: "4Gi"
             readinessProbe:
               failureThreshold: 5
-              successThreshold: 2
+              successThreshold: 1
+              periodSeconds: 5
             extraEnvs:
               - name: node.roles
                 value: "master,data,ingest"
@@ -788,7 +787,6 @@ spec:
           - |
             # Add OpenSearch Helm repository
             helm repo add opensearch https://opensearch-project.github.io/helm-charts/
-            helm repo update
             
             # Create OpenSearch configuration
             cat > /tmp/opensearch.yml << EOF
@@ -815,6 +813,11 @@ spec:
                 memory: "4Gi"
             persistence:
               enabled: false
+            startupProbe:
+              initialDelaySeconds: 5
+              periodSeconds: 5
+              timeoutSeconds: 3
+              failureThreshold: 30
             opensearchJavaOpts: "-Xms2g -Xmx2g"
             plugins:
               enabled: true
@@ -876,7 +879,6 @@ spec:
           - |
             # Add OpenSearch Helm repository
             helm repo add opensearch https://opensearch-project.github.io/helm-charts/
-            helm repo update
             
             # Create OpenSearch configuration
             cat > /tmp/opensearch.yml << EOF
@@ -906,6 +908,11 @@ spec:
                 memory: "4Gi"
             persistence:
               enabled: false
+            startupProbe:
+              initialDelaySeconds: 5
+              periodSeconds: 5
+              timeoutSeconds: 3
+              failureThreshold: 30
             opensearchJavaOpts: "-Xms2g -Xmx2g"
             plugins:
               enabled: true

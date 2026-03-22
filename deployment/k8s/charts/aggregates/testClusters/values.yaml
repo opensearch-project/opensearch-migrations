@@ -20,8 +20,8 @@ source:
 
   # Configure health checks for Elasticsearch
   readinessProbe:
-    initialDelaySeconds: 30
-    periodSeconds: 10
+    initialDelaySeconds: 5
+    periodSeconds: 5
     timeoutSeconds: 5
     successThreshold: 1
     failureThreshold: 3
@@ -40,8 +40,8 @@ source:
           fi
 
   livenessProbe:
-    initialDelaySeconds: 60
-    periodSeconds: 20
+    initialDelaySeconds: 10
+    periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
     exec:
