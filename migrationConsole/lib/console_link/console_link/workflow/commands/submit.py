@@ -156,8 +156,9 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
             if 'AlreadyExists' in stderr:
                 click.echo(
                     "Error: A workflow already exists. "
-                    "Run 'workflow reset --all' to teardown the existing "
-                    "workflow before submitting a new one.", err=True)
+                    "Run 'workflow status' to check its state, then "
+                    "'workflow reset --all' to teardown before resubmitting.",
+                    err=True)
             else:
                 click.echo(f"Script failed with exit code {e.returncode}", err=True)
                 if stderr:

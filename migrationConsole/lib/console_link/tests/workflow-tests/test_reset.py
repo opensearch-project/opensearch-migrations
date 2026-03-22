@@ -68,20 +68,19 @@ class TestPatchTeardown:
 
 
 class TestResetCommandList:
-    @patch('console_link.workflow.commands.reset.list_approval_gates')
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._list_migration_crds')
-    def test_list_mode(self, mock_list, mock_k8s, mock_gates):
+    def test_list_mode(self, mock_list, mock_k8s):
         mock_list.return_value = [
             ('capturedtraffics', 'source-proxy', 'Ready'),
             ('trafficreplays', 'src-tgt-replayer', 'Ready'),
         ]
-        mock_gates.return_value = []
         runner = CliRunner()
         result = runner.invoke(workflow_cli, ['reset'])
         assert result.exit_code == 0
         assert 'source-proxy' in result.output
         assert 'src-tgt-replayer' in result.output
+        assert 'Capture Proxy' in result.output
         assert 'Ready' in result.output
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')

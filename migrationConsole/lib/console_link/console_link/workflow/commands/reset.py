@@ -1,7 +1,12 @@
 """Reset command for workflow CLI - tears down workflow resources via CRD status patching.
 
-Workflow templates watch for status.phase == Teardown on migration CRDs.
-This command patches CRDs to trigger that teardown, letting the workflow handle cleanup.
+Teardown uses a two-pronged mechanism:
+1. CRD patch: Sets status.phase = Teardown on migration CRDs. The Argo workflow
+   templates watch for this phase and initiate graceful shutdown of their pods.
+2. Deployment deletion: Deletes Kubernetes Deployments owned by the workflow to
+   immediately kill any running tasks that don't respond to the graceful signal.
+
+Together these ensure resources are cleaned up promptly even if the graceful path stalls.
 """
 
 import logging
@@ -24,6 +29,11 @@ logger = logging.getLogger(__name__)
 CRD_GROUP = 'migrations.opensearch.org'
 CRD_VERSION = 'v1alpha1'
 TEARDOWN_CRDS = ['capturedtraffics', 'snapshotmigrations', 'trafficreplays']
+DISPLAY_NAMES = {
+    'capturedtraffics': 'Capture Proxy',
+    'snapshotmigrations': 'Snapshot Migration',
+    'trafficreplays': 'Traffic Replay',
+}
 
 
 def _list_migration_crds(namespace):
@@ -61,16 +71,14 @@ def _patch_teardown(namespace, plural, name):
 
 
 def _show_resources(namespace, crds):
-    """List mode: show all migration CRDs and approval gates."""
-    click.echo(f"Migration resources in namespace '{namespace}':")
+    """List mode: show all migration CRDs with friendly display names."""
+    click.echo("Migration resources:")
     for plural, name, phase in crds:
-        kind = plural.rstrip('s')
-        click.echo(f"  {kind}/{name:<35} ({phase})")
-    for name, phase in list_approval_gates(namespace):
-        click.echo(f"  approvalgate/{name:<30} ({phase})")
+        display = DISPLAY_NAMES.get(plural, plural)
+        click.echo(f"  {display}: {name:<35} ({phase})")
     click.echo()
-    click.echo("Use 'workflow reset <name>' to teardown a resource.")
-    click.echo("Use 'workflow reset --all' to teardown all and delete the workflow.")
+    click.echo("Use 'workflow reset <name>' to teardown a specific resource.")
+    click.echo("Use 'workflow reset --all' to teardown all resources and delete the workflow.")
 
 
 def _patch_targets(namespace, targets):
@@ -124,8 +132,17 @@ def _reset_all(namespace, workflow_name, argo_server, token, insecure):
         click.echo(f"  ✗ Failed to delete workflow '{workflow_name}'", err=True)
 
 
+def _get_resource_completions(ctx, param, incomplete):
+    try:
+        load_k8s_config()
+        crds = _list_migration_crds(ctx.params.get('namespace', 'ma'))
+        return [n for _, n, ph in crds if n.startswith(incomplete) and ph != 'Teardown']
+    except Exception:
+        return []
+
+
 @click.command(name="reset")
-@click.argument('path', required=False, default=None)
+@click.argument('path', required=False, default=None, shell_complete=_get_resource_completions)
 @click.option('--all', 'reset_all', is_flag=True, default=False, help='Teardown all resources and delete workflow')
 @click.option('--workflow-name', default=DEFAULT_WORKFLOW_NAME, shell_complete=get_workflow_completions)
 @click.option(
