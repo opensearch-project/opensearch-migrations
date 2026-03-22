@@ -329,4 +329,62 @@ public class OpenSearchDefaultRetryE2ETest {
         }
     }
 
+    @Test
+    public void testBulkErrorAsStringValueIsRetried() throws Exception {
+        // Some non-OpenSearch targets may return "error" as a plain string instead of an object.
+        // This should be treated as retryable since we can't classify it.
+        var requestCount = new AtomicInteger();
+        String errorAsString = "{\"took\":1,\"errors\":true,\"items\":[" +
+            "{\"index\":{\"_id\":\"1\",\"status\":500,\"error\":\"internal error occurred\"}}" +
+            "]}";
+        try (var rootContext = TestContext.withAllTracking();
+             var httpServer = SimpleHttpServer.makeServer(false, r ->
+                 requestCount.incrementAndGet() <= 1
+                     ? makeBulkJsonResponse(errorAsString)
+                     : makeBulkJsonResponse(bulkResponseNoErrors())))
+        {
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
+            Assertions.assertEquals(2, result.responses().size());
+        }
+    }
+
+    @Test
+    public void testBulkErrorsFieldAfterItemsStillWorks() throws Exception {
+        // JSON field order is not guaranteed. Test that "errors" appearing after "items"
+        // is handled correctly via finalizeAnalysis.
+        var requestCount = new AtomicInteger();
+        String errorsAfterItems = "{\"took\":1,\"items\":[" +
+            "{\"index\":{\"_id\":\"1\",\"status\":503," +
+            "\"error\":{\"type\":\"unavailable_shards_exception\",\"reason\":\"test\"}}}" +
+            "],\"errors\":true}";
+        try (var rootContext = TestContext.withAllTracking();
+             var httpServer = SimpleHttpServer.makeServer(false, r ->
+                 requestCount.incrementAndGet() <= 1
+                     ? makeBulkJsonResponse(errorsAfterItems)
+                     : makeBulkJsonResponse(bulkResponseNoErrors())))
+        {
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
+            Assertions.assertEquals(2, result.responses().size());
+        }
+    }
+
+    @Test
+    public void testBulkErrorsFalseAfterItemsIsNotRetried() throws Exception {
+        // "errors":false after items — finalizeAnalysis should return NO_ERRORS.
+        var requestCount = new AtomicInteger();
+        String errorsFalseAfterItems = "{\"took\":1,\"items\":[" +
+            "{\"index\":{\"_id\":\"1\",\"result\":\"created\",\"status\":201}}" +
+            "],\"errors\":false}";
+        try (var rootContext = TestContext.withAllTracking();
+             var httpServer = SimpleHttpServer.makeServer(false, r -> {
+                 requestCount.incrementAndGet();
+                 return makeBulkJsonResponse(errorsFalseAfterItems);
+             }))
+        {
+            var result = getResultAndVerifyDiagnostics(sendBulkRequest(httpServer, rootContext));
+            Assertions.assertEquals(1, result.responses().size());
+            Assertions.assertEquals(1, requestCount.get());
+        }
+    }
+
 }

@@ -150,20 +150,25 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 inItems = false;
                 return;
             }
+            trackObjectDepth(token);
+            processErrorFields(token);
+        }
 
+        private void trackObjectDepth(JsonToken token) {
             if (token == JsonToken.START_OBJECT) {
                 itemDepth++;
             } else if (token == JsonToken.END_OBJECT) {
                 if (inErrorObject && itemDepth == errorObjectDepth) {
                     if (!foundTypeInCurrentError) {
-                        // Error object without a "type" field — can't classify, treat as retryable
                         hasRetryableError = true;
                     }
                     inErrorObject = false;
                 }
                 itemDepth--;
             }
+        }
 
+        private void processErrorFields(JsonToken token) throws IOException {
             if (inErrorObject && "type".equals(pendingFieldName) && token.isScalarValue()) {
                 hasAnyError = true;
                 foundTypeInCurrentError = true;
@@ -179,7 +184,6 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 errorObjectDepth = itemDepth;
                 foundTypeInCurrentError = false;
             } else if ("error".equals(pendingFieldName) && token.isScalarValue()) {
-                // error as a string value (not object) — treat as retryable since we can't classify
                 hasAnyError = true;
                 hasRetryableError = true;
             }
