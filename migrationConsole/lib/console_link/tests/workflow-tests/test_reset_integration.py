@@ -439,20 +439,10 @@ class TestAutocompleteIntegration:
 class TestPatchTargetsFailureIntegration:
 
     def test_reset_nonexistent_crd_instance_fails(self, runner, reset_ns):
-        """Patch a CRD plural that exists but instance name doesn't — _patch_teardown returns False."""
-        # Create one real resource so the list isn't empty, but try to reset a name
-        # that we'll delete before the patch runs
-        _create_crd_instance(reset_ns, "capturedtraffics", "ephemeral", phase="Ready")
-
-        # Delete it so the patch will fail
-        custom = client.CustomObjectsApi()
-        custom.delete_namespaced_custom_object(
-            group=CRD_GROUP, version=CRD_VERSION,
-            namespace=reset_ns, plural="capturedtraffics", name="ephemeral"
-        )
-
-        # Now reset should fail to patch
-        result = runner.invoke(workflow_cli, ["reset", "ephemeral", "--namespace", reset_ns])
+        """Reset a resource name that doesn't exist — should report no matching resources."""
+        # Use a name that was never created, so there's no race with k8s deletion
+        result = runner.invoke(workflow_cli, ["reset", "does-not-exist", "--namespace", reset_ns])
+        assert result.exit_code == 0
         assert "No resources to teardown" in result.output
 
 
