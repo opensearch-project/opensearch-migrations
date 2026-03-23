@@ -287,4 +287,85 @@ export const testCases: TestCase[] = [
       },
     },
   }),
+
+  // ───────────────────────────────────────────────────────────
+  // Highlighting tests
+  // ───────────────────────────────────────────────────────────
+
+  solrTest('highlighting-basic', {
+    description: 'Basic highlighting with hl=true on a text field',
+    documents: [
+      { id: '1', title: 'OpenSearch Migrations', description: 'A guide to search migration tools' },
+      { id: '2', title: 'Apache Solr', description: 'Enterprise search platform with advanced features' },
+      { id: '3', title: 'Elasticsearch Guide', description: 'Full-text search and analytics engine' },
+    ],
+    requestPath: '/solr/testcollection/select?q=description:search&hl=true&hl.fl=description&fl=id,title&rows=3&wt=json',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        description: { type: 'text_general' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        description: { type: 'text' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.highlighting[*][*][*]', rule: 'regex', expected: '.*<em>.*</em>.*', reason: 'Solr and OpenSearch both use UnifiedHighlighter but passage scoring differs — fragment text boundaries may not match exactly, so we only verify tags are present' },
+    ],
+  }),
+
+  solrTest('highlighting-custom-tags', {
+    description: 'Highlighting with custom pre/post tags',
+    documents: [
+      { id: '1', title: 'Apple iPhone 15 Pro', description: 'Flagship smartphone from Apple' },
+      { id: '2', title: 'Samsung Galaxy S24', description: 'Premium smartphone with AI camera' },
+    ],
+    requestPath: '/solr/testcollection/select?q=description:smartphone&hl=true&hl.fl=description&hl.simple.pre=%3Cb%3E&hl.simple.post=%3C%2Fb%3E&fl=id,title&wt=json',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        description: { type: 'text_general' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        description: { type: 'text' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.highlighting[*][*][*]', rule: 'regex', expected: '.*<b>.*</b>.*', reason: 'Verifies custom pre/post tags (<b></b>) are applied instead of default <em></em> — fragment text may still differ between highlighters' },
+    ],
+  }),
+
+  solrTest('highlighting-multiple-fields', {
+    description: 'Highlighting across multiple fields',
+    documents: [
+      { id: '1', title: 'Apple MacBook Pro', description: 'Professional laptop from Apple with M3 chip' },
+      { id: '2', title: 'Dell XPS Laptop', description: 'Premium ultrabook with Intel processor' },
+    ],
+    requestPath: '/solr/testcollection/select?q=*:*&hl=true&hl.fl=title,description&hl.q=Apple&fl=id,title&wt=json',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        description: { type: 'text_general' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        description: { type: 'text' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.highlighting[*][*][*]', rule: 'regex', expected: '.*<em>.*</em>.*', reason: 'Fragment text may differ between Solr and OpenSearch highlighters' },
+    ],
+  }),
 ];
+
