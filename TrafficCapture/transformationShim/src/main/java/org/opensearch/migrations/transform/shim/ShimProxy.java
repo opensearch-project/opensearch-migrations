@@ -15,6 +15,7 @@ import org.opensearch.migrations.transform.shim.netty.MultiTargetRoutingHandler;
 import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.migrations.transform.shim.validation.ValidationRule;
+import org.opensearch.migrations.transform.shim.reporting.MetricsReceiver;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.Unpooled;
@@ -73,6 +74,7 @@ public class ShimProxy {
     private final Duration secondaryTimeout;
     private final int maxContentLength;
     private final RootShimProxyContext rootShimProxyContext;
+    private final MetricsReceiver metricsReceiver;
 
     private Channel serverChannel;
     private Channel healthChannel;
@@ -90,7 +92,8 @@ public class ShimProxy {
         boolean allowInsecureBackend,
         Duration secondaryTimeout,
         int maxContentLength,
-        RootShimProxyContext rootShimProxyContext
+        RootShimProxyContext rootShimProxyContext,
+        MetricsReceiver metricsReceiver
     ) {
         this.port = port;
         this.targets = new LinkedHashMap<>(targets);
@@ -102,6 +105,7 @@ public class ShimProxy {
         this.maxContentLength = maxContentLength > 0 ? maxContentLength : DEFAULT_MAX_CONTENT_LENGTH;
         this.backendSslContext = buildBackendSslContext(allowInsecureBackend);
         this.rootShimProxyContext = rootShimProxyContext;
+        this.metricsReceiver = metricsReceiver;
 
         if (!this.targets.containsKey(primaryTarget)) {
             throw new IllegalArgumentException("Primary target '" + primaryTarget + "' not in targets");
@@ -118,7 +122,7 @@ public class ShimProxy {
         String primaryTarget,
         List<ValidationRule> validators
     ) {
-        this(port, targets, primaryTarget, null, validators, null, false, null, DEFAULT_MAX_CONTENT_LENGTH, null);
+        this(port, targets, primaryTarget, null, validators, null, false, null, DEFAULT_MAX_CONTENT_LENGTH, null, null);
     }
 
     /** Convenience constructor — no max content length override. */
@@ -133,7 +137,7 @@ public class ShimProxy {
         Duration secondaryTimeout
     ) {
         this(port, targets, primaryTarget, activeTargets, validators, sslEngineSupplier,
-            allowInsecureBackend, secondaryTimeout, DEFAULT_MAX_CONTENT_LENGTH, null);
+            allowInsecureBackend, secondaryTimeout, DEFAULT_MAX_CONTENT_LENGTH, null, null);
     }
 
     private SslContext buildBackendSslContext(boolean allowInsecure) {
@@ -222,7 +226,7 @@ public class ShimProxy {
 
         pipeline.addLast("multiTargetRouter", new MultiTargetRoutingHandler(
             targets, primaryTarget, activeTargets, validators, secondaryTimeout,
-            backendSslContext, maxContentLength, activeRequests, rootShimProxyContext));
+            backendSslContext, maxContentLength, activeRequests, rootShimProxyContext, metricsReceiver));
         addLoggingHandler(pipeline, "E");
     }
 

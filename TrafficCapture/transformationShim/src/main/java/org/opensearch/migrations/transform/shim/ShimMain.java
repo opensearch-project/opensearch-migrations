@@ -30,6 +30,10 @@ import org.opensearch.migrations.transform.shim.validation.FieldIgnoringEquality
 import org.opensearch.migrations.transform.shim.validation.JavascriptValidator;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.migrations.transform.shim.validation.ValidationRule;
+import org.opensearch.migrations.transform.shim.reporting.MetricsReceiver;
+import org.opensearch.migrations.transform.shim.reporting.OpenSearchMetricsSink;
+import org.opensearch.migrations.transform.shim.reporting.ReportingConfig;
+import org.opensearch.migrations.transform.shim.reporting.SolrMetricsExtractor;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
@@ -124,6 +128,10 @@ public class ShimMain {
             description = "Watch transform JS files for changes and hot-reload them.")
         public boolean watchTransforms;
 
+        @Parameter(names = {"--reporting-config"},
+            description = "Path to YAML configuration file for the validation reporting framework.")
+        public String reportingConfig;
+
         @Parameter(names = {"--help", "-h"}, help = true, description = "Show usage.")
         public boolean help;
     }
@@ -154,10 +162,36 @@ public class ShimMain {
         var rootContext = new RootShimProxyContext(otelSdk,
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 
+        // Initialize metrics reporting if configured
+        MetricsReceiver metricsReceiver = null;
+        OpenSearchMetricsSink metricsSink = null;
+        if (params.reportingConfig != null) {
+            try {
+                ReportingConfig reportingConfig = ReportingConfig.parse(Path.of(params.reportingConfig));
+                if (reportingConfig.isEnabled() && reportingConfig.hasSink()) {
+                    metricsSink = new OpenSearchMetricsSink(
+                        reportingConfig.getUri(),
+                        reportingConfig.getIndexPrefix(),
+                        reportingConfig.getBulkSize(),
+                        reportingConfig.getFlushIntervalMs(),
+                        reportingConfig.getUsername(),
+                        reportingConfig.getPassword(),
+                        reportingConfig.isInsecureTls()
+                    );
+                    metricsReceiver = new MetricsReceiver(metricsSink, new SolrMetricsExtractor(),
+                        reportingConfig.isIncludeRequestBody());
+                    log.info("Validation reporting enabled, sink: {} index prefix: {}",
+                        reportingConfig.getUri(), reportingConfig.getIndexPrefix());
+                }
+            } catch (Exception e) {
+                log.error("Failed to initialize metrics reporting, continuing without it: {}", e.getMessage());
+            }
+        }
+
         var proxy = new ShimProxy(
             params.listenPort, targets, params.primary, activeTargets, validators,
             null, params.insecureBackend, Duration.ofMillis(params.timeoutMs), params.maxContentLength,
-            rootContext);
+            rootContext, metricsReceiver);
 
         TransformFileWatcher watcher = null;
         if (params.watchTransforms && !watchedTransforms.isEmpty()) {
@@ -168,9 +202,11 @@ public class ShimMain {
         }
 
         final TransformFileWatcher watcherRef = watcher;
+        final OpenSearchMetricsSink sinkRef = metricsSink;
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
                 log.info("Shutdown signal received, stopping proxy...");
+                if (sinkRef != null) sinkRef.close();
                 if (watcherRef != null) watcherRef.close();
                 proxy.stop();
             } catch (Exception e) {

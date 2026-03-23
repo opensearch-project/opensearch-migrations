@@ -1,0 +1,20 @@
+# =============================================================================
+# Validation Reporting Framework — Sample Configuration
+# =============================================================================
+# Pass this file to the shim via: --reporting-config reporting-config.yaml
+
+enabled: true
+include_request_body: true
+
+sink:
+  type: opensearch
+  opensearch:
+    uri: https://your-reporting-cluster.example.com
+    index_prefix: shim-metrics
+    bulk_size: 1
+    flush_interval_ms: 5000
+    auth:
+      username: your-username
+      password: your-password
+      tls:
+        insecure: true

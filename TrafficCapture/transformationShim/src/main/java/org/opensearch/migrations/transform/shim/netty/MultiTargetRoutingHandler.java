@@ -23,6 +23,7 @@ import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.migrations.transform.shim.validation.TargetResponse;
 import org.opensearch.migrations.transform.shim.validation.ValidationResult;
 import org.opensearch.migrations.transform.shim.validation.ValidationRule;
+import org.opensearch.migrations.transform.shim.reporting.MetricsReceiver;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -83,6 +84,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     private final AtomicInteger activeRequests;
     private final AtomicLong requestCounter = new AtomicLong(0);
     private final RootShimProxyContext rootContext;
+    private final MetricsReceiver metricsReceiver;
 
     /** Connection pools keyed by target name. Lazily initialized on first use. */
     private volatile AbstractChannelPoolMap<String, FixedChannelPool> poolMap;
@@ -96,7 +98,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         SslContext backendSslContext,
         int maxContentLength,
         AtomicInteger activeRequests,
-        RootShimProxyContext rootContext
+        RootShimProxyContext rootContext,
+        MetricsReceiver metricsReceiver
     ) {
         super(false);
         this.targets = targets;
@@ -108,6 +111,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         this.maxContentLength = maxContentLength;
         this.activeRequests = activeRequests;
         this.rootContext = rootContext;
+        this.metricsReceiver = metricsReceiver;
     }
 
     /** Backward-compatible constructor without RootShimProxyContext. */
@@ -122,7 +126,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         AtomicInteger activeRequests
     ) {
         this(targets, primaryTarget, activeTargets, validators, secondaryTimeout,
-            backendSslContext, maxContentLength, activeRequests, null);
+            backendSslContext, maxContentLength, activeRequests, null, null);
     }
 
     @Override
@@ -228,6 +232,22 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                     HttpMessageUtil.writeResponse(ctx, response, keepAlive);
 
                     logTuple(requestId, requestMap, allResponses, results);
+
+                    // Collect validation metrics if reporting is configured
+                    if (metricsReceiver != null) {
+                        try {
+                            Map<String, Map<String, Object>> perTargetTransformed = new LinkedHashMap<>();
+                            for (String name : activeTargets) {
+                                Target target = targets.get(name);
+                                if (target.requestTransform() != null) {
+                                    perTargetTransformed.put(name, requestMap);
+                                }
+                            }
+                            metricsReceiver.process(requestMap, perTargetTransformed, allResponses, Map.of());
+                        } catch (Exception me) {
+                            log.debug("Metrics collection failed (non-fatal)", me);
+                        }
+                    }
                 } catch (Exception e) {
                     log.error("Error building validation response", e);
                     if (requestCtx != null) {
