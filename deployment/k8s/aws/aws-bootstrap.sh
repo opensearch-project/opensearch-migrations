@@ -959,6 +959,7 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
   echo "Private ECR values written to $ecr_values_file"
 fi
 
+# Mirror MA images — runs regardless of whether base mirror was parallel or sequential
 if [[ "$push_images_to_ecr" == "true" ]]; then
   # Mirror MA images to the private ECR repo with expected tags
   # Skip if --build-images is set — locally-built images take precedence
