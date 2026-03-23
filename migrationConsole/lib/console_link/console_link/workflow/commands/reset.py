@@ -19,7 +19,6 @@ The --all flag combines both: patch all resources → wait for workflow completi
 Single-resource reset only patches — it doesn't touch the workflow.
 """
 
-import fnmatch
 import logging
 import os
 
@@ -29,7 +28,7 @@ from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode, load_k8s_config
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
-from .crd_utils import CRD_GROUP, CRD_VERSION, has_glob
+from .crd_utils import CRD_GROUP, CRD_VERSION, has_glob, match_names
 from .suspend_steps import (
     wait_for_workflow_completion,
     delete_workflow,
@@ -140,6 +139,27 @@ def _get_resource_completions(ctx, param, incomplete):
         return []
 
 
+def _resolve_targets(namespace, path):
+    """Resolve a path (exact name or glob) to a list of non-Teardown targets."""
+    if has_glob(path):
+        crds = _list_migration_resources(namespace)
+        matched_names = set(match_names([n for _, n, _ in crds], path))
+        return [(p, n, ph) for p, n, ph in crds
+                if n in matched_names and ph != 'Teardown']
+    match = _find_resource_by_name(namespace, path)
+    return [match] if match and match[2] != 'Teardown' else []
+
+
+def _handle_targeted_reset(ctx, namespace, path):
+    """Handle reset of specific resource(s) by name or glob pattern."""
+    targets = _resolve_targets(namespace, path)
+    if not targets:
+        click.echo(f"No resources to teardown matching '{path}'.")
+        return
+    if not _patch_targets(namespace, targets):
+        ctx.exit(ExitCode.FAILURE.value)
+
+
 @click.command(name="reset")
 @click.argument('path', required=False, default=None, shell_complete=_get_resource_completions)
 @click.option('--all', 'reset_all', is_flag=True, default=False, help='Teardown all resources and delete workflow')
@@ -174,21 +194,7 @@ def reset_command(ctx, path, reset_all, workflow_name, argo_server, namespace, i
         load_k8s_config()
 
         if path is not None:
-            if has_glob(path):
-                # Glob pattern — list all and filter
-                crds = _list_migration_resources(namespace)
-                targets = [(p, n, ph) for p, n, ph in crds
-                           if fnmatch.fnmatch(n, path) and ph != 'Teardown']
-            else:
-                # Exact name — direct lookup
-                match = _find_resource_by_name(namespace, path)
-                targets = [match] if match and match[2] != 'Teardown' else []
-
-            if not targets:
-                click.echo(f"No resources to teardown matching '{path}'.")
-                return
-            if not _patch_targets(namespace, targets):
-                ctx.exit(ExitCode.FAILURE.value)
+            _handle_targeted_reset(ctx, namespace, path)
             return
 
         crds = _list_migration_resources(namespace)
@@ -202,10 +208,9 @@ def reset_command(ctx, path, reset_all, workflow_name, argo_server, namespace, i
             return
 
         targets = [(p, n, ph) for p, n, ph in crds if ph != 'Teardown']
-        if targets:
-            if not _patch_targets(namespace, targets):
-                ctx.exit(ExitCode.FAILURE.value)
-                return
+        if targets and not _patch_targets(namespace, targets):
+            ctx.exit(ExitCode.FAILURE.value)
+            return
 
         _reset_all(namespace, workflow_name, argo_server, token, insecure)
 
