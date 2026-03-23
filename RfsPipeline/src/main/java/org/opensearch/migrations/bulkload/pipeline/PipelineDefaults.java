@@ -2,7 +2,7 @@ package org.opensearch.migrations.bulkload.pipeline;
 
 /**
  * Single source of truth for pipeline batch defaults.
- * Used by both {@code PipelineRunner} (builder defaults) and the CLI ({@code RfsMigrateDocuments}).
+ * Used by both {@code DocumentMigrationBootstrap} (builder defaults) and the CLI ({@code RfsMigrateDocuments}).
  */
 /**
  * @deprecated Defaults belong in the CLI layer, not the library. Use the constants in
