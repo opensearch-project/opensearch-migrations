@@ -1,7 +1,6 @@
 package org.opensearch.migrations.bulkload;
 
 import java.io.File;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -10,7 +9,6 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
-import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
@@ -86,226 +84,148 @@ public class EndToEndTest extends SourceTestBase {
         final var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
 
-        var sourceVersion = sourceCluster.getContainerVersion().getVersion();
-        String cacheKey = sourceVersion + "-endToEnd";
-        Path snapshotDir = localDirectory.toPath();
-        boolean cached = fixtureCache.restoreIfCached(cacheKey, snapshotDir);
-
         try {
+            // === ACTION: Set up the source/target clusters ===
+            Startables.deepStart(sourceCluster, targetCluster).join();
+
             var indexName = "blog_2023";
             var numberOfShards = 3;
+            var sourceClusterOperations = new ClusterOperations(sourceCluster);
+            var targetClusterOperations = new ClusterOperations(targetCluster);
+
+            // Number of default shards is different across different versions on ES/OS.
+            // So we explicitly set it.
+            var sourceVersion = sourceCluster.getContainerVersion().getVersion();
             boolean supportsSoftDeletes = VersionMatchers.equalOrGreaterThanES_6_5.test(sourceVersion);
             boolean supportsCompletion = sourceSupportsCompletionFields(sourceVersion);
-            boolean isEs5SingleType = VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion)
-                && VersionMatchers.isES_5_X.test(sourceVersion);
-            String snapshotName = "my_snap";
-
-            if (!cached) {
-                Startables.deepStart(sourceCluster, targetCluster).join();
-                populateSourceAndCreateSnapshot(
-                    sourceCluster, targetCluster, snapshotContext,
-                    indexName, numberOfShards, supportsSoftDeletes, supportsCompletion, snapshotName, snapshotDir
-                );
-            } else {
-                prepareTargetFromCache(targetCluster, indexName, numberOfShards, supportsSoftDeletes, supportsCompletion);
-            }
-
-            var expectedTerminationException = runMigration(
-                sourceVersion, targetCluster, snapshotDir, snapshotName, testDocMigrationContext
+            String body = String.format(
+                "{" +
+                "  \"settings\": {" +
+                "    \"number_of_shards\": %d," +
+                "    \"number_of_replicas\": 0," +
+                (supportsSoftDeletes
+                        ? "    \"index.soft_deletes.enabled\": true,"
+                        : "") +
+                "    \"refresh_interval\": -1" +
+                "  }" +
+                "}",
+                numberOfShards
             );
+            sourceClusterOperations.createIndex(indexName, body);
+            targetClusterOperations.createIndex(indexName, body);
 
-            verifyMigrationResults(
-                sourceCluster, targetCluster, testDocMigrationContext, cached,
-                sourceVersion, numberOfShards, supportsCompletion, isEs5SingleType,
-                expectedTerminationException
-            );
-        } finally {
-            FileSystemUtils.deleteDirectories(localDirectory.toString());
-        }
-    }
-
-    @SneakyThrows
-    private void populateSourceAndCreateSnapshot(
-        SearchClusterContainer sourceCluster,
-        SearchClusterContainer targetCluster,
-        SnapshotTestContext snapshotContext,
-        String indexName, int numberOfShards, boolean supportsSoftDeletes,
-        boolean supportsCompletion, String snapshotName, Path snapshotDir
-    ) {
-        var sourceClusterOperations = new ClusterOperations(sourceCluster);
-        var targetClusterOperations = new ClusterOperations(targetCluster);
-
-        String indexSettings = createIndexSettings(numberOfShards, supportsSoftDeletes);
-        sourceClusterOperations.createIndex(indexName, indexSettings);
-        targetClusterOperations.createIndex(indexName, indexSettings);
-
-        if (supportsCompletion) {
-            setupCompletionIndex(sourceClusterOperations, targetClusterOperations, numberOfShards);
-        }
-
-        populateTestDocuments(sourceClusterOperations, indexName);
-
-        if (sourceClusterOperations.shouldTestEs5SingleType()) {
-            sourceClusterOperations.createEs5SingleTypeIndexWithDocs(ES5_SINGLE_TYPE_INDEX);
-        }
-
-        createAndCopySnapshot(sourceCluster, snapshotContext, snapshotName, snapshotDir);
-    }
-
-    private static String createIndexSettings(int numberOfShards, boolean supportsSoftDeletes) {
-        return String.format(
-            "{" +
-            "  \"settings\": {" +
-            "    \"number_of_shards\": %d," +
-            "    \"number_of_replicas\": 0," +
-            (supportsSoftDeletes
-                    ? "    \"index.soft_deletes.enabled\": true,"
-                    : "") +
-            "    \"refresh_interval\": -1" +
-            "  }" +
-            "}",
-            numberOfShards
-        );
-    }
-
-    private static void setupCompletionIndex(
-        ClusterOperations sourceOps, ClusterOperations targetOps, int numberOfShards
-    ) {
-        String completionIndex = "completion_index";
-        sourceOps.createIndexWithCompletionField(completionIndex, numberOfShards);
-        targetOps.createIndexWithCompletionField(completionIndex, numberOfShards);
-        String docType = sourceOps.defaultDocType();
-        sourceOps.createDocument(completionIndex, "1", "{\"completion\": \"bananas\"}", null, docType);
-        sourceOps.refresh();
-        targetOps.refresh();
-    }
-
-    private void populateTestDocuments(ClusterOperations sourceOps, String indexName) {
-        String largeDoc = generateLargeDocJson(2);
-        sourceOps.createDocument(indexName, "large1", largeDoc, "3", null);
-        sourceOps.createDocument(indexName, "large2", largeDoc, "3", null);
-        sourceOps.createDocument(indexName, "222", "{\"score\": 42}");
-        sourceOps.createDocument(indexName, "223", "{\"score\": 55, \"active\": true}", "1", null);
-        sourceOps.createDocument(indexName, "224", "{\"score\": 60, \"active\": true}", "1", null);
-        sourceOps.createDocument(indexName, "225", "{\"score\": 77, \"active\": false}", "2", null);
-
-        sourceOps.refresh(indexName);
-        sourceOps.createDocument(indexName, "toBeDeleted", "{\"score\": 99, \"active\": true}", "1", null);
-        sourceOps.createDocument(indexName, "remaining", "{\"score\": 88, \"active\": false}", "1", null);
-        sourceOps.refresh(indexName);
-        sourceOps.deleteDocument(indexName, "toBeDeleted", "1", null);
-        sourceOps.refresh(indexName);
-    }
-
-    @SneakyThrows
-    private void createAndCopySnapshot(
-        SearchClusterContainer sourceCluster, SnapshotTestContext snapshotContext,
-        String snapshotName, Path snapshotDir
-    ) {
-        var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
-                .host(sourceCluster.getUrl())
-                .insecure(true)
-                .build()
-                .toConnectionContext());
-        var sourceClient = sourceClientFactory.determineVersionAndCreate();
-        var snapshotCreator = new FileSystemSnapshotCreator(
-            snapshotName, "my_snap_repo", sourceClient,
-            SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, List.of(),
-            snapshotContext.createSnapshotCreateContext()
-        );
-        SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
-        sourceCluster.copySnapshotData(localDirectory.toString());
-        fixtureCache.store(sourceCluster.getContainerVersion().getVersion() + "-endToEnd", snapshotDir);
-    }
-
-    private void prepareTargetFromCache(
-        SearchClusterContainer targetCluster, String indexName,
-        int numberOfShards, boolean supportsSoftDeletes, boolean supportsCompletion
-    ) {
-        targetCluster.start();
-        var targetClusterOperations = new ClusterOperations(targetCluster);
-        targetClusterOperations.createIndex(indexName, createIndexSettings(numberOfShards, supportsSoftDeletes));
-
-        if (supportsCompletion) {
-            targetClusterOperations.createIndexWithCompletionField("completion_index", numberOfShards);
-            targetClusterOperations.refresh();
-        }
-    }
-
-    private ExpectedMigrationWorkTerminationException runMigration(
-        Version sourceVersion, SearchClusterContainer targetCluster,
-        Path snapshotDir, String snapshotName, DocumentMigrationTestContext testDocMigrationContext
-    ) {
-        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(sourceVersion, true);
-        var sourceRepo = new FileSystemRepo(snapshotDir, fileFinder);
-
-        var runCounter = new AtomicInteger();
-        var clockJitter = new Random(1);
-
-        var transformationConfig = VersionMatchers.isES_5_X.or(VersionMatchers.isES_6_X)
-                    .test(targetCluster.getContainerVersion().getVersion()) ?
-                "[{\"NoopTransformerProvider\":{}}]" : null;
-
-        return waitForRfsCompletion(() -> migrateDocumentsSequentially(
-                sourceRepo,
-                null,
-                snapshotName,
-                List.of(),
-                targetCluster,
-                runCounter,
-                clockJitter,
-                testDocMigrationContext,
-                sourceVersion,
-                targetCluster.getContainerVersion().getVersion(),
-                transformationConfig,
-                DocumentExceptionAllowlist.empty(),
-                Integer.MAX_VALUE
-        ));
-    }
-
-    private void verifyMigrationResults(
-        SearchClusterContainer sourceCluster, SearchClusterContainer targetCluster,
-        DocumentMigrationTestContext testDocMigrationContext, boolean cached,
-        Version sourceVersion, int numberOfShards, boolean supportsCompletion,
-        boolean isEs5SingleType, ExpectedMigrationWorkTerminationException terminationException
-    ) {
-        int totalShards = numberOfShards;
-        if (supportsCompletion) {
-            totalShards += numberOfShards;
-        }
-        if (isEs5SingleType) {
-            totalShards += 1;
-        }
-        Assertions.assertEquals(totalShards + 1, terminationException.numRuns);
-
-        if (!cached) {
-            checkClusterMigrationOnFinished(sourceCluster, targetCluster, testDocMigrationContext);
-            boolean isSourceES1x = VersionMatchers.isES_1_X.test(sourceVersion);
-            boolean isTargetES1x = VersionMatchers.isES_1_X.test(targetCluster.getContainerVersion().getVersion());
-
+            // Create and verify a 'completion' index only for ES 2.x and above
             if (supportsCompletion) {
-                validateCompletionDoc(new ClusterOperations(targetCluster));
+                String completionIndex = "completion_index";
+                sourceClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
+                targetClusterOperations.createIndexWithCompletionField(completionIndex, numberOfShards);
+                String completionDoc =
+                "{" +
+                "    \"completion\": \"bananas\" " +
+                "}";
+                String docType = sourceClusterOperations.defaultDocType();
+                sourceClusterOperations.createDocument(completionIndex, "1", completionDoc, null, docType);
+                sourceClusterOperations.refresh();
+                targetClusterOperations.refresh();
             }
 
-            checkDocsWithRouting(sourceCluster, testDocMigrationContext, !isSourceES1x);
-            checkDocsWithRouting(targetCluster, testDocMigrationContext, !isTargetES1x);
+            // === ACTION: Create two large documents (2MB each) ===
+            String largeDoc = generateLargeDocJson(2);
+            sourceClusterOperations.createDocument(indexName, "large1", largeDoc, "3", null);
+            sourceClusterOperations.createDocument(indexName, "large2", largeDoc, "3", null);
 
-            verifyEs5SingleTypeIndex(new ClusterOperations(sourceCluster), new ClusterOperations(targetCluster));
-        } else {
-            var targetClient = new RestClient(ConnectionContextTestParams.builder()
-                .host(targetCluster.getUrl())
-                .build()
-                .toConnectionContext());
-            targetClient.get("_refresh", testDocMigrationContext.createUnboundRequestContext());
+            // === ACTION: Create some searchable documents ===
+            sourceClusterOperations.createDocument(indexName, "222", "{\"score\": 42}");
+            sourceClusterOperations.createDocument(indexName, "223", "{\"score\": 55, \"active\": true}", "1", null);
+            sourceClusterOperations.createDocument(indexName, "224", "{\"score\": 60, \"active\": true}", "1", null);
+            sourceClusterOperations.createDocument(indexName, "225", "{\"score\": 77, \"active\": false}", "2", null);
 
-            var targetClusterOperations = new ClusterOperations(targetCluster);
+
+            // To create deleted docs in a segment that persists on the snapshot, refresh, then create two docs on a shard, then after a refresh, delete one.
+            sourceClusterOperations.refresh(indexName);
+            sourceClusterOperations.createDocument(indexName, "toBeDeleted", "{\"score\": 99, \"active\": true}", "1", null);
+            sourceClusterOperations.createDocument(indexName, "remaining", "{\"score\": 88, \"active\": false}", "1", null);
+            sourceClusterOperations.refresh(indexName);
+            sourceClusterOperations.deleteDocument(indexName, "toBeDeleted" , "1", null);
+            sourceClusterOperations.refresh(indexName);
+
+            // For ES 5.x sources (5.5 and 5.6 only)
+            if (sourceClusterOperations.shouldTestEs5SingleType()) {
+                sourceClusterOperations.createEs5SingleTypeIndexWithDocs(ES5_SINGLE_TYPE_INDEX);
+            }
+
+            // === ACTION: Take a snapshot ===
+            var snapshotName = "my_snap";
+            var snapshotRepoName = "my_snap_repo";
+            var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                    .host(sourceCluster.getUrl())
+                    .insecure(true)
+                    .build()
+                    .toConnectionContext());
+            var sourceClient = sourceClientFactory.determineVersionAndCreate();
+            var snapshotCreator = new FileSystemSnapshotCreator(
+                snapshotName,
+                snapshotRepoName,
+                sourceClient,
+                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                List.of(),
+                snapshotContext.createSnapshotCreateContext()
+            );
+            SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                    sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+
+            // === ACTION: Migrate the documents ===
+            var runCounter = new AtomicInteger();
+            var clockJitter = new Random(1);
+
+            var transformationConfig = VersionMatchers.isES_5_X.or(VersionMatchers.isES_6_X)
+                        .test(targetCluster.getContainerVersion().getVersion()) ?
+                    "[{\"NoopTransformerProvider\":{}}]" // skip transformations including doc type removal
+                    : null;
+
+            // ExpectedMigrationWorkTerminationException is thrown on completion.
+            var expectedTerminationException = waitForRfsCompletion(() -> migrateDocumentsSequentially(
+                    sourceRepo,
+                    snapshotName,
+                    List.of(),
+                    targetCluster,
+                    runCounter,
+                    clockJitter,
+                    testDocMigrationContext,
+                    sourceCluster.getContainerVersion().getVersion(),
+                    targetCluster.getContainerVersion().getVersion(),
+                    transformationConfig
+            ));
+
+            int totalShards = numberOfShards; // blog_2023 index
+            if (supportsCompletion) {
+                totalShards += numberOfShards; // completion_index
+            }
+            if (sourceClusterOperations.shouldTestEs5SingleType()) {
+                totalShards += 1; // es5_single_type index
+            }
+            Assertions.assertEquals(totalShards + 1, expectedTerminationException.numRuns);
+
+            // Check that the docs were migrated
+            checkClusterMigrationOnFinished(sourceCluster, targetCluster, testDocMigrationContext);
+            boolean isSourceES1x = VersionMatchers.isES_1_X.test(sourceCluster.getContainerVersion().getVersion());
             boolean isTargetES1x = VersionMatchers.isES_1_X.test(targetCluster.getContainerVersion().getVersion());
 
             if (supportsCompletion) {
                 validateCompletionDoc(targetClusterOperations);
             }
 
+            // Check that that docs were migrated with routing, routing field not returned on es1 so skip validation
+            checkDocsWithRouting(sourceCluster, testDocMigrationContext, !isSourceES1x);
             checkDocsWithRouting(targetCluster, testDocMigrationContext, !isTargetES1x);
+
+            // Check that docs were migrated for shouldTestEs5SingleType cases
+            verifyEs5SingleTypeIndex(sourceClusterOperations, targetClusterOperations);
+        } finally {
+            FileSystemUtils.deleteDirectories(localDirectory.toString());
         }
     }
 
