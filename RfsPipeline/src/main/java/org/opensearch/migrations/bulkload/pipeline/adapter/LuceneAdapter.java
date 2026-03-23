@@ -5,7 +5,7 @@ import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
-import org.opensearch.migrations.bulkload.pipeline.ir.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.Document;
 
 /**
  * Converts between existing Lucene-specific types and the clean pipeline IR.

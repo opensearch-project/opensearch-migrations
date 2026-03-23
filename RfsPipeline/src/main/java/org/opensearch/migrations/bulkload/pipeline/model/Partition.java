@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.pipeline.ir;
+package org.opensearch.migrations.bulkload.pipeline.model;
 
 /**
  * Source-agnostic partition — represents a unit of parallel work within a collection.

@@ -7,7 +7,7 @@ import java.util.Map;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.bulk.operations.DeleteOperationMeta;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
-import org.opensearch.migrations.bulkload.pipeline.ir.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.Document;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;

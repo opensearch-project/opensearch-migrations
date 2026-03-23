@@ -1,6 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
-import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
+import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 
 import lombok.Getter;
 

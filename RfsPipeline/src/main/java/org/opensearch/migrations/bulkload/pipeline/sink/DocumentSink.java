@@ -2,9 +2,9 @@ package org.opensearch.migrations.bulkload.pipeline.sink;
 
 import java.util.List;
 
-import org.opensearch.migrations.bulkload.pipeline.ir.BatchResult;
-import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
-import org.opensearch.migrations.bulkload.pipeline.ir.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.BatchResult;
+import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
+import org.opensearch.migrations.bulkload.pipeline.model.Document;
 
 import reactor.core.publisher.Mono;
 
@@ -27,7 +27,7 @@ public interface DocumentSink extends AutoCloseable {
      * Write a batch of documents to the target collection.
      *
      * <p>Returns batch-local stats only. The pipeline is responsible for tracking
-     * cumulative offsets and constructing {@link org.opensearch.migrations.bulkload.pipeline.ir.ProgressCursor}
+     * cumulative offsets and constructing {@link org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor}
      * for resumability.
      *
      * @param collectionName the target collection name

@@ -46,7 +46,7 @@ flowchart LR
 
 The core defines three layers:
 
-- **IR types** (`ir/`): `Document`, `Partition`, `CollectionMetadata`, `ProgressCursor`, `BatchResult` — all source-agnostic, no ES/Lucene/OpenSearch concepts
+- **IR types** (`model/`): `Document`, `Partition`, `CollectionMetadata`, `ProgressCursor`, `BatchResult` — all source-agnostic, no ES/Lucene/OpenSearch concepts
 - **Port interfaces** (`source/`, `sink/`): `DocumentSource`, `DocumentSink` — generic contracts using IR types
 - **Pipeline** (`DocumentMigrationPipeline`): reactive batching + concurrency orchestration, operates only on IR types
 - **Pipeline support**: `PipelineDefaults` (default values), `PipelineException` (error types)

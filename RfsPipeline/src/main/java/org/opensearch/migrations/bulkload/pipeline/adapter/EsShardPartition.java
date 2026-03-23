@@ -2,7 +2,7 @@ package org.opensearch.migrations.bulkload.pipeline.adapter;
 
 import java.util.Objects;
 
-import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
+import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 
 /**
  * ES-specific partition implementation — identifies a shard within a snapshot.

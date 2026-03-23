@@ -2,9 +2,9 @@ package org.opensearch.migrations.bulkload.pipeline.source;
 
 import java.util.List;
 
-import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
-import org.opensearch.migrations.bulkload.pipeline.ir.Document;
-import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
+import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
+import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 
 import reactor.core.publisher.Flux;
 

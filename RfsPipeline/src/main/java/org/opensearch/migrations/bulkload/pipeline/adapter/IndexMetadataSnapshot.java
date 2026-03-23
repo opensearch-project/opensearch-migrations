@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
  * ES-specific metadata snapshot for a single index.
  *
  * <p>This is an adapter-layer type, not part of the core IR. The core pipeline uses
- * {@link org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata} instead.
+ * {@link org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata} instead.
  * ES source adapters produce this, and ES sink adapters consume it via
  * {@link CollectionMetadata#sourceConfig()}.
  *

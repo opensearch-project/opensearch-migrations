@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.pipeline.ir;
+package org.opensearch.migrations.bulkload.pipeline.model;
 
 /**
  * Result of writing a single batch to the sink. Contains batch-local stats only —

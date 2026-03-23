@@ -1,4 +1,4 @@
-package org.opensearch.migrations.bulkload.pipeline.ir;
+package org.opensearch.migrations.bulkload.pipeline.model;
 
 import java.util.Objects;
 

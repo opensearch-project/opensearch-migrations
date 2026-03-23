@@ -2,7 +2,7 @@
 
 The pipeline defines a source-agnostic intermediate representation (IR). All types are Java `record`s or interfaces with compact constructor validation and zero runtime dependencies beyond Reactor. Port interfaces use `Flux` and `Mono` for reactive streaming.
 
-## IR Types (`ir/` package)
+## IR Types (`model/` package)
 
 All types in this package are source-agnostic — no ES, Lucene, or OpenSearch concepts.
 

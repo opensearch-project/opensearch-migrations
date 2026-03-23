@@ -8,7 +8,7 @@ import reactor.core.publisher.Mono;
  * <p>This is an optional capability — only ES/OpenSearch sinks implement it.
  * Non-ES sinks do not have global metadata and should not implement this.
  * The core pipeline contract ({@link org.opensearch.migrations.bulkload.pipeline.sink.DocumentSink})
- * uses {@link org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata} instead.
+ * uses {@link org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata} instead.
  */
 public interface GlobalMetadataSink extends AutoCloseable {
 

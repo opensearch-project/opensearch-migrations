@@ -5,7 +5,7 @@ import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
-import org.opensearch.migrations.bulkload.pipeline.ir.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import org.junit.jupiter.api.Test;

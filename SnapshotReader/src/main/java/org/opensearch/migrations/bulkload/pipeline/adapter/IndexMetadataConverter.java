@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
-import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
+import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 
 import com.fasterxml.jackson.databind.JsonNode;

@@ -8,9 +8,9 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
-import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
-import org.opensearch.migrations.bulkload.pipeline.ir.Document;
-import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
+import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
+import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
