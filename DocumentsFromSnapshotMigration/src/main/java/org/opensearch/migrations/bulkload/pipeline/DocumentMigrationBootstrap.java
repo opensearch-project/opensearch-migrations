@@ -15,6 +15,7 @@ import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
@@ -236,7 +237,7 @@ public class DocumentMigrationBootstrap {
             var error = migrationError.get();
             if (error != null) {
                 context.recordPipelineError();
-                throw new RuntimeException("Partition migration failed for " + wi, error);
+                throw new RfsException("Partition migration failed for " + wi, error);
             }
             context.recordShardDuration(durationMs);
             context.recordDocsMigrated(totalDocsMigrated.get());
@@ -244,7 +245,7 @@ public class DocumentMigrationBootstrap {
             return CompletionStatus.WORK_COMPLETED;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
+            throw new RfsException("Partition migration interrupted", e);
         } finally {
             progressMonitor.close();
         }
