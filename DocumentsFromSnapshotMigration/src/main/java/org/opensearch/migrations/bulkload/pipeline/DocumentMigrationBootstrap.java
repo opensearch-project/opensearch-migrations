@@ -88,6 +88,23 @@ public class DocumentMigrationBootstrap {
     private final Consumer<Runnable> cancellationTriggerConsumer = runnable -> {};
 
     /**
+     * Keep acquiring and migrating shards until no more work is available.
+     * Returns WORK_COMPLETED if at least one shard was migrated, NOTHING_DONE otherwise.
+     */
+    public CompletionStatus migrateAllShards(
+        Supplier<IDocumentMigrationContexts.IDocumentReindexContext> contextSupplier
+    ) throws java.io.IOException, InterruptedException {
+        CompletionStatus lastStatus = CompletionStatus.NOTHING_DONE;
+        while (true) {
+            var status = migrateNextShard(contextSupplier);
+            if (status == CompletionStatus.NOTHING_DONE) {
+                return lastStatus;
+            }
+            lastStatus = status;
+        }
+    }
+
+    /**
      * Acquire the next available shard via work coordination and migrate it (coordinated mode).
      * Requires {@code workCoordinator} to be set.
      *

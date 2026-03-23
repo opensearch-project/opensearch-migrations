@@ -864,7 +864,7 @@ public class RfsMigrateDocuments {
             .cancellationTriggerConsumer(cancellationRunnable::set)
             .build();
 
-        return runner.migrateNextShard(rootDocumentContext::createReindexContext);
+        return runner.migrateAllShards(rootDocumentContext::createReindexContext);
     }
 
     /**
