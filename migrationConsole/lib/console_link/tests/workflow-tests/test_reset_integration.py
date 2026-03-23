@@ -30,7 +30,7 @@ from testcontainers.k3s import K3SContainer
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.commands.reset import (
     CRD_GROUP, CRD_VERSION,
-    _list_migration_crds, _patch_teardown,
+    _list_migration_resources, _patch_teardown,
 )
 from console_link.workflow.commands.approve import list_approval_gates, approve_gate
 
@@ -208,7 +208,7 @@ def _get_phase(namespace, plural, name):
 
 
 # ============================================================================
-# Tests: _list_migration_crds
+# Tests: _list_migration_resources
 # ============================================================================
 
 @pytest.mark.slow
@@ -219,16 +219,16 @@ class TestListMigrationCrdsIntegration:
         _create_crd_instance(reset_ns, "snapshotmigrations", "snap-a", phase="Running")
         _create_crd_instance(reset_ns, "trafficreplays", "replay-a", phase="Ready")
 
-        results = _list_migration_crds(reset_ns)
+        results = _list_migration_resources(reset_ns)
         names = {n for _, n, _ in results}
         assert names == {"proxy-a", "snap-a", "replay-a"}
 
     def test_empty_namespace(self, reset_ns):
-        assert _list_migration_crds(reset_ns) == []
+        assert _list_migration_resources(reset_ns) == []
 
     def test_shows_unknown_when_no_status(self, reset_ns):
         _create_crd_instance(reset_ns, "capturedtraffics", "no-status")
-        results = _list_migration_crds(reset_ns)
+        results = _list_migration_resources(reset_ns)
         assert results == [("capturedtraffics", "no-status", "Unknown")]
 
 

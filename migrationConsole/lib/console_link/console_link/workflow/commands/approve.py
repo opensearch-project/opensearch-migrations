@@ -9,11 +9,9 @@ from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode, load_k8s_config
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .crd_utils import CRD_GROUP, CRD_VERSION
 
 logger = logging.getLogger(__name__)
-
-CRD_GROUP = 'migrations.opensearch.org'
-CRD_VERSION = 'v1alpha1'
 
 
 def list_approval_gates(namespace):
@@ -67,9 +65,9 @@ def approve_command(ctx, task_names, workflow_name, argo_server, namespace, inse
     Each TASK_NAME can be an exact name or glob pattern (e.g., *.evaluateMetadata).
 
     Example:
-        workflow approve source.target.snap.migration.evaluateMetadata
-        workflow approve "*.evaluateMetadata"
-        workflow approve gate1 gate2
+        workflow approve source.target.evaluateMetadata
+        workflow approve "*.migrateMetadata"
+        workflow approve step1 step2 step3
     """
     import fnmatch
     try:

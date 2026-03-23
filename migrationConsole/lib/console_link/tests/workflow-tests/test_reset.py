@@ -5,7 +5,7 @@ from click.testing import CliRunner
 
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.commands.reset import (
-    _list_migration_crds,
+    _list_migration_resources,
     _patch_teardown,
 )
 
@@ -35,7 +35,7 @@ class TestListMigrationCrds:
         })
         mock_client.CustomObjectsApi.return_value = mock_custom
 
-        result = _list_migration_crds('ma')
+        result = _list_migration_resources('ma')
         assert len(result) == 2
         assert ('capturedtraffics', 'source-proxy', 'Ready') in result
         assert ('trafficreplays', 'src-tgt-replayer', 'Running') in result
@@ -49,7 +49,7 @@ class TestListMigrationCrds:
         })
         mock_client.CustomObjectsApi.return_value = mock_custom
 
-        result = _list_migration_crds('ma')
+        result = _list_migration_resources('ma')
         assert result == [('capturedtraffics', 'x', 'Unknown')]
 
 
@@ -69,7 +69,7 @@ class TestPatchTeardown:
 
 class TestResetCommandList:
     @patch('console_link.workflow.commands.reset.load_k8s_config')
-    @patch('console_link.workflow.commands.reset._list_migration_crds')
+    @patch('console_link.workflow.commands.reset._list_migration_resources')
     def test_list_mode(self, mock_list, mock_k8s):
         mock_list.return_value = [
             ('capturedtraffics', 'source-proxy', 'Ready'),
@@ -84,7 +84,7 @@ class TestResetCommandList:
         assert 'Ready' in result.output
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')
-    @patch('console_link.workflow.commands.reset._list_migration_crds')
+    @patch('console_link.workflow.commands.reset._list_migration_resources')
     def test_no_resources(self, mock_list, mock_k8s):
         mock_list.return_value = []
         runner = CliRunner()
@@ -95,12 +95,9 @@ class TestResetCommandList:
 class TestResetCommandPatch:
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._patch_teardown')
-    @patch('console_link.workflow.commands.reset._list_migration_crds')
-    def test_patch_specific_resource(self, mock_list, mock_patch, mock_k8s):
-        mock_list.return_value = [
-            ('capturedtraffics', 'source-proxy', 'Ready'),
-            ('trafficreplays', 'src-tgt-replayer', 'Ready'),
-        ]
+    @patch('console_link.workflow.commands.reset._find_resource_by_name')
+    def test_patch_specific_resource(self, mock_find, mock_patch, mock_k8s):
+        mock_find.return_value = ('capturedtraffics', 'source-proxy', 'Ready')
         mock_patch.return_value = True
 
         runner = CliRunner()
@@ -113,7 +110,7 @@ class TestResetCommandPatch:
     @patch('console_link.workflow.commands.reset.wait_for_workflow_completion')
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._patch_teardown')
-    @patch('console_link.workflow.commands.reset._list_migration_crds')
+    @patch('console_link.workflow.commands.reset._list_migration_resources')
     def test_reset_all(self, mock_list, mock_patch, mock_k8s, mock_wait, mock_delete):
         mock_list.return_value = [
             ('capturedtraffics', 'source-proxy', 'Ready'),
@@ -130,11 +127,9 @@ class TestResetCommandPatch:
         assert 'Deleted workflow' in result.output
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')
-    @patch('console_link.workflow.commands.reset._list_migration_crds')
-    def test_skips_already_teardown(self, mock_list, mock_k8s):
-        mock_list.return_value = [
-            ('capturedtraffics', 'source-proxy', 'Teardown'),
-        ]
+    @patch('console_link.workflow.commands.reset._find_resource_by_name')
+    def test_skips_already_teardown(self, mock_find, mock_k8s):
+        mock_find.return_value = ('capturedtraffics', 'source-proxy', 'Teardown')
         runner = CliRunner()
         result = runner.invoke(workflow_cli, ['reset', 'source-proxy'])
         assert 'No resources to teardown' in result.output

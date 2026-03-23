@@ -1,11 +1,25 @@
-"""Reset command for workflow CLI - tears down workflow resources via CRD status patching.
+"""Reset command for workflow CLI - tears down migration resources.
 
-The CLI patches status.phase = Teardown on migration CRDs. The Argo workflow templates
-watch for this phase via waitForExistingResource and handle all cleanup (deleting
-Deployments, coordinator clusters, etc.) themselves. The CLI only speaks CRDs — it
-does not directly manipulate any k8s workload resources.
+How it works (for developers):
+
+Each long-running migration component (proxy, replayer, backfill) has a corresponding
+custom resource (CRD) that tracks its lifecycle phase: Created → Ready → Teardown.
+The Argo workflow templates block on these resources via waitForExistingResource,
+so patching status.phase to "Teardown" unblocks the workflow and lets it run its
+own cleanup logic (deleting Deployments, coordinator clusters, etc.).
+
+This file has both PATCH and DELETE operations because they serve different purposes:
+- PATCH (status.phase = Teardown): signals each component to begin its teardown
+  sequence. The workflow handles the actual cleanup.
+- DELETE (workflow deletion): after all components have torn down and the workflow
+  has reached a terminal phase, we delete the workflow itself so a new one can be
+  submitted.
+
+The --all flag combines both: patch all resources → wait for workflow completion → delete.
+Single-resource reset only patches — it doesn't touch the workflow.
 """
 
+import fnmatch
 import logging
 import os
 
@@ -15,16 +29,14 @@ from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode, load_k8s_config
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .crd_utils import CRD_GROUP, CRD_VERSION, has_glob
 from .suspend_steps import (
     wait_for_workflow_completion,
     delete_workflow,
 )
 
 logger = logging.getLogger(__name__)
-
-CRD_GROUP = 'migrations.opensearch.org'
-CRD_VERSION = 'v1alpha1'
-TEARDOWN_CRDS = ['capturedtraffics', 'snapshotmigrations', 'trafficreplays']
+TEARDOWN_RESOURCES = ['capturedtraffics', 'snapshotmigrations', 'trafficreplays']
 DISPLAY_NAMES = {
     'capturedtraffics': 'Capture Proxy',
     'snapshotmigrations': 'Snapshot Migration',
@@ -32,11 +44,11 @@ DISPLAY_NAMES = {
 }
 
 
-def _list_migration_crds(namespace):
-    """List all migration CRDs with their status phase. Returns list of (plural, name, phase)."""
+def _list_migration_resources(namespace):
+    """List all migration resources with their status phase. Returns list of (plural, name, phase)."""
     custom = client.CustomObjectsApi()
     results = []
-    for plural in TEARDOWN_CRDS:
+    for plural in TEARDOWN_RESOURCES:
         try:
             items = custom.list_namespaced_custom_object(
                 group=CRD_GROUP, version=CRD_VERSION,
@@ -51,8 +63,24 @@ def _list_migration_crds(namespace):
     return results
 
 
+def _find_resource_by_name(namespace, name):
+    """Find a single resource by name across all migration resource types. Returns (plural, name, phase) or None."""
+    custom = client.CustomObjectsApi()
+    for plural in TEARDOWN_RESOURCES:
+        try:
+            item = custom.get_namespaced_custom_object(
+                group=CRD_GROUP, version=CRD_VERSION,
+                namespace=namespace, plural=plural, name=name
+            )
+            phase = item.get('status', {}).get('phase', 'Unknown')
+            return (plural, name, phase)
+        except ApiException:
+            pass
+    return None
+
+
 def _patch_teardown(namespace, plural, name):
-    """Patch a CRD's status.phase to Teardown. Returns True if patched."""
+    """Signal a resource to begin teardown. Returns True if successful."""
     custom = client.CustomObjectsApi()
     try:
         custom.patch_namespaced_custom_object_status(
@@ -67,7 +95,7 @@ def _patch_teardown(namespace, plural, name):
 
 
 def _show_resources(crds):
-    """List mode: show all migration CRDs with friendly display names."""
+    """List mode: show all migration resources with friendly display names."""
     click.echo("Migration resources:")
     for plural, name, phase in crds:
         display = DISPLAY_NAMES.get(plural, plural)
@@ -78,7 +106,7 @@ def _show_resources(crds):
 
 
 def _patch_targets(namespace, targets):
-    """Patch a list of CRDs to Teardown. Returns True if all succeeded."""
+    """Patch a list of resources to Teardown. Returns True if all succeeded."""
     for plural, name, phase in targets:
         if _patch_teardown(namespace, plural, name):
             click.echo(f"  ✓ Patched {name} to Teardown")
@@ -89,7 +117,7 @@ def _patch_targets(namespace, targets):
 
 
 def _reset_all(namespace, workflow_name, argo_server, token, insecure):
-    """Wait for workflow to complete after CRD teardown signals, then delete workflow."""
+    """Wait for workflow to complete after teardown signals, then delete workflow."""
     click.echo("Waiting for workflow to complete...")
     phase = wait_for_workflow_completion(workflow_name, namespace, argo_server, token, insecure)
     if phase:
@@ -106,7 +134,7 @@ def _reset_all(namespace, workflow_name, argo_server, token, insecure):
 def _get_resource_completions(ctx, param, incomplete):
     try:
         load_k8s_config()
-        crds = _list_migration_crds(ctx.params.get('namespace', 'ma'))
+        crds = _list_migration_resources(ctx.params.get('namespace', 'ma'))
         return [n for _, n, ph in crds if n.startswith(incomplete) and ph != 'Teardown']
     except Exception:
         return []
@@ -130,46 +158,56 @@ def _get_resource_completions(ctx, param, incomplete):
 @click.option('--token', help='Bearer token for authentication')
 @click.pass_context
 def reset_command(ctx, path, reset_all, workflow_name, argo_server, namespace, insecure, token):
-    """Reset workflow resources by signaling teardown via CRD status.
+    """Reset workflow resources by signaling teardown.
 
-    With no arguments, lists migration CRDs and their status.
-    With a NAME, patches matching CRDs to Teardown phase.
-    With --all, patches all non-Teardown CRDs, waits for workflow completion, deletes workflow.
+    With no arguments, lists migration resources and their status.
+    With a NAME or glob pattern, signals matching resources to begin teardown.
+    With --all, tears down all active resources, waits for workflow completion, deletes workflow.
 
     Example:
         workflow reset                     # list resettable resources
         workflow reset source-proxy        # teardown just capture proxy
+        workflow reset "source-*"          # teardown all matching resources
         workflow reset --all               # teardown everything and delete workflow
     """
     try:
         load_k8s_config()
 
-        crds = _list_migration_crds(namespace)
+        if path is not None:
+            if has_glob(path):
+                # Glob pattern — list all and filter
+                crds = _list_migration_resources(namespace)
+                targets = [(p, n, ph) for p, n, ph in crds
+                           if fnmatch.fnmatch(n, path) and ph != 'Teardown']
+            else:
+                # Exact name — direct lookup
+                match = _find_resource_by_name(namespace, path)
+                targets = [match] if match and match[2] != 'Teardown' else []
+
+            if not targets:
+                click.echo(f"No resources to teardown matching '{path}'.")
+                return
+            if not _patch_targets(namespace, targets):
+                ctx.exit(ExitCode.FAILURE.value)
+            return
+
+        crds = _list_migration_resources(namespace)
 
         if not crds and not reset_all:
             click.echo("No migration resources found.")
             return
 
-        if path is None and not reset_all:
+        if not reset_all:
             _show_resources(crds)
             return
 
-        # Find CRDs to patch
-        if reset_all:
-            targets = [(p, n, ph) for p, n, ph in crds if ph != 'Teardown']
-        else:
-            targets = [(p, n, ph) for p, n, ph in crds if n == path and ph != 'Teardown']
-
+        targets = [(p, n, ph) for p, n, ph in crds if ph != 'Teardown']
         if targets:
             if not _patch_targets(namespace, targets):
                 ctx.exit(ExitCode.FAILURE.value)
                 return
-        elif not reset_all:
-            click.echo(f"No resources to teardown matching '{path}'.")
-            return
 
-        if reset_all:
-            _reset_all(namespace, workflow_name, argo_server, token, insecure)
+        _reset_all(namespace, workflow_name, argo_server, token, insecure)
 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
