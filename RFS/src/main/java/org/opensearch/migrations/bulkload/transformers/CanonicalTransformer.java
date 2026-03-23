@@ -83,7 +83,13 @@ public class CanonicalTransformer implements Transformer {
         ObjectNode componentTemplatesOut = MAPPER.createObjectNode();
         if (componentTemplatesRoot != null && !componentTemplatesRoot.isEmpty()) {
             componentTemplatesRoot.fieldNames().forEachRemaining(name -> {
-                componentTemplatesOut.set(name, componentTemplatesRoot.get(name).deepCopy());
+                var template = (ObjectNode) componentTemplatesRoot.get(name).deepCopy();
+                var templateSubRoot = (ObjectNode) template.get("template");
+                if (templateSubRoot != null) {
+                    TransformFunctions.removeIntermediateIndexSettingsLevel(templateSubRoot);
+                    TransformFunctions.fixReplicasForDimensionality(templateSubRoot, awarenessAttributes);
+                }
+                componentTemplatesOut.set(name, template);
             });
         }
         ObjectNode componentTemplateWrapper = MAPPER.createObjectNode();
