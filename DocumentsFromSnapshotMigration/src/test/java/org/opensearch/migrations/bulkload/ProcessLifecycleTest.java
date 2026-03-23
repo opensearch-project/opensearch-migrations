@@ -61,6 +61,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
         Path tempDirSnapshot;
         Path tempDirLucene;
         ToxiProxyWrapper proxyContainer;
+        /** Direct (non-proxied) URL for work coordination, or null to use the proxy. */
+        String coordinatorUrl;
     }
 
     // The following test expects to get an exit code of 0 (TBD_GOES_HERE) at least two times, and then an
@@ -124,13 +126,18 @@ public class ProcessLifecycleTest extends SourceTestBase {
             var osTargetContainer = new OpensearchContainer<>(targetImageName).withExposedPorts(OPENSEARCH_PORT)
                 .withNetwork(network)
                 .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
+            var osCoordinatorContainer = new OpensearchContainer<>(targetImageName).withExposedPorts(OPENSEARCH_PORT)
+                .withNetwork(network);
             var proxyContainer = new ToxiProxyWrapper(network)
         ) {
             CompletableFuture.allOf(
                 CompletableFuture.runAsync(esSourceContainer::start),
                 CompletableFuture.runAsync(osTargetContainer::start),
+                CompletableFuture.runAsync(osCoordinatorContainer::start),
                 CompletableFuture.runAsync(() -> proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT))
             ).join();
+
+            var coordinatorUrl = "http://" + osCoordinatorContainer.getHost() + ":" + osCoordinatorContainer.getMappedPort(OPENSEARCH_PORT);
 
             // Populate the source cluster with data
             var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
@@ -159,7 +166,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
 
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
-            int actualExitCode = processRunner.apply(new RunData(tempDirSnapshot, tempDirLucene, proxyContainer));
+            int actualExitCode = processRunner.apply(new RunData(tempDirSnapshot, tempDirLucene, proxyContainer, coordinatorUrl));
             log.atInfo().setMessage("Process exited with code: {}").addArgument(actualExitCode).log();
 
             // Check if the exit code is as expected
@@ -212,11 +219,16 @@ public class ProcessLifecycleTest extends SourceTestBase {
     private static ProcessBuilder setupProcessWithSlowProxy(RunData d) {
         var tp = d.proxyContainer.getProxy();
         tp.toxics().latency("latency-toxic", ToxicDirection.DOWNSTREAM, 1000);
+        var args = new ArrayList<>(java.util.List.of(
+                "--documents-per-bulk-request", "4", "--max-connections", "1"));
+        if (d.coordinatorUrl != null) {
+            args.addAll(java.util.List.of("--coordinator-host", d.coordinatorUrl));
+        }
         return setupProcess(
                 d.tempDirSnapshot,
                 d.tempDirLucene,
                 d.proxyContainer.getProxyUriAsString(),
-                new String[] {"--documents-per-bulk-request", "4", "--max-connections", "1"}
+                args.toArray(new String[0])
         );
     }
 
@@ -242,9 +254,9 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 throw new RuntimeException(e);
             }
 
-            // Check that there is a .migrations_working_state index on the target, and it has the expected values.
+            // Check that there is a .migrations_working_state index on the coordinator, and it has the expected values.
             var client = new RestClient(ConnectionContextTestParams.builder()
-                    .host(d.proxyContainer.getProxyUriAsString())
+                    .host(d.coordinatorUrl)
                     .build()
                     .toConnectionContext());
             Assertions.assertEquals(200, client.get(".migrations_working_state", null).statusCode);
