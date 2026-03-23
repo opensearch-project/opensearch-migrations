@@ -564,10 +564,10 @@ class ExprBuilder {
         return new ComparisonExpression<number, L, R>(">", l, r);
     }
 
-    not<C extends ExpressionType>(data: AllowLiteralOrExpression<boolean, C>): BaseExpression<boolean, C>;
     not<C extends ExpressionType>(data: BaseExpression<Serialized<boolean>, C>): BaseExpression<boolean, C>;
+    not<C extends ExpressionType>(data: AllowLiteralOrExpression<boolean, C>): BaseExpression<boolean, C>;
     not<C extends ExpressionType>(data: AllowLiteralOrExpression<boolean, C> | BaseExpression<Serialized<boolean>, C>) {
-        return fn<boolean, C>("!", toExpression(data as any));
+        return fn<boolean, C>("!", isExpression(data) ? data : toExpression(data));
     }
 
     isEmpty(data: AllowLiteralOrExpression<any, any>): BaseExpression<boolean, "complicatedExpression"> {
