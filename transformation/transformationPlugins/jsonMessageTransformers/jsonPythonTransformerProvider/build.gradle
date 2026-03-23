@@ -5,15 +5,15 @@ plugins {
 
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonGraalTransformerBase')
-    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformer')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonPythonTransformer')
+
+    implementation libs.commons.compress
+    implementation libs.slf4j.api
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
-    testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
 
     testImplementation libs.junit.jupiter.api
     testImplementation libs.junit.jupiter.params
-    testImplementation libs.slf4j.api
     testImplementation libs.hamcrest
     testRuntimeOnly libs.junit.jupiter.engine
-
 }
