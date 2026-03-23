@@ -4,11 +4,9 @@ plugins {
 }
 
 dependencies {
-    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonGraalTransformerBase')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonPythonTransformer')
 
-    implementation libs.jackson.core
-    implementation libs.jackson.databind
     implementation libs.commons.compress
     implementation libs.slf4j.api
 
