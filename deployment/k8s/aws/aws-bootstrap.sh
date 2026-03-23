@@ -667,14 +667,18 @@ if [[ "$deploy_cfn" == "true" ]]; then
 
   echo "Deploying CloudFormation stack: $cfn_stack_name"
 
-  # Check for terminal stack states that prevent deployment
+  # Check for stack states that prevent deployment
   if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
     _stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
       --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
-    if [[ "$_stack_status" == "ROLLBACK_COMPLETE" || "$_stack_status" == "DELETE_FAILED" ]]; then
+    if [[ "$_stack_status" == *_IN_PROGRESS ]]; then
       echo "Error: Stack $cfn_stack_name is in $_stack_status state." >&2
-      echo "Delete it manually before re-running:" >&2
-      echo "  aws cloudformation delete-stack --stack-name $cfn_stack_name ${region:+--region $region}" >&2
+      echo "Wait for the current operation to complete before re-running." >&2
+      exit 1
+    fi
+    if [[ "$_stack_status" == "DELETE_FAILED" || "$_stack_status" == "UPDATE_ROLLBACK_FAILED" ]]; then
+      echo "Error: Stack $cfn_stack_name is in $_stack_status state." >&2
+      echo "Manual intervention required before re-running." >&2
       exit 1
     fi
   fi
