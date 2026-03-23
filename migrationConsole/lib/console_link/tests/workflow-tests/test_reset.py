@@ -114,17 +114,12 @@ class TestResetCommandPatch:
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._patch_teardown')
     @patch('console_link.workflow.commands.reset._list_migration_crds')
-    @patch('console_link.workflow.commands.reset.list_approval_gates')
-    @patch('console_link.workflow.commands.reset.approve_gate')
-    def test_reset_all(self, mock_approve, mock_gates,
-                       mock_list, mock_patch, mock_k8s, mock_wait, mock_delete):
+    def test_reset_all(self, mock_list, mock_patch, mock_k8s, mock_wait, mock_delete):
         mock_list.return_value = [
             ('capturedtraffics', 'source-proxy', 'Ready'),
             ('trafficreplays', 'src-tgt-replayer', 'Ready'),
         ]
-        mock_gates.return_value = []
         mock_patch.return_value = True
-        mock_approve.return_value = True
         mock_wait.return_value = 'Succeeded'
         mock_delete.return_value = True
 

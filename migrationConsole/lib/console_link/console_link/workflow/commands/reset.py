@@ -15,7 +15,6 @@ from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode, load_k8s_config
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
-from .approve import list_approval_gates, approve_gate
 from .suspend_steps import (
     wait_for_workflow_completion,
     delete_workflow,
@@ -90,17 +89,13 @@ def _patch_targets(namespace, targets):
 
 
 def _reset_all(namespace, workflow_name, argo_server, token, insecure):
-    """Approve all gates, wait for workflow completion, delete workflow."""
-    for name, phase in list_approval_gates(namespace):
-        if phase == 'Pending' and approve_gate(namespace, name):
-            click.echo(f"  ✓ Approved gate {name}")
-
+    """Wait for workflow to complete after CRD teardown signals, then delete workflow."""
     click.echo("Waiting for workflow to complete...")
     phase = wait_for_workflow_completion(workflow_name, namespace, argo_server, token, insecure)
     if phase:
         click.echo(f"Workflow finished: {phase}")
     else:
-        click.echo("Timed out waiting for workflow completion.", err=True)
+        click.echo("Timed out waiting — force deleting workflow.", err=True)
 
     if delete_workflow(workflow_name, namespace, argo_server, token, insecure):
         click.echo(f"  ✓ Deleted workflow '{workflow_name}'")
