@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.pipeline.adapter;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -116,7 +117,19 @@ public class OpenSearchDocumentSink implements DocumentSink {
             .toList();
         var transformed = transformer.transformJson(asMaps);
         if (transformed instanceof List) {
-            return ((List<Map<String, Object>>) transformed).stream()
+            // Normalize polyglot types (e.g. GraalVM PolyglotList/PolyglotMap) to native Java
+            // by round-tripping through JSON serialization, then filter out non-map entries
+            // (empty arrays from transformer indicate filtered-out documents)
+            List<Object> rawList;
+            try {
+                var json = OBJECT_MAPPER.writeValueAsBytes(transformed);
+                rawList = OBJECT_MAPPER.readValue(json,
+                    OBJECT_MAPPER.getTypeFactory().constructCollectionType(List.class, Object.class));
+            } catch (IOException e) {
+                throw new java.io.UncheckedIOException("Failed to normalize transformer output", e);
+            }
+            return rawList.stream()
+                .filter(item -> item instanceof Map)
                 .map(item -> OBJECT_MAPPER.convertValue(item, BulkOperationSpec.class))
                 .collect(Collectors.toList());
         }

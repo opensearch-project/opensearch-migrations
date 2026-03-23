@@ -113,6 +113,35 @@ class OpenSearchDocumentSinkTest {
 
     @SuppressWarnings("unchecked")
     @Test
+    void writeBatch_withTypeMappingTransformer_handlesPolyglotTypes() {
+        when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
+
+        // Use the real TypeMappingSanitization transformer (GraalVM/JS-based) which returns
+        // PolyglotList/PolyglotMap types that must be normalized to native Java types
+        var transformerConfig = "[{\"TypeMappingSanitizationTransformerProvider\":" +
+            "{\"staticMappings\":{\"source_index\":{\"type1\":\"source_index\",\"type2\":\"source_index\"}}," +
+            "\"sourceProperties\":{\"version\":{\"major\":5,\"minor\":6}}}}]";
+        var loader = new org.opensearch.migrations.transform.TransformationLoader();
+        var transformer = loader.getTransformerFactoryLoader(transformerConfig);
+
+        var sink = new OpenSearchDocumentSink(client, () -> transformer, false,
+            DocumentExceptionAllowlist.empty(), null);
+
+        // Create a document with _type hint (as the pipeline does for ES 5.x multi-type indices)
+        var docJson = "{\"title\":\"test\"}";
+        var hints = Map.of(Document.HINT_TYPE, "type1");
+        var docs = List.of(new Document("doc1", docJson.getBytes(), Document.Operation.UPSERT, hints, Map.of()));
+
+        // This would throw ClassCastException: PolyglotList cannot be cast to Map
+        // before the fix in applyTransformation
+        var result = sink.writeBatch("source_index", docs).block();
+
+        assertNotNull(result);
+        verify(client).sendBulkRequest(eq("source_index"), anyList(), isNull(), eq(false), any());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
     void writeBatch_transformerModifiesDocs_sendsTransformed() {
         when(client.sendBulkRequest(anyString(), anyList(), any(), anyBoolean(), any())).thenReturn(OK);
 
