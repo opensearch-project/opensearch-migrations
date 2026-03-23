@@ -13,6 +13,7 @@ dependencies {
 
     implementation libs.netty.all
     implementation libs.jackson.databind
+    implementation libs.jackson.dataformat.yaml
     implementation libs.jcommander
     implementation libs.slf4j.api
     implementation libs.log4j.api

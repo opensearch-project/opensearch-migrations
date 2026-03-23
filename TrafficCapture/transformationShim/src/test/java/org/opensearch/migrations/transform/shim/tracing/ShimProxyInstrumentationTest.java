@@ -85,7 +85,7 @@ class ShimProxyInstrumentationTest {
         targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPort)));
 
         proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
-            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
+            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext, null);
         proxy.start();
 
         var resp = httpGet("http://localhost:" + proxyPort + "/test/endpoint");
@@ -113,7 +113,7 @@ class ShimProxyInstrumentationTest {
         targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPort)));
 
         proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
-            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
+            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext, null);
         proxy.start();
 
         httpGet("http://localhost:" + proxyPort + "/metrics-check");
