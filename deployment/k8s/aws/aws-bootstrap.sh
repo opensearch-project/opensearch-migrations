@@ -64,7 +64,7 @@ push_images_to_ecr=false
 ma_images_source=""
 skip_setting_k8s_context=false
 skip_test_images=false
-image_tag=""
+image_tag="latest"
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -418,11 +418,7 @@ TOOLS_ARCH=$(uname -m)
 # --- compute image tag ---
 # Default to "latest" for simple dev workflows (build, delete pod, done).
 # CI passes --image-tag with a git SHA for immutable, reproducible deploys.
-if [[ -n "$image_tag" ]]; then
-  IMAGE_TAG="$image_tag"
-else
-  IMAGE_TAG="latest"
-fi
+IMAGE_TAG="$image_tag"
 echo "Image tag: $IMAGE_TAG"
 case "$TOOLS_ARCH" in
   x86_64 | amd64) TOOLS_ARCH="amd64" ;;
