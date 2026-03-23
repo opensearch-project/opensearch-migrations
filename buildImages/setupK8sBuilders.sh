@@ -20,9 +20,8 @@ if docker buildx inspect "$BUILDER_NAME" 2>/dev/null | grep -q "Status: running"
   echo "Builder '$BUILDER_NAME' already running, skipping bootstrap"
   docker buildx use "$BUILDER_NAME"
   exit 0
-# Slow path: --bootstrap tries to start buildkit pods (timeout prevents indefinite hang
-# when a stale builder config exists but pods can't be scheduled on EKS Auto Mode)
-elif timeout 120 docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
+# Slow path: --bootstrap tries to start buildkit pods
+elif docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
   echo "Builder '$BUILDER_NAME' bootstrapped successfully"
   docker buildx use "$BUILDER_NAME"
   exit 0
