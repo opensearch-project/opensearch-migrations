@@ -130,11 +130,16 @@ def call(Map config = [:]) {
                             env.STACK_NAME_SUFFIX = "${maStageName}-us-east-1"
                             def clusterDetails = readJSON text: env.clusterDetailsJson
                             def targetCluster = clusterDetails.target
-                            def vpcId = targetCluster.vpcId
+                            def vpcId = targetCluster.vpcId ?: ''
                             def subnetIds = "${targetCluster.subnetIds}"
 
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    if (!vpcId) {
+                                        def firstSubnet = subnetIds.split(',')[0]
+                                        vpcId = sh(script: "aws ec2 describe-subnets --subnet-ids ${firstSubnet} --region us-east-1 --query 'Subnets[0].VpcId' --output text", returnStdout: true).trim()
+                                        echo "Resolved VPC ID from subnet: ${vpcId}"
+                                    }
                                     sh """
                                         ./deployment/k8s/aws/aws-bootstrap.sh \
                                           --deploy-import-vpc-cfn \
