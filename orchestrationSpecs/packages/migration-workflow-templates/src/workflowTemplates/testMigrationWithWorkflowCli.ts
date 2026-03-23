@@ -151,7 +151,7 @@ fi
 
             // Step 4: Delete the migration workflow (skipped when keepMigrationWorkflow=true)
             .addStep("deleteMigrationWorkflow", INTERNAL, "deleteMigrationWorkflow",
-                {when: expr.not(expr.cast(b.inputs.keepMigrationWorkflow).to<boolean>())}
+                {when: expr.not(b.inputs.keepMigrationWorkflow)}
             )
         )
     )
