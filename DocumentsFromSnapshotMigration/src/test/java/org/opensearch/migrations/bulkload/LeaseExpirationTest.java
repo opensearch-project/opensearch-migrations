@@ -77,13 +77,11 @@ public class LeaseExpirationTest extends SourceTestBase {
         // 2 Shards, for each shard, expect two status code 2 and one status code 0 (3 leases)
         int shards = 2;
         int indexDocCount = 1640 * shards;
+        int migrationProcessesPerShard = 3;
         int continueExitCode = 2;
         int finalExitCodePerShard = 0;
-        // Allow up to 20 runs total (pipeline throughput varies with CI load)
-        int maxRuns = 20;
-        runTestProcessWithCheckpoint(continueExitCode,
+        runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
                 finalExitCodePerShard, shards, shards, indexDocCount, forceMoreSegments,
-                maxRuns,
                 sourceClusterVersion,
                 targetClusterVersion,
                 d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer,
@@ -91,11 +89,10 @@ public class LeaseExpirationTest extends SourceTestBase {
     }
 
     @SneakyThrows
-    private void runTestProcessWithCheckpoint(int expectedInitialExitCode,
+    private void runTestProcessWithCheckpoint(int expectedInitialExitCode, int expectedInitialExitCodeCount,
                                               int expectedEventualExitCode, int expectedEventualExitCodeCount,
                                               int shards, int indexDocCount,
                                               boolean forceMoreSegments,
-                                              int maxRuns,
                                               SearchClusterContainer.ContainerVersion sourceClusterVersion,
                                               SearchClusterContainer.ContainerVersion targetClusterVersion,
                                               Function<RunData, Integer> processRunner) {
@@ -182,26 +179,25 @@ public class LeaseExpirationTest extends SourceTestBase {
                 log.atInfo().setMessage("Process exited with code: {}").addArgument(exitCode).log();
                 // Clean tree for subsequent run
                 FileSystemUtils.deleteDirectories(tempDirLucene.toString());
-            } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < maxRuns);
+            } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount + expectedEventualExitCodeCount);
 
-            // All shards must complete (exit code 0)
+            // Check if the final exit code is as expected
             Assertions.assertEquals(
                     expectedEventualExitCodeCount,
                     finalExitCodeCount,
-                    "Expected " + expectedEventualExitCodeCount + " completions (exit code " + expectedEventualExitCode + ") but got " + finalExitCodeCount
+                    "The program did not exit with the expected final exit code."
             );
 
-            // Last exit code must be completion
             Assertions.assertEquals(
                     expectedEventualExitCode,
                     exitCode,
                     "The program did not exit with the expected final exit code."
             );
 
-            // At least one lease expiration must have occurred (proves checkpoint/resume works)
-            Assertions.assertTrue(
-                    initialExitCodeCount >= 1,
-                    "Expected at least 1 lease expiration (exit code " + expectedInitialExitCode + ") but got " + initialExitCodeCount
+            Assertions.assertEquals(
+                    expectedInitialExitCodeCount,
+                    initialExitCodeCount,
+                    "The program did not exit with the expected number of " + expectedInitialExitCode +" exit codes"
             );
 
             // Assert doc count on the target cluster matches source
