@@ -151,8 +151,18 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
             click.echo("\nEnsure CONFIG_PROCESSOR_DIR is set correctly and contains:", err=True)
             click.echo("  - createMigrationWorkflowFromUserConfiguration.sh", err=True)
             ctx.exit(ExitCode.FAILURE.value)
-        except subprocess.CalledProcessError:
-            # Error details already printed by script_runner with direct_output=True
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr or ''
+            if 'AlreadyExists' in stderr:
+                click.echo(
+                    "Error: A workflow already exists. "
+                    "Run 'workflow status' to check its state, then "
+                    "'workflow reset --all' to teardown before resubmitting.",
+                    err=True)
+            else:
+                click.echo(f"Script failed with exit code {e.returncode}", err=True)
+                if stderr:
+                    logger.info(f"stderr: {stderr}")
             ctx.exit(ExitCode.FAILURE.value)
         except Exception as e:
             click.echo(f"Error submitting workflow: {str(e)}", err=True)

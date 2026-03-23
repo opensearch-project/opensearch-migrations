@@ -93,9 +93,9 @@ class ScriptRunner:
                 if e.stderr:
                     print(f"stderr: {e.stderr}", file=sys.stderr)
             else:
-                logger.error(f"Script failed with exit code {e.returncode}")
+                logger.debug(f"Script failed with exit code {e.returncode}")
                 if e.stderr:
-                    logger.error(f"stderr: {e.stderr}")
+                    logger.debug(f"stderr: {e.stderr}")
             raise subprocess.CalledProcessError(
                 e.returncode, e.cmd, e.stdout, e.stderr
             ) from None
@@ -216,7 +216,7 @@ class ScriptRunner:
         try:
             logger.debug(f"Config file: {temp_file_path}")
             output = self.run_script("createMigrationWorkflowFromUserConfiguration.sh", None,
-                                     *([temp_file_path] + args), direct_output=True)
+                                     *([temp_file_path] + args), direct_output=False)
 
             # Parse kubectl output to extract workflow information
             # The script should output workflow creation details

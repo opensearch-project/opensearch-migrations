@@ -23,8 +23,9 @@ rules:
     resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: ["migrations.opensearch.org"]
-    resources: ["capturedtraffics", "datasnapshots", "snapshotmigrations",
-                "capturedtraffics/status", "datasnapshots/status", "snapshotmigrations/status"]
+    resources: ["approvalgates", "capturedtraffics", "datasnapshots", "snapshotmigrations", "trafficreplays",
+                "approvalgates/status", "capturedtraffics/status", "datasnapshots/status", "snapshotmigrations/status",
+                "trafficreplays/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
 ---

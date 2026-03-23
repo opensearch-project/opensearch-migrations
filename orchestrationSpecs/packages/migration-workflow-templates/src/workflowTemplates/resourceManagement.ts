@@ -207,4 +207,124 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
 
+    // ── Approval gate templates ─────────────────────────────────────────
+
+    .addTemplate("createApprovalGate", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "ApprovalGate",
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Pending"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("waitForApproval", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addWaitForExistingResource(b => b
+            .setDefinition({
+                resource: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "ApprovalGate",
+                    name: b.inputs.resourceName
+                },
+                conditions: {successCondition: "status.phase == Approved"}
+            })
+        )
+    )
+
+
+    // ── Teardown signal templates ───────────────────────────────────────
+
+    .addTemplate("waitForTeardown", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addWaitForExistingResource(b => b
+            .setDefinition({
+                resource: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: b.inputs.resourceKind,
+                    name: b.inputs.resourceName
+                },
+                conditions: {successCondition: "status.phase == Teardown"}
+            })
+        )
+    )
+
+
+    .addTemplate("patchTeardown", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: b.inputs.resourceKind,
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Teardown"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("deleteDeployment", t => t
+        .addRequiredInput("deploymentName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "delete",
+                flags: ["--ignore-not-found"],
+                manifest: {
+                    apiVersion: "apps/v1",
+                    kind: "Deployment",
+                    metadata: {name: b.inputs.deploymentName}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("createTrafficReplay", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "TrafficReplay",
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Running"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("patchTrafficReplayReady", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "TrafficReplay",
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Ready"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
     .getFullScope();

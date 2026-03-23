@@ -222,6 +222,27 @@
               },
               "name": "patchCapturedTraffic"
             }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforteardown",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "CapturedTraffic"
+                  }
+                ]
+              },
+              "name": "waitForTeardown"
+            }
           ]
         ],
         "outputs": {
@@ -692,6 +713,191 @@
         }
       },
       {
+        "name": "migrateandselfteardown",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "snapshotMigrationConfig"
+            },
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "resolvedSnapshotName"
+            },
+            {
+              "name": "uniqueRunNonce",
+              "description": "Workflow session nonce",
+              "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            },
+            {
+              "name": "imageTrafficReplayerLocation"
+            },
+            {
+              "name": "imageTrafficReplayerPullPolicy"
+            },
+            {
+              "name": "imageReindexFromSnapshotLocation"
+            },
+            {
+              "name": "imageReindexFromSnapshotPullPolicy"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageCoordinatorClusterLocation"
+            },
+            {
+              "name": "imageCoordinatorClusterPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "migratefromsnapshot",
+              "withParam": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrations']}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "uniqueRunNonce",
+                    "value": "{{inputs.parameters.uniqueRunNonce}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerLocation",
+                    "value": "{{inputs.parameters.imageTrafficReplayerLocation}}"
+                  },
+                  {
+                    "name": "imageTrafficReplayerPullPolicy",
+                    "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotLocation",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
+                  },
+                  {
+                    "name": "imageReindexFromSnapshotPullPolicy",
+                    "value": "{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterLocation",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "imageCoordinatorClusterPullPolicy",
+                    "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
+                  },
+                  {
+                    "name": "label",
+                    "value": "{{=jsonpath(toJSON(item), '$.label')}}"
+                  },
+                  {
+                    "name": "metadataMigrationConfig",
+                    "value": "{{=sprig.dig('metadataMigrationConfig', '', item)}}"
+                  },
+                  {
+                    "name": "documentBackfillConfig",
+                    "value": "{{=sprig.dig('documentBackfillConfig', '', item)}}"
+                  },
+                  {
+                    "name": "sourceVersion",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceVersion']}}"
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel']}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotMigrationConfig)['targetConfig'])}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{=toJSON(sprig.dict(\"snapshotName\", inputs.parameters.resolvedSnapshotName, \"label\", fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotConfig']['label'], \"repoConfig\", fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotConfig']['repoConfig']))}}"
+                  },
+                  {
+                    "name": "migrationLabel",
+                    "value": "{{=item['label']}}"
+                  },
+                  {
+                    "name": "groupName_view",
+                    "value": "{{=item['label']}}"
+                  }
+                ]
+              },
+              "name": "migrateFromSnapshot"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchsnapshotmigrationready",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  }
+                ]
+              },
+              "name": "patchSnapshotMigration"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchteardown",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "SnapshotMigration"
+                  }
+                ]
+              },
+              "name": "selfTeardown"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "runsinglesnapshotmigration",
         "inputs": {
           "parameters": [
@@ -793,13 +999,35 @@
           ],
           [
             {
-              "template": "migratefromsnapshot",
-              "withParam": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrations']}}",
+              "templateRef": {
+                "template": "waitforteardown",
+                "name": "resource-management"
+              },
               "arguments": {
                 "parameters": [
                   {
-                    "name": "groupName_view",
-                    "value": "{{=item['label']}}"
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "SnapshotMigration"
+                  }
+                ]
+              },
+              "name": "teardownWatcher"
+            },
+            {
+              "template": "migrateandselfteardown",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "snapshotMigrationConfig",
+                    "value": "{{inputs.parameters.snapshotMigrationConfig}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
                   },
                   {
                     "name": "uniqueRunNonce",
@@ -846,57 +1074,15 @@
                     "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
                   },
                   {
-                    "name": "label",
-                    "value": "{{=jsonpath(toJSON(item), '$.label')}}"
-                  },
-                  {
-                    "name": "metadataMigrationConfig",
-                    "value": "{{=sprig.dig('metadataMigrationConfig', '', item)}}"
-                  },
-                  {
-                    "name": "documentBackfillConfig",
-                    "value": "{{=sprig.dig('documentBackfillConfig', '', item)}}"
-                  },
-                  {
-                    "name": "sourceVersion",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceVersion']}}"
-                  },
-                  {
-                    "name": "sourceLabel",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel']}}"
-                  },
-                  {
-                    "name": "targetConfig",
-                    "value": "{{=toJSON(fromJSON(inputs.parameters.snapshotMigrationConfig)['targetConfig'])}}"
-                  },
-                  {
-                    "name": "snapshotConfig",
-                    "value": "{{=toJSON(sprig.dict(\"snapshotName\", (('externalSnapshotName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']) ? (fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['externalSnapshotName']) : (steps.readSnapshotName.outputs.parameters.snapshotName)), \"label\", fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotConfig']['label'], \"repoConfig\", fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotConfig']['repoConfig']))}}"
-                  },
-                  {
-                    "name": "migrationLabel",
-                    "value": "{{=item['label']}}"
+                    "name": "resolvedSnapshotName",
+                    "value": "{{=(('externalSnapshotName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']) ? (fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['externalSnapshotName']) : (steps.readSnapshotName.outputs.parameters.snapshotName))}}"
                   }
                 ]
               },
-              "name": "migrateFromSnapshot"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "patchsnapshotmigrationready",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.resourceName}}"
-                  }
-                ]
-              },
-              "name": "patchSnapshotMigration"
+              "name": "migrateAndTeardown",
+              "continueOn": {
+                "failed": true
+              }
             }
           ]
         ],
@@ -1065,6 +1251,61 @@
                 ]
               },
               "name": "deployReplayer"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "createtrafficreplay",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                  }
+                ]
+              },
+              "name": "createTrafficReplay"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchtrafficreplayready",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                  }
+                ]
+              },
+              "name": "patchTrafficReplayReady"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforteardown",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "TrafficReplay"
+                  }
+                ]
+              },
+              "name": "waitForTeardown"
             }
           ]
         ],

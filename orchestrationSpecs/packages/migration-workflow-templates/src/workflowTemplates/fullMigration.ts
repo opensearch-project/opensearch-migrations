@@ -147,6 +147,14 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.proxyName,
                 })
             )
+            // Wait for teardown signal on the CapturedTraffic CRD
+            .addStep("waitForTeardown", ResourceManagement, "waitForTeardown", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.proxyName,
+                    resourceKind: expr.literal("CapturedTraffic"),
+                })
+            )
         )
     )
 
@@ -280,6 +288,53 @@ export const FullMigration = WorkflowBuilder.create({
     )
 
 
+    // Wrapper: run migration then self-teardown (used inside parallel group)
+    // This ensures selfTeardown happens inside the parallel group, satisfying teardownWatcher.
+    .addTemplate("migrateAndSelfTeardown", t => t
+        .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("resolvedSnapshotName", typeToken<string>())
+        .addInputsFromRecord(uniqueRunNonceParam)
+        .addInputsFromRecord(ImageParameters)
+
+        .addSteps(b => b
+            .addStep("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c => {
+                    const snapshotMigrationConfig = expr.deserializeRecord(b.inputs.snapshotMigrationConfig);
+                    const snapshotRepoConfig = expr.get(snapshotMigrationConfig, "snapshotConfig");
+
+                    return c.register({
+                        ...selectInputsForRegister(b, c),
+                        ...selectInputsFieldsAsExpressionRecord(c.item, c,
+                            getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
+                        sourceVersion: expr.get(snapshotMigrationConfig, "sourceVersion"),
+                        sourceLabel: expr.get(snapshotMigrationConfig, "sourceLabel"),
+                        targetConfig: expr.serialize(expr.get(snapshotMigrationConfig, "targetConfig")),
+                        snapshotConfig: expr.serialize(expr.makeDict({
+                            snapshotName: b.inputs.resolvedSnapshotName,
+                            label: expr.get(snapshotRepoConfig, "label"),
+                            repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
+                        })),
+                        migrationLabel: expr.get(c.item, "label"),
+                        groupName_view: expr.get(c.item, "label")
+                    });
+                }, {
+                    loopWith: makeParameterLoop(
+                        expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "migrations"))
+                }
+            )
+            .addStep("patchSnapshotMigration", ResourceManagement, "patchSnapshotMigrationReady", c =>
+                c.register({resourceName: b.inputs.resourceName})
+            )
+            .addStep("selfTeardown", ResourceManagement, "patchTeardown", c =>
+                c.register({
+                    resourceName: b.inputs.resourceName,
+                    resourceKind: expr.literal("SnapshotMigration"),
+                })
+            )
+        )
+    )
+
+
     .addTemplate("runSingleSnapshotMigration", t => t
         .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("resourceName", typeToken<string>())
@@ -328,38 +383,33 @@ export const FullMigration = WorkflowBuilder.create({
                     }
                 }
             )
-            .addStep("migrateFromSnapshot", INTERNAL, "migrateFromSnapshot", c => {
-                    const snapshotMigrationConfig = expr.deserializeRecord(b.inputs.snapshotMigrationConfig);
-                    const snapshotNameResolution = expr.get(snapshotMigrationConfig, "snapshotNameResolution");
-                    const resolvedSnapshotName = expr.ternary(
-                        expr.hasKey(snapshotNameResolution, "externalSnapshotName"),
-                        expr.getLoose(snapshotNameResolution, "externalSnapshotName"),
-                        c.steps.readSnapshotName.outputs.snapshotName
-                    );
-                    const snapshotRepoConfig = expr.get(snapshotMigrationConfig, "snapshotConfig");
-
-                    return c.register({
+            // Parallel: teardown watcher + (migrate → patchReady → selfTeardown)
+            // Natural completion: migration finishes, patches Ready then Teardown → watcher resolves
+            // External reset: CRD patched to Teardown → watcher resolves, migration killed via continueOn
+            .addStepGroup(g => g
+                .addStep("teardownWatcher", ResourceManagement, "waitForTeardown", c =>
+                    c.register({
                         ...selectInputsForRegister(b, c),
-                        ...selectInputsFieldsAsExpressionRecord(c.item, c,
-                            getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
-                        sourceVersion: expr.get(snapshotMigrationConfig, "sourceVersion"),
-                        sourceLabel: expr.get(snapshotMigrationConfig, "sourceLabel"),
-                        targetConfig: expr.serialize(expr.get(snapshotMigrationConfig, "targetConfig")),
-                        snapshotConfig: expr.serialize(expr.makeDict({
-                            snapshotName: resolvedSnapshotName,
-                            label: expr.get(snapshotRepoConfig, "label"),
-                            repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
-                        })),
-                        migrationLabel: expr.get(c.item, "label"),
-                        groupName_view: expr.get(c.item, "label")
-                    });
-                }, {
-                    loopWith: makeParameterLoop(
-                        expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "migrations"))
-                }
-            )
-            .addStep("patchSnapshotMigration", ResourceManagement, "patchSnapshotMigrationReady", c =>
-                c.register({...selectInputsForRegister(b, c)})
+                        resourceName: b.inputs.resourceName,
+                        resourceKind: expr.literal("SnapshotMigration"),
+                    })
+                )
+                .addStep("migrateAndTeardown", INTERNAL, "migrateAndSelfTeardown", c => {
+                        const snapshotMigrationConfig = expr.deserializeRecord(b.inputs.snapshotMigrationConfig);
+                        const snapshotNameResolution = expr.get(snapshotMigrationConfig, "snapshotNameResolution");
+                        return c.register({
+                            ...selectInputsForRegister(b, c),
+                            snapshotMigrationConfig: b.inputs.snapshotMigrationConfig,
+                            resourceName: b.inputs.resourceName,
+                            resolvedSnapshotName: expr.ternary(
+                                expr.hasKey(snapshotNameResolution, "externalSnapshotName"),
+                                expr.getLoose(snapshotNameResolution, "externalSnapshotName"),
+                                c.steps.readSnapshotName.outputs.snapshotName
+                            ),
+                        });
+                    },
+                    {continueOn: {failed: true}}
+                )
             )
         )
     )
@@ -420,6 +470,38 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.literal("-"),
                         expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
                         expr.literal("-replayer"))
+                })
+            )
+            // Create TrafficReplay CRD and wait for teardown signal
+            .addStep("createTrafficReplay", ResourceManagement, "createTrafficReplay", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: expr.concat(
+                        b.inputs.fromProxy,
+                        expr.literal("-"),
+                        expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
+                        expr.literal("-replayer")),
+                })
+            )
+            .addStep("patchTrafficReplayReady", ResourceManagement, "patchTrafficReplayReady", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: expr.concat(
+                        b.inputs.fromProxy,
+                        expr.literal("-"),
+                        expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
+                        expr.literal("-replayer")),
+                })
+            )
+            .addStep("waitForTeardown", ResourceManagement, "waitForTeardown", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: expr.concat(
+                        b.inputs.fromProxy,
+                        expr.literal("-"),
+                        expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
+                        expr.literal("-replayer")),
+                    resourceKind: expr.literal("TrafficReplay"),
                 })
             )
         )

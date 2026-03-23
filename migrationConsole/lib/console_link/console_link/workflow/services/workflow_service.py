@@ -41,15 +41,6 @@ class WorkflowSubmitResult(TypedDict):
     error: Optional[str]
 
 
-class WorkflowStopResult(TypedDict):
-    """Result of workflow stop operation."""
-    success: bool
-    workflow_name: str
-    namespace: str
-    message: str
-    error: Optional[str]
-
-
 class WorkflowApproveResult(TypedDict):
     """Result of workflow approve/resume operation."""
     success: bool
@@ -358,103 +349,6 @@ class WorkflowService:
             error_msg = f"Error getting workflow status: {e}"
             logger.error(error_msg)
             return self._create_error_status_result(workflow_name, namespace, error_msg)
-
-    def stop_workflow(
-        self,
-        workflow_name: str,
-        namespace: str,
-        argo_server: str,
-        token: Optional[str] = None,
-        insecure: bool = False
-    ) -> WorkflowStopResult:
-        """Stop a running workflow via Argo Workflows REST API.
-
-        Args:
-            workflow_name: Name of the workflow to stop
-            namespace: Kubernetes namespace
-            argo_server: Argo Server URL
-            token: Bearer token for authentication
-            insecure: Whether to skip TLS verification
-
-        Returns:
-            WorkflowStopResult dict with success status, message, and error
-        """
-        try:
-            headers = self._prepare_headers(token)
-
-            # Construct URL for stop endpoint
-            url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}/stop"
-
-            logger.info(f"Stopping workflow {workflow_name} in namespace {namespace}")
-            logger.debug(f"Stop request URL: {url}")
-
-            # Make PUT request to stop the workflow
-            response = requests.put(
-                url,
-                headers=headers,
-                verify=not insecure
-            )
-
-            # Handle response
-            if response.status_code == 200:
-                logger.info(f"Workflow {workflow_name} stopped successfully")
-                return WorkflowStopResult(
-                    success=True,
-                    workflow_name=workflow_name,
-                    namespace=namespace,
-                    message=f"Workflow {workflow_name} stopped successfully",
-                    error=None
-                )
-            elif response.status_code == 404:
-                error_msg = f"Workflow {workflow_name} not found in namespace {namespace}"
-                logger.error(error_msg)
-                return WorkflowStopResult(
-                    success=False,
-                    workflow_name=workflow_name,
-                    namespace=namespace,
-                    message=error_msg,
-                    error=error_msg
-                )
-            else:
-                error_msg = f"Failed to stop workflow: HTTP {response.status_code}"
-                try:
-                    error_detail = response.json()
-                    error_msg = f"Failed to stop workflow: {error_detail}"
-                except Exception:
-                    error_msg = f"Failed to stop workflow: {response.text}"
-
-                logger.error(error_msg)
-                return WorkflowStopResult(
-                    success=False,
-                    workflow_name=workflow_name,
-                    namespace=namespace,
-                    message=error_msg,
-                    error=error_msg
-                )
-
-        except requests.exceptions.RequestException as e:
-            error_msg = f"Network error stopping workflow: {e}"
-            logger.error(error_msg)
-
-            return WorkflowStopResult(
-                success=False,
-                workflow_name=workflow_name,
-                namespace=namespace,
-                message=error_msg,
-                error=str(e)
-            )
-
-        except Exception as e:
-            error_msg = f"Unexpected error stopping workflow: {e}"
-            logger.exception(error_msg)
-
-            return WorkflowStopResult(
-                success=False,
-                workflow_name=workflow_name,
-                namespace=namespace,
-                message=error_msg,
-                error=str(e)
-            )
 
     def approve_workflow(
         self,
