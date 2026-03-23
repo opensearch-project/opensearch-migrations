@@ -37,7 +37,7 @@ while true; do
     # Wait for the Java process to finish
     wait $JAVA_PID
     EXIT_CODE=$?
-    if [ $EXIT_CODE -ne 0 ]; then
+    if [ $EXIT_CODE -ne 0 ] && [ $EXIT_CODE -ne 4 ]; then
         exit $EXIT_CODE
     fi
     echo "Process exited with code 0, restarting..."
