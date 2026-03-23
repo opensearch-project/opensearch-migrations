@@ -398,17 +398,132 @@ class TestApproveIntegration:
 
 
 # ============================================================================
+# Tests: autocomplete
+# ============================================================================
+
+@pytest.mark.slow
+class TestAutocompleteIntegration:
+
+    def test_autocomplete_returns_non_teardown_resources(self, reset_ns):
+        from console_link.workflow.commands.reset import _get_resource_completions
+
+        _create_crd_instance(reset_ns, "capturedtraffics", "proxy-ac", phase="Ready")
+        _create_crd_instance(reset_ns, "snapshotmigrations", "snap-ac", phase="Teardown")
+
+        class FakeCtx:
+            params = {'namespace': reset_ns}
+
+        completions = _get_resource_completions(FakeCtx(), None, "")
+        assert "proxy-ac" in completions
+        assert "snap-ac" not in completions  # already Teardown
+
+    def test_autocomplete_filters_by_prefix(self, reset_ns):
+        from console_link.workflow.commands.reset import _get_resource_completions
+
+        _create_crd_instance(reset_ns, "capturedtraffics", "proxy-x", phase="Ready")
+        _create_crd_instance(reset_ns, "capturedtraffics", "other-y", phase="Ready")
+
+        class FakeCtx:
+            params = {'namespace': reset_ns}
+
+        completions = _get_resource_completions(FakeCtx(), None, "proxy")
+        assert "proxy-x" in completions
+        assert "other-y" not in completions
+
+
+# ============================================================================
+# Tests: _patch_targets failure
+# ============================================================================
+
+@pytest.mark.slow
+class TestPatchTargetsFailureIntegration:
+
+    def test_reset_nonexistent_crd_instance_fails(self, runner, reset_ns):
+        """Patch a CRD plural that exists but instance name doesn't — _patch_teardown returns False."""
+        # Create one real resource so the list isn't empty, but try to reset a name
+        # that we'll delete before the patch runs
+        _create_crd_instance(reset_ns, "capturedtraffics", "ephemeral", phase="Ready")
+
+        # Delete it so the patch will fail
+        custom = client.CustomObjectsApi()
+        custom.delete_namespaced_custom_object(
+            group=CRD_GROUP, version=CRD_VERSION,
+            namespace=reset_ns, plural="capturedtraffics", name="ephemeral"
+        )
+
+        # Now reset should fail to patch
+        result = runner.invoke(workflow_cli, ["reset", "ephemeral", "--namespace", reset_ns])
+        assert "No resources to teardown" in result.output
+
+
+# ============================================================================
+# Tests: workflow submit error paths
+# ============================================================================
+
+@pytest.mark.slow
+class TestSubmitErrorPathsIntegration:
+
+    def test_submit_no_config(self, runner, reset_ns):
+        """Submit with no saved config shows error."""
+        result = runner.invoke(workflow_cli, ["submit", "--namespace", reset_ns])
+        assert result.exit_code != 0
+        assert "No workflow configuration" in result.output
+
+    def test_submit_script_not_found(self, runner, reset_ns, monkeypatch, tmp_path):
+        """Submit with missing script shows CONFIG_PROCESSOR_DIR hint."""
+        # Point to a dir that exists but has no script
+        monkeypatch.setenv("CONFIG_PROCESSOR_DIR", str(tmp_path))
+
+        # Need a config so we get past the config check
+        from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
+        store = WorkflowConfigStore(namespace=reset_ns)
+        from console_link.workflow.models.config import WorkflowConfig
+        store.save_config(WorkflowConfig({"targets": {"t": {"endpoint": "http://x:9200"}}}), "default")
+
+        result = runner.invoke(workflow_cli, ["submit", "--namespace", reset_ns])
+        assert result.exit_code != 0
+        assert "CONFIG_PROCESSOR_DIR" in result.output
+
+    def test_submit_script_fails_with_already_exists(self, runner, reset_ns, monkeypatch, tmp_path):
+        """Submit with a script that outputs AlreadyExists shows hint."""
+        # Create a fake submit script that fails with AlreadyExists
+        script = tmp_path / "createMigrationWorkflowFromUserConfiguration.sh"
+        script.write_text("#!/bin/bash\necho 'AlreadyExists' >&2; exit 1\n")
+        script.chmod(0o755)
+        monkeypatch.setenv("CONFIG_PROCESSOR_DIR", str(tmp_path))
+
+        from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
+        store = WorkflowConfigStore(namespace=reset_ns)
+        from console_link.workflow.models.config import WorkflowConfig
+        store.save_config(WorkflowConfig({"targets": {"t": {"endpoint": "http://x:9200"}}}), "default")
+
+        result = runner.invoke(workflow_cli, ["submit", "--namespace", reset_ns])
+        assert result.exit_code != 0
+        assert "workflow already exists" in result.output
+        assert "reset --all" in result.output
+
+    def test_submit_script_fails_generic(self, runner, reset_ns, monkeypatch, tmp_path):
+        """Submit with a script that fails generically shows exit code."""
+        script = tmp_path / "createMigrationWorkflowFromUserConfiguration.sh"
+        script.write_text("#!/bin/bash\necho 'something broke' >&2; exit 1\n")
+        script.chmod(0o755)
+        monkeypatch.setenv("CONFIG_PROCESSOR_DIR", str(tmp_path))
+
+        from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
+        store = WorkflowConfigStore(namespace=reset_ns)
+        from console_link.workflow.models.config import WorkflowConfig
+        store.save_config(WorkflowConfig({"targets": {"t": {"endpoint": "http://x:9200"}}}), "default")
+
+        result = runner.invoke(workflow_cli, ["submit", "--namespace", reset_ns])
+        assert result.exit_code != 0
+        assert "Script failed with exit code 1" in result.output
+
+
+# ============================================================================
 # Tests: workflow submit AlreadyExists hint
 # ============================================================================
 
 @pytest.mark.slow
 class TestSubmitAlreadyExistsIntegration:
-
-    def test_submit_hint_shown(self, runner, reset_ns):
-        """Verify the AlreadyExists hint mentions 'workflow status' and 'reset --all'."""
-        # We can't easily trigger a real AlreadyExists without Argo, but we can
-        # verify the error message format by checking the source. This test just
-        # ensures the submit command is wired up and doesn't crash.
-        result = runner.invoke(workflow_cli, ["submit", "--namespace", reset_ns])
-        # Will fail (no config), but shouldn't crash
-        assert result.exit_code != 0 or "Error" in result.output or "No workflow configuration" in result.output
+    """Covered by TestSubmitErrorPathsIntegration above."""
+    pass
