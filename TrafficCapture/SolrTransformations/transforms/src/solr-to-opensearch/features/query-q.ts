@@ -11,7 +11,7 @@
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext, JavaMap } from '../context';
 
-function parseSolrQuery(q: string): JavaMap {
+export function parseSolrQuery(q: string): JavaMap {
   if (!q || q === '*:*') return new Map([['match_all', new Map()]]);
 
   const fieldMatch = /^([^:]+):(.+)$/.exec(q);
