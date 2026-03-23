@@ -1,12 +1,9 @@
 """Reset command for workflow CLI - tears down workflow resources via CRD status patching.
 
-Teardown uses a two-pronged mechanism:
-1. CRD patch: Sets status.phase = Teardown on migration CRDs. The Argo workflow
-   templates watch for this phase and initiate graceful shutdown of their pods.
-2. Deployment deletion: Deletes Kubernetes Deployments owned by the workflow to
-   immediately kill any running tasks that don't respond to the graceful signal.
-
-Together these ensure resources are cleaned up promptly even if the graceful path stalls.
+The CLI patches status.phase = Teardown on migration CRDs. The Argo workflow templates
+watch for this phase via waitForExistingResource and handle all cleanup (deleting
+Deployments, coordinator clusters, etc.) themselves. The CLI only speaks CRDs — it
+does not directly manipulate any k8s workload resources.
 """
 
 import logging
@@ -92,29 +89,8 @@ def _patch_targets(namespace, targets):
     return True
 
 
-def _delete_migration_deployments(namespace):
-    """Delete Deployments owned by the workflow to force-kill running tasks."""
-    apps = client.AppsV1Api()
-    try:
-        deployments = apps.list_namespaced_deployment(
-            namespace=namespace,
-            label_selector='workflows.argoproj.io/workflow'
-        )
-        for dep in deployments.items:
-            name = dep.metadata.name
-            try:
-                apps.delete_namespaced_deployment(name=name, namespace=namespace)
-                click.echo(f"  ✓ Deleted deployment {name}")
-            except ApiException as e:
-                logger.warning(f"Failed to delete deployment {name}: {e}")
-    except ApiException:
-        pass
-
-
 def _reset_all(namespace, workflow_name, argo_server, token, insecure):
-    """Approve all gates, delete deployments, wait for completion, delete workflow."""
-    _delete_migration_deployments(namespace)
-
+    """Approve all gates, wait for workflow completion, delete workflow."""
     for name, phase in list_approval_gates(namespace):
         if phase == 'Pending' and approve_gate(namespace, name):
             click.echo(f"  ✓ Approved gate {name}")

@@ -116,8 +116,7 @@ class TestResetCommandPatch:
     @patch('console_link.workflow.commands.reset._list_migration_crds')
     @patch('console_link.workflow.commands.reset.list_approval_gates')
     @patch('console_link.workflow.commands.reset.approve_gate')
-    @patch('console_link.workflow.commands.reset._delete_migration_deployments')
-    def test_reset_all(self, mock_del_deps, mock_approve, mock_gates,
+    def test_reset_all(self, mock_approve, mock_gates,
                        mock_list, mock_patch, mock_k8s, mock_wait, mock_delete):
         mock_list.return_value = [
             ('capturedtraffics', 'source-proxy', 'Ready'),
@@ -133,7 +132,6 @@ class TestResetCommandPatch:
         result = runner.invoke(workflow_cli, ['reset', '--all'])
         assert result.exit_code == 0
         assert mock_patch.call_count == 2
-        mock_del_deps.assert_called_once_with('ma')
         assert 'Deleted workflow' in result.output
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')
