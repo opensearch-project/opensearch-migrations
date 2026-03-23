@@ -18,7 +18,6 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
-import org.opensearch.migrations.bulkload.pipeline.model.ProgressCursor;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
@@ -143,94 +142,7 @@ public class DocumentMigrationBootstrap {
 
                     @Override
                     public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
-                        var wi = workItem.getWorkItem();
-                        log.info("Pipeline acquired work item: {}", wi);
-
-                        if (workItemTimeProvider != null) {
-                            workItemTimeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
-                        }
-
-                        var partition = new EsShardPartition(snapshotName, wi.getIndexName(), wi.getShardNumber());
-                        long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
-                            ? wi.getStartingDocId() : 0;
-
-                        var pipeline = new DocumentMigrationPipeline(
-                            pipelineConfig.source(), pipelineConfig.sink(),
-                            pipelineConfig.maxDocsPerBatch(), pipelineConfig.maxBytesPerBatch(),
-                            1, pipelineConfig.batchConcurrency()
-                        );
-                        var progressMonitor = new PipelineProgressMonitor(pipeline);
-                        progressMonitor.start();
-                        var latch = new CountDownLatch(1);
-                        var lastCursor = new AtomicReference<ProgressCursor>();
-                        var batchCount = new AtomicInteger();
-                        var totalDocsMigrated = new AtomicLong();
-                        var totalBytesMigrated = new AtomicLong();
-                        var migrationError = new AtomicReference<Throwable>();
-                        var finishScheduler = Schedulers.newSingle("pipelineFinishScheduler");
-
-                        var disposable = pipeline.migratePartition(partition, wi.getIndexName(), startingOffset)
-                            .subscribeOn(finishScheduler)
-                            .doFirst(() -> {
-                                if (workItemTimeProvider != null) {
-                                    workItemTimeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
-                                }
-                            })
-                            .doFinally(s -> finishScheduler.dispose())
-                            .subscribe(
-                                cursor -> {
-                                    lastCursor.set(cursor);
-                                    batchCount.incrementAndGet();
-                                    totalDocsMigrated.addAndGet(cursor.docsInBatch());
-                                    totalBytesMigrated.addAndGet(cursor.bytesInBatch());
-                                    cursorConsumer.accept(new WorkItemCursor(cursor.lastDocProcessed()));
-                                },
-                                error -> {
-                                    log.atError()
-                                        .setCause(error)
-                                        .setMessage("Pipeline error for {}")
-                                        .addArgument(wi)
-                                        .log();
-                                    migrationError.set(error);
-                                    latch.countDown();
-                                },
-                                () -> {
-                                    log.info("Pipeline completed for index={}, shard={}", wi.getIndexName(), wi.getShardNumber());
-                                    latch.countDown();
-                                }
-                            );
-
-                        cancellationTriggerConsumer.accept(disposable::dispose);
-
-                        try {
-                            long start = System.currentTimeMillis();
-                            latch.await();
-                            long durationMs = System.currentTimeMillis() - start;
-                            log.atInfo()
-                                .setMessage("Partition migration stats: index={}, shard={}, docs={}, bytes={}, batches={}, duration={}ms")
-                                .addArgument(wi.getIndexName())
-                                .addArgument(wi.getShardNumber())
-                                .addArgument(totalDocsMigrated::get)
-                                .addArgument(totalBytesMigrated::get)
-                                .addArgument(batchCount::get)
-                                .addArgument(durationMs)
-                                .log();
-
-                            var error = migrationError.get();
-                            if (error != null) {
-                                context.recordPipelineError();
-                                throw new RuntimeException("Partition migration failed for " + wi, error);
-                            }
-                            context.recordShardDuration(durationMs);
-                            context.recordDocsMigrated(totalDocsMigrated.get());
-                            context.recordBytesMigrated(totalBytesMigrated.get());
-                            return CompletionStatus.WORK_COMPLETED;
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            throw new RuntimeException(e);
-                        } finally {
-                            progressMonitor.close();
-                        }
+                        return runPartitionMigration(workItem, pipelineConfig, context);
                     }
 
                     @Override
@@ -242,6 +154,99 @@ public class DocumentMigrationBootstrap {
         } finally {
             closeQuietly(source);
             closeQuietly(sink);
+        }
+    }
+
+    private CompletionStatus runPartitionMigration(
+        IWorkCoordinator.WorkItemAndDuration workItem,
+        PipelineConfig pipelineConfig,
+        IDocumentMigrationContexts.IDocumentReindexContext context
+    ) {
+        var wi = workItem.getWorkItem();
+        log.info("Pipeline acquired work item: {}", wi);
+
+        if (workItemTimeProvider != null) {
+            workItemTimeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
+        }
+
+        var partition = new EsShardPartition(snapshotName, wi.getIndexName(), wi.getShardNumber());
+        long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
+            ? wi.getStartingDocId() : 0;
+
+        var pipeline = new DocumentMigrationPipeline(
+            pipelineConfig.source(), pipelineConfig.sink(),
+            pipelineConfig.maxDocsPerBatch(), pipelineConfig.maxBytesPerBatch(),
+            1, pipelineConfig.batchConcurrency()
+        );
+        var progressMonitor = new PipelineProgressMonitor(pipeline);
+        progressMonitor.start();
+        var latch = new CountDownLatch(1);
+        var batchCount = new AtomicInteger();
+        var totalDocsMigrated = new AtomicLong();
+        var totalBytesMigrated = new AtomicLong();
+        var migrationError = new AtomicReference<Throwable>();
+        var finishScheduler = Schedulers.newSingle("pipelineFinishScheduler");
+
+        var disposable = pipeline.migratePartition(partition, wi.getIndexName(), startingOffset)
+            .subscribeOn(finishScheduler)
+            .doFirst(() -> {
+                if (workItemTimeProvider != null) {
+                    workItemTimeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
+                }
+            })
+            .doFinally(s -> finishScheduler.dispose())
+            .subscribe(
+                cursor -> {
+                    batchCount.incrementAndGet();
+                    totalDocsMigrated.addAndGet(cursor.docsInBatch());
+                    totalBytesMigrated.addAndGet(cursor.bytesInBatch());
+                    cursorConsumer.accept(new WorkItemCursor(cursor.lastDocProcessed()));
+                },
+                error -> {
+                    log.atError()
+                        .setCause(error)
+                        .setMessage("Pipeline error for {}")
+                        .addArgument(wi)
+                        .log();
+                    migrationError.set(error);
+                    latch.countDown();
+                },
+                () -> {
+                    log.info("Pipeline completed for index={}, shard={}", wi.getIndexName(), wi.getShardNumber());
+                    latch.countDown();
+                }
+            );
+
+        cancellationTriggerConsumer.accept(disposable::dispose);
+
+        try {
+            long start = System.currentTimeMillis();
+            latch.await();
+            long durationMs = System.currentTimeMillis() - start;
+            log.atInfo()
+                .setMessage("Partition migration stats: index={}, shard={}, docs={}, bytes={}, batches={}, duration={}ms")
+                .addArgument(wi.getIndexName())
+                .addArgument(wi.getShardNumber())
+                .addArgument(totalDocsMigrated::get)
+                .addArgument(totalBytesMigrated::get)
+                .addArgument(batchCount::get)
+                .addArgument(durationMs)
+                .log();
+
+            var error = migrationError.get();
+            if (error != null) {
+                context.recordPipelineError();
+                throw new RuntimeException("Partition migration failed for " + wi, error);
+            }
+            context.recordShardDuration(durationMs);
+            context.recordDocsMigrated(totalDocsMigrated.get());
+            context.recordBytesMigrated(totalBytesMigrated.get());
+            return CompletionStatus.WORK_COMPLETED;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        } finally {
+            progressMonitor.close();
         }
     }
 
