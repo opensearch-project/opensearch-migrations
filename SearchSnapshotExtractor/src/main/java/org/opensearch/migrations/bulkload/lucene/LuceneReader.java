@@ -23,11 +23,11 @@ public class LuceneReader {
 
     /** Dedicated scheduler for Lucene I/O — more threads than boundedElastic on small pods. */
     private static final Scheduler LUCENE_IO_SCHEDULER = Schedulers.newBoundedElastic(
-        64, Integer.MAX_VALUE, "lucene-io", 60, true
+        100, Integer.MAX_VALUE, "lucene-io", 60, true
     );
 
     /** Concurrency for flatMapSequential within a segment — matches the scheduler thread count. */
-    private static final int SEGMENT_READ_CONCURRENCY = 64;
+    private static final int SEGMENT_READ_CONCURRENCY = 100;
 
     private LuceneReader() {}
 
