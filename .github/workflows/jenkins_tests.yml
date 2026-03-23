@@ -31,7 +31,7 @@ jobs:
       group: ${{ github.workflow }}-full-es68-e2e-aws-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -50,7 +50,7 @@ jobs:
       group: ${{ github.workflow }}-elasticsearch-5x-k8s-local-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -74,7 +74,7 @@ jobs:
       group: ${{ github.workflow }}-eks-integ-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
