@@ -81,4 +81,4 @@ fi
 docker buildx use "$BUILDER_NAME"
 echo "BUILDX_BUILDER=${BUILDER_NAME}"
 echo "Bootstrapping builder..."
-timeout 300 docker buildx inspect --bootstrap
+docker buildx inspect --bootstrap
