@@ -38,7 +38,7 @@ import lombok.extern.slf4j.Slf4j;
  *     .cursorConsumer(progressCursor::set)
  *     .cancellationTriggerConsumer(cancellationRef::set)
  *     .build();
- * runner.migrateNextShard(contextSupplier);
+ * runner.migrateOneShard(contextSupplier);
  * </pre>
  */
 @Slf4j
@@ -88,23 +88,13 @@ public class DocumentMigrationBootstrap {
     private final Consumer<Runnable> cancellationTriggerConsumer = runnable -> {};
 
     /**
-     * Acquire and migrate a single shard. Each JVM invocation processes one work item,
-     * then exits so the orchestrator can restart the process for the next shard.
-     * Returns WORK_COMPLETED if a shard was migrated, NOTHING_DONE otherwise.
-     */
-    public CompletionStatus migrateAllShards(
-        Supplier<IDocumentMigrationContexts.IDocumentReindexContext> contextSupplier
-    ) throws java.io.IOException, InterruptedException {
-        return migrateNextShard(contextSupplier);
-    }
-
-    /**
-     * Acquire the next available shard via work coordination and migrate it (coordinated mode).
-     * Requires {@code workCoordinator} to be set.
+     * Acquire and migrate a single shard via work coordination.
+     * Each JVM invocation processes one work item, then exits so the
+     * orchestrator can restart the process for the next shard.
      *
-     * @return completion status indicating whether work was done
+     * @return WORK_COMPLETED if a shard was migrated, NOTHING_DONE if no work was available
      */
-    public CompletionStatus migrateNextShard(
+    public CompletionStatus migrateOneShard(
         Supplier<IDocumentMigrationContexts.IDocumentReindexContext> contextSupplier
     ) throws java.io.IOException, InterruptedException {
         if (workCoordinator == null) {
