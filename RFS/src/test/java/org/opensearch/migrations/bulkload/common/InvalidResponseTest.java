@@ -199,6 +199,29 @@ class InvalidResponseTest {
     }
 
     @Test
+    void testGetIllegalArguments_versionMaskError() {
+        var errorBody = "{\r\n" +
+            "  \"error\": {\r\n" +
+            "    \"root_cause\": [\r\n" +
+            "      {\r\n" +
+            "        \"type\": \"illegal_argument_exception\",\r\n" +
+            "        \"reason\": \"Version id 8521000 must contain OpenSearch mask\"\r\n" +
+            "      }\r\n" +
+            "    ],\r\n" +
+            "    \"type\": \"illegal_argument_exception\",\r\n" +
+            "    \"reason\": \"Version id 8521000 must contain OpenSearch mask\"\r\n" +
+            "  },\r\n" +
+            "  \"status\": 400\r\n" +
+            "}";
+        var response = new HttpResponse(400, "Bad Request", Map.of(), errorBody);
+        var iar = new InvalidResponse("ignored", response);
+
+        var result = iar.getIllegalArguments();
+
+        assertThat(result, containsInAnyOrder("index.version.created"));
+    }
+
+    @Test
     void testGetUnsupportedMappingParameters_singleParam() {
         var errorBody = "{\r\n" +
             "  \"error\": {\r\n" +
