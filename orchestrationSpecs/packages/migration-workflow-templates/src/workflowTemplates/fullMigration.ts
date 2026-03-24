@@ -250,6 +250,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("groupName_view", typeToken<string>())
+        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addOptionalInput("metadataMigrationConfig", c =>
             expr.empty<z.infer<typeof ARGO_METADATA_OPTIONS>>())
         .addOptionalInput("documentBackfillConfig", c =>
@@ -351,7 +352,8 @@ export const FullMigration = WorkflowBuilder.create({
                             repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
                         })),
                         migrationLabel: expr.get(c.item, "label"),
-                        groupName_view: expr.get(c.item, "label")
+                        groupName_view: expr.get(c.item, "label"),
+                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], "")
                     });
                 }, {
                     loopWith: makeParameterLoop(

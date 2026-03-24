@@ -520,6 +520,10 @@
               "name": "groupName_view"
             },
             {
+              "name": "sourceEndpoint",
+              "value": ""
+            },
+            {
               "name": "metadataMigrationConfig",
               "value": ""
             },
@@ -586,6 +590,10 @@
                   {
                     "name": "metadataMigrationConfig",
                     "value": "{{inputs.parameters.metadataMigrationConfig}}"
+                  },
+                  {
+                    "name": "sourceEndpoint",
+                    "value": "{{inputs.parameters.sourceEndpoint}}"
                   },
                   {
                     "name": "snapshotConfig",
@@ -876,6 +884,10 @@
                   {
                     "name": "migrationLabel",
                     "value": "{{=item['label']}}"
+                  },
+                  {
+                    "name": "sourceEndpoint",
+                    "value": "{{=sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
                   }
                 ]
               },
