@@ -71,7 +71,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
     private static final String SESSION_NAME = "rfs-coordinator-outage";
 
     private static final Version SOURCE_VERSION = SearchClusterContainer.ES_V7_10_2.getVersion();
-    private static final Version COORDINATOR_VERSION = SearchClusterContainer.OS_V3_0_0.getVersion();
+    private static final Version COORDINATOR_VERSION = SearchClusterContainer.OS_LATEST.getVersion();
 
     // With 1 doc/bulk, 1 connection, and 1000ms upstream latency on the target proxy,
     // each bulk request takes ~1s round-trip, so 60 docs take ~60s to migrate.
@@ -130,7 +130,7 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
                 .withAccessToHost(true).withNetwork(network);
             var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
                 .withAccessToHost(true).withNetwork(network).withNetworkAliases("target");
-            var osCoordinatorContainer = new SearchClusterContainer(SearchClusterContainer.OS_V3_0_0)
+            var osCoordinatorContainer = new SearchClusterContainer(SearchClusterContainer.OS_LATEST)
                 .withAccessToHost(true).withNetwork(network).withNetworkAliases("coordinator");
             var targetProxy = new ToxiProxyWrapper(network);
             var coordinatorProxy = new ToxiProxyWrapper(network)
