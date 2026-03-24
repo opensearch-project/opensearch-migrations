@@ -324,6 +324,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                 throw new RuntimeException("Gradle build failed for image: " + version.imageName);
             }
         } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             throw new RuntimeException("Failed to build image: " + version.imageName, e);
         }
     }

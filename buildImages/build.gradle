@@ -211,7 +211,7 @@ def testBuildKitProjects = [
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard",
                 imageName:  "elasticsearch_searchguard",
                 buildArgs: [
-                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImage(
+                        BASE_IMAGE: RegistryImageBuildUtils.resolveBaseImageForContainer(
                                 intermediateRegistry, "migrations", "custom-elasticsearch", "7.10.2")
                 ],
                 requiredDependencies: [
