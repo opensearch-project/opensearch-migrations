@@ -310,7 +310,9 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
 
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
-        .describe("List of index name patterns to include in the snapshot. An empty list means all indices are included."),
+        .describe("List of index names to include in the snapshot. " +
+            "Each entry is either an exact index name (e.g. 'logs-2024-01') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*-2024'). " +
+            "An empty list includes all indices."),
     maxSnapshotRateMbPerNode: z.number().default(0).optional()
         .describe("Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."),
     compressionEnabled: z.boolean().default(false).optional()
@@ -340,11 +342,17 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
 
 export const USER_METADATA_PROCESS_OPTIONS = z.object({
     componentTemplateAllowlist: z.array(z.string()).default([]).optional()
-        .describe("List of component template name patterns to include in the metadata migration. An empty list means all component templates are included."),
+        .describe("List of component template names to include in the metadata migration. " +
+            "Each entry is either an exact name or a regex pattern prefixed with 'regex:'. " +
+            "An empty list includes all non-system component templates."),
     indexAllowlist: z.array(z.string()).default([]).optional()
-        .describe("List of index name patterns to include in the metadata migration. An empty list means all indices are included."),
+        .describe("List of index names to include in the metadata migration. " +
+            "Each entry is either an exact index name (e.g. 'my-index') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). " +
+            "An empty list includes all non-system indices."),
     indexTemplateAllowlist: z.array(z.string()).default([]).optional()
-        .describe("List of index template name patterns to include in the metadata migration. An empty list means all index templates are included."),
+        .describe("List of index template names to include in the metadata migration. " +
+            "Each entry is either an exact name or a regex pattern prefixed with 'regex:'. " +
+            "An empty list includes all non-system index templates."),
 
     allowLooseVersionMatching: z.boolean().default(true).optional()
         .describe("When true, allows metadata migration between clusters with non-exact version compatibility (e.g. ES 7.x to OS 2.x). When false, requires strict version matching."),
@@ -400,7 +408,9 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
 
 export const USER_RFS_PROCESS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
-        .describe("List of index name patterns to include in the document backfill. An empty list means all indices from the snapshot are migrated."),
+        .describe("List of index names to include in the document backfill. " +
+            "Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). " +
+            "An empty list includes all non-system indices from the snapshot."),
     allowLooseVersionMatching: z.boolean().default(true).optional()
         .describe("When true, allows document migration between clusters with non-exact version compatibility."),
     docTransformerConfigBase64: z.string().default("").optional()

@@ -1759,7 +1759,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "type": "string"
                                   },
                                   "default": [],
-                                  "description": "List of index name patterns to include in the snapshot. An empty list means all indices are included."
+                                  "description": "List of index names to include in the snapshot. Each entry is either an exact index name (e.g. 'logs-2024-01') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*-2024'). An empty list includes all indices."
                                 },
                                 "maxSnapshotRateMbPerNode": {
                                   "type": "number",
@@ -2005,7 +2005,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "List of component template name patterns to include in the metadata migration. An empty list means all component templates are included."
+                        "description": "List of component template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system component templates."
                       },
                       "indexAllowlist": {
                         "type": "array",
@@ -2013,7 +2013,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "List of index name patterns to include in the metadata migration. An empty list means all indices are included."
+                        "description": "List of index names to include in the metadata migration. Each entry is either an exact index name (e.g. 'my-index') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). An empty list includes all non-system indices."
                       },
                       "indexTemplateAllowlist": {
                         "type": "array",
@@ -2021,7 +2021,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "List of index template name patterns to include in the metadata migration. An empty list means all index templates are included."
+                        "description": "List of index template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system index templates."
                       },
                       "allowLooseVersionMatching": {
                         "type": "boolean",
@@ -2187,7 +2187,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "List of index name patterns to include in the document backfill. An empty list means all indices from the snapshot are migrated."
+                        "description": "List of index names to include in the document backfill. Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). An empty list includes all non-system indices from the snapshot."
                       },
                       "allowLooseVersionMatching": {
                         "type": "boolean",
