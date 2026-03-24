@@ -24,6 +24,13 @@ data:
               - resources:
                   kinds:
                     - Pod
+                  operations:
+                    - CREATE
+          preconditions:
+            all:
+              - key: "{{`{{ request.object.metadata.annotations.\"kyverno.io/mutated-by\" || '' }}`}}"
+                operator: NotEquals
+                value: "zero-resource-requests"
           mutate:
             patchStrategicMerge:
               metadata:
@@ -36,16 +43,10 @@ data:
                       requests:
                         cpu: "0"
                         memory: "0"
-                      limits:
-                        cpu: "0"
-                        memory: "0"
                 initContainers:
                   - (name): "*"
                     resources:
                       requests:
-                        cpu: "0"
-                        memory: "0"
-                      limits:
                         cpu: "0"
                         memory: "0"
 {{- end }}
