@@ -153,7 +153,27 @@ class MATestBase:
             self.parameters["target-cluster-template"] = self.target_argo_cluster_template
             self.parameters["skip-cleanup"] = "true" if self.reuse_clusters else "false"
 
+    def _ensure_approval_configmap(self):
+        """Ensure the approval configmap exists for Argo v4.0+ (requires configmap-type label).
+        In production, the config-processor creates this. In tests, we create a default."""
+        import subprocess
+        kubectl_cmd = [
+            "kubectl", "apply", "-n", self.argo_service.namespace, "-f", "-"
+        ]
+        configmap_yaml = (
+            'apiVersion: v1\n'
+            'kind: ConfigMap\n'
+            'metadata:\n'
+            '  name: approval-config\n'
+            '  labels:\n'
+            '    workflows.argoproj.io/configmap-type: Parameter\n'
+            'data:\n'
+            '  autoApprove: "{}"\n'
+        )
+        subprocess.run(kubectl_cmd, input=configmap_yaml, text=True, check=True)
+
     def workflow_start(self):
+        self._ensure_approval_configmap()
         start_result = self.argo_service.start_workflow(workflow_template_name=self.workflow_template,
                                                         parameters=self.parameters)
         assert start_result.success is True
