@@ -444,4 +444,92 @@ class MetricsReceiverTest {
         assertEquals("/c/_search", doc.transformedRequest().uri());
         assertEquals(1, doc.customMetrics().get("warn"));
     }
+
+    @Test
+    void toJsonStringFallsBackToToStringOnSerializationFailure() {
+        var sink = new CapturingSink();
+        var collector = new MetricsReceiver(sink, true);
+        // InputStream is not serializable by Jackson and will throw
+        var unserializable = new java.io.InputStream() {
+            @Override public int read() { return -1; }
+            @Override public String toString() { return "fallback-value"; }
+        };
+        var reqMap = new LinkedHashMap<String, Object>();
+        reqMap.put("method", "POST");
+        reqMap.put("URI", "/solr/c/update");
+        reqMap.put("headers", Map.of());
+        reqMap.put("payload", unserializable);
+        var transformedReqs = Map.of("opensearch", Map.<String, Object>of("method", "POST", "URI", "/c/_bulk"));
+        var responses = Map.of(
+            "solr", successResponse("solr", Map.of()),
+            "opensearch", successResponse("opensearch", Map.of())
+        );
+        collector.process(reqMap, transformedReqs, responses, emptyPerTargetMetrics());
+
+        assertEquals("fallback-value", sink.documents.get(0).originalRequest().body());
+    }
+
+    @Test
+    void buildRequestRecordWithNullMap() {
+        var sink = new CapturingSink();
+        var collector = new MetricsReceiver(sink, false);
+        assertNull(collector.buildRequestRecord(null));
+    }
+
+    @Test
+    void guardSkipsWhenMultipleTransformedRequests() {
+        var sink = new CapturingSink();
+        var collector = new MetricsReceiver(sink, false);
+        var responses = Map.of(
+            "solr", successResponse("solr", solrResponseBody(10, 1)),
+            "opensearch", successResponse("opensearch", solrResponseBody(10, 1))
+        );
+        // Two transformed requests — should skip (expects exactly 1)
+        var transformedReqs = Map.of(
+            "opensearch", Map.<String, Object>of("method", "GET", "URI", "/a"),
+            "extra", Map.<String, Object>of("method", "GET", "URI", "/b")
+        );
+        collector.process(requestMap("GET", "/solr/c/select"), transformedReqs, responses, emptyPerTargetMetrics());
+        assertTrue(sink.documents.isEmpty());
+    }
+
+    @Test
+    void extractLongReturnsNullWhenParsedBodyNull() {
+        var sink = new CapturingSink();
+        var collector = new MetricsReceiver(sink, false);
+        // Success response but with null parsedBody
+        var primary = new TargetResponse("solr", 200, new byte[0], null,
+            Duration.ofMillis(10), Duration.ZERO, Duration.ZERO, null);
+        var secondary = new TargetResponse("opensearch", 200, new byte[0], null,
+            Duration.ofMillis(10), Duration.ZERO, Duration.ZERO, null);
+        collector.process(
+            new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null),
+            new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null),
+            primary, secondary, Map.of());
+
+        var doc = sink.documents.get(0);
+        assertNull(doc.baselineHitCount());
+        assertNull(doc.candidateHitCount());
+        assertNull(doc.baselineResponseTimeMs());
+        assertNull(doc.candidateResponseTimeMs());
+    }
+
+    @Test
+    void stringPayloadReturnedDirectly() {
+        var sink = new CapturingSink();
+        var collector = new MetricsReceiver(sink, true);
+        var reqMap = new LinkedHashMap<String, Object>();
+        reqMap.put("method", "POST");
+        reqMap.put("URI", "/solr/c/update");
+        reqMap.put("headers", Map.of());
+        reqMap.put("payload", "raw-string-body");
+        var transformedReqs = Map.of("opensearch", Map.<String, Object>of("method", "POST", "URI", "/c/_bulk"));
+        var responses = Map.of(
+            "solr", successResponse("solr", Map.of()),
+            "opensearch", successResponse("opensearch", Map.of())
+        );
+        collector.process(reqMap, transformedReqs, responses, emptyPerTargetMetrics());
+
+        assertEquals("raw-string-body", sink.documents.get(0).originalRequest().body());
+    }
 }

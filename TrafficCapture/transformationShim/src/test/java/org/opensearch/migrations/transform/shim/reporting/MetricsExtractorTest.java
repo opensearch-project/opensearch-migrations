@@ -45,6 +45,12 @@ class MetricsExtractorTest {
         assertEquals(15, MetricsExtractor.extractNestedField(map, "took"));
     }
 
+    @Test
+    void extractNestedField_nullPath() {
+        var map = Map.<String, Object>of("took", 15);
+        assertNull(MetricsExtractor.extractNestedField(map, null));
+    }
+
     // --- computeDriftPercentage ---
 
     @Test

@@ -90,4 +90,41 @@ class FacetComparatorTest {
         assertNotNull(drifts);
         assertEquals(0.0, drifts.get(0).driftPercentage());
     }
+
+    @Test
+    void facetCountsNotAMap() {
+        var body = Map.<String, Object>of("facet_counts", "not-a-map");
+        var results = FacetComparator.compareFacets(body, body);
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void facetFieldsNotAMap() {
+        var body = Map.<String, Object>of("facet_counts", Map.of("facet_fields", "not-a-map"));
+        var results = FacetComparator.compareFacets(body, body);
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void parseBucketsSkipsNullKeyAndNonNumericCount() {
+        // Odd-length list: last element has no pair, should be skipped
+        var solr = Map.<String, Object>of("facet_counts",
+            Map.of("facet_fields", Map.of("f", List.of("a", 1, "b", "notANumber"))));
+        var os = Map.<String, Object>of("facet_counts",
+            Map.of("facet_fields", Map.of("f", List.of("a", 1))));
+        var results = FacetComparator.compareFacets(solr, os);
+        assertEquals(1, results.size());
+        // "b" should be in missing keys since its count wasn't a Number and was skipped from solr buckets
+        var entry = results.get(0);
+        assertTrue(entry.keysMatch()); // only "a" parsed from both sides
+    }
+
+    @Test
+    void facetsOnlyOnSecondSide() {
+        var os = facetBody("category", "books", 10);
+        var results = FacetComparator.compareFacets(Map.of(), os);
+        assertEquals(1, results.size());
+        assertFalse(results.get(0).keysMatch());
+        assertEquals(List.of("books"), results.get(0).extraKeys());
+    }
 }
