@@ -13,8 +13,8 @@ Each proxied request produces a single **ValidationDocument** indexed into the r
 | Section | Fields | When Present |
 |---|---|---|
 | Request context | `original_request`, `transformed_request`, `collection_name`, `normalized_endpoint`, `timestamp`, `request_id` | Always |
-| Hit count drift | `solr_hit_count`, `opensearch_hit_count`, `hit_count_drift_percentage` | Always (null if target errored) |
-| Query latency | `solr_qtime_ms`, `opensearch_took_ms`, `query_time_delta_ms` | Always (null if target errored) |
+| Hit count drift | `baseline_hit_count`, `candidate_hit_count`, `hit_count_drift_percentage` | Always (null if target errored) |
+| Response latency | `baseline_response_time_ms`, `candidate_response_time_ms`, `response_time_delta_ms` | Always (null if target errored) |
 | Comparisons | `comparisons` list (typed entries, e.g., facet bucket diffs) | Only when the query has facets |
 | Custom metrics | `custom_metrics` map | Always (empty if no transform metrics emitted) |
 
@@ -30,7 +30,7 @@ sequenceDiagram
     participant Shim as Shim Proxy
     participant Solr
     participant OS as OpenSearch
-    participant MC as MetricsCollector
+    participant MC as MetricsReceiver
     participant Sink as OpenSearchMetricsSink
     participant RC as Reporting Cluster
 
@@ -48,7 +48,7 @@ sequenceDiagram
     Sink->>RC: POST /_bulk (buffered batch)
 ```
 
-The `MetricsCollector` runs inline on the Netty event loop after validators but before the response is sent. It never blocks — the `OpenSearchMetricsSink` buffers documents and flushes on a background thread. If the reporting cluster is down, documents are discarded and the proxy continues normally.
+The `MetricsReceiver` runs inline on the Netty event loop after validators but before the response is sent. It never blocks — the `OpenSearchMetricsSink` buffers documents and flushes on a background thread. If the reporting cluster is down, documents are discarded and the proxy continues normally.
 
 ## Configuration
 
@@ -93,7 +93,7 @@ All in `org.opensearch.migrations.transform.shim.reporting`:
 | Class | Role |
 |---|---|
 | `ValidationDocument` | Java record — the document schema with nested `RequestRecord`, `ComparisonEntry`, `ValueDrift` |
-| `MetricsCollector` | Extracts metrics from target responses, builds document, submits to sink |
+| `MetricsReceiver` | Extracts metrics from target responses, builds document, submits to sink |
 | `MetricsSink` | Interface — `submit()`, `flush()`, `close()` |
 | `OpenSearchMetricsSink` | Bulk-indexes documents into the reporting cluster |
 | `MetricsExtractor` | Static utilities — nested field extraction, drift computation, URI parsing |
@@ -109,5 +109,5 @@ Documents are indexed into time-based indices: `{index_prefix}-{yyyy.MM.dd}` (de
 The framework is best-effort. The proxy's primary job (routing requests and returning responses) is never compromised:
 
 - If the reporting cluster is unreachable, the batch is discarded and new documents continue to be accepted.
-- If `MetricsCollector` throws, the exception is caught and logged — the client response is unaffected.
+- If `MetricsReceiver` throws, the exception is caught and logged — the client response is unaffected.
 - If a target response is missing or errored, the corresponding fields are set to null and a partial document is still indexed.

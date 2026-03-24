@@ -19,12 +19,12 @@ public record ValidationDocument(
     @JsonProperty("normalized_endpoint") String normalizedEndpoint,
 
     // Fixed metrics (universal — always present)
-    @JsonProperty("solr_hit_count") Long solrHitCount,
-    @JsonProperty("opensearch_hit_count") Long opensearchHitCount,
+    @JsonProperty("baseline_hit_count") Long baselineHitCount,
+    @JsonProperty("candidate_hit_count") Long candidateHitCount,
     @JsonProperty("hit_count_drift_percentage") Double hitCountDriftPercentage,
-    @JsonProperty("solr_qtime_ms") Long solrQtimeMs,
-    @JsonProperty("opensearch_took_ms") Long opensearchTookMs,
-    @JsonProperty("query_time_delta_ms") Long queryTimeDeltaMs,
+    @JsonProperty("baseline_response_time_ms") Long baselineResponseTimeMs,
+    @JsonProperty("candidate_response_time_ms") Long candidateResponseTimeMs,
+    @JsonProperty("response_time_delta_ms") Long responseTimeDeltaMs,
 
     // Comparisons (variable — only present when applicable)
     @JsonProperty("comparisons") List<ComparisonEntry> comparisons,
@@ -53,8 +53,8 @@ public record ValidationDocument(
     /** Per-key value drift within a comparison. */
     public record ValueDrift(
         @JsonProperty("key") String key,
-        @JsonProperty("solr_value") Number solrValue,
-        @JsonProperty("opensearch_value") Number opensearchValue,
+        @JsonProperty("baseline_value") Number baselineValue,
+        @JsonProperty("candidate_value") Number candidateValue,
         @JsonProperty("drift_percentage") Double driftPercentage
     ) {}
 }

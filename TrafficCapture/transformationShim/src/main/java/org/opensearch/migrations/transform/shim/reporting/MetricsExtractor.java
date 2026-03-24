@@ -28,28 +28,28 @@ public final class MetricsExtractor {
             current = ((Map<String, Object>) current).get(segment);
             if (current == null) return null;
         }
-        return current instanceof Number ? (Number) current : null;
+        return current instanceof Number number ? number : null;
     }
 
     /**
      * Compute hit count drift percentage.
      * Returns null if either input is null.
      * Returns 0.0 if both are zero.
-     * Returns -1.0 if solr is zero but os is non-zero (sentinel).
+     * Returns -1.0 if baseline is zero but candidate is non-zero (sentinel).
      */
-    public static Double computeDriftPercentage(Long solrCount, Long osCount) {
-        if (solrCount == null || osCount == null) return null;
-        if (solrCount == 0L && osCount == 0L) return 0.0;
-        if (solrCount == 0L) return -1.0;
-        return Math.abs(solrCount - osCount) / (double) solrCount * 100.0;
+    public static Double computeDriftPercentage(Long baselineCount, Long candidateCount) {
+        if (baselineCount == null || candidateCount == null) return null;
+        if (baselineCount == 0L && candidateCount == 0L) return 0.0;
+        if (baselineCount == 0L) return -1.0;
+        return Math.abs(baselineCount - candidateCount) / (double) baselineCount * 100.0;
     }
 
     /**
-     * Compute query time delta: osTook - solrQtime.
+     * Compute response time delta: candidateTime - baselineTime.
      */
-    public static Long computeQueryTimeDelta(Long solrQtime, Long osTook) {
-        if (solrQtime == null || osTook == null) return null;
-        return osTook - solrQtime;
+    public static Long computeResponseTimeDelta(Long baselineTime, Long candidateTime) {
+        if (baselineTime == null || candidateTime == null) return null;
+        return candidateTime - baselineTime;
     }
 
     /**

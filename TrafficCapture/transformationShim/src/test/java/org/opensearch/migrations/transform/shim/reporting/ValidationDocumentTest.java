@@ -48,12 +48,12 @@ class ValidationDocumentTest {
         assertTrue(tree.has("transformed_request"));
         assertTrue(tree.has("collection_name"));
         assertTrue(tree.has("normalized_endpoint"));
-        assertTrue(tree.has("solr_hit_count"));
-        assertTrue(tree.has("opensearch_hit_count"));
+        assertTrue(tree.has("baseline_hit_count"));
+        assertTrue(tree.has("candidate_hit_count"));
         assertTrue(tree.has("hit_count_drift_percentage"));
-        assertTrue(tree.has("solr_qtime_ms"));
-        assertTrue(tree.has("opensearch_took_ms"));
-        assertTrue(tree.has("query_time_delta_ms"));
+        assertTrue(tree.has("baseline_response_time_ms"));
+        assertTrue(tree.has("candidate_response_time_ms"));
+        assertTrue(tree.has("response_time_delta_ms"));
         assertTrue(tree.has("custom_metrics"));
         // Nested RequestRecord
         assertTrue(tree.get("original_request").has("method"));
@@ -65,8 +65,8 @@ class ValidationDocumentTest {
         assertTrue(comp.has("value_drifts"));
         // Nested ValueDrift
         JsonNode drift = comp.get("value_drifts").get(0);
-        assertTrue(drift.has("solr_value"));
-        assertTrue(drift.has("opensearch_value"));
+        assertTrue(drift.has("baseline_value"));
+        assertTrue(drift.has("candidate_value"));
         assertTrue(drift.has("drift_percentage"));
     }
 
@@ -81,7 +81,7 @@ class ValidationDocumentTest {
         JsonNode tree = MAPPER.readTree(json);
         assertFalse(tree.has("original_request"));
         assertFalse(tree.has("comparisons"));
-        assertFalse(tree.has("solr_hit_count"));
+        assertFalse(tree.has("baseline_hit_count"));
         assertFalse(tree.has("custom_metrics"));
         // But timestamp and request_id are present
         assertTrue(tree.has("timestamp"));

@@ -18,15 +18,15 @@ import org.slf4j.LoggerFactory;
  * and submits a ValidationDocument to the configured MetricsSink.
  * Called from the Netty event loop — must not block.
  */
-public class MetricsCollector {
+public class MetricsReceiver {
 
-    private static final Logger log = LoggerFactory.getLogger(MetricsCollector.class);
+    private static final Logger log = LoggerFactory.getLogger(MetricsReceiver.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final MetricsSink sink;
     private final boolean includeRequestBody;
 
-    public MetricsCollector(MetricsSink sink, boolean includeRequestBody) {
+    public MetricsReceiver(MetricsSink sink, boolean includeRequestBody) {
         this.sink = sink;
         this.includeRequestBody = includeRequestBody;
     }
@@ -37,7 +37,7 @@ public class MetricsCollector {
      * to the overload that takes resolved arguments.
      * Never throws — all exceptions are caught and logged.
      */
-    public void collect(
+    public void process(
             Map<String, Object> originalRequestMap,
             Map<String, Map<String, Object>> perTargetTransformedRequests,
             Map<String, TargetResponse> responses,
@@ -82,7 +82,7 @@ public class MetricsCollector {
                     ? perTargetTransformMetrics.getOrDefault(secondaryName, Map.of())
                     : Map.of();
 
-            collect(originalRequest, transformedRequest, primaryResponse, secondaryResponse, secondaryMetrics);
+            process(originalRequest, transformedRequest, primaryResponse, secondaryResponse, secondaryMetrics);
         } catch (Exception e) {
             log.error("Error collecting validation metrics", e);
         }
@@ -92,13 +92,13 @@ public class MetricsCollector {
      * Collect metrics from resolved primary and secondary target responses.
      * Never throws — all exceptions are caught and logged.
      *
-     * @param originalRequest    the original Solr request
+     * @param originalRequest    the original source request
      * @param transformedRequest the transformed request sent to the secondary target
      * @param primaryResponse    the primary target's response
      * @param secondaryResponse  the secondary target's response
      * @param transformMetrics   custom metrics emitted by the secondary target's transforms
      */
-    public void collect(
+    public void process(
             RequestRecord originalRequest,
             RequestRecord transformedRequest,
             TargetResponse primaryResponse,
@@ -116,7 +116,7 @@ public class MetricsCollector {
 
             Long primaryQtime = extractLong(primaryResponse, "responseHeader.QTime");
             Long secondaryQtime = extractLong(secondaryResponse, "responseHeader.QTime");
-            Long queryTimeDelta = MetricsExtractor.computeQueryTimeDelta(primaryQtime, secondaryQtime);
+            Long responseTimeDelta = MetricsExtractor.computeResponseTimeDelta(primaryQtime, secondaryQtime);
 
             List<ValidationDocument.ComparisonEntry> comparisons = FacetComparator.compareFacets(
                     primaryResponse != null ? primaryResponse.parsedBody() : null,
@@ -137,7 +137,7 @@ public class MetricsCollector {
                     hitCountDrift,
                     primaryQtime,
                     secondaryQtime,
-                    queryTimeDelta,
+                    responseTimeDelta,
                     comparisons.isEmpty() ? null : comparisons,
                     customMetrics
             );

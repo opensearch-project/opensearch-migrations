@@ -75,18 +75,18 @@ class MetricsExtractorTest {
         assertEquals(0.0, MetricsExtractor.computeDriftPercentage(100L, 100L));
     }
 
-    // --- computeQueryTimeDelta ---
+    // --- computeResponseTimeDelta ---
 
     @Test
     void delta_normalValues() {
-        assertEquals(3L, MetricsExtractor.computeQueryTimeDelta(12L, 15L));
-        assertEquals(-5L, MetricsExtractor.computeQueryTimeDelta(20L, 15L));
+        assertEquals(3L, MetricsExtractor.computeResponseTimeDelta(12L, 15L));
+        assertEquals(-5L, MetricsExtractor.computeResponseTimeDelta(20L, 15L));
     }
 
     @Test
     void delta_nullInputs() {
-        assertNull(MetricsExtractor.computeQueryTimeDelta(null, 15L));
-        assertNull(MetricsExtractor.computeQueryTimeDelta(12L, null));
+        assertNull(MetricsExtractor.computeResponseTimeDelta(null, 15L));
+        assertNull(MetricsExtractor.computeResponseTimeDelta(12L, null));
     }
 
     // --- extractCollectionName ---
