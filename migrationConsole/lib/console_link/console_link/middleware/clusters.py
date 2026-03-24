@@ -76,7 +76,7 @@ def _solr_cat_indices(cluster: Cluster, as_json=False):
         for coll in collections:
             doc_count = _solr_collection_doc_count(cluster, coll)
             lines.append(f"{coll:<20} {doc_count:>10}")
-        return "\n".join(lines).encode()
+        return ("\n".join(lines) + "\n").encode()
 
 
 def _solr_list_collections_or_cores(cluster: Cluster) -> list:
