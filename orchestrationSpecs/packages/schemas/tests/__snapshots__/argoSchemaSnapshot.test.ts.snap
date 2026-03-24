@@ -774,10 +774,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "transformerConfig": {
                             "type": "string",
                             "description": "Inline JSON configuration for metadata transformers. Keys are transformer names and values are their configuration. Alternative to transformerConfigBase64 for simple configurations."
-                          },
-                          "transformerConfigFile": {
-                            "type": "string",
-                            "description": "Path to a JSON file containing metadata transformer configuration. The file is read from the container filesystem."
                           }
                         }
                       },
@@ -880,10 +876,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "docTransformerConfig": {
                             "type": "string",
                             "description": "Inline JSON configuration for document transformers. Keys are transformer names and values are their configuration. Alternative to docTransformerConfigBase64 for simple configurations."
-                          },
-                          "docTransformerConfigFile": {
-                            "type": "string",
-                            "description": "Path to a JSON file containing document transformer configuration. The file is read from the container filesystem."
                           },
                           "documentsPerBulkRequest": {
                             "type": "number",
@@ -1313,10 +1305,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "description": "Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations containing special characters."
                     },
-                    "transformerConfigFile": {
-                      "type": "string",
-                      "description": "Path to a JSON file containing request transformer configuration. The file is read from the container filesystem."
-                    },
                     "tupleTransformerConfig": {
                       "type": "string",
                       "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs for stateful transformations."
@@ -1324,10 +1312,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "tupleTransformerConfigBase64": {
                       "type": "string",
                       "description": "Base64-encoded tuple transformer configuration."
-                    },
-                    "tupleTransformerConfigFile": {
-                      "type": "string",
-                      "description": "Path to a JSON file containing tuple transformer configuration."
                     },
                     "userAgent": {
                       "type": "string",
@@ -2104,10 +2088,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "transformerConfig": {
                         "type": "string",
                         "description": "Inline JSON configuration for metadata transformers. Keys are transformer names and values are their configuration. Alternative to transformerConfigBase64 for simple configurations."
-                      },
-                      "transformerConfigFile": {
-                        "type": "string",
-                        "description": "Path to a JSON file containing metadata transformer configuration. The file is read from the container filesystem."
                       }
                     },
                     "description": "Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."
@@ -2222,10 +2202,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "docTransformerConfig": {
                         "type": "string",
                         "description": "Inline JSON configuration for document transformers. Keys are transformer names and values are their configuration. Alternative to docTransformerConfigBase64 for simple configurations."
-                      },
-                      "docTransformerConfigFile": {
-                        "type": "string",
-                        "description": "Path to a JSON file containing document transformer configuration. The file is read from the container filesystem."
                       },
                       "documentsPerBulkRequest": {
                         "type": "number",
@@ -2803,10 +2779,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "description": "Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations containing special characters."
                   },
-                  "transformerConfigFile": {
-                    "type": "string",
-                    "description": "Path to a JSON file containing request transformer configuration. The file is read from the container filesystem."
-                  },
                   "tupleTransformerConfig": {
                     "type": "string",
                     "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs for stateful transformations."
@@ -2814,10 +2786,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "tupleTransformerConfigBase64": {
                     "type": "string",
                     "description": "Base64-encoded tuple transformer configuration."
-                  },
-                  "tupleTransformerConfigFile": {
-                    "type": "string",
-                    "description": "Path to a JSON file containing tuple transformer configuration."
                   },
                   "userAgent": {
                     "type": "string",

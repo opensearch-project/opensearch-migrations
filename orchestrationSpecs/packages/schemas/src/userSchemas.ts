@@ -281,14 +281,10 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
         .describe("Inline request transformer configuration as a JSON string. Defines transformations applied to each request before replaying to the target."),
     transformerConfigEncoded: z.string().optional()
         .describe("Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations containing special characters."),
-    transformerConfigFile: z.string().optional()
-        .describe("Path to a JSON file containing request transformer configuration. The file is read from the container filesystem."),
     tupleTransformerConfig: z.string().optional()
         .describe("Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs for stateful transformations."),
     tupleTransformerConfigBase64: z.string().optional()
         .describe("Base64-encoded tuple transformer configuration."),
-    tupleTransformerConfigFile: z.string().optional()
-        .describe("Path to a JSON file containing tuple transformer configuration."),
     userAgent: z.string().optional()
         .describe("String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."),
 }).describe("Process-level configuration options for the traffic replayer application. These control how captured traffic is consumed from Kafka and replayed to the target cluster.");
@@ -367,8 +363,6 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
         .describe("Base64-encoded JSON configuration for metadata transformers. Defines custom transformations applied to index mappings and settings during migration."),
     transformerConfig: z.string().optional()
         .describe("Inline JSON configuration for metadata transformers. Keys are transformer names and values are their configuration. Alternative to transformerConfigBase64 for simple configurations."),
-    transformerConfigFile: z.string().optional()
-        .describe("Path to a JSON file containing metadata transformer configuration. The file is read from the container filesystem."),
 }).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
 
 export const USER_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(USER_METADATA_WORKFLOW_OPTIONS);
@@ -413,8 +407,6 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("Base64-encoded JSON configuration for document transformers. Defines custom transformations applied to each document during the backfill (e.g. field renaming, type conversion)."),
     docTransformerConfig: z.string().optional()
         .describe("Inline JSON configuration for document transformers. Keys are transformer names and values are their configuration. Alternative to docTransformerConfigBase64 for simple configurations."),
-    docTransformerConfigFile: z.string().optional()
-        .describe("Path to a JSON file containing document transformer configuration. The file is read from the container filesystem."),
     documentsPerBulkRequest: z.number().default(0x7fffffff).optional()
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
