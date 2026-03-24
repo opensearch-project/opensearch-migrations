@@ -14,9 +14,9 @@ import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
 import org.opensearch.migrations.bulkload.lucene.SegmentNameSorter;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
-import org.opensearch.migrations.bulkload.pipeline.ir.CollectionMetadata;
-import org.opensearch.migrations.bulkload.pipeline.ir.Document;
-import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
+import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
+import org.opensearch.migrations.bulkload.pipeline.model.Document;
+import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import com.fasterxml.jackson.databind.JsonNode;

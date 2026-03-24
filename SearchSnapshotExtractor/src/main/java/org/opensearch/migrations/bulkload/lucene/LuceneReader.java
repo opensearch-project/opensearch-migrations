@@ -254,7 +254,7 @@ public class LuceneReader {
         }
 
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
-        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes != null ? sourceBytes.getBytes(java.nio.charset.StandardCharsets.UTF_8) : null, routing, operation);
+        return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing, operation);
     }
 
     /** Backwards-compatible overload without mapping context */

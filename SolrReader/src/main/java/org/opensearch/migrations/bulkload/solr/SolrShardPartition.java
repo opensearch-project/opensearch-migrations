@@ -2,7 +2,7 @@ package org.opensearch.migrations.bulkload.solr;
 
 import java.nio.file.Path;
 
-import org.opensearch.migrations.bulkload.pipeline.ir.Partition;
+import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 
 /**
  * Partition representing a Solr shard within a collection.
