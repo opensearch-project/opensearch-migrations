@@ -54,6 +54,7 @@ ENV WORKON_HOME=/
 ENV PIPENV_CUSTOM_VENV_NAME=.venv
 ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
+ENV PATH="/.venv/bin:${PATH}"
 
 # Copy tools from previous stage
 COPY --from=migration-console-tools /root/kafka-tools /root/kafka-tools
