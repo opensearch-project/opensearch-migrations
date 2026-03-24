@@ -303,6 +303,15 @@ export const USER_REPLAYER_PROCESS_OPTION_KEYS = getZodKeys(USER_REPLAYER_PROCES
 export const USER_REPLAYER_OPTIONS = z.object({
     ...USER_REPLAYER_WORKFLOW_OPTIONS.shape,
     ...USER_REPLAYER_PROCESS_OPTIONS.shape,
+}).superRefine((data, ctx) => {
+    if (data.lookaheadTimeSeconds !== undefined && data.observedPacketConnectionTimeout !== undefined
+        && data.lookaheadTimeSeconds <= data.observedPacketConnectionTimeout) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `lookaheadTimeSeconds (${data.lookaheadTimeSeconds}) must be strictly greater than observedPacketConnectionTimeout (${data.observedPacketConnectionTimeout})`,
+            path: ['lookaheadTimeSeconds']
+        });
+    }
 });
 
 // Note: noWait is not included here as it is hardcoded to true in the workflow.
@@ -366,14 +375,14 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
         .describe("When true, allows metadata migration between clusters with non-exact version compatibility (e.g. ES 7.x to OS 2.x). When false, requires strict version matching."),
     clusterAwarenessAttributes: z.number().default(1).optional()
         .describe("Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."),
-    multiTypeBehavior: z.union(["NONE", "UNION", "SPLIT"].map(s=>z.literal(s))).default("NONE").optional()
+    multiTypeBehavior: z.enum(["NONE", "UNION", "SPLIT"]).default("NONE").optional()
         .describe("Strategy for handling Elasticsearch multi-type indices (ES 5.x and earlier). " +
             "'NONE': fail if multi-type indices are encountered. " +
             "'UNION': merge all types into a single mapping. " +
             "'SPLIT': create separate indices for each type."),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
         .describe("URL for the OpenTelemetry Collector for metadata migration metrics."),
-    output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).default("HUMAN_READABLE").optional()
+    output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
     transformerConfigBase64: z.string().default("").optional()
         .describe("Base64-encoded JSON configuration for metadata transformers. Defines custom transformations applied to index mappings and settings during migration."),
@@ -439,7 +448,7 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
         .describe("URL for the OpenTelemetry Collector for RFS backfill metrics and progress tracking."),
-    serverGeneratedIds: z.union(["AUTO", "ALWAYS", "NEVER"].map(s=>z.literal(s))).default("AUTO").optional()
+    serverGeneratedIds: z.enum(["AUTO", "ALWAYS", "NEVER"]).default("AUTO").optional()
         .describe("Controls document ID generation on the target. " +
             "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
             "'ALWAYS': always use server-generated IDs (discards source IDs). " +

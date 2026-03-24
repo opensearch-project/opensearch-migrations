@@ -724,25 +724,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "default": 1
                           },
                           "multiTypeBehavior": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "NONE"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "UNION"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "SPLIT"
-                                ]
-                              }
+                            "type": "string",
+                            "enum": [
+                              "NONE",
+                              "UNION",
+                              "SPLIT"
                             ],
                             "default": "NONE"
                           },
@@ -751,19 +737,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "default": "http://otel-collector:4317"
                           },
                           "output": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "HUMAN_READABLE"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "JSON"
-                                ]
-                              }
+                            "type": "string",
+                            "enum": [
+                              "HUMAN_READABLE",
+                              "JSON"
                             ],
                             "default": "HUMAN_READABLE"
                           },
@@ -903,25 +880,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "default": "http://otel-collector:4317"
                           },
                           "serverGeneratedIds": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "AUTO"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "ALWAYS"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "NEVER"
-                                ]
-                              }
+                            "type": "string",
+                            "enum": [
+                              "AUTO",
+                              "ALWAYS",
+                              "NEVER"
                             ],
                             "default": "AUTO"
                           },
@@ -2035,25 +1998,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "description": "Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."
                       },
                       "multiTypeBehavior": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              "NONE"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "UNION"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "SPLIT"
-                            ]
-                          }
+                        "type": "string",
+                        "enum": [
+                          "NONE",
+                          "UNION",
+                          "SPLIT"
                         ],
                         "default": "NONE",
                         "description": "Strategy for handling Elasticsearch multi-type indices (ES 5.x and earlier). 'NONE': fail if multi-type indices are encountered. 'UNION': merge all types into a single mapping. 'SPLIT': create separate indices for each type."
@@ -2064,19 +2013,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "description": "URL for the OpenTelemetry Collector for metadata migration metrics."
                       },
                       "output": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              "HUMAN_READABLE"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "JSON"
-                            ]
-                          }
+                        "type": "string",
+                        "enum": [
+                          "HUMAN_READABLE",
+                          "JSON"
                         ],
                         "default": "HUMAN_READABLE",
                         "description": "Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."
@@ -2236,25 +2176,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "description": "URL for the OpenTelemetry Collector for RFS backfill metrics and progress tracking."
                       },
                       "serverGeneratedIds": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              "AUTO"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "ALWAYS"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "NEVER"
-                            ]
-                          }
+                        "type": "string",
+                        "enum": [
+                          "AUTO",
+                          "ALWAYS",
+                          "NEVER"
                         ],
                         "default": "AUTO",
                         "description": "Controls document ID generation on the target. 'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. 'ALWAYS': always use server-generated IDs (discards source IDs). 'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."
