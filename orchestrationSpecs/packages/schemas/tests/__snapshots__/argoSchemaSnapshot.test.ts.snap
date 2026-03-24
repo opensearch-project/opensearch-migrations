@@ -222,7 +222,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "limits",
                         "requests"
                       ],
-                      "description": "Kubernetes resource limits and requests for the capture proxy container. Defaults to 3500m CPU and 3500Mi memory for both limits and requests (Guaranteed QoS)."
+                      "description": "Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults (Guaranteed QoS)."
                     },
                     "otelCollectorEndpoint": {
                       "type": "string",
@@ -322,12 +322,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "duration": {
                               "type": "string",
                               "default": "2160h",
-                              "description": "Requested certificate validity duration in Go duration format. Default is '2160h' (90 days)."
+                              "description": "Requested certificate validity duration in Go duration format (e.g. '2160h' = 90 days)."
                             },
                             "renewBefore": {
                               "type": "string",
                               "default": "360h",
-                              "description": "How long before certificate expiry to trigger renewal. Default is '360h' (15 days)."
+                              "description": "How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."
                             }
                           },
                           "required": [
@@ -844,7 +844,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "limits",
                               "requests"
                             ],
-                            "description": "Kubernetes resource limits and requests for the RFS container. Defaults to 3300m CPU and 7000Mi memory. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
+                            "description": "Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
                           },
                           "indexAllowlist": {
                             "type": "array",
@@ -1189,7 +1189,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "limits",
                         "requests"
                       ],
-                      "description": "Kubernetes resource limits and requests for the replayer container. Defaults to 3500m CPU and 3500Mi memory (Guaranteed QoS)."
+                      "description": "Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults (Guaranteed QoS)."
                     },
                     "kafkaTrafficEnableMSKAuth": {
                       "type": "boolean",
@@ -1460,7 +1460,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "integer",
                     "minimum": 1,
                     "default": 1,
-                    "description": "Default number of partitions for auto-created Kafka topics. More partitions enable higher parallelism for consumers."
+                    "description": "Number of partitions for auto-created Kafka topics. More partitions enable higher parallelism for consumers."
                   },
                   "topicReplicas": {
                     "type": "integer",
@@ -1636,7 +1636,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "type": "string",
                       "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
                       "default": "",
-                      "description": "Override the default S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation. Leave empty to use the default AWS S3 endpoint."
+                      "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
                     },
                     "s3RepoPathUri": {
                       "type": "string",
@@ -1697,7 +1697,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "loggingConfigurationOverrideConfigMap": {
                                   "type": "string",
                                   "default": "",
-                                  "description": "Name of a Kubernetes ConfigMap containing a custom Log4j configuration for the snapshot creation process. Leave empty for defaults."
+                                  "description": "Name of a Kubernetes ConfigMap containing a custom Log4j configuration for the snapshot creation process."
                                 },
                                 "indexAllowlist": {
                                   "type": "array",
@@ -2111,7 +2111,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "limits",
                           "requests"
                         ],
-                        "description": "Kubernetes resource limits and requests for the RFS container. Defaults to 3300m CPU and 7000Mi memory. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
+                        "description": "Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
                       },
                       "indexAllowlist": {
                         "type": "array",
@@ -2134,7 +2134,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "documentsPerBulkRequest": {
                         "type": "number",
                         "default": 2147483647,
-                        "description": "Maximum number of documents per bulk indexing request to the target cluster. Default is 2147483647 (effectively unlimited, bounded by request size). Lower values reduce per-request latency but increase overhead."
+                        "description": "Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."
                       },
                       "initialLeaseDuration": {
                         "type": "string",
@@ -2149,7 +2149,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "maxShardSizeBytes": {
                         "type": "number",
                         "default": 85899345920,
-                        "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Default is 85899345920 (80 GiB). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."
+                        "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."
                       },
                       "otelCollectorEndpoint": {
                         "type": "string",
@@ -2203,12 +2203,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
                     "default": "",
-                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j configuration. When set, the ConfigMap is mounted into the container and used to override default logging. Leave empty to use built-in logging defaults."
+                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j configuration. When set, the ConfigMap is mounted into the container to override logging behavior."
                   },
                   "internetFacing": {
                     "type": "boolean",
                     "default": false,
-                    "description": "When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC. When false (default), the load balancer is internal-only."
+                    "description": "When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC."
                   },
                   "podReplicas": {
                     "type": "number",
@@ -2284,12 +2284,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "limits",
                       "requests"
                     ],
-                    "description": "Kubernetes resource limits and requests for the capture proxy container. Defaults to 3500m CPU and 3500Mi memory for both limits and requests (Guaranteed QoS)."
+                    "description": "Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults (Guaranteed QoS)."
                   },
                   "otelCollectorEndpoint": {
                     "type": "string",
                     "default": "http://otel-collector:4317",
-                    "description": "gRPC endpoint (host:port) for the OpenTelemetry Collector. The proxy sends metrics and traces to this endpoint. Default points to the in-cluster collector service."
+                    "description": "gRPC endpoint (host:port) for the OpenTelemetry Collector. The proxy sends metrics and traces to this endpoint."
                   },
                   "setHeader": {
                     "type": "array",
@@ -2301,7 +2301,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "destinationConnectionPoolSize": {
                     "type": "number",
                     "default": 0,
-                    "description": "Maximum number of persistent connections to the destination (source) cluster. 0 means unlimited/default connection pooling."
+                    "description": "Maximum number of persistent connections to the destination (source) cluster. 0 means unlimited connection pooling."
                   },
                   "destinationConnectionPoolTimeout": {
                     "type": "string",
@@ -2321,7 +2321,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "maxTrafficBufferSize": {
                     "type": "number",
                     "default": 1048576,
-                    "description": "Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka. Default is 1048576 (1 MiB)."
+                    "description": "Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka."
                   },
                   "noCapture": {
                     "type": "boolean",
@@ -2391,12 +2391,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "duration": {
                             "type": "string",
                             "default": "2160h",
-                            "description": "Requested certificate validity duration in Go duration format. Default is '2160h' (90 days)."
+                            "description": "Requested certificate validity duration in Go duration format (e.g. '2160h' = 90 days)."
                           },
                           "renewBefore": {
                             "type": "string",
                             "default": "360h",
-                            "description": "How long before certificate expiry to trigger renewal. Default is '360h' (15 days)."
+                            "description": "How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."
                           }
                         },
                         "required": [
@@ -2520,12 +2520,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "jvmArgs": {
                     "type": "string",
                     "default": "",
-                    "description": "Additional JVM arguments passed to the replayer process via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). Leave empty for JVM defaults."
+                    "description": "Additional JVM arguments passed to the replayer process via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC')."
                   },
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
                     "default": "",
-                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j configuration for the replayer. Leave empty to use built-in logging defaults."
+                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j configuration for the replayer."
                   },
                   "podReplicas": {
                     "type": "number",
@@ -2591,7 +2591,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "limits",
                       "requests"
                     ],
-                    "description": "Kubernetes resource limits and requests for the replayer container. Defaults to 3500m CPU and 3500Mi memory (Guaranteed QoS)."
+                    "description": "Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults (Guaranteed QoS)."
                   },
                   "kafkaTrafficEnableMSKAuth": {
                     "type": "boolean",
@@ -2615,7 +2615,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "numClientThreads": {
                     "type": "number",
                     "default": 0,
-                    "description": "Number of threads used to send replayed requests to the target. 0 uses the Netty default (typically number of available processors)."
+                    "description": "Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."
                   },
                   "observedPacketConnectionTimeout": {
                     "type": "number",
@@ -2640,7 +2640,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "speedupFactor": {
                     "type": "number",
                     "default": 1.1,
-                    "description": "Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed. Default 1.1 provides a slight speedup to keep replay ahead of capture."
+                    "description": "Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed."
                   },
                   "targetServerResponseTimeoutSeconds": {
                     "type": "number",
@@ -2676,7 +2676,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "description": "String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."
                   }
                 },
-                "description": "Optional replayer configuration overrides. If omitted, default replayer settings are used."
+                "description": "Optional replayer configuration overrides. If omitted, replayer runs with schema defaults."
               }
             },
             "required": [

@@ -97,9 +97,8 @@ export const S3_REPO_CONFIG = z.object({
     awsRegion: z.string()
         .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."),
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
-        .describe("Override the default S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
-            "LocalStack endpoints are automatically resolved to IP addresses during config transformation. " +
-            "Leave empty to use the default AWS S3 endpoint."),
+        .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
+            "LocalStack endpoints are automatically resolved to IP addresses during config transformation."),
     s3RepoPathUri: z.string().regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
         .describe("S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. " +
             "The bucket must already exist and be accessible from the source cluster."),
@@ -175,9 +174,9 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
         dnsNames: z.array(z.string()).min(1)
             .describe("DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name (e.g. 'my-proxy.default.svc.cluster.local')."),
         duration: z.string().default("2160h").optional()
-            .describe("Requested certificate validity duration in Go duration format. Default is '2160h' (90 days)."),
+            .describe("Requested certificate validity duration in Go duration format (e.g. '2160h' = 90 days)."),
         renewBefore: z.string().default("360h").optional()
-            .describe("How long before certificate expiry to trigger renewal. Default is '360h' (15 days)."),
+            .describe("How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."),
     }).describe("Provision a TLS certificate via cert-manager. A Certificate resource is created and the resulting secret is mounted into the proxy pod."),
     z.object({
         mode: z.literal("existingSecret")
@@ -189,23 +188,23 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
 
 export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe("Name of a Kubernetes ConfigMap containing a custom Log4j configuration. When set, the ConfigMap is mounted into the container and used to override default logging. Leave empty to use built-in logging defaults."),
+        .describe("Name of a Kubernetes ConfigMap containing a custom Log4j configuration. When set, the ConfigMap is mounted into the container to override logging behavior."),
     internetFacing: z.boolean().default(false).optional()
-        .describe("When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC. When false (default), the load balancer is internal-only."),
+        .describe("When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC."),
     podReplicas: z.number().default(1).optional()
         .describe("Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.PROXY, (v ?? {})), RESOURCE_REQUIREMENTS)
-        .describe("Kubernetes resource limits and requests for the capture proxy container. Defaults to 3500m CPU and 3500Mi memory for both limits and requests (Guaranteed QoS).")
+        .describe("Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults (Guaranteed QoS).")
         .default(DEFAULT_RESOURCES.PROXY),
 }).describe("Kubernetes deployment-level options for the capture proxy.");
 
 export const USER_PROXY_PROCESS_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("gRPC endpoint (host:port) for the OpenTelemetry Collector. The proxy sends metrics and traces to this endpoint. Default points to the in-cluster collector service."),
+        .describe("gRPC endpoint (host:port) for the OpenTelemetry Collector. The proxy sends metrics and traces to this endpoint."),
     setHeader: z.array(z.string()).optional()
         .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format."),
     destinationConnectionPoolSize: z.number().default(0).optional()
-        .describe("Maximum number of persistent connections to the destination (source) cluster. 0 means unlimited/default connection pooling."),
+        .describe("Maximum number of persistent connections to the destination (source) cluster. 0 means unlimited connection pooling."),
     destinationConnectionPoolTimeout: z.string()
         .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
         .default("PT30S").optional()
@@ -215,7 +214,7 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
     listenPort: z.number()
         .describe("TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL."),
     maxTrafficBufferSize: z.number().default(1048576).optional()
-        .describe("Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka. Default is 1048576 (1 MiB)."),
+        .describe("Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka."),
     noCapture: z.boolean().default(false).optional()
         .describe("When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording."),
     numThreads: z.number().default(1).optional()
@@ -246,13 +245,13 @@ export const USER_PROXY_OPTIONS = z.object({
 
 export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
-        .describe("Additional JVM arguments passed to the replayer process via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). Leave empty for JVM defaults."),
+        .describe("Additional JVM arguments passed to the replayer process via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC')."),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe("Name of a Kubernetes ConfigMap containing a custom Log4j configuration for the replayer. Leave empty to use built-in logging defaults."),
+        .describe("Name of a Kubernetes ConfigMap containing a custom Log4j configuration for the replayer."),
     podReplicas: z.number().default(1).optional()
         .describe("Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.REPLAYER, (v ?? {})), RESOURCE_REQUIREMENTS)
-        .describe("Kubernetes resource limits and requests for the replayer container. Defaults to 3500m CPU and 3500Mi memory (Guaranteed QoS)."),
+        .describe("Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults (Guaranteed QoS)."),
 }).describe("Kubernetes deployment-level options for the traffic replayer.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
@@ -265,7 +264,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     maxConcurrentRequests: z.number().default(10000).optional()
         .describe("Maximum number of HTTP requests that can be in-flight simultaneously to the target cluster. Limits concurrency to prevent overwhelming the target."),
     numClientThreads: z.number().default(0).optional()
-        .describe("Number of threads used to send replayed requests to the target. 0 uses the Netty default (typically number of available processors)."),
+        .describe("Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."),
     observedPacketConnectionTimeout: z.number().default(360).optional()
         .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream."),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
@@ -275,7 +274,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     removeAuthHeader: z.boolean().default(false).optional()
         .describe("Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately."),
     speedupFactor: z.number().default(1.1).optional()
-        .describe("Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed. Default 1.1 provides a slight speedup to keep replay ahead of capture."),
+        .describe("Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed."),
     targetServerResponseTimeoutSeconds: z.number().default(150).optional()
         .describe("Maximum seconds to wait for a response from the target cluster before timing out a replayed request."),
     transformerConfig: z.string().optional()
@@ -310,7 +309,7 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
         .describe("Additional JVM arguments passed to the CreateSnapshot process via JDK_JAVA_OPTIONS (e.g. '-Xmx2g')."),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe("Name of a Kubernetes ConfigMap containing a custom Log4j configuration for the snapshot creation process. Leave empty for defaults.")
+        .describe("Name of a Kubernetes ConfigMap containing a custom Log4j configuration for the snapshot creation process.")
 }).describe("Workflow-level options for snapshot creation, controlling naming and JVM configuration.");
 
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
@@ -394,7 +393,7 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
                     ),
             }),
         }))
-        .describe("Kubernetes resource limits and requests for the RFS container. Defaults to 3300m CPU and 7000Mi memory. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."),
+        .describe("Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."),
 }).describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
 
 export const USER_RFS_PROCESS_OPTIONS = z.object({
@@ -405,13 +404,13 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
     docTransformerConfigBase64: z.string().default("").optional()
         .describe("Base64-encoded JSON configuration for document transformers. Defines custom transformations applied to each document during the backfill (e.g. field renaming, type conversion)."),
     documentsPerBulkRequest: z.number().default(0x7fffffff).optional()
-        .describe("Maximum number of documents per bulk indexing request to the target cluster. Default is 2147483647 (effectively unlimited, bounded by request size). Lower values reduce per-request latency but increase overhead."),
+        .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     initialLeaseDuration: z.string().default("PT1H").optional()
         .describe("ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up."),
     maxConnections: z.number().default(10).optional()
         .describe("Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing."),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
-        .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Default is 85899345920 (80 GiB). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."),
+        .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
         .describe("gRPC endpoint (host:port) for the OpenTelemetry Collector for RFS backfill metrics and progress tracking."),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
@@ -474,7 +473,7 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
                    ]).default({ type: "ephemeral" }).optional()
                    .describe("Storage configuration for Kafka broker data."),
     partitions:    z.number().int().min(1).default(1).optional()
-        .describe("Default number of partitions for auto-created Kafka topics. More partitions enable higher parallelism for consumers."),
+        .describe("Number of partitions for auto-created Kafka topics. More partitions enable higher parallelism for consumers."),
     topicReplicas: z.number().int().min(1).default(1).optional()
         .describe("Replication factor for auto-created Kafka topics. Must not exceed the number of broker replicas. Higher values improve durability."),
 }).describe("Configuration for auto-creating a Strimzi Kafka cluster. Used when no existing Kafka cluster is provided.");
@@ -562,7 +561,7 @@ export const REPLAYER_CONFIG = z.object({
     dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).default([]).optional()
         .describe("List of snapshot migrations that must complete before this replayer starts. Ensures data consistency when replaying traffic that depends on backfilled data."),
     replayerConfig: USER_REPLAYER_OPTIONS.optional()
-        .describe("Optional replayer configuration overrides. If omitted, default replayer settings are used.")
+        .describe("Optional replayer configuration overrides. If omitted, replayer runs with schema defaults.")
 }).describe("Configuration for a single traffic replayer instance, binding a proxy's captured traffic to a target cluster.");
 
 export const TRAFFIC_CONFIG = z.object({
