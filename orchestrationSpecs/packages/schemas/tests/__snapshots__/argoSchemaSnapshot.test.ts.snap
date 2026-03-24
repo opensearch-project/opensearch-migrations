@@ -2729,7 +2729,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "lookaheadTimeSeconds": {
                     "type": "number",
                     "default": 400,
-                    "description": "Number of seconds of captured traffic to buffer ahead of the current replay position. Larger values improve throughput but increase memory usage."
+                    "description": "Number of seconds of captured traffic to buffer ahead of the current replay position. Must be strictly greater than observedPacketConnectionTimeout. Larger values improve throughput but increase memory usage."
                   },
                   "maxConcurrentRequests": {
                     "type": "number",
@@ -2744,7 +2744,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "observedPacketConnectionTimeout": {
                     "type": "number",
                     "default": 360,
-                    "description": "Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream."
+                    "description": "Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."
                   },
                   "otelCollectorEndpoint": {
                     "type": "string",

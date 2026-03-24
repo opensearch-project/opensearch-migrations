@@ -260,13 +260,13 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     kafkaTrafficPropertyFile: z.string().optional()
         .describe("Path to a Java properties file with additional or overridden Kafka consumer configuration. Mounted into the replayer container."),
     lookaheadTimeSeconds: z.number().default(400).optional()
-        .describe("Number of seconds of captured traffic to buffer ahead of the current replay position. Larger values improve throughput but increase memory usage."),
+        .describe("Number of seconds of captured traffic to buffer ahead of the current replay position. Must be strictly greater than observedPacketConnectionTimeout. Larger values improve throughput but increase memory usage."),
     maxConcurrentRequests: z.number().default(10000).optional()
         .describe("Maximum number of HTTP requests that can be in-flight simultaneously to the target cluster. Limits concurrency to prevent overwhelming the target."),
     numClientThreads: z.number().default(0).optional()
         .describe("Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."),
     observedPacketConnectionTimeout: z.number().default(360).optional()
-        .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream."),
+        .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
         .describe("URL for the OpenTelemetry Collector to which the replayer sends metrics and traces."),
     quiescentPeriodMs: z.number().default(5000).optional()
