@@ -8,9 +8,9 @@
 - Use `--skip-console-exec` on bootstrap to avoid interactive kubectl exec at end
 - `workflow submit --wait` blocks until workflow completes
 - For cleanup: `helm uninstall -n ma ma --wait --timeout 60s` then `kubectl delete namespace ma --wait=true`
-- Run commands in migration console with venv:
+- Run commands in migration console:
   ```bash
-  kubectl exec migration-console-0 -n ma -- bash -c "source /.venv/bin/activate && <command>"
+  kubectl exec migration-console-0 -n ma -- <command>
   ```
 - Use `-v` flag for verbose output when debugging:
   ```bash
