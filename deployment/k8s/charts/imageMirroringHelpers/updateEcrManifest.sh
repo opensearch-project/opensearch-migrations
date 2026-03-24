@@ -31,7 +31,7 @@ echo "=== ECR Manifest Update ==="
 echo "Plan:"
 echo "  1. Extract chart names + versions from values.yaml"
 echo "  2. Pull each chart and run helm template to discover images"
-echo "  3. Add known runtime images (strimzi kafka, etcd, etc.)"
+echo "  3. Add known runtime images (strimzi kafka, etc.)"
 echo "  4. Compare with current manifest and report changes"
 echo "  5. Run verifyNoPublicImages.sh to confirm overrides are complete"
 echo ""
@@ -95,8 +95,8 @@ quay.io/strimzi/kaniko-executor:0.47.0
 quay.io/strimzi/maven-builder:0.47.0
 quay.io/coreos/etcd:v3.5.12
 public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3
-docker.io/amazon/aws-cli:2.25.11
-docker.io/amazon/aws-cli:latest
+mirror.gcr.io/amazon/aws-cli:2.25.11
+mirror.gcr.io/amazon/aws-cli:latest
 RUNTIME
 
 # Deduplicate and sort

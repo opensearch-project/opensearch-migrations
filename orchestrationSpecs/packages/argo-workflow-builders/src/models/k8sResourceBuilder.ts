@@ -24,7 +24,7 @@ export type K8sActionVerb = "create" | "get" | "apply" | "delete" | "replace" | 
 /** Partial representation of io.argoproj.workflow.v1alpha1.ResourceTemplate */
 export type ResourceWorkflowDefinition = {
     action: AllowLiteralOrExpression<K8sActionVerb>,
-    failureCondition?: AllowLiteralOrExpression<string>,
+    failureCondition?: string,
     flags?: string[],
     setOwnerReference?: AllowLiteralOrExpression<boolean>,
     // make these more strongly typed!
@@ -60,7 +60,7 @@ export class K8sResourceBuilder<
         super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
     }
 
-    protected getBody() {
+    getBody() {
         return {resource: this.bodyScope};
     }
 

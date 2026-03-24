@@ -54,6 +54,9 @@ charts:
       kafka:
         image:
           registry: "${M}/quay.io"
+      buildah:
+        image:
+          registry: "${M}/quay.io"
 
   argo-workflows:
     repository: "oci://${ECR}/charts/argo-workflows"
@@ -80,7 +83,7 @@ charts:
         repository: "${M}/cr.fluentbit.io/fluent/fluent-bit"
       testFramework:
         image:
-          repository: "${M}/docker.io/library/busybox"
+          repository: "${M}/mirror.gcr.io/library/busybox"
           tag: latest
 
   kube-prometheus-stack:
@@ -121,24 +124,14 @@ charts:
       grafana:
         image:
           registry: "${ECR}"
-          repository: "mirrored/docker.io/grafana/grafana"
+          repository: "mirrored/mirror.gcr.io/grafana/grafana"
         sidecar:
           image:
             registry: "${M}/quay.io"
         testFramework:
           image:
-            repository: "${M}/docker.io/bats/bats"
+            repository: "${M}/mirror.gcr.io/bats/bats"
             tag: "v1.4.1"
-
-  etcd-operator:
-    repository: "oci://${ECR}/charts/etcd-operator"
-    values:
-      etcdOperator:
-        image:
-          repository: "${M}/ghcr.io/aenix-io/etcd-operator"
-      kubeRbacProxy:
-        image:
-          repository: "${M}/gcr.io/kubebuilder/kube-rbac-proxy"
 
   opentelemetry-operator:
     repository: "oci://${ECR}/charts/opentelemetry-operator"
@@ -156,34 +149,34 @@ charts:
     repository: "oci://${ECR}/charts/localstack"
     values:
       image:
-        repository: "${M}/docker.io/localstack/localstack"
+        repository: "${M}/mirror.gcr.io/localstack/localstack"
 
   grafana:
     repository: "oci://${ECR}/charts/grafana"
     values:
       image:
         registry: "${ECR}"
-        repository: "mirrored/docker.io/grafana/grafana"
+        repository: "mirrored/mirror.gcr.io/grafana/grafana"
       sidecar:
         image:
           registry: "${M}/quay.io"
       testFramework:
         image:
-          repository: "${M}/docker.io/bats/bats"
+          repository: "${M}/mirror.gcr.io/bats/bats"
           tag: "v1.4.1"
 
   jaeger:
     repository: "oci://${ECR}/charts/jaeger"
     values:
       agent:
-        image: "${M}/docker.io/jaegertracing/jaeger-agent"
+        image: "${M}/mirror.gcr.io/jaegertracing/jaeger-agent"
       collector:
-        image: "${M}/docker.io/jaegertracing/jaeger-collector"
+        image: "${M}/mirror.gcr.io/jaegertracing/jaeger-collector"
       query:
-        image: "${M}/docker.io/jaegertracing/jaeger-query"
+        image: "${M}/mirror.gcr.io/jaegertracing/jaeger-query"
       storage:
         cassandra:
-          image: "${M}/docker.io/library/cassandra"
+          image: "${M}/mirror.gcr.io/library/cassandra"
 
   kyverno:
     repository: "oci://${ECR}/charts/kyverno"
@@ -192,17 +185,16 @@ charts:
         registry: "${M}/reg.kyverno.io"
       initImage:
         registry: "${M}/reg.kyverno.io"
-      cleanupJobs:
-        admissionReports:
-          image:
-            registry: "${M}/docker.io"
-        clusterAdmissionReports:
-          image:
-            registry: "${M}/docker.io"
+      webhooksCleanup:
+        image:
+          registry: "${M}/registry.k8s.io"
+      test:
+        image:
+          registry: "${M}/ghcr.io"
 
 # --- Direct template image overrides ---
 defaultBucketConfiguration:
-  bucketOperationImage: "${M}/docker.io/amazon/aws-cli:2.25.11"
+  bucketOperationImage: "${M}/mirror.gcr.io/amazon/aws-cli:2.25.11"
 
 # --- Otel collector (hardcoded in template, override via values) ---
 otelCollectorImage: "${M}/public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3"
@@ -210,10 +202,6 @@ otelCollectorImage: "${M}/public.ecr.aws/aws-observability/aws-otel-collector:v0
 # --- Coordinator cluster image (used by RFS workflow via configmap) ---
 images:
   coordinatorCluster:
-    repository: "${M}/docker.io/opensearchproject/opensearch"
+    repository: "${M}/mirror.gcr.io/opensearchproject/opensearch"
     tag: "3.1.0"
-
-# --- Etcd data image (used by etcd-operator CRD) ---
-etcdCluster:
-  image: "${M}/quay.io/coreos/etcd:v3.5.12"
 EOF

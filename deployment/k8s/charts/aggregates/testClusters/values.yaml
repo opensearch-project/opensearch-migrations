@@ -4,6 +4,11 @@ conditionalPackageInstalls:
 
 useDedicatedKarpenterPool: false
 
+# Override to restrict instance types in the dedicated search NodePool.
+# If empty, allows any c/m/r instance gen 6+.
+# nodePoolInstanceTypes:
+#   - m6i.2xlarge
+
 source:
   http:
     tls:
@@ -55,7 +60,13 @@ source:
 
   imageTag: "latest"
   image: "migrations/elasticsearch_searchguard"
-  roles: [ "master ", "data", "ingest" ]
+  roles:
+    - "master " # PURPOSEFULLY ADD THIS SPACE.
+                # This is critical the cheat with the chart.
+                # The chart does an exact-match for 'master' in a place that is incompatible with
+                # a single-node cluster but later these values will be implicitly trimmed
+    - "data"
+    - "ingest"
   antiAffinity: "soft"
   esJavaOpts: "-Xms512m -Xmx512m"
   protocol: https

@@ -137,7 +137,7 @@ class MATestBase:
         }]
         self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs
 
-    def prepare_workflow_parameters(self):
+    def prepare_workflow_parameters(self, keep_workflows: bool = False):
         # For existing clusters
         if self.imported_clusters:
             self.workflow_template = "full-migration-imported-clusters"
@@ -149,6 +149,7 @@ class MATestBase:
             ]
             self.parameters["source-configs"] = source_configs
             self.parameters["target-config"] = self.target_cluster.config
+            self.parameters["keepMigrationWorkflow"] = "true" if keep_workflows else "false"
         else:
             self.parameters["snapshot-and-migration-configs"] = self.workflow_snapshot_and_migration_config
             self.parameters["source-cluster-template"] = self.source_argo_cluster_template

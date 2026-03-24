@@ -21,6 +21,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
+import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.IKafkaConsumerContexts;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
@@ -112,6 +113,12 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     private final AtomicInteger consumerConnectionGeneration;
     private final AtomicInteger kafkaRecordsLeftToCommitEventually;
     private final AtomicBoolean kafkaRecordsReadyToCommit;
+    // Heartbeat counters — reset each heartbeat cycle
+    private final AtomicInteger pollsSinceLastHeartbeat = new AtomicInteger();
+    private final AtomicInteger emptyPollsSinceLastHeartbeat = new AtomicInteger();
+    private final AtomicInteger commitsSinceLastHeartbeat = new AtomicInteger();
+    private static final org.slf4j.Logger heartbeatLogger =
+        org.slf4j.LoggerFactory.getLogger("KafkaHeartbeat");
     /** Partitions revoked but not yet confirmed lost — cleared in onPartitionsAssigned. */
     private final Set<Integer> pendingCleanupPartitions = Collections.newSetFromMap(new ConcurrentHashMap<>());
     /** Called with truly lost partition numbers after onPartitionsAssigned confirms they didn't come back. */
@@ -293,9 +300,10 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 throw e;
             } catch (RuntimeException e) {
                 log.atWarn().setCause(e)
-                    .setMessage("Unable to poll the topic: {} with our Kafka consumer. "
+                    .setMessage("Unable to poll the topic: {} with our Kafka consumer ({}). "
                             + "Swallowing and awaiting next metadata refresh to try again.")
                     .addArgument(topic)
+                    .addArgument(this)
                     .log();
             } finally {
                 resume();
@@ -375,7 +383,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 kafkaRecord.partition(),
                 kafkaRecord.offset()
             );
-            offsetTracker.add(offsetDetails.getOffset());
+            offsetTracker.add(offsetDetails.getOffset(), kafkaRecord.key());
             kafkaRecordsLeftToCommitEventually.incrementAndGet();
             log.atTrace().setMessage("records in flight={}").addArgument(kafkaRecordsLeftToCommitEventually::get).log();
             return builder.apply(offsetDetails, kafkaRecord);
@@ -391,11 +399,15 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             try (var pollContext = context.createPollContext()) {
                 records = kafkaConsumer.poll(keepAliveInterval.dividedBy(POLL_TIMEOUT_KEEP_ALIVE_DIVISOR));
             }
-            log.atLevel(records.isEmpty() ? Level.TRACE : Level.INFO)
+            log.atLevel(records.isEmpty() ? Level.TRACE : Level.DEBUG)
                 .setMessage("Kafka consumer poll has fetched {} records.  Records in flight={}")
                 .addArgument(records::count)
                 .addArgument(kafkaRecordsLeftToCommitEventually::get)
                 .log();
+            pollsSinceLastHeartbeat.incrementAndGet();
+            if (records.isEmpty()) {
+                emptyPollsSinceLastHeartbeat.incrementAndGet();
+            }
             log.atTrace().setMessage("All positions: {{}}")
                 .addArgument(() ->
                     kafkaConsumer.assignment()
@@ -412,9 +424,10 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             return records;
         } catch (RuntimeException e) {
             log.atWarn().setCause(e)
-                .setMessage("Unable to poll the topic: {} with our Kafka consumer. "
+                .setMessage("Unable to poll the topic: {} with our Kafka consumer ({}). "
                         + "Swallowing and awaiting next metadata refresh to try again.")
                 .addArgument(topic)
+                .addArgument(this)
                 .log();
             return new ConsumerRecords<>(Collections.emptyMap(), Collections.emptyMap());
         }
@@ -484,6 +497,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         }
         try {
             safeCommitStatic(context, kafkaConsumer, nextCommitsMapCopy);
+            commitsSinceLastHeartbeat.incrementAndGet();
             synchronized (commitDataLock) {
                 nextCommitsMapCopy.entrySet()
                     .stream()
@@ -499,7 +513,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             // This function will only ever be called in a threadsafe way, mutually exclusive from any
             // other call other than commitKafkaKey(). Since commitKafkaKey() doesn't alter
             // partitionToOffsetLifecycleTrackerMap, these lines can be outside of the commitDataLock mutex
-            log.trace("partitionToOffsetLifecycleTrackerMap=" + partitionToOffsetLifecycleTrackerMap);
+            log.atTrace().setMessage("partitionToOffsetLifecycleTrackerMap={}").addArgument(partitionToOffsetLifecycleTrackerMap).log();
             kafkaRecordsLeftToCommitEventually.set(
                 partitionToOffsetLifecycleTrackerMap.values().stream().mapToInt(OffsetLifecycleTracker::size).sum()
             );
@@ -550,6 +564,47 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             orderedKeyHolders.poll();
         }
     }
+
+    /** Emit a periodic heartbeat log summarizing the Kafka consumer state. */
+    public void logHeartbeat() {
+        int polls = pollsSinceLastHeartbeat.getAndSet(0);
+        int emptyPolls = emptyPollsSinceLastHeartbeat.getAndSet(0);
+        int commits = commitsSinceLastHeartbeat.getAndSet(0);
+        int inflight = kafkaRecordsLeftToCommitEventually.get();
+        boolean readyToCommit = kafkaRecordsReadyToCommit.get();
+        int generation = consumerConnectionGeneration.get();
+
+        synchronized (commitDataLock) {
+            var sb = new StringBuilder();
+            sb.append("generation=").append(generation);
+            sb.append(" partitions=").append(partitionToOffsetLifecycleTrackerMap.keySet());
+            sb.append(" inflight=").append(inflight);
+
+            // Report commit head details from the first partition's tracker
+            partitionToOffsetLifecycleTrackerMap.values().stream().findFirst().ifPresent(tracker -> {
+                tracker.peekHeadOffset().ifPresent(headOffset -> {
+                    sb.append(" commitHead={offset=").append(headOffset);
+                    tracker.peekHeadMetadata().ifPresent(meta -> {
+                        sb.append(", conn=").append(meta.connectionId);
+                        var age = Duration.between(meta.addedAt, clock.instant());
+                        sb.append(", age=").append(Utils.formatDurationInSeconds(age));
+                    });
+                    sb.append("}");
+                });
+                sb.append(" commitTail=").append(tracker.getHighWatermark());
+                sb.append(" queueSize=").append(tracker.size());
+            });
+
+            sb.append(" polls=").append(polls);
+            sb.append(" emptyPolls=").append(emptyPolls);
+            sb.append(" commits=").append(commits);
+            sb.append(" readyToCommit=").append(readyToCommit);
+            sb.append(" pendingCommitPartitions=").append(nextSetOfCommitsMap.size());
+
+            heartbeatLogger.atInfo().setMessage("{}").addArgument(sb).log();
+        }
+    }
+
 
     String nextCommitsToString() {
         return "nextCommits="

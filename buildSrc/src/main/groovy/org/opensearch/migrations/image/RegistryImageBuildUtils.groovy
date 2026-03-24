@@ -6,6 +6,7 @@ import org.gradle.api.tasks.Exec
 import org.opensearch.migrations.common.CommonUtils
 
 class RegistryImageBuildUtils {
+    private static boolean builderWarningShown = false
 
     static class Registry { // Helper object
         final String hostUrl      // For Jib, which runs in the JVM directly (e.g., localhost:5001)
@@ -20,11 +21,62 @@ class RegistryImageBuildUtils {
                 this.containerUrl = rawUrl
             }
         }
+
+        String getRegistryDomain() { hostUrl.split('/')[0] }
+        boolean isEcr() { registryDomain.contains('.ecr.') && registryDomain.contains('.amazonaws.com') }
     }
 
     static String resolveBaseImage(Registry registry, String group, String image, String tag) {
-        def formatter = ImageRegistryFormatterFactory.getFormatter(registry.containerUrl)
-        return formatter.getFullBaseImageIdentifier(registry.containerUrl, group, image, tag)
+        return resolveBaseImageForUrl(registry.hostUrl, group, image, tag)
+    }
+
+    static String resolveBaseImageForContainer(Registry registry, String group, String image, String tag) {
+        return resolveBaseImageForUrl(registry.containerUrl, group, image, tag)
+    }
+
+    private static String resolveBaseImageForUrl(String url, String group, String image, String tag) {
+        def formatter = ImageRegistryFormatterFactory.getFormatter(url)
+        return formatter.getFullBaseImageIdentifier(url, group, image, tag)
+    }
+
+    /**
+     * Query a v2 registry for the digest of an image reference like "host:port/repo:tag"
+     * and return "host:port/repo@sha256:...". Throws if the digest cannot be resolved.
+     */
+    static String resolveDigest(String imageReference, boolean allowInsecure) {
+        def atIdx = imageReference.indexOf('@')
+        if (atIdx >= 0) return imageReference // already has a digest
+
+        def colonIdx = imageReference.lastIndexOf(':')
+        def slashIdx = imageReference.lastIndexOf('/')
+        String tag = (colonIdx > slashIdx && colonIdx >= 0) ? imageReference.substring(colonIdx + 1) : "latest"
+        String repoWithHost = (colonIdx > slashIdx && colonIdx >= 0) ? imageReference.substring(0, colonIdx) : imageReference
+
+        def firstSlash = repoWithHost.indexOf('/')
+        if (firstSlash < 0) throw new GradleException("Cannot parse registry host from image reference: ${imageReference}")
+        def registryHost = repoWithHost.substring(0, firstSlash)
+        def repository = repoWithHost.substring(firstSlash + 1)
+
+        def scheme = allowInsecure ? "http" : "https"
+        def url = new URL("${scheme}://${registryHost}/v2/${repository}/manifests/${tag}")
+        def conn = (HttpURLConnection) url.openConnection()
+        conn.setRequestMethod("HEAD")
+        conn.setRequestProperty("Accept",
+                "application/vnd.docker.distribution.manifest.list.v2+json, " +
+                "application/vnd.docker.distribution.manifest.v2+json, " +
+                "application/vnd.oci.image.index.v1+json, " +
+                "application/vnd.oci.image.manifest.v1+json")
+        conn.setConnectTimeout(5000)
+        conn.setReadTimeout(5000)
+
+        if (conn.responseCode != 200) {
+            throw new GradleException("Failed to resolve digest for ${imageReference}: registry returned HTTP ${conn.responseCode}")
+        }
+        def digest = conn.getHeaderField("Docker-Content-Digest")
+        if (!digest) {
+            throw new GradleException("Failed to resolve digest for ${imageReference}: registry did not return Docker-Content-Digest header")
+        }
+        return "${repoWithHost}@${digest}"
     }
 
     // Determine the build mode based on the tasks requested in the CLI, throwing if multiple variants are configured
@@ -64,15 +116,21 @@ class RegistryImageBuildUtils {
 
                 project.plugins.withId('com.google.cloud.tools.jib') {
                     Registry targetReg = config.get("repoName", null) ? finalRegistry : intermediateRegistry
-                    def baseFormatter = ImageRegistryFormatterFactory.getFormatter(config.get("baseImageRegistryEndpoint", "").toString())
                     def targetFormatter = ImageRegistryFormatterFactory.getFormatter(targetReg.hostUrl)
 
-                    def baseImage = baseFormatter.getFullBaseImageIdentifier(
-                            config.get("baseImageRegistryEndpoint", "").toString(),
-                            config.get("baseImageGroup", "").toString(),
-                            config.baseImageName.toString(),
-                            config.baseImageTag.toString()
-                    )
+                    def baseEndpoint = config.get("baseImageRegistryEndpoint", "").toString()
+                    def baseImage
+                    if (config.containsKey("baseImageOverride")) {
+                        // Pre-resolved base image (e.g., from pull-through cache rewriting)
+                        baseImage = config.get("baseImageOverride").toString()
+                    } else if (baseEndpoint == intermediateRegistry.hostUrl) {
+                        baseImage = resolveBaseImage(intermediateRegistry, config.get("baseImageGroup", "").toString(),
+                                config.baseImageName.toString(), config.baseImageTag.toString())
+                    } else {
+                        def formatter = ImageRegistryFormatterFactory.getFormatter(baseEndpoint)
+                        baseImage = formatter.getFullBaseImageIdentifier(baseEndpoint, config.get("baseImageGroup", "").toString(),
+                                config.baseImageName.toString(), config.baseImageTag.toString())
+                    }
 
                     def (registryDestination, _) = targetFormatter.getFullTargetImageIdentifier(
                             targetReg.hostUrl,
@@ -80,6 +138,16 @@ class RegistryImageBuildUtils {
                             config.imageTag.toString(),
                             config.get("repoName", null)?.toString()
                     )
+
+                    // For intermediate images (built in the same pipeline), resolve the
+                    // digest at execution time to ensure reproducible builds.
+                    if (baseEndpoint == intermediateRegistry.hostUrl && !intermediateRegistry.isEcr()) {
+                        project.tasks.named("jib").configure {
+                            doFirst {
+                                project.jib.from.image = RegistryImageBuildUtils.resolveDigest(baseImage, project.jib.allowInsecureRegistries)
+                            }
+                        }
+                    }
 
                     project.jib {
                         from {
@@ -97,21 +165,46 @@ class RegistryImageBuildUtils {
                             if (targetArch != "multi") dest = "${registryDestination}_${targetArch}"
                             image = dest
 
+                            // For single-arch builds, also tag as the base name (without suffix)
+                            // to match BuildKit behavior and allow local k8s deployments to find images
+                            def tagList = []
+                            if (targetArch != "multi") {
+                                tagList.add(config.imageTag.toString())
+                            }
                             def versionTag = rootProject.findProperty("imageVersion")
                             if (versionTag) {
                                 def suffix = (targetArch != "multi") ? "_${targetArch}" : ""
-                                tags = ["${versionTag}${suffix}".toString()]
+                                def versionDest = targetFormatter.getFullTargetImageIdentifier(
+                                        targetReg.hostUrl, config.imageName.toString(), versionTag,
+                                        config.get("repoName", null)?.toString())[0]
+                                // Extract just the tag portion for Jib's tags list
+                                def formattedTag = versionDest.toString().split(":")[-1]
+                                tagList.add("${formattedTag}${suffix}".toString())
                             }
+                            if (tagList) tags = tagList
                         }
                         extraDirectories {
                             paths {
-                                path { from = project.file("docker"); into = '/' }
+                                def dockerDir = project.file("docker")
+                                if (dockerDir.exists()) {
+                                    path { from = dockerDir; into = '/' }
+                                }
                                 path { from = project.file("build/versionDir"); into = '/' }
                             }
-                            permissions = ['/runJavaWithClasspath.sh': '755']
+                            def extraPerms = (Map<String, String>) config.get("extraPermissions", [:])
+                            if (extraPerms) {
+                                permissions = extraPerms
+                            }
                         }
                         allowInsecureRegistries = true
-                        container { entrypoint = ['tail', '-f', '/dev/null'] }
+                        container {
+                            def flags = (List<String>) config.get("jvmFlags", [])
+                            if (flags) {
+                                jvmFlags = flags
+                            }
+                            // mainClass is auto-detected from the application plugin.
+                            // Jib generates: java <jvmFlags> -cp @/app/jib-classpath-file <mainClass>
+                        }
                     }
 
                     // Handle Dependencies
@@ -146,10 +239,10 @@ class RegistryImageBuildUtils {
     }
 
     void registerLoginTask(Project project, Registry registry) {
-        def registryDomain = registry.hostUrl.split("/")[0]
-        def isEcr = registryDomain.contains(".ecr.") && registryDomain.contains(".amazonaws.com")
+        def isEcr = registry.isEcr()
 
         if (isEcr) {
+            def registryDomain = registry.registryDomain
             def region = (registryDomain =~ /^(\d+)\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$/)[0][2]
             project.tasks.register("loginToECR", Exec) {
                 group = "docker"
@@ -169,7 +262,29 @@ class RegistryImageBuildUtils {
         Registry targetReg = repoName ? finalRegistry : intermediateRegistry
         def registryEndpoint = targetReg.containerUrl
 
-        def builder = project.findProperty("builder") ?: "local-remote-builder"
+        def builder = project.findProperty("builder") ?: ""
+        def builderWasExplicit = true
+        if (!builder) {
+            try {
+                def context = "kubectl config current-context".execute().text.trim()
+                if (context) {
+                    // NOTE: This naming convention must match setupK8sBuilders.sh's BUILDER_NAME derivation
+                    builder = "builder-" + context.replaceAll("[^a-zA-Z0-9_-]", "-")
+                    if (!builderWarningShown) {
+                        project.logger.lifecycle("No -Pbuilder specified, derived '${builder}' from kube context '${context}'")
+                        builderWarningShown = true
+                    }
+                }
+            } catch (Exception ignored) {}
+            if (!builder) {
+                // Use a placeholder so Gradle configuration succeeds (task registration needs a value).
+                // The actual validation happens at task execution time via doFirst below.
+                builder = "UNSET"
+                builderWasExplicit = false
+            }
+        }
+        def resolvedBuilder = builder
+        def builderIsValid = builderWasExplicit
         def imageName = cfg.get("imageName").toString()
         def imageTag = cfg.get("imageTag", "latest").toString()
         def contextPath = project.file(cfg.get("contextDir", ".")).path
@@ -216,6 +331,12 @@ class RegistryImageBuildUtils {
                     group = "docker"
                     description = "Build and push ${platform} ${primaryDest}"
 
+                    doFirst {
+                        if (!builderIsValid) {
+                            throw new GradleException("No -Pbuilder specified and no kube context set. Use -Pbuilder=<name> or set a kube context.")
+                        }
+                    }
+
                     commonInputs(it, suffix)
                     inputs.property("platform", platform)
 
@@ -224,18 +345,18 @@ class RegistryImageBuildUtils {
                             "docker buildx build",
                             "--progress=plain",
                             "--platform ${platform}",
-                            "--builder ${builder}",
+                            *(builder ? ["--builder ${builder}"] : []),
                             // don't include the suffix - this is dangerous, but single-platform builds are supported
                             // as a convenience to developers that are purposefully ONLY supporting PART of the
                             // potential architectures
                             "-t ${primaryDest}",
                             *(versionTaggedDest ? ["-t", "${versionTaggedDest}"] : []),
                             "--push",
-                            "--cache-to=type=registry,ref=${cacheDestination}${suffix},mode=max",
+                            "--cache-to=type=registry,ref=${cacheDestination}${suffix},mode=max,ignore-error=true",
                             "--cache-from=type=registry,ref=${cacheDestination}${suffix}"
                     ]
                     buildArgFlags.each { fullArgs.add(it) }
-                    fullArgs.add(contextPath)
+                    fullArgs.add("\"${contextPath}\"")
                     commandLine 'sh', '-c', fullArgs.join(" ")
                 }
             }
@@ -247,22 +368,27 @@ class RegistryImageBuildUtils {
         def multiArchTaskName = "buildKit_${cfg.serviceName}"
         if (!project.tasks.findByName(multiArchTaskName)) {
             project.tasks.register(multiArchTaskName, Exec) {
+                doFirst {
+                    if (!builderIsValid) {
+                        throw new GradleException("No -Pbuilder specified and no kube context set. Use -Pbuilder=<name> or set a kube context.")
+                    }
+                }
                 commonInputs(it, "")
                 def fullArgs = [
                         "docker buildx build",
                         "--progress=plain",
                         "--platform linux/amd64,linux/arm64",
-                        "--builder ${builder}",
+                        *(builder ? ["--builder ${builder}"] : []),
                         "-t ${primaryDest}",
                         *(versionTaggedDest ? ["-t", "${versionTaggedDest}"] : []),
                         "--push",
-                        "--cache-to=type=registry,ref=${cacheDestination},mode=max",
+                        "--cache-to=type=registry,ref=${cacheDestination},mode=max,ignore-error=true",
                         "--cache-from=type=registry,ref=${cacheDestination}",
                         "--cache-from=type=registry,ref=${cacheDestination}_amd64",
                         "--cache-from=type=registry,ref=${cacheDestination}_arm64"
                 ]
                 buildArgFlags.each { fullArgs.add(it) }
-                fullArgs.add(contextPath)
+                fullArgs.add("\"${contextPath}\"")
                 commandLine 'sh', '-c', fullArgs.join(" ")
             }
         }

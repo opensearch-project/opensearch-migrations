@@ -1,4 +1,5 @@
-FROM public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3
+ARG BASE_IMAGE=public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3
+FROM ${BASE_IMAGE}
 
 COPY otel-config*.yaml /etc/
 CMD ["--config", "/etc/otel-config-debug-only.yaml"]

@@ -20,8 +20,18 @@ export const response: MicroTransform<ResponseContext> = {
       const doc = new Map();
       for (const key of source.keys()) {
         const value = source.get(key);
-        // Solr wraps multi-valued field values in arrays; id is single-valued
-        doc.set(key, key === 'id' || Array.isArray(value) ? value : [value]);
+        // Solr field type behavior:
+        // - text_general: by default returns arrays, even for single values
+        // - pint, pfloat, plong, pdouble (numeric): returns scalar values
+        // - string (keyword): returns scalar values
+        // - boolean: returns scalar values
+        if (key === 'id' || typeof value === 'number' || typeof value === 'boolean') {
+          doc.set(key, value);
+        } else if (Array.isArray(value)) {
+          doc.set(key, value);
+        } else {
+          doc.set(key, [value]);
+        }
       }
       // Solr adds _version_ (optimistic concurrency) to every doc
       doc.set('_version_', hit.has('_version') ? hit.get('_version') : 0);
@@ -30,7 +40,7 @@ export const response: MicroTransform<ResponseContext> = {
 
     const responseMap = new Map();
     responseMap.set('numFound', total.get('value'));
-    responseMap.set('start', 0);
+    responseMap.set('start', Number.parseInt(ctx.requestParams.get('start') || '0', 10));
     responseMap.set('numFoundExact', true);
     responseMap.set('docs', docs);
     ctx.responseBody.set('response', responseMap);

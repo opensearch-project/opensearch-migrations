@@ -50,9 +50,9 @@ jobs:
           issue-body: "This release requires approval from at least one reviewer. Please approve or deny the release of opensearch-migrations **TAG**: ${{ github.ref_name }}  **COMMIT**: ${{ github.sha }} **VERSION**: ${{ steps.get_data.outputs.version }}. The published TrafficCapture version will be 0.${{ steps.get_data.outputs.version }}."
           exclude-workflow-initiator-as-approver: true
       - name: Set up QEMU (for arm64 emulation)
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Set up Buildx builder (BuildKit)
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           driver: docker-container
           # Keep debug on while we troubleshoot this new registry setup
@@ -96,7 +96,7 @@ jobs:
           echo "dockerhub-password=$DOCKERHUB_PASSWORD" >> $GITHUB_OUTPUT
       - name: Login to DockerHub
         if: ${{ !github.event.act }}
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.MIGRATIONS_DOCKER_USERNAME }}
           password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
@@ -106,6 +106,7 @@ jobs:
         run: |
           # Preface Traffic Capture version with 0. to signal interface immaturity
           ./gradlew :buildImages:buildImagesToRegistry \
+            -Pbuilder=local-remote-builder \
             -PintermediateRegistry=localhost:5000 \
             -PregistryEndpoint=opensearchstaging \
             -PimageVersion=${{ steps.get_data.outputs.version }} \
@@ -141,27 +142,27 @@ jobs:
           docker tag opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }} migrations/capture_proxy:latest
           docker tag opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }} migrations/reindex_from_snapshot:latest
       - name: Generate SBOM for migration_console
-        uses: anchore/sbom-action@v0.22.2
+        uses: anchore/sbom-action@v0.24.0
         with:
           image: migrations/migration_console:latest
           output-file: opensearch-migrations-console-sbom.spdx.json
       - name: Generate SBOM for traffic_replayer
-        uses: anchore/sbom-action@v0.22.2
+        uses: anchore/sbom-action@v0.24.0
         with:
           image: migrations/traffic_replayer:latest
           output-file: opensearch-migrations-traffic-replayer-sbom.spdx.json
       - name: Generate SBOM for capture_proxy
-        uses: anchore/sbom-action@v0.22.2
+        uses: anchore/sbom-action@v0.24.0
         with:
           image: migrations/capture_proxy:latest
           output-file: opensearch-migrations-traffic-capture-proxy-sbom.spdx.json
       - name: Generate SBOM for reindex_from_snapshot
-        uses: anchore/sbom-action@v0.22.2
+        uses: anchore/sbom-action@v0.24.0
         with:
           image: migrations/reindex_from_snapshot:latest
           output-file: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
       - name: Generate SBOM for artifacts
-        uses: anchore/sbom-action@v0.22.2
+        uses: anchore/sbom-action@v0.24.0
         with:
           file: opensearch-migrations-source.tar.gz
           output-file: opensearch-migrations-source-sbom.spdx.json

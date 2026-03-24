@@ -704,6 +704,7 @@ public class RfsMigrateDocuments {
                             workItemId,
                             successorWorkItemIds,
                             successorNextAcquisitionLeaseExponent,
+                            workItemAndDuration.getLeaseExpirationTime(),
                             contextSupplier
                     );
                 }

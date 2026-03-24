@@ -186,11 +186,12 @@ class TestRunner:
 
         # Cleanup non-Helm Kubernetes resources (ES 1.x and 2.x)
         try:
-            self.k8s_service.run_command([
-                "kubectl", "delete", "all,configmap,secret",
-                "-l", "migration-test=true",
-                "--ignore-not-found"
-            ], ignore_errors=True)
+            self.k8s_service.run_command(
+                self.k8s_service._kubectl_base() + [
+                    "delete", "all,configmap,secret",
+                    "-l", "migration-test=true",
+                    "--ignore-not-found"
+                ], ignore_errors=True)
         except Exception as e:
             logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
 
@@ -253,12 +254,10 @@ class TestRunner:
                                 "images.installer.repository": repo,
                                 "images.installer.tag": mc_tag,
                                 # Kyverno image overrides
-                                "charts.kyverno.values.cleanupJobs.admissionReports.image.repository": repo,
-                                "charts.kyverno.values.cleanupJobs.admissionReports.image.tag": mc_tag,
-                                "charts.kyverno.values.cleanupJobs.clusterAdmissionReports.image.repository": repo,
-                                "charts.kyverno.values.cleanupJobs.clusterAdmissionReports.image.tag": mc_tag,
                                 "charts.kyverno.values.webhooksCleanup.image.repository": repo,
                                 "charts.kyverno.values.webhooksCleanup.image.tag": mc_tag,
+                                "charts.kyverno.values.test.image.repository": repo,
+                                "charts.kyverno.values.test.image.tag": mc_tag,
                             })
                         else:
                             prefix = self.registry_prefix
@@ -270,9 +269,8 @@ class TestRunner:
                                 "images.migrationConsole.repository": mc_repo,
                                 "images.installer.repository": mc_repo,
                                 # Kyverno image overrides
-                                "charts.kyverno.values.cleanupJobs.admissionReports.image.repository": mc_repo,
-                                "charts.kyverno.values.cleanupJobs.clusterAdmissionReports.image.repository": mc_repo,
                                 "charts.kyverno.values.webhooksCleanup.image.repository": mc_repo,
+                                "charts.kyverno.values.test.image.repository": mc_repo,
                             })
                     if not self.k8s_service.helm_install(chart_path=self.ma_chart_path, release_name=MA_RELEASE_NAME,
                                                          values_file=self.values_file,
@@ -435,12 +433,32 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip helm install (use when deployment already exists, e.g., from aws-bootstrap.sh)"
     )
+    parser.add_argument(
+        "--kube-context",
+        type=str,
+        default=None,
+        help="Kubernetes context to use for kubectl and helm commands. "
+             "If not set, uses the current kubectl context."
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    k8s_service = K8sService()
+
+    # Handle report summary early — no K8s access needed
+    if args.output_reports_summary_only:
+        if not args.test_reports_dir:
+            raise ValueError("The '--test-reports-dir' arg must be provided when using '--output-reports-summary-only")
+        # Create a minimal TestRunner without K8sService for summary-only mode
+        test_runner = TestRunner(k8s_service=None,
+                                 unique_id=args.unique_id,
+                                 test_ids=[],
+                                 ma_chart_path="",
+                                 combinations=[])
+        return test_runner.collect_reports_and_print_summary(reports_dir=args.test_reports_dir)
+
+    k8s_service = K8sService(kube_context=args.kube_context)
     helm_k8s_base_path = "../../deployment/k8s"
     helm_charts_base_path = f"{helm_k8s_base_path}/charts"
     ma_chart_path = f"{helm_charts_base_path}/aggregates/migrationAssistantWithArgo"
@@ -463,10 +481,6 @@ def main() -> None:
         return test_runner.cleanup_deployment()
     if args.delete_clusters_only:
         return test_runner.cleanup_clusters()
-    if args.output_reports_summary_only:
-        if not args.test_reports_dir:
-            raise ValueError("The '--test-reports-dir' arg must be provided when using '--output-reports-summary-only")
-        return test_runner.collect_reports_and_print_summary(reports_dir=args.test_reports_dir)
     skip_delete = args.skip_delete
     keep_workflows = args.keep_workflows
     reuse_clusters = args.reuse_clusters

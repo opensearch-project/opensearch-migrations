@@ -15,7 +15,7 @@
         "inputs": {
           "parameters": [
             {
-              "name": "groupName",
+              "name": "groupName_view",
               "value": "bulk_load_group"
             }
           ]

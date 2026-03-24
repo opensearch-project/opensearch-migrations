@@ -63,13 +63,9 @@ include 'TrafficCapture:trafficCaptureProxyServer'
 include 'TrafficCapture:trafficReplayer'
 include 'TrafficCapture:transformationShim'
 include 'TrafficCapture:SolrTransformations'
-include 'frontend'
 include 'buildImages'
 include 'custom-es-images'
 include 'kiro-cli'
-include ':console_link'
-
-project(':console_link').projectDir = file('migrationConsole/lib/console_link')
 
 
 addSubProjects(':transformation', Paths.get(rootProject.projectDir.getPath(), 'transformation', 'transformationPlugins').toFile())

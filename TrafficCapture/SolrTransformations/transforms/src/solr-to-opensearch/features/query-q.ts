@@ -11,7 +11,7 @@
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext, JavaMap } from '../context';
 
-function parseSolrQuery(q: string): JavaMap {
+export function parseSolrQuery(q: string): JavaMap {
   if (!q || q === '*:*') return new Map([['match_all', new Map()]]);
 
   const fieldMatch = /^([^:]+):(.+)$/.exec(q);
@@ -29,5 +29,11 @@ export const request: MicroTransform<RequestContext> = {
   apply: (ctx) => {
     const q = ctx.params.get('q') || '*:*';
     ctx.body.set('query', parseSolrQuery(q));
+
+    // rows → size, start → from
+    const rows = ctx.params.get('rows');
+    if (rows) ctx.body.set('size', Number.parseInt(rows, 10));
+    const start = ctx.params.get('start');
+    if (start) ctx.body.set('from', Number.parseInt(start, 10));
   },
 };

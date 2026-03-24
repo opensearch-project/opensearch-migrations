@@ -6,4 +6,11 @@ script_dir_abs_path=$(dirname "$script_abs_path")
 cd "$script_dir_abs_path" || exit
 
 cd ../../.. || exit
-./gradlew :buildDockerImages -x test "$@"
+
+# Pass ECR pull-through cache endpoint to Gradle if available
+PTC_ARG=""
+if [ -n "$ECR_PULL_THROUGH_ENDPOINT" ]; then
+  PTC_ARG="-PpullThroughCacheEndpoint=$ECR_PULL_THROUGH_ENDPOINT"
+fi
+
+./gradlew :buildDockerImages -x test $PTC_ARG "$@"

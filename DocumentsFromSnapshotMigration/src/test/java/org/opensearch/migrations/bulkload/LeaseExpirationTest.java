@@ -16,6 +16,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.data.IndexOptions;
 import org.opensearch.migrations.data.WorkloadGenerator;
@@ -30,7 +31,6 @@ import eu.rekawek.toxiproxy.model.ToxicDirection;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -67,8 +67,9 @@ public class LeaseExpirationTest extends SourceTestBase {
     public void testProcessExitsAsExpected(boolean forceMoreSegments,
                                            SearchClusterContainer.ContainerVersion sourceClusterVersion,
                                            SearchClusterContainer.ContainerVersion targetClusterVersion) {
-        // Sending 10 docs per request with 2 requests concurrently with each taking 1 second is 40 docs/sec
-        // will process 1640 docs in 21 seconds. With 10s lease duration, expect to be finished in 3 leases.
+        // With 10 docs/bulk, 2 connections, 500ms latency, results in ~40 docs/sec throughput.
+        // Lease is PT27s with early trigger at 75% = ~20s effective work time.
+        // ~20s × 40 docs/sec = ~800 docs/lease. 1640 docs/shard needs ~3 leases (2 handoffs + 1 completion).
         // This is ensured with the toxiproxy settings, the migration should not be able to be completed
         // faster, but with a heavily loaded test environment, may be slower which is why this is marked as
         // isolated.
@@ -180,10 +181,6 @@ public class LeaseExpirationTest extends SourceTestBase {
                 FileSystemUtils.deleteDirectories(tempDirLucene.toString());
             } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount + expectedEventualExitCodeCount);
 
-            // Assert doc count on the target cluster matches source
-            checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer,
-                    DocumentMigrationTestContext.factory().noOtelTracking());
-
             // Check if the final exit code is as expected
             Assertions.assertEquals(
                     expectedEventualExitCodeCount,
@@ -202,6 +199,10 @@ public class LeaseExpirationTest extends SourceTestBase {
                     initialExitCodeCount,
                     "The program did not exit with the expected number of " + expectedInitialExitCode +" exit codes"
             );
+
+            // Assert doc count on the target cluster matches source
+            checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer,
+                    DocumentMigrationTestContext.factory().noOtelTracking());
         } finally {
             FileSystemUtils.deleteDirectories(tempDirSnapshot.toString());
         }
@@ -219,13 +220,23 @@ public class LeaseExpirationTest extends SourceTestBase {
         var tp = proxyContainer.getProxy();
         var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 500);
 
-        // Set to less than 2x lease time to ensure leases aren't doubling
-        int timeoutSeconds = 35;
+        // With 10 docs/bulk, 2 connections, 500ms latency, effective throughput is ~40 docs/sec.
+        // The anticipated effective work time per lease is the time the worker actually processes
+        // documents before the early checkpoint trigger fires.
+        int anticipatedEffectiveWorkSeconds = 20;
+        double earlyTriggerFraction = 0.75;
+        // Lease duration is set so that the 75% early trigger mark equals the anticipated work time:
+        //   anticipatedEffectiveWorkSeconds / earlyTriggerFraction = 20 / 0.75 ≈ 26.67 → round to 27s
+        // Early trigger fires at: 27 * 0.75 = 20.25s ≈ anticipated effective work time
+        long leaseDurationSeconds = Math.round(anticipatedEffectiveWorkSeconds / earlyTriggerFraction);
+
+        // Less than 2x lease duration to ensure leases aren't doubling
+        int timeoutSeconds = (int) (leaseDurationSeconds * 2 - 1);
 
         String[] additionalArgs = {
             "--documents-per-bulk-request", "10",
             "--max-connections", "2",
-            "--initial-lease-duration", "PT20s",
+            "--initial-lease-duration", "PT" + leaseDurationSeconds + "s",
             "--source-version", sourceClusterVersion.getVersion().toString()
         };
 
@@ -245,15 +256,13 @@ public class LeaseExpirationTest extends SourceTestBase {
     }
 
     /**
-     * Verifies that RFS persists checkpoint metadata ({@code successor_items}) on the coordinator
-     * before the lease expires, and that the checkpoint value reflects the expected doc position.
+     * Verifies early lease-timeout handoff during a transient coordinator outage.
      *
-     * Setup: 80 docs, 1 doc/sec, PT60s lease. Coordinator disabled at t=40s, re-enabled at t=48s.
-     * Expected checkpoint at t=45s (75% of PT60s lease) pointing to doc 45 ({@code geonames__0__45}).
-     * Lease expires at t=60s while migration is in progress; worker exits PROCESS_TIMED_OUT (2).
-     * Assertions run after worker exits.
+     * Setup: 80 docs at ~1 doc/sec with PT60s lease. Coordinator is disabled at t=40s and
+     * re-enabled at t=48s. Expected behavior is early trigger at t=45s, worker exit with
+     * PROCESS_TIMED_OUT (2), and persisted successor checkpoint in the early-trigger range
+     * (distinct from lease-expiry behavior).
      */
-    @Disabled("MIGRATIONS-2864: expected to pass after pre-expiry checkpointing is implemented")
     @Test
     @SneakyThrows
     public void testEarlyCheckpointPersistedBeforeLeaseExpiry() {
@@ -261,9 +270,6 @@ public class LeaseExpirationTest extends SourceTestBase {
         final int SHARDS = 1;
         final int COORDINATOR_DISABLE_AFTER_SECONDS = 40;
         final int COORDINATOR_REENABLE_AFTER_SECONDS = 8; // re-enabled at t=48s, within lease window
-        // At 75% of PT60s = t=45s, progressCursor should be at doc 45
-        // Successor work item ID: geonames__0__45
-        final String EXPECTED_CHECKPOINT_WORK_ITEM = "geonames__0__45";
 
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
         var tempDirSnapshot = Files.createTempDirectory("earlyCheckpoint_snapshot");
@@ -331,33 +337,34 @@ public class LeaseExpirationTest extends SourceTestBase {
                 log.atInfo().setMessage("Run: exit code {}, target doc count: {}")
                     .addArgument(exitCode).addArgument(finalDocCount).log();
 
-                // ASSERT: worker exits PROCESS_TIMED_OUT; lease expired while migration was in progress
+                // ASSERT: worker exits the lease-timeout handoff path
                 Assertions.assertEquals(RfsMigrateDocuments.PROCESS_TIMED_OUT_EXIT_CODE, exitCode,
                     "Worker should exit with PROCESS_TIMED_OUT (2); lease expired before all docs migrated");
 
-                // ASSERT: target doc count is well below lease-expiry baseline (~58),
-                // consistent with early handoff near t=45s
-                Assertions.assertTrue(finalDocCount >= 40 && finalDocCount <= 50,
-                    "Target should have 40-50 docs (stopped at early checkpoint); got " + finalDocCount);
+                // ASSERT: target doc count falls in early-trigger band, not lease-expiry band
+                Assertions.assertTrue(finalDocCount >= 42 && finalDocCount <= 46,
+                    "Target should have 42-46 docs (early checkpoint at ~t=45s); got " + finalDocCount);
 
-                // ASSERT: coordinator has a work item with successor_items (checkpoint was persisted)
+                // ASSERT: parent work item contains successor handoff metadata
+                var parentWorkItemId = new IWorkCoordinator.WorkItemAndDuration
+                    .WorkItem("geonames", 0, Integer.MIN_VALUE).toString();
                 coordinatorOps.refresh(coordinatorIndexName);
-                var successorQuery = "{\"query\":{\"exists\":{\"field\":\""
-                    + OpenSearchWorkCoordinator.SUCCESSOR_ITEMS_FIELD_NAME + "\"}}}";
-                var searchResponse = coordinatorOps.post("/" + coordinatorIndexName + "/_search", successorQuery);
+                var parentQuery = "{\"query\":{\"ids\":{\"values\":[\"" + parentWorkItemId + "\"]}}}";
+                var searchResponse = coordinatorOps.post("/" + coordinatorIndexName + "/_search", parentQuery);
                 Assertions.assertEquals(200, searchResponse.getKey(), "Failed to query coordinator index");
                 var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-                var hits = mapper.readTree(searchResponse.getValue()).path("hits").path("hits");
-                Assertions.assertTrue(hits.size() > 0,
-                    "Expected at least one work item with successor_items on coordinator");
-
-                // ASSERT: the successor work item points to doc 45 (checkpoint at 75% of PT60s lease = t=45s)
-                // Today this fails ; checkpoint happens at lease expiry, not at 75%
-                var successorItems = hits.get(0).path("_source")
+                var parentHits = mapper.readTree(searchResponse.getValue()).path("hits").path("hits");
+                Assertions.assertEquals(1, parentHits.size(),
+                    "Expected exactly one hit for parent work item " + parentWorkItemId);
+                var successorItems = parentHits.get(0).path("_source")
                     .path(OpenSearchWorkCoordinator.SUCCESSOR_ITEMS_FIELD_NAME).asText();
-                Assertions.assertEquals(EXPECTED_CHECKPOINT_WORK_ITEM, successorItems,
-                    "Successor work item should be " + EXPECTED_CHECKPOINT_WORK_ITEM
-                    + " (checkpoint at doc 45 = 75% of PT60s lease), got: " + successorItems);
+
+                // ASSERT: successor checkpoint doc is in early-trigger range
+                Assertions.assertTrue(successorItems.startsWith("geonames__0__"),
+                    "Successor should be for shard 0, got: " + successorItems);
+                var checkpointDoc = Integer.parseInt(successorItems.substring("geonames__0__".length()));
+                Assertions.assertTrue(checkpointDoc >= 40 && checkpointDoc <= 44,
+                    "Checkpoint doc should be 40-44 (early trigger at ~t=45s); got " + checkpointDoc);
             } finally {
                 scheduler.shutdownNow();
             }

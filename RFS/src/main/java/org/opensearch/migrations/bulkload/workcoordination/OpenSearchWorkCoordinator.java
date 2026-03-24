@@ -199,12 +199,18 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     private static void retryWithExponentialBackoff(
             RetryableAction action, int maxRetries, long baseRetryTimeMs, Consumer<Exception> exceptionConsumer) throws InterruptedException, IllegalStateException {
-        retryWithExponentialBackoff(action, maxRetries, baseRetryTimeMs, Long.MAX_VALUE, null, exceptionConsumer);
+        retryWithExponentialBackoff(action, maxRetries, baseRetryTimeMs, Long.MAX_VALUE, null, null, exceptionConsumer);
     }
 
     private static void retryWithExponentialBackoff(
             RetryableAction action, int maxRetries, long baseRetryTimeMs, long maxDelayMs,
             String operationName, Consumer<Exception> exceptionConsumer) throws InterruptedException, IllegalStateException {
+        retryWithExponentialBackoff(action, maxRetries, baseRetryTimeMs, maxDelayMs, null, operationName, exceptionConsumer);
+    }
+
+    private static void retryWithExponentialBackoff(
+            RetryableAction action, int maxRetries, long baseRetryTimeMs, long maxDelayMs,
+            Instant deadline, String operationName, Consumer<Exception> exceptionConsumer) throws InterruptedException, IllegalStateException {
         int attempt = 0;
         long delay = baseRetryTimeMs;
         while (true) {
@@ -227,6 +233,15 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     throw new RetriesExceededException(e, attempt);
                 }
                 long cappedDelay = Math.min(delay, maxDelayMs);
+                if (deadline != null) {
+                    long remainingMs = Duration.between(Instant.now(), deadline).toMillis();
+                    if (remainingMs <= 0 || cappedDelay > remainingMs) {
+                        log.atWarn().setMessage("Retry would exceed deadline (remaining={}ms, nextSleep={}ms), aborting")
+                            .addArgument(remainingMs).addArgument(cappedDelay).log();
+                        exceptionConsumer.accept(e);
+                        throw new RetriesExceededException(e, attempt);
+                    }
+                }
                 Duration sleepDuration = Duration.ofMillis(cappedDelay);
                 log.atWarn().setCause(e)
                         .setMessage("Retry attempt {}/{} for {}. Backing off {} before next attempt. Error: {}")
@@ -928,6 +943,18 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             int successorNextAcquisitionLeaseExponent,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException, IllegalStateException {
+        createSuccessorWorkItemsAndMarkComplete(workItemId, successorWorkItemIds,
+            successorNextAcquisitionLeaseExponent, null, contextSupplier);
+    }
+
+    @Override
+    public void createSuccessorWorkItemsAndMarkComplete(
+            String workItemId,
+            List<String> successorWorkItemIds,
+            int successorNextAcquisitionLeaseExponent,
+            Instant deadline,
+            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException, IllegalStateException {
         if (successorWorkItemIds.contains(workItemId)) {
             throw new IllegalArgumentException(String.format("successorWorkItemIds %s can not not contain the parent workItemId: %s", successorWorkItemIds, workItemId));
         }
@@ -935,20 +962,22 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             throw new IllegalArgumentException("successorWorkItemIds can not contain the delimiter: " + SUCCESSOR_ITEM_DELIMITER);
         }
         try (var ctx = contextSupplier.get()) {
-            // It is extremely valuable to try hard to get the work item updated with successor item ids. If it fails without
-            // completing this step, the next worker to pick up this lease will rerun all of the work. If it fails after this
-            // step, the next worker to pick it up will see this update and resume the work of creating the successor work items,
-            // without redriving the work.
             retryWithExponentialBackoff(
                     () -> updateWorkItemWithSuccessors(workItemId, successorWorkItemIds),
                     MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES,
                     CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
+                    Long.MAX_VALUE,
+                    deadline,
+                    "updateWorkItemWithSuccessors[" + workItemId + "]",
                     e -> ctx.addTraceException(e, true)
             );
             retryWithExponentialBackoff(
                     () -> createUnassignedWorkItemsIfNonexistent(successorWorkItemIds, successorNextAcquisitionLeaseExponent),
                     MAX_CREATE_UNASSIGNED_SUCCESSOR_WORK_ITEM_RETRIES,
                     CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
+                    Long.MAX_VALUE,
+                    deadline,
+                    "createUnassignedWorkItems[" + workItemId + "]",
                     e -> ctx.addTraceException(e, true)
             );
             retryWithExponentialBackoff(
@@ -956,6 +985,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     completionRetryConfig.maxRetries(),
                     completionRetryConfig.initialDelayMs(),
                     completionRetryConfig.maxDelayMs(),
+                    deadline,
                     "completeWorkItem[" + workItemId + "]",
                     e -> ctx.addTraceException(e, true)
             );

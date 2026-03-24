@@ -23,7 +23,7 @@ write_cluster_outputs() {
   network_stack_name=$(echo "$stacks" | grep "NetworkInfra-${stage}" | head -n 1)
   vpc_id=$(aws cloudformation describe-stacks \
     --stack-name "$network_stack_name" \
-    --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" \
+    --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue | [0]" \
     --output text)
 
   cluster_stack_names=$(echo "$stacks" | grep -E "^$CLUSTER_STACK_TYPE_REGEX-.*-${stage}-")
@@ -108,12 +108,19 @@ if [[ -z "$PROVIDED_CONTEXT_FILE_PATH" ]]; then
   exit 1
 fi
 
+SAMPLE_CDK_REPO="https://github.com/aws-samples/amazon-opensearch-service-sample-cdk.git"
+SAMPLE_CDK_VERSION=$(git ls-remote --tags --sort=-v:refname "$SAMPLE_CDK_REPO" "v0.1.*" | head -n1 | sed 's/.*refs\/tags\///')
+if [[ -z "$SAMPLE_CDK_VERSION" ]]; then
+  echo "Error: Could not discover latest v0.1.x tag from $SAMPLE_CDK_REPO"
+  exit 1
+fi
+echo "Using sample CDK version: $SAMPLE_CDK_VERSION"
 if [ ! -d "amazon-opensearch-service-sample-cdk" ]; then
-  git clone https://github.com/aws-samples/amazon-opensearch-service-sample-cdk.git
+  git clone "$SAMPLE_CDK_REPO"
 else
   echo "Repo already exists, skipping clone."
 fi
-cd amazon-opensearch-service-sample-cdk && git pull
+cd amazon-opensearch-service-sample-cdk && git fetch --tags && git checkout "$SAMPLE_CDK_VERSION"
 npm install
 
 cd ..

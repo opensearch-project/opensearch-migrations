@@ -18,10 +18,25 @@ class HelmCommandFailed(Exception):
 
 
 class K8sService:
-    def __init__(self, namespace: str = "ma") -> None:
+    def __init__(self, namespace: str = "ma", kube_context: str = None) -> None:
         self.namespace = namespace
-        config.load_kube_config()
+        self.kube_context = kube_context
+        config.load_kube_config(context=kube_context)
         self.k8s_client = client.CoreV1Api()
+
+    def _kubectl_base(self) -> List[str]:
+        """Return kubectl command prefix with optional --context."""
+        cmd = ["kubectl"]
+        if self.kube_context:
+            cmd.append(f"--context={self.kube_context}")
+        return cmd
+
+    def _helm_base(self) -> List[str]:
+        """Return helm command prefix with optional --kube-context."""
+        cmd = ["helm"]
+        if self.kube_context:
+            cmd.append(f"--kube-context={self.kube_context}")
+        return cmd
 
     def run_command(self, command: List,
                     stdout: int | None = subprocess.PIPE,
@@ -143,11 +158,12 @@ class K8sService:
 
     def copy_log_files(self, destination: str):
         console_pod_id = self.get_migration_console_pod_id()
+        kubectl = " ".join(self._kubectl_base())
         command_list = [
             "sh",
             "-c",
             f"rm -rf {destination} && mkdir -p {destination} && "
-            f"kubectl -n ma exec {console_pod_id} -- sh -c "
+            f"{kubectl} -n ma exec {console_pod_id} -- sh -c "
             f"'cd /shared-logs-output && tar -cf - fluentbit-*' | "
             f"tar -xf - -C {destination}"
         ]
@@ -187,12 +203,12 @@ class K8sService:
     def create_namespace(self, namespace: str) -> CompletedProcess | None:
         logger.info(f"Ensuring namespace '{namespace}' exists")
 
-        check_cmd = ["kubectl", "get", "namespace", namespace]
+        check_cmd = self._kubectl_base() + ["get", "namespace", namespace]
         result = self.run_command(check_cmd, ignore_errors=True)
 
         if result is None or result.returncode != 0:
             logger.info(f"Namespace '{namespace}' not found. Creating it now...")
-            create_cmd = ["kubectl", "create", "namespace", namespace]
+            create_cmd = self._kubectl_base() + ["create", "namespace", namespace]
             return self.run_command(create_cmd)
         else:
             logger.info(f"Namespace '{namespace}' already exists")
@@ -209,15 +225,16 @@ class K8sService:
                     f"\"{ns}\")]}}{{.metadata.name}}{{\"\\n\"}}{{end}}"
                 )
                 result = self.run_command(
-                    ["kubectl", "get", webhook_type, "-o", jsonpath],
+                    self._kubectl_base() + ["get", webhook_type, "-o", jsonpath],
                     ignore_errors=True
                 )
                 if result and result.stdout.strip():
                     for name in result.stdout.strip().split("\n"):
                         if name:
                             logger.info(f"Deleting {webhook_type} '{name}' (references namespace '{self.namespace}')")
-                            self.run_command(["kubectl", "delete", webhook_type, name, "--ignore-not-found"],
-                                             ignore_errors=True)
+                            self.run_command(
+                                self._kubectl_base() + ["delete", webhook_type, name, "--ignore-not-found"],
+                                ignore_errors=True)
             except Exception as e:
                 logger.warning(f"Failed to cleanup {webhook_type}: {e}")
 
@@ -227,7 +244,7 @@ class K8sService:
         deadline = time.time() + timeout_seconds
         while True:
             result = self.run_command(
-                ["kubectl", "get", "pods", "-n", self.namespace, "-o", "name"],
+                self._kubectl_base() + ["get", "pods", "-n", self.namespace, "-o", "name"],
                 ignore_errors=True
             )
             if not result or not result.stdout.strip():
@@ -242,7 +259,7 @@ class K8sService:
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
             result = self.run_command(
-                ["kubectl", "get", "namespace", namespace, "-o", "name"],
+                self._kubectl_base() + ["get", "namespace", namespace, "-o", "name"],
                 ignore_errors=True
             )
             if not result or not result.stdout.strip():
@@ -259,10 +276,10 @@ class K8sService:
         self.delete_webhooks_referencing_namespace()
         # Delete kyverno's separate namespace if it exists (ownerReference cascade
         # may not complete in time when the parent namespace is force-deleted)
-        self.run_command(["kubectl", "delete", "namespace", "kyverno-ma",
+        self.run_command(self._kubectl_base() + ["delete", "namespace", "kyverno-ma",
                          "--ignore-not-found", "--grace-period=0"], ignore_errors=True)
         # Delete main namespace
-        self.run_command(["kubectl", "delete", "namespace", self.namespace,
+        self.run_command(self._kubectl_base() + ["delete", "namespace", self.namespace,
                          "--ignore-not-found", "--grace-period=0", "--force"])
         # Wait for pods to fully terminate before deleting webhooks again
         # This prevents kyverno from recreating webhooks during termination
@@ -274,19 +291,21 @@ class K8sService:
         """Delete all kyverno-labeled webhook configurations."""
         for webhook_type in ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]:
             self.run_command(
-                ["kubectl", "delete", webhook_type, "-l", "app.kubernetes.io/instance=kyverno", "--ignore-not-found"],
+                self._kubectl_base() + [
+                    "delete", webhook_type, "-l",
+                    "app.kubernetes.io/instance=kyverno", "--ignore-not-found"],
                 ignore_errors=True
             )
 
     def check_helm_release_exists(self, release_name: str) -> bool:
         logger.info(f"Checking if {release_name} is already deployed in '{self.namespace}' namespace")
-        check_command = ["helm", "status", release_name, "-n", self.namespace]
+        check_command = self._helm_base() + ["status", release_name, "-n", self.namespace]
         status_result = self.run_command(check_command, ignore_errors=True)
         return True if status_result and status_result.returncode == 0 else False
 
     def helm_upgrade(self, chart_path: str, release_name: str, values_file: str = None) -> CompletedProcess:
         logger.info(f"Upgrading {release_name} from {chart_path} with values {values_file}")
-        command = ["helm", "upgrade", release_name, chart_path, "-n", self.namespace]
+        command = self._helm_base() + ["upgrade", release_name, chart_path, "-n", self.namespace]
         if values_file:
             command.extend(["-f", values_file])
         return self.run_command(command)
@@ -298,13 +317,86 @@ class K8sService:
             logger.info(f"Helm release {release_name} already exists, skipping install")
             return True
         logger.info(f"Installing {release_name} from {chart_path} with values {values_file}")
-        command = ["helm", "install", release_name, chart_path, "-n", self.namespace, "--create-namespace"]
+        command = self._helm_base() + ["install", release_name, chart_path, "-n", self.namespace, "--create-namespace",
+                                       "--wait", "--timeout", "5m"]
         if values_file:
             command.extend(["-f", values_file])
         if values:
             for key, value in values.items():
                 command.extend(["--set", f"{key}={shlex.quote(str(value))}"])
-        return self.run_command(command)
+        try:
+            return self.run_command(command)
+        except subprocess.CalledProcessError:
+            self._dump_helm_debug_info(release_name)
+            raise
+
+    def _dump_helm_debug_info(self, release_name: str):
+        """Dump detailed debug info when helm install fails."""
+        logger.error("=== BEGIN HELM INSTALL DEBUG INFO ===")
+        debug_commands = [
+            ("All pods", self._kubectl_base() + ["get", "pods", "--all-namespaces", "-o", "wide"]),
+            ("All events", self._kubectl_base() + ["get", "events", "--all-namespaces", "--sort-by=.lastTimestamp"]),
+            ("kube-system pod logs", self._kubectl_base() + [
+                "logs", "-n", "kube-system", "--all-containers", "--prefix", "--tail=200",
+                "-l", "tier=control-plane"]),
+        ]
+        debug_commands.extend([
+            (f"Jobs in {self.namespace}", self._kubectl_base() + ["get", "jobs", "-n", self.namespace, "-o", "wide"]),
+            ("Job status detail", self._kubectl_base() + [
+                "get", "jobs", "-n", self.namespace, "-l", f"app.kubernetes.io/instance={release_name}",
+                "-o", "jsonpath={range .items[*]}name={.metadata.name} succeeded={.status.succeeded} "
+                "failed={.status.failed} conditions={.status.conditions[*].type} "
+                "uncountedSucceeded={.status.uncountedTerminatedPods.succeeded} "
+                "uncountedFailed={.status.uncountedTerminatedPods.failed}{\"\\n\"}{end}"]),
+            ("Pod finalizers", self._kubectl_base() + [
+                "get", "pods", "-n", self.namespace, "-l", f"app.kubernetes.io/instance={release_name}",
+                "-o", "jsonpath={range .items[*]}name={.metadata.name} phase={.status.phase} "
+                "finalizers={.metadata.finalizers}{\"\\n\"}{end}"]),
+            ("Helm list all namespaces", self._helm_base() + ["list", "--all-namespaces"]),
+        ])
+        for label, cmd in debug_commands:
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                logger.error(f"--- {label} ---\n{result.stdout}{result.stderr}")
+            except Exception as e:
+                logger.error(f"--- {label} --- FAILED: {e}")
+
+        # Dump installer job logs if present
+        try:
+            chart_name = release_name.replace('ma', 'migrationAssistantWithArgo')
+            pod_result = subprocess.run(
+                self._kubectl_base() + ["get", "pods", "-n", self.namespace,
+                                        "-l", f"app.kubernetes.io/name={chart_name}",
+                                        "-o", "jsonpath={.items[*].metadata.name}"],
+                capture_output=True, text=True, timeout=10)
+            for pod_name in pod_result.stdout.split():
+                log_result = subprocess.run(
+                    self._kubectl_base() + ["logs", "-n", self.namespace, pod_name, "--tail=200"],
+                    capture_output=True, text=True, timeout=30)
+                logger.error(f"--- Logs for {pod_name} ---\n{log_result.stdout}{log_result.stderr}")
+        except Exception as e:
+            logger.error(f"--- Installer pod logs --- FAILED: {e}")
+
+        # Describe any non-running pods
+        try:
+            result = subprocess.run(
+                self._kubectl_base() + ["get", "pods", "--all-namespaces",
+                                        "--field-selector=status.phase!=Running,status.phase!=Succeeded",
+                                        "-o", "wide"],
+                capture_output=True, text=True, timeout=10)
+            if result.stdout.strip():
+                logger.error(f"--- Non-running pods (all namespaces) ---\n{result.stdout}")
+                for line in result.stdout.strip().split('\n')[1:]:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        ns, name = parts[0], parts[1]
+                        desc = subprocess.run(
+                            self._kubectl_base() + ["describe", "pod", name, "-n", ns],
+                            capture_output=True, text=True, timeout=15)
+                        logger.error(f"--- Describe {ns}/{name} ---\n{desc.stdout[-2000:]}")
+        except Exception as e:
+            logger.error(f"--- Non-running pods --- FAILED: {e}")
+        logger.error("=== END HELM INSTALL DEBUG INFO ===")
 
     def helm_uninstall(self, release_name: str) -> CompletedProcess | bool:
         helm_release_exists = self.check_helm_release_exists(release_name=release_name)
@@ -313,12 +405,12 @@ class K8sService:
             return True
 
         logger.info(f"Uninstalling {release_name}...")
-        return self.run_command(["helm", "uninstall", release_name, "-n", self.namespace])
+        return self.run_command(self._helm_base() + ["uninstall", release_name, "-n", self.namespace])
 
     def get_helm_installations(self) -> List[str]:
         target_namespace = self.namespace
         # Use helm list with short output format to get just the release names
-        command = ["helm", "list", "-n", target_namespace, "--short"]
+        command = self._helm_base() + ["list", "-n", target_namespace, "--short"]
 
         try:
             result = self.run_command(command)
@@ -338,8 +430,9 @@ class K8sService:
     def get_configmaps(self) -> List[str]:
         target_namespace = self.namespace
         # Use kubectl get configmaps to get just the ConfigMap names
-        command = ["kubectl", "get", "configmaps", "-n", target_namespace, "--no-headers", "-o",
-                   "custom-columns=:metadata.name"]
+        command = self._kubectl_base() + [
+            "get", "configmaps", "-n", target_namespace,
+            "--no-headers", "-o", "custom-columns=:metadata.name"]
 
         try:
             result = self.run_command(command)
@@ -359,14 +452,14 @@ class K8sService:
     def delete_configmap(self, configmap_name: str) -> CompletedProcess:
         target_namespace = self.namespace
         logger.info(f"Deleting ConfigMap '{configmap_name}' from namespace '{target_namespace}'...")
-        delete_command = [
-            "kubectl", "delete", "configmap", configmap_name, "-n", target_namespace, "--ignore-not-found"
+        delete_command = self._kubectl_base() + [
+            "delete", "configmap", configmap_name, "-n", target_namespace, "--ignore-not-found"
         ]
         return self.run_command(delete_command)
 
     def delete_all_argo_templates(self) -> None:
         """Deletes all Argo WorkflowTemplates from all namespaces."""
         logger.info("Deleting all Argo WorkflowTemplates from all namespaces")
-        self.run_command([
-            "kubectl", "delete", "workflowtemplates", "--all-namespaces", "--all", "--ignore-not-found"
+        self.run_command(self._kubectl_base() + [
+            "delete", "workflowtemplates", "--all-namespaces", "--all", "--ignore-not-found"
         ], ignore_errors=True)

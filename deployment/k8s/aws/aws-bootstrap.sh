@@ -54,12 +54,15 @@ vpc_id=""
 subnet_ids=""
 eks_access_principal_arn=""
 skip_cfn_deploy=false
+tls_mode="none"
+pca_arn=""
 build_chart_and_dashboards=false
 version=""
 create_vpc_endpoints=""
 ignore_checks=false
 push_images_to_ecr=false
 ma_images_source=""
+skip_setting_k8s_context=false
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -95,6 +98,9 @@ while [[ $# -gt 0 ]]; do
     --ignore-checks) ignore_checks=true; shift 1 ;;
     --push-all-images-to-private-ecr) push_images_to_ecr=true; shift 1 ;;
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
+    --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
+    --tls-mode) tls_mode="$2"; shift 2 ;;
+    --pca-arn) pca_arn="$2"; shift 2 ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo ""
@@ -146,6 +152,11 @@ while [[ $# -gt 0 ]]; do
       echo "  --stage <val>                             Stage name for CFN exports filter and CFN Stage parameter (default: dev)"
       echo "  --region <val>                            AWS region"
       echo "  --skip-console-exec                       Don't exec into console pod (default: $skip_console_exec)"
+      echo "  --skip-setting-k8s-context                Don't set the kubectl current-context to the EKS cluster."
+      echo "                                            The kubeconfig entry is still created, but the active context"
+      echo "                                            is left unchanged. Use this on hosts that manage multiple K8s"
+      echo "                                            deployments. You will need to pass --context=<context-name>"
+      echo "                                            to every kubectl/helm command, or set the context yourself."
       echo ""
       echo "Build options:"
       echo "  --base-dir <path>                         opensearch-migrations directory"
@@ -162,6 +173,15 @@ while [[ $# -gt 0 ]]; do
       echo "                                            release artifacts. Required when mixing --build-* flags (e.g."
       echo "                                            --build-cfn without --build-images) to avoid accidental"
       echo "                                            version mismatches between built and downloaded components."
+      echo ""
+      echo "TLS / Certificate options:"
+      echo "  --tls-mode <mode>                         TLS certificate strategy for the capture proxy."
+      echo "                                            none         - No TLS (default)"
+      echo "                                            self-signed  - Use cert-manager self-signed issuer"
+      echo "                                            pca-existing - Use an existing AWS Private CA"
+      echo "                                            pca-create   - Create a new AWS Private CA via ACK"
+      echo "  --pca-arn <arn>                           ARN of existing AWS Private CA"
+      echo "                                            (required with --tls-mode pca-existing)"
       echo ""
       echo "Examples:"
       echo "  # Deploy new infrastructure with a new VPC and bootstrap:"
@@ -314,6 +334,19 @@ validate_args() {
     echo "Error: --create-vpc-endpoints is only valid with --deploy-import-vpc-cfn." >&2
     exit 1
   fi
+  # Validate TLS mode
+  case "$tls_mode" in
+    none|self-signed) ;;
+    pca-existing)
+      if [[ -z "$pca_arn" ]]; then
+        echo "Error: --pca-arn is required with --tls-mode pca-existing." >&2
+        exit 1
+      fi ;;
+    pca-create) ;;
+    *)
+      echo "Error: Unknown --tls-mode: $tls_mode (expected: none, self-signed, pca-existing, pca-create)" >&2
+      exit 1 ;;
+  esac
 }
 validate_args
 
@@ -503,10 +536,11 @@ deploy_dashboard() {
   local full_name="MA-${STAGE}-${AWS_CFN_REGION}-${dashboard_name}"
   aws cloudwatch put-dashboard \
     --dashboard-name "$full_name" \
-    --dashboard-body "file://${tmp_json}" >/dev/null
+    --dashboard-body "file://${tmp_json}" \
+    --region "${AWS_CFN_REGION}" >/dev/null
 
   # Validate dashboards on CloudWatch
-  if aws cloudwatch get-dashboard --dashboard-name "$full_name" >/dev/null 2>&1; then
+  if aws cloudwatch get-dashboard --dashboard-name "$full_name" --region "${AWS_CFN_REGION}" >/dev/null 2>&1; then
     echo "OK: Dashboard available: ${full_name}"
   else
     echo "WARN: Could not read back dashboard: ${full_name}"
@@ -518,8 +552,10 @@ deploy_dashboard() {
 check_existing_ma_release() {
   local release_name="$1"
   local release_namespace="$2"
+  local helm_ctx=()
+  [[ -n "${KUBE_CONTEXT:-}" ]] && helm_ctx=("--kube-context=${KUBE_CONTEXT}")
 
-  if helm status "$release_name" -n "$release_namespace" >/dev/null 2>&1; then
+  if helm "${helm_ctx[@]}" status "$release_name" -n "$release_namespace" >/dev/null 2>&1; then
     echo
     echo "A Migration Assistant Helm release named '$release_name' already exists in namespace '$release_namespace'."
     echo "This usually means Migration Assistant is already installed on this cluster."
@@ -721,7 +757,16 @@ else
 fi
 echo ""
 
-aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}"
+aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --alias "${MIGRATIONS_EKS_CLUSTER_NAME}"
+KUBE_CONTEXT="${MIGRATIONS_EKS_CLUSTER_NAME}"
+export KUBE_CONTEXT
+
+if [[ "$skip_setting_k8s_context" == "true" ]]; then
+  echo "Skipping setting kubectl current-context (--skip-setting-k8s-context)."
+  echo "Use --context=${KUBE_CONTEXT} with kubectl or --kube-context=${KUBE_CONTEXT} with helm."
+else
+  kubectl config use-context "${KUBE_CONTEXT}" >/dev/null 2>&1
+fi
 
 # --- EKS access entry (optional) ---
 if [[ -n "$eks_access_principal_arn" ]]; then
@@ -869,8 +914,6 @@ if [[ "$ignore_checks" != "true" && -n "${VPC_ID:-}" ]]; then
   fi
 fi
 
-kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace "$namespace"
-kubectl config set-context --current --namespace="$namespace" >/dev/null 2>&1
 
 
 # --- mirror public images to private ECR (optional) ---
@@ -937,7 +980,8 @@ if [[ "$build_images" == "true" ]]; then
   # When mirroring, buildkit still pulls from public registries — building on
   # isolated clusters is not supported. Use --ma-images-source instead.
 
-  if docker buildx inspect local-remote-builder --bootstrap &>/dev/null; then
+  BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
+  if docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
     echo "Buildkit already configured and healthy, skipping setup"
   else
     echo "Setting up buildkit for local builds..."
@@ -951,10 +995,10 @@ if [[ "$build_images" == "true" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -x test || exit
+  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -x test || exit
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
-  docker buildx rm local-remote-builder 2>/dev/null || true
+  docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
   echo "Builder removed. Buildkit pods will be terminated by kubernetes driver."
 fi
 
@@ -1024,10 +1068,89 @@ fi
 
 check_existing_ma_release "$namespace" "$namespace"
 
+# Build TLS-related helm --set flags and create Pod Identity Associations
+TLS_HELM_FLAGS=""
+
+# For any PCA mode, ensure Pod Identity Association exists
+if [[ "$tls_mode" == "pca-existing" || "$tls_mode" == "pca-create" ]]; then
+  echo "Ensuring Pod Identity Association for aws-pca-issuer..."
+  ARGO_ASSOC_ID=$(aws eks list-pod-identity-associations \
+    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+    --region "${AWS_CFN_REGION}" \
+    --namespace "${namespace}" \
+    --service-account argo-workflow-executor \
+    --query 'associations[0].associationId' --output text 2>/dev/null)
+  PID_ROLE_ARN=""
+  if [[ -n "$ARGO_ASSOC_ID" && "$ARGO_ASSOC_ID" != "None" ]]; then
+    PID_ROLE_ARN=$(aws eks describe-pod-identity-association \
+      --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --region "${AWS_CFN_REGION}" \
+      --association-id "$ARGO_ASSOC_ID" \
+      --query 'association.roleArn' --output text)
+
+    EXISTING=$(aws eks list-pod-identity-associations \
+      --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+      --region "${AWS_CFN_REGION}" \
+      --namespace "${namespace}" \
+      --service-account aws-pca-issuer \
+      --query 'associations[0].associationId' --output text 2>/dev/null)
+    if [[ -z "$EXISTING" || "$EXISTING" == "None" ]]; then
+      aws eks create-pod-identity-association \
+        --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+        --region "${AWS_CFN_REGION}" \
+        --namespace "${namespace}" \
+        --service-account aws-pca-issuer \
+        --role-arn "$PID_ROLE_ARN" \
+        --query 'association.associationId' --output text
+      echo "Created Pod Identity Association for aws-pca-issuer"
+    else
+      echo "Pod Identity Association for aws-pca-issuer already exists"
+    fi
+  else
+    echo "WARNING: Could not find existing Pod Identity role. aws-pca-issuer may not have AWS credentials." >&2
+  fi
+fi
+
+case "$tls_mode" in
+  pca-existing)
+    TLS_HELM_FLAGS="--set conditionalPackageInstalls.aws-privateca-issuer=true"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.arn=$pca_arn"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.region=${AWS_CFN_REGION}"
+    ;;
+  pca-create)
+    TLS_HELM_FLAGS="--set conditionalPackageInstalls.aws-privateca-issuer=true"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set conditionalPackageInstalls.ack-acmpca-controller=true"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.create=true"
+    TLS_HELM_FLAGS="$TLS_HELM_FLAGS --set awsPrivateCA.region=${AWS_CFN_REGION}"
+
+    # Also create Pod Identity for ACK controller
+    if [[ -n "$PID_ROLE_ARN" ]]; then
+      EXISTING_ACK=$(aws eks list-pod-identity-associations \
+        --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+        --region "${AWS_CFN_REGION}" \
+        --namespace "${namespace}" \
+        --service-account ack-acmpca-controller \
+        --query 'associations[0].associationId' --output text 2>/dev/null)
+      if [[ -z "$EXISTING_ACK" || "$EXISTING_ACK" == "None" ]]; then
+        aws eks create-pod-identity-association \
+          --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
+          --region "${AWS_CFN_REGION}" \
+          --namespace "${namespace}" \
+          --service-account ack-acmpca-controller \
+          --role-arn "$PID_ROLE_ARN" \
+          --query 'association.associationId' --output text
+        echo "Created Pod Identity Association for ack-acmpca-controller"
+      fi
+    fi
+    ;;
+esac
+
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
 helm install "$namespace" "${ma_chart_dir}" \
+  --kube-context="${KUBE_CONTEXT}" \
   --namespace $namespace \
-  --timeout 10m \
+  --create-namespace \
+  --timeout 20m \
   $HELM_VALUES_FLAGS \
   ${extra_helm_values:+-f "$extra_helm_values"} \
   --set stageName="${STAGE}" \
@@ -1035,7 +1158,10 @@ helm install "$namespace" "${ma_chart_dir}" \
   --set aws.account="${AWS_ACCOUNT}" \
   --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
   $IMAGE_FLAGS \
+  $TLS_HELM_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
+
+kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null 2>&1
 
 echo "Deploying CloudWatch dashboards..."
 deploy_dashboard "CaptureReplay" "${dashboard_dir}/capture-replay-dashboard.json"
@@ -1058,8 +1184,8 @@ if [[ "$disable_general_purpose_pool" == "true" ]]; then
 fi
 
 if [[ "$skip_console_exec" == "false" ]]; then
-  kubectl -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
-  cmd="kubectl -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
+  kubectl --context="${KUBE_CONTEXT}" -n "$namespace" wait --for=condition=ready pod/migration-console-0 --timeout=300s
+  cmd="kubectl --context=${KUBE_CONTEXT} -n $namespace exec --stdin --tty migration-console-0 -- /bin/bash"
   echo "Accessing migration console with command: $cmd"
   eval "$cmd"
 fi

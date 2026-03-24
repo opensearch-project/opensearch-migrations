@@ -419,11 +419,6 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             log.info("Output=" + contents);
             Assertions.assertEquals(normalizeJson(expected), normalizeJson(contents));
         }
-        try {
-            Thread.sleep(500);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
         var allMetricData = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         var filteredMetrics = allMetricData.stream()
             .filter(md -> md.getName().startsWith("tupleResult"))

@@ -138,6 +138,24 @@ final class JsonDiff {
 
         List<Object> exp = expected;
         List<Object> act = actual;
+
+        // sublist: extract a sublist from actual before comparing with expected.
+        // The 'skip' field specifies how many leading elements to skip (default 0).
+        if (rule != null && "sublist".equals(rule.rule())) {
+            int offset = rule.skip() != null ? rule.skip() : 0;
+            if (act.size() >= offset) {
+                act = act.subList(offset, act.size());
+            }
+            // Now compare trimmed actual with expected (Solr's response)
+            if (exp.size() != act.size()) {
+                diffs.add(new Difference(path + ".length (after offset " + offset + ")", exp.size(), act.size(), null));
+            }
+            for (int i = 0; i < Math.min(exp.size(), act.size()); i++) {
+                compare(exp.get(i), act.get(i), path + "[" + i + "]", rules, diffs);
+            }
+            return;
+        }
+
         if (rule != null && "loose-order".equals(rule.rule())) {
             exp = sortForComparison(expected);
             act = sortForComparison(actual);

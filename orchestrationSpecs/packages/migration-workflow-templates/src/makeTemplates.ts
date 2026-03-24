@@ -21,7 +21,7 @@ function getNamespace(): string {
     return 'ma';
 }
 
-function getOutputDirectory(): string|null {
+function getOutputDirectory(): string | null {
     const args = process.argv.slice(2);
     const outputDirectoryArgIndex = args.indexOf('--outputDirectory');
 
@@ -36,7 +36,7 @@ const targetNamespace = getNamespace();
 
 function createDirectoryIfNotExists(dirPath: string): void {
     try {
-        fs.mkdirSync(dirPath, {recursive:true});
+        fs.mkdirSync(dirPath, {recursive: true});
         console.log(`Directory created or already exists: ${dirPath}`);
     } catch (error) {
         console.error(`Error creating directory: ${error}`);

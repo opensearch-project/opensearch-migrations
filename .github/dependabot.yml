@@ -60,6 +60,7 @@ updates:
       - dependency-name: "org.gradle.toolchains.foojay-resolver-convention"
       - dependency-name: "org.jcommander:jcommander"
       - dependency-name: "org.opensearch:*"
+      - dependency-name: "org.opensearch.plugin:opensearch-security" # Version is derived from openSearch base version in build.gradle
       - dependency-name: "org.opensearch.plugin:*"
         update-types:
           - "version-update:semver-major"

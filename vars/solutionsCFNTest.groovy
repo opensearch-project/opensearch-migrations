@@ -7,6 +7,7 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "sol-integ", description: 'Stage name for deployment environment')
         }
 
@@ -23,6 +24,7 @@ def call(Map config = [:]) {
                     genericVariables: [
                             [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
                             [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                            [key: 'GIT_COMMIT', value: '$.GIT_COMMIT'],
                             [key: 'job_name', value: '$.job_name']
                     ],
                     tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
@@ -35,19 +37,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    script {
-                        sh 'sudo chown -R $(whoami) .'
-                        sh 'sudo chmod -R u+w .'
-                        // If in an existing git repository, remove any additional files in git tree that are not listed in .gitignore
-                        if (sh(script: 'git rev-parse --git-dir > /dev/null 2>&1', returnStatus: true) == 0) {
-                            echo 'Cleaning any existing git files in workspace'
-                            sh 'git reset --hard'
-                            sh 'git clean -fd'
-                        } else {
-                            echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
-                        }
-                        git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
-                    }
+                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }
 
