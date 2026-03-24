@@ -195,12 +195,12 @@ export const SNAPSHOT_REPO_CONFIG = z.object({
 
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     label: z.string(), // from the record of the user config
-    snapshotNameResolution: SNAPSHOT_NAME_RESOLUTION.optional(),
+    snapshotNameResolution: SNAPSHOT_NAME_RESOLUTION,
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1),
     sourceVersion: z.string(),
     sourceLabel: z.string(),
     targetConfig: NAMED_TARGET_CLUSTER_CONFIG,
-    snapshotConfig: SNAPSHOT_REPO_CONFIG.optional(),
+    snapshotConfig: SNAPSHOT_REPO_CONFIG,
     // For Solr/HTTP API sources (no snapshot)
     sourceEndpoint: z.string().optional(),
     sourceAllowInsecure: z.boolean().optional(),

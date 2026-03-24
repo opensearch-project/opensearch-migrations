@@ -411,13 +411,22 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 const { enabled: _e2, ...restOfTarget } = targetCluster;
                 results.push({
                     label: `${fromSource}-to-${toTarget}`,
+                    snapshotNameResolution: { externalSnapshotName: "solr-direct-migration" },
                     migrations: autoLabelMigrations([{
                         metadataMigrationConfig: {},
-                        documentBackfillConfig: {},
                     }]),
                     sourceVersion: sourceCluster.version || "",
                     sourceLabel: fromSource,
                     targetConfig: { ...restOfTarget, label: toTarget },
+                    snapshotConfig: {
+                        label: "solr-direct",
+                        repoConfig: {
+                            awsRegion: "",
+                            s3RepoPathUri: "",
+                            useLocalStack: false,
+                            repoName: "solr-direct",
+                        }
+                    },
                     sourceEndpoint: sourceCluster.endpoint || "",
                     sourceAllowInsecure: sourceCluster.allowInsecure ?? false,
                     sourceAuth: sourceCluster.authConfig,
