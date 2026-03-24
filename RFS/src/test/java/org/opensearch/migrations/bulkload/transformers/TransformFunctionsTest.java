@@ -169,6 +169,100 @@ public class TransformFunctionsTest {
         assertEquals(false, result.has("index.version.created"));
     }
 
+    /**
+     * Reproduces https://github.com/opensearch-project/opensearch-migrations/issues/2487
+     * 
+     * ES 8.x decoupled IndexVersion from the release version. For example, ES 8.17.0
+     * produces index settings with version.created=8521000 instead of 8170000.
+     * When this setting is forwarded to OpenSearch 3.x, it gets rejected:
+     *   "Version id 8521000 must contain OpenSearch mask"
+     * 
+     * The fix is to strip the internal version.created (and version.upgraded) settings
+     * from index settings during transformation, since the target cluster should assign
+     * its own version metadata.
+     */
+    @Test
+    public void removeVersionCreatedSetting_ES8_DecoupledIndexVersion() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+
+        // Simulate index settings from an ES 8.17 snapshot with decoupled IndexVersion
+        ObjectNode root = mapper.createObjectNode();
+        ObjectNode settings = mapper.createObjectNode();
+        settings.put("creation_date", "1700000000000");
+        settings.put("number_of_replicas", "1");
+        settings.put("number_of_shards", "1");
+        settings.put("provided_name", "test_index");
+
+        // This is the problematic setting: ES 8.17 writes 8521000 as the IndexVersion
+        // instead of the release-derived 8170000
+        ObjectNode versionNode = mapper.createObjectNode();
+        versionNode.put("created", "8521000");
+        settings.set("version", versionNode);
+
+        root.set("settings", settings);
+
+        // After transformation, version.created should be removed
+        TransformFunctions.removeVersionCreatedSetting(root);
+
+        // The version.created setting should be gone
+        assertFalse(settings.has("version"),
+            "version setting should be removed from index settings since it's an internal " +
+            "setting that can cause 'Version id must contain OpenSearch mask' errors on the target");
+
+        // Other settings should be preserved
+        assertEquals("1700000000000", settings.get("creation_date").asText());
+        assertEquals("1", settings.get("number_of_replicas").asText());
+        assertEquals("1", settings.get("number_of_shards").asText());
+    }
+
+    @Test
+    public void removeVersionCreatedSetting_WithUpgraded() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+
+        ObjectNode root = mapper.createObjectNode();
+        ObjectNode settings = mapper.createObjectNode();
+        settings.put("number_of_shards", "1");
+
+        ObjectNode versionNode = mapper.createObjectNode();
+        versionNode.put("created", "7100299");
+        versionNode.put("upgraded", "7170099");
+        settings.set("version", versionNode);
+
+        root.set("settings", settings);
+
+        TransformFunctions.removeVersionCreatedSetting(root);
+
+        assertFalse(settings.has("version"),
+            "version setting (including upgraded) should be removed");
+        assertEquals("1", settings.get("number_of_shards").asText());
+    }
+
+    @Test
+    public void removeVersionCreatedSetting_NoVersionSetting() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+
+        ObjectNode root = mapper.createObjectNode();
+        ObjectNode settings = mapper.createObjectNode();
+        settings.put("number_of_shards", "1");
+        root.set("settings", settings);
+
+        // Should not throw when no version setting exists
+        TransformFunctions.removeVersionCreatedSetting(root);
+
+        assertEquals("1", settings.get("number_of_shards").asText());
+    }
+
+    @Test
+    public void removeVersionCreatedSetting_NoSettings() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode root = mapper.createObjectNode();
+
+        // Should not throw when no settings exist
+        TransformFunctions.removeVersionCreatedSetting(root);
+
+        assertFalse(root.has("settings"));
+    }
+
     @Test
     public void getMappingsFromBeneathIntermediate_AsExpected() throws Exception {
         // Extract from {"_doc":{"properties":{"address":{"type":"text"}}}}

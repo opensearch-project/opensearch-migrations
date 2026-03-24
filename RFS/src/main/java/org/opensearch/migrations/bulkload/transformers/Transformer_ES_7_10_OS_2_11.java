@@ -94,6 +94,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
 
         newRoot.set("settings", TransformFunctions.convertFlatSettingsToTree((ObjectNode) newRoot.get("settings")));
         TransformFunctions.removeIntermediateIndexSettingsLevel(newRoot); // run before fixNumberOfReplicas
+        TransformFunctions.removeVersionCreatedSetting(newRoot); // remove internal version setting (issue #2487)
         TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributes);
 
         log.atDebug().setMessage("Transformed Object: {}").addArgument(newRoot).log();

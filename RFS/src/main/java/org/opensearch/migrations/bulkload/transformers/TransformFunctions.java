@@ -212,6 +212,28 @@ public class TransformFunctions {
     }
 
     /**
+     * Removes the internal {@code version.created} and {@code version.upgraded} settings from index settings.
+     * <p>
+     * These settings are internal to Elasticsearch/OpenSearch and record the version that originally created
+     * (and last upgraded) the index. They should not be forwarded to the target cluster because:
+     * <ul>
+     *   <li>ES 8.x decoupled {@code IndexVersion} from the release version, so the version_id in the snapshot
+     *       (e.g., 8521000 for ES 8.17.0) no longer maps to a recognizable release version.</li>
+     *   <li>OpenSearch 3.x removed legacy ES version definitions, causing it to reject unrecognized version IDs
+     *       with: "Version id NNNNNNN must contain OpenSearch mask"</li>
+     * </ul>
+     * The target cluster will assign its own version metadata when the index is created.
+     *
+     * @see <a href="https://github.com/opensearch-project/opensearch-migrations/issues/2487">Issue #2487</a>
+     */
+    public static void removeVersionCreatedSetting(ObjectNode root) {
+        if (root.has(SETTINGS_KEY_STR)) {
+            ObjectNode settingsRoot = (ObjectNode) root.get(SETTINGS_KEY_STR);
+            settingsRoot.remove("version");
+        }
+    }
+
+    /**
      * If allocation awareness is enabled, we need to ensure that the number of copies of our data matches the dimensionality.
      * As a specific example, if you spin up a cluster spread across 3 availability zones and your awareness attribute is "zone",
      * then the dimensionality would be 3.  This means you need to ensure the number of total copies is a multiple of 3, with
