@@ -129,7 +129,7 @@ public class OpenSearchDocumentSink implements DocumentSink {
                 throw new java.io.UncheckedIOException("Failed to normalize transformer output", e);
             }
             return rawList.stream()
-                .filter(item -> item instanceof Map)
+                .filter(Map.class::isInstance)
                 .map(item -> OBJECT_MAPPER.convertValue(item, BulkOperationSpec.class))
                 .collect(Collectors.toList());
         }
