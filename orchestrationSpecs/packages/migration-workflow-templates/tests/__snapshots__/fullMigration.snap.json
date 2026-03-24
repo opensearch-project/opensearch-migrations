@@ -1400,7 +1400,7 @@
                   },
                   {
                     "name": "snapshotMigrationConfig",
-                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotNameResolution\", fromJSON(item['snapshotNameResolution']), \"migrations\", fromJSON(item['migrations']), \"sourceVersion\", item['sourceVersion'], \"sourceLabel\", item['sourceLabel'], \"targetConfig\", fromJSON(item['targetConfig']), \"snapshotConfig\", fromJSON(item['snapshotConfig'])))}}"
+                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotNameResolution\", fromJSON(item['snapshotNameResolution']), \"migrations\", fromJSON(item['migrations']), \"sourceVersion\", item['sourceVersion'], \"sourceLabel\", item['sourceLabel'], \"targetConfig\", fromJSON(item['targetConfig']), \"snapshotConfig\", fromJSON(item['snapshotConfig']), \"sourceEndpoint\", sprig.dig('sourceEndpoint', '', item)))}}"
                   },
                   {
                     "name": "sortOrder_view",

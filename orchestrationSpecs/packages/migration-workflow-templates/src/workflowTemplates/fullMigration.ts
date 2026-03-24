@@ -548,7 +548,8 @@ export const FullMigration = WorkflowBuilder.create({
                         sourceVersion: expr.get(c.item, "sourceVersion"),
                         sourceLabel: expr.get(c.item, "sourceLabel"),
                         targetConfig: expr.deserializeRecord(expr.get(c.item, "targetConfig")),
-                        snapshotConfig: expr.deserializeRecord(expr.get(c.item, "snapshotConfig"))
+                        snapshotConfig: expr.deserializeRecord(expr.get(c.item, "snapshotConfig")),
+                        sourceEndpoint: expr.dig(c.item, ["sourceEndpoint"], "")
                     })),
 //                    snapshotMigrationConfig: expr.cast(c.item).to<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>()
                     sortOrder_view: expr.literal(4),
