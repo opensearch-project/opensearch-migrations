@@ -104,8 +104,9 @@ export const S3_REPO_CONFIG = z.object({
         .describe("S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. " +
             "The bucket must already exist and be accessible from the source cluster."),
     s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
-        .describe("IAM role ARN to assume when accessing S3 for snapshot operations. " +
-            "Leave empty to use the default credentials of the migration infrastructure.")
+        .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
+            "This is passed to the cluster when registering the snapshot repository. " +
+            "Leave empty if the cluster's own IAM role already has S3 access.")
 }).describe("Configuration for an S3-backed snapshot repository used by the source cluster.");
 
 export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
