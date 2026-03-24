@@ -147,8 +147,11 @@ def cluster_group(ctx):
 
 
 def _cluster_label(name: str, cluster) -> str:
-    """Return a display label, e.g. 'TARGET CLUSTER (Amazon OpenSearch Serverless)'."""
+    """Return a display label, e.g. 'TARGET CLUSTER (Amazon OpenSearch Serverless, Collection type: VECTOR)'."""
     if cluster and cluster.is_serverless:
+        collection_type = cluster.detect_serverless_collection_type()
+        if collection_type:
+            return f"{name} ({cluster.display_name}, Collection type: {collection_type})"
         return f"{name} ({cluster.display_name})"
     return name
 
@@ -211,16 +214,17 @@ def cat_indices_cmd(ctx, refresh, cluster):
 def connection_check_cmd(ctx, cluster):
     """Checks if a connection can be established to source and target clusters"""
     if cluster:
-        click.echo(clusters_.connection_check(resolve_named_cluster(ctx, cluster)))
+        result = clusters_.connection_check(resolve_named_cluster(ctx, cluster))
+        click.echo(result.connection_message)
         return
     click.echo(_cluster_label("SOURCE CLUSTER", ctx.env.source_cluster))
     if ctx.env.source_cluster:
-        click.echo(clusters_.connection_check(ctx.env.source_cluster))
+        click.echo(clusters_.connection_check(ctx.env.source_cluster).connection_message)
     else:
         click.echo("No source cluster defined.")
     click.echo(_cluster_label("TARGET CLUSTER", ctx.env.target_cluster))
     if ctx.env.target_cluster:
-        click.echo(clusters_.connection_check(ctx.env.target_cluster))
+        click.echo(clusters_.connection_check(ctx.env.target_cluster).connection_message)
     else:
         click.echo("No target cluster defined.")
 

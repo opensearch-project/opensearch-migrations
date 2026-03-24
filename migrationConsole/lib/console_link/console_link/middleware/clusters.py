@@ -73,8 +73,8 @@ def connection_check(cluster: Cluster) -> ConnectionResult:
         # collection_type is None only for non-serverless clusters
         try:
             cluster.call_api("/_cat/indices", timeout=3)
-            msg = f"Successfully connected to serverless collection! Collection type: {collection_type}"
-            return ConnectionResult(connection_message=msg, connection_established=True)
+            return ConnectionResult(connection_message="Successfully connected to serverless collection!",
+                                    connection_established=True)
         except Exception as e:
             logger.debug(f"Unable to access AOSS cluster: {cluster} with exception: {e}")
             return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {e}",
