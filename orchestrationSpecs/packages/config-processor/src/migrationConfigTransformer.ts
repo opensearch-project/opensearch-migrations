@@ -397,13 +397,35 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         for (const mc of userConfig.snapshotMigrationConfigs) {
             const { fromSource, toTarget, perSnapshotConfig } = mc;
-            if (!perSnapshotConfig) continue;
 
             const sourceCluster = userConfig.sourceClusters[fromSource];
             const targetCluster = userConfig.targetClusters[toTarget];
             if (!targetCluster) {
                 throw new Error(`Migration references unknown target cluster '${toTarget}'`);
             }
+
+            const isSolrSource = sourceCluster.version?.toUpperCase().startsWith("SOLR");
+
+            // For Solr sources without perSnapshotConfig, generate a direct HTTP API migration
+            if (isSolrSource && !perSnapshotConfig) {
+                const { enabled: _e2, ...restOfTarget } = targetCluster;
+                results.push({
+                    label: `${fromSource}-to-${toTarget}`,
+                    migrations: autoLabelMigrations([{
+                        metadataMigrationConfig: {},
+                        documentBackfillConfig: {},
+                    }]),
+                    sourceVersion: sourceCluster.version || "",
+                    sourceLabel: fromSource,
+                    targetConfig: { ...restOfTarget, label: toTarget },
+                    sourceEndpoint: sourceCluster.endpoint || "",
+                    sourceAllowInsecure: sourceCluster.allowInsecure ?? false,
+                    sourceAuth: sourceCluster.authConfig,
+                });
+                continue;
+            }
+
+            if (!perSnapshotConfig) continue;
 
             const { enabled: _e2, ...restOfTarget } = targetCluster;
             const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
