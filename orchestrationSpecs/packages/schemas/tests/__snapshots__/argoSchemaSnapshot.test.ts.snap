@@ -887,6 +887,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "initialLeaseDuration": {
                             "type": "string",
+                            "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
                             "default": "PT1H"
                           },
                           "maxConnections": {
@@ -2215,6 +2216,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       },
                       "initialLeaseDuration": {
                         "type": "string",
+                        "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
                         "default": "PT1H",
                         "description": "ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up."
                       },

@@ -430,7 +430,9 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
         .describe("Maximum aggregate document size in bytes per bulk indexing request. Does not apply to single-document requests."),
-    initialLeaseDuration: z.string().default("PT1H").optional()
+    initialLeaseDuration: z.string()
+        .regex(/^[-+]?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/)
+        .default("PT1H").optional()
         .describe("ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up."),
     maxConnections: z.number().default(10).optional()
         .describe("Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing."),
