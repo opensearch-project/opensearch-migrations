@@ -24,7 +24,7 @@ mkdir -p "${TEMP_DIR}/deployment/open-source"
 export CODE_BUCKET SOLUTION_NAME CODE_VERSION
 
 cd "${SCRIPT_DIR}"
-npm install
+npm ci
 
 echo "Synthesizing CloudFormation templates..."
 npx cdk synth --asset-metadata false --path-metadata false --quiet
