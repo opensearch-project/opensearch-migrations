@@ -233,16 +233,7 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
         .describe("URI path pattern to suppress from capture. Requests matching this path are forwarded but not recorded."),
     suppressMethodAndPath: z.string().default("").optional()
         .describe("Combined method and path pattern for capture suppression in 'METHOD /path' format."),
-}).describe("Process-level configuration options for the capture proxy application. These are passed as command-line arguments to the proxy container.")
-.superRefine((data, ctx) => {
-    if (data.sslConfigFile && data.tls) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "sslConfigFile and tls are mutually exclusive. Use tls for Kubernetes deployments or sslConfigFile for legacy non-Kubernetes deployments.",
-            path: ['tls']
-        });
-    }
-});
+}).describe("Process-level configuration options for the capture proxy application. These are passed as command-line arguments to the proxy container.");
 
 export const USER_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(USER_PROXY_WORKFLOW_OPTIONS);
 export const USER_PROXY_PROCESS_OPTION_KEYS = getZodKeys(USER_PROXY_PROCESS_OPTIONS);
@@ -250,6 +241,14 @@ export const USER_PROXY_PROCESS_OPTION_KEYS = getZodKeys(USER_PROXY_PROCESS_OPTI
 export const USER_PROXY_OPTIONS = z.object({
     ...USER_PROXY_WORKFLOW_OPTIONS.shape,
     ...USER_PROXY_PROCESS_OPTIONS.shape,
+}).superRefine((data, ctx) => {
+    if (data.sslConfigFile && data.tls) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "sslConfigFile and tls are mutually exclusive. Use tls for Kubernetes deployments or sslConfigFile for legacy non-Kubernetes deployments.",
+            path: ['tls']
+        });
+    }
 });
 
 export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
