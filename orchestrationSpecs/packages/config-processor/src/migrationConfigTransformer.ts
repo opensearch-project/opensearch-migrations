@@ -421,8 +421,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     snapshotConfig: {
                         label: "solr-direct",
                         repoConfig: {
-                            awsRegion: "",
-                            s3RepoPathUri: "",
+                            awsRegion: "us-east-1",
+                            s3RepoPathUri: "s3://solr-direct-migration/placeholder",
                             useLocalStack: false,
                             repoName: "solr-direct",
                         }
