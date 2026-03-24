@@ -27,6 +27,7 @@ dependencies {
     implementation project(":RFS")
     implementation project(":SnapshotReader")
     implementation project(":RfsPipeline")
+    implementation project(":SolrReader")
     implementation project(":transformation")
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')

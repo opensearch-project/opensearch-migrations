@@ -19,6 +19,7 @@ import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
+import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
@@ -83,6 +84,10 @@ public class DocumentMigrationBootstrap {
     private final DeltaMode deltaMode = null;
     @Builder.Default
     private final Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory = null;
+
+    // Optional: external document source (e.g. Solr). When set, bypasses LuceneSnapshotSource.
+    @Builder.Default
+    private final DocumentSource externalDocumentSource = null;
 
     // Optional: work coordination
     @Builder.Default
@@ -251,7 +256,10 @@ public class DocumentMigrationBootstrap {
         }
     }
 
-    private LuceneSnapshotSource createDocumentSource() {
+    private DocumentSource createDocumentSource() {
+        if (externalDocumentSource != null) {
+            return externalDocumentSource;
+        }
         var builder = LuceneSnapshotSource.builder(extractor, snapshotName, workDir)
             .maxShardSizeBytes(maxShardSizeBytes);
         if (previousSnapshotName != null && deltaMode != null) {
