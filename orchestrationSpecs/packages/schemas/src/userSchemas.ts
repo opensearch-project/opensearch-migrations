@@ -317,6 +317,10 @@ export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
         .describe("List of index name patterns to include in the snapshot. An empty list means all indices are included."),
     maxSnapshotRateMbPerNode: z.number().default(0).optional()
         .describe("Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."),
+    compressionEnabled: z.boolean().default(false).optional()
+        .describe("When true, enables metadata compression for the snapshot. Reduces snapshot size at the cost of slightly increased CPU usage during creation."),
+    includeGlobalState: z.boolean().default(true).optional()
+        .describe("When true, includes cluster global state (persistent settings, templates, etc.) in the snapshot."),
 }).describe("Process-level options for the CreateSnapshot command, controlling which indices are snapshotted and rate limiting.");
 
 export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS);
@@ -361,6 +365,10 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
     transformerConfigBase64: z.string().default("").optional()
         .describe("Base64-encoded JSON configuration for metadata transformers. Defines custom transformations applied to index mappings and settings during migration."),
+    transformerConfig: z.string().optional()
+        .describe("Inline JSON configuration for metadata transformers. Keys are transformer names and values are their configuration. Alternative to transformerConfigBase64 for simple configurations."),
+    transformerConfigFile: z.string().optional()
+        .describe("Path to a JSON file containing metadata transformer configuration. The file is read from the container filesystem."),
 }).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
 
 export const USER_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(USER_METADATA_WORKFLOW_OPTIONS);
@@ -403,8 +411,14 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("When true, allows document migration between clusters with non-exact version compatibility."),
     docTransformerConfigBase64: z.string().default("").optional()
         .describe("Base64-encoded JSON configuration for document transformers. Defines custom transformations applied to each document during the backfill (e.g. field renaming, type conversion)."),
+    docTransformerConfig: z.string().optional()
+        .describe("Inline JSON configuration for document transformers. Keys are transformer names and values are their configuration. Alternative to docTransformerConfigBase64 for simple configurations."),
+    docTransformerConfigFile: z.string().optional()
+        .describe("Path to a JSON file containing document transformer configuration. The file is read from the container filesystem."),
     documentsPerBulkRequest: z.number().default(0x7fffffff).optional()
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
+    documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
+        .describe("Maximum aggregate document size in bytes per bulk indexing request. Does not apply to single-document requests."),
     initialLeaseDuration: z.string().default("PT1H").optional()
         .describe("ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up."),
     maxConnections: z.number().default(10).optional()
@@ -413,6 +427,20 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
         .describe("URL for the OpenTelemetry Collector for RFS backfill metrics and progress tracking."),
+    serverGeneratedIds: z.union(["AUTO", "ALWAYS", "NEVER"].map(s=>z.literal(s))).default("AUTO").optional()
+        .describe("Controls document ID generation on the target. " +
+            "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
+            "'ALWAYS': always use server-generated IDs (discards source IDs). " +
+            "'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."),
+    allowedDocExceptionTypes: z.array(z.string()).default([]).optional()
+        .describe("List of document-level exception types to treat as successful operations during bulk migration. " +
+            "Enables idempotent migrations by allowing specific errors (e.g. 'version_conflict_engine_exception') to be treated as success rather than failure."),
+    coordinatorRetryMaxRetries: z.number().default(7).optional()
+        .describe("Maximum number of retries when marking work items as completed on the coordinator."),
+    coordinatorRetryInitialDelayMs: z.number().default(1000).optional()
+        .describe("Initial delay in milliseconds for coordinator completion retries. Doubles with each attempt up to coordinatorRetryMaxDelayMs."),
+    coordinatorRetryMaxDelayMs: z.number().default(64000).optional()
+        .describe("Maximum delay in milliseconds for any single coordinator completion retry."),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
 
 export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);

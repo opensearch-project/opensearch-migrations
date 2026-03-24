@@ -436,6 +436,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "maxSnapshotRateMbPerNode": {
                             "type": "number",
                             "default": 0
+                          },
+                          "compressionEnabled": {
+                            "type": "boolean",
+                            "default": false
+                          },
+                          "includeGlobalState": {
+                            "type": "boolean",
+                            "default": true
                           }
                         }
                       },
@@ -762,6 +770,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "transformerConfigBase64": {
                             "type": "string",
                             "default": ""
+                          },
+                          "transformerConfig": {
+                            "type": "string",
+                            "description": "Inline JSON configuration for metadata transformers. Keys are transformer names and values are their configuration. Alternative to transformerConfigBase64 for simple configurations."
+                          },
+                          "transformerConfigFile": {
+                            "type": "string",
+                            "description": "Path to a JSON file containing metadata transformer configuration. The file is read from the container filesystem."
                           }
                         }
                       },
@@ -861,9 +877,21 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": "string",
                             "default": ""
                           },
+                          "docTransformerConfig": {
+                            "type": "string",
+                            "description": "Inline JSON configuration for document transformers. Keys are transformer names and values are their configuration. Alternative to docTransformerConfigBase64 for simple configurations."
+                          },
+                          "docTransformerConfigFile": {
+                            "type": "string",
+                            "description": "Path to a JSON file containing document transformer configuration. The file is read from the container filesystem."
+                          },
                           "documentsPerBulkRequest": {
                             "type": "number",
                             "default": 2147483647
+                          },
+                          "documentsSizePerBulkRequest": {
+                            "type": "number",
+                            "default": 10485760
                           },
                           "initialLeaseDuration": {
                             "type": "string",
@@ -880,6 +908,48 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "otelCollectorEndpoint": {
                             "type": "string",
                             "default": "http://otel-collector:4317"
+                          },
+                          "serverGeneratedIds": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "AUTO"
+                                ]
+                              },
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "ALWAYS"
+                                ]
+                              },
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "NEVER"
+                                ]
+                              }
+                            ],
+                            "default": "AUTO"
+                          },
+                          "allowedDocExceptionTypes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
+                          },
+                          "coordinatorRetryMaxRetries": {
+                            "type": "number",
+                            "default": 7
+                          },
+                          "coordinatorRetryInitialDelayMs": {
+                            "type": "number",
+                            "default": 1000
+                          },
+                          "coordinatorRetryMaxDelayMs": {
+                            "type": "number",
+                            "default": 64000
                           }
                         }
                       }
@@ -1711,6 +1781,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "type": "number",
                                   "default": 0,
                                   "description": "Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."
+                                },
+                                "compressionEnabled": {
+                                  "type": "boolean",
+                                  "default": false,
+                                  "description": "When true, enables metadata compression for the snapshot. Reduces snapshot size at the cost of slightly increased CPU usage during creation."
+                                },
+                                "includeGlobalState": {
+                                  "type": "boolean",
+                                  "default": true,
+                                  "description": "When true, includes cluster global state (persistent settings, templates, etc.) in the snapshot."
                                 }
                               },
                               "description": "Configuration for creating a new snapshot of the source cluster."
@@ -2020,6 +2100,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "string",
                         "default": "",
                         "description": "Base64-encoded JSON configuration for metadata transformers. Defines custom transformations applied to index mappings and settings during migration."
+                      },
+                      "transformerConfig": {
+                        "type": "string",
+                        "description": "Inline JSON configuration for metadata transformers. Keys are transformer names and values are their configuration. Alternative to transformerConfigBase64 for simple configurations."
+                      },
+                      "transformerConfigFile": {
+                        "type": "string",
+                        "description": "Path to a JSON file containing metadata transformer configuration. The file is read from the container filesystem."
                       }
                     },
                     "description": "Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."
@@ -2131,10 +2219,23 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "default": "",
                         "description": "Base64-encoded JSON configuration for document transformers. Defines custom transformations applied to each document during the backfill (e.g. field renaming, type conversion)."
                       },
+                      "docTransformerConfig": {
+                        "type": "string",
+                        "description": "Inline JSON configuration for document transformers. Keys are transformer names and values are their configuration. Alternative to docTransformerConfigBase64 for simple configurations."
+                      },
+                      "docTransformerConfigFile": {
+                        "type": "string",
+                        "description": "Path to a JSON file containing document transformer configuration. The file is read from the container filesystem."
+                      },
                       "documentsPerBulkRequest": {
                         "type": "number",
                         "default": 2147483647,
                         "description": "Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."
+                      },
+                      "documentsSizePerBulkRequest": {
+                        "type": "number",
+                        "default": 10485760,
+                        "description": "Maximum aggregate document size in bytes per bulk indexing request. Does not apply to single-document requests."
                       },
                       "initialLeaseDuration": {
                         "type": "string",
@@ -2155,6 +2256,53 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "string",
                         "default": "http://otel-collector:4317",
                         "description": "URL for the OpenTelemetry Collector for RFS backfill metrics and progress tracking."
+                      },
+                      "serverGeneratedIds": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "AUTO"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "ALWAYS"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "NEVER"
+                            ]
+                          }
+                        ],
+                        "default": "AUTO",
+                        "description": "Controls document ID generation on the target. 'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. 'ALWAYS': always use server-generated IDs (discards source IDs). 'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."
+                      },
+                      "allowedDocExceptionTypes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "default": [],
+                        "description": "List of document-level exception types to treat as successful operations during bulk migration. Enables idempotent migrations by allowing specific errors (e.g. 'version_conflict_engine_exception') to be treated as success rather than failure."
+                      },
+                      "coordinatorRetryMaxRetries": {
+                        "type": "number",
+                        "default": 7,
+                        "description": "Maximum number of retries when marking work items as completed on the coordinator."
+                      },
+                      "coordinatorRetryInitialDelayMs": {
+                        "type": "number",
+                        "default": 1000,
+                        "description": "Initial delay in milliseconds for coordinator completion retries. Doubles with each attempt up to coordinatorRetryMaxDelayMs."
+                      },
+                      "coordinatorRetryMaxDelayMs": {
+                        "type": "number",
+                        "default": 64000,
+                        "description": "Maximum delay in milliseconds for any single coordinator completion retry."
                       }
                     },
                     "description": "Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."
