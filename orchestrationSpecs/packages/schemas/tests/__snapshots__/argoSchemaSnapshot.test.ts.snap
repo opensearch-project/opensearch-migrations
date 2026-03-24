@@ -1996,7 +1996,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "otelCollectorEndpoint": {
                         "type": "string",
                         "default": "http://otel-collector:4317",
-                        "description": "gRPC endpoint (host:port) for the OpenTelemetry Collector for metadata migration metrics."
+                        "description": "URL for the OpenTelemetry Collector for metadata migration metrics."
                       },
                       "output": {
                         "anyOf": [
@@ -2154,7 +2154,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "otelCollectorEndpoint": {
                         "type": "string",
                         "default": "http://otel-collector:4317",
-                        "description": "gRPC endpoint (host:port) for the OpenTelemetry Collector for RFS backfill metrics and progress tracking."
+                        "description": "URL for the OpenTelemetry Collector for RFS backfill metrics and progress tracking."
                       }
                     },
                     "description": "Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."
@@ -2289,7 +2289,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "otelCollectorEndpoint": {
                     "type": "string",
                     "default": "http://otel-collector:4317",
-                    "description": "gRPC endpoint (host:port) for the OpenTelemetry Collector. The proxy sends metrics and traces to this endpoint."
+                    "description": "URL for the OpenTelemetry Collector to which the proxy sends metrics and traces."
                   },
                   "setHeader": {
                     "type": "array",
@@ -2625,7 +2625,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "otelCollectorEndpoint": {
                     "type": "string",
                     "default": "http://otel-collector:4317",
-                    "description": "gRPC endpoint (host:port) for the OpenTelemetry Collector. The replayer sends metrics and traces to this endpoint for monitoring replay progress."
+                    "description": "URL for the OpenTelemetry Collector to which the replayer sends metrics and traces."
                   },
                   "quiescentPeriodMs": {
                     "type": "number",

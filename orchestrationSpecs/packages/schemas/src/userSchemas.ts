@@ -200,7 +200,7 @@ export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
 
 export const USER_PROXY_PROCESS_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("gRPC endpoint (host:port) for the OpenTelemetry Collector. The proxy sends metrics and traces to this endpoint."),
+        .describe("URL for the OpenTelemetry Collector to which the proxy sends metrics and traces."),
     setHeader: z.array(z.string()).optional()
         .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format."),
     destinationConnectionPoolSize: z.number().default(0).optional()
@@ -268,7 +268,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     observedPacketConnectionTimeout: z.number().default(360).optional()
         .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream."),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("gRPC endpoint (host:port) for the OpenTelemetry Collector. The replayer sends metrics and traces to this endpoint for monitoring replay progress."),
+        .describe("URL for the OpenTelemetry Collector to which the replayer sends metrics and traces."),
     quiescentPeriodMs: z.number().default(5000).optional()
         .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."),
     removeAuthHeader: z.boolean().default(false).optional()
@@ -356,7 +356,7 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "'UNION': merge all types into a single mapping. " +
             "'SPLIT': create separate indices for each type."),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("gRPC endpoint (host:port) for the OpenTelemetry Collector for metadata migration metrics."),
+        .describe("URL for the OpenTelemetry Collector for metadata migration metrics."),
     output: z.union(["HUMAN_READABLE", "JSON"].map(s=>z.literal(s))).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
     transformerConfigBase64: z.string().default("").optional()
@@ -412,7 +412,7 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("gRPC endpoint (host:port) for the OpenTelemetry Collector for RFS backfill metrics and progress tracking."),
+        .describe("URL for the OpenTelemetry Collector for RFS backfill metrics and progress tracking."),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
 
 export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);
