@@ -1,4 +1,5 @@
 from typing import Any, Dict, Generator, NamedTuple, Optional, TypeAlias
+from urllib.parse import urlparse
 from enum import Enum
 import json
 import logging
@@ -170,7 +171,11 @@ class Cluster:
                 self.auth_details is not None and
                 self.auth_details.get("service") == "aoss"):
             return True
-        return ".aoss.amazonaws.com" in (self.endpoint or "")
+        try:
+            hostname = urlparse(self.endpoint or "").hostname or ""
+            return hostname.endswith(".aoss.amazonaws.com")
+        except Exception:
+            return False
 
     def detect_serverless_collection_type(self) -> Optional[str]:
         """Detect AOSS collection type by mirroring Java OpenSearchClientFactory logic:
