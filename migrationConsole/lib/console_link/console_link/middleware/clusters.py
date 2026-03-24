@@ -59,10 +59,8 @@ def cat_indices(cluster: Cluster, refresh=False, as_json=False):
 
 
 def _solr_cat_indices(cluster: Cluster, as_json=False):
-    """List Solr collections with doc counts via Collections API (SolrCloud)."""
-    # Get collection list
-    r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
-    collections = r.json().get("collections", [])
+    """List Solr collections/cores with doc counts. Tries SolrCloud first, falls back to standalone."""
+    collections = _solr_list_collections_or_cores(cluster)
 
     if as_json:
         result = []
@@ -79,6 +77,26 @@ def _solr_cat_indices(cluster: Cluster, as_json=False):
             doc_count = _solr_collection_doc_count(cluster, coll)
             lines.append(f"{coll:<20} {doc_count:>10}")
         return "\n".join(lines).encode()
+
+
+def _solr_list_collections_or_cores(cluster: Cluster) -> list:
+    """List collections (SolrCloud) or cores (standalone). Tries both APIs."""
+    # Try SolrCloud Collections API first
+    try:
+        r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+        if r.status_code == 200:
+            collections = r.json().get("collections", [])
+            if collections:
+                return collections
+    except Exception:
+        pass
+
+    # Fall back to Core Admin API (standalone Solr)
+    try:
+        r = cluster.call_api("/solr/admin/cores?action=STATUS&wt=json")
+        return list(r.json().get("status", {}).keys())
+    except Exception:
+        return []
 
 
 def _solr_collection_doc_count(cluster: Cluster, collection: str) -> int:

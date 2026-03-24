@@ -111,9 +111,17 @@ class Snapshot(ABC):
         pass
 
     def _get_solr_collections(self) -> list:
-        """Fetch collection names from SolrCloud Collections API."""
-        r = self.source_cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
-        return r.json().get("collections", [])
+        """Fetch collection/core names. Tries SolrCloud first, falls back to standalone."""
+        try:
+            r = self.source_cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+            if r.status_code == 200:
+                collections = r.json().get("collections", [])
+                if collections:
+                    return collections
+        except Exception:
+            pass
+        r = self.source_cluster.call_api("/solr/admin/cores?action=STATUS&wt=json")
+        return list(r.json().get("status", {}).keys())
 
     def get_snapshot_indexes(self, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
         """
@@ -737,6 +745,13 @@ def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotS
     """Build a SnapshotStatus from SolrCloud REQUESTSTATUS responses."""
     r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
     collections = r.json().get("collections", [])
+    if not collections:
+        # Fall back to standalone cores
+        try:
+            r = cluster.call_api("/solr/admin/cores?action=STATUS&wt=json")
+            collections = list(r.json().get("status", {}).keys())
+        except Exception:
+            collections = []
 
     accum = {
         "total_shards": 0, "completed_shards": 0, "index_size_bytes": 0,

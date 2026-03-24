@@ -34,9 +34,19 @@ def convert_solr_schema_to_os_mappings(solr_fields: List[Dict]) -> Dict:
 
 
 def get_solr_collections(source: Cluster) -> List[str]:
-    """List SolrCloud collections."""
-    r = source.call_api("/solr/admin/collections?action=LIST&wt=json")
-    return r.json().get("collections", [])
+    """List Solr collections (SolrCloud) or cores (standalone)."""
+    # Try SolrCloud Collections API first
+    try:
+        r = source.call_api("/solr/admin/collections?action=LIST&wt=json")
+        if r.status_code == 200:
+            collections = r.json().get("collections", [])
+            if collections:
+                return collections
+    except Exception:
+        pass
+    # Fall back to Core Admin API (standalone)
+    r = source.call_api("/solr/admin/cores?action=STATUS&wt=json")
+    return list(r.json().get("status", {}).keys())
 
 
 def get_solr_schema_fields(source: Cluster, collection: str) -> List[Dict]:
