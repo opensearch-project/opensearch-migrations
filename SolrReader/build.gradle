@@ -9,6 +9,7 @@ evaluationDependsOn ':SearchSnapshotExtractor'
 dependencies {
     implementation project(':RfsPipeline')
     implementation project(':RfsCommon')
+    implementation project(':RfsHttp')
     implementation project(':SearchSnapshotExtractor')
 
     // Shadow lucene9 jar for reading Solr 8 (Lucene 8.11) backup files
@@ -16,6 +17,7 @@ dependencies {
 
     implementation libs.jackson.databind
     implementation libs.jackson.core
+    implementation libs.jackson.dataformat.smile
     implementation libs.reactor.core
     implementation libs.slf4j.api
 
