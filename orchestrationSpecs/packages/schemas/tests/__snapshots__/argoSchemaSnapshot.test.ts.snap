@@ -266,7 +266,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "sslConfigFile": {
                       "type": "string",
-                      "description": "Path to a YAML file with OpenSearch security SSL configuration (plugins.security.ssl.http.* keys). Legacy option for non-Kubernetes deployments. For Kubernetes, prefer the 'tls' configuration instead."
+                      "description": "[Expert] Path to a YAML file with OpenSearch security SSL configuration (plugins.security.ssl.http.* keys). The file must be mounted into the container by the user. For Kubernetes deployments, prefer the 'tls' option instead."
                     },
                     "tls": {
                       "oneOf": [
@@ -751,6 +751,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "transformerConfig": {
                             "type": "string",
                             "description": "Inline JSON configuration for metadata transformers. Keys are transformer names and values are their configuration. Alternative to transformerConfigBase64 for simple configurations."
+                          },
+                          "transformerConfigFile": {
+                            "type": "string",
+                            "description": "[Expert] Path to a JSON file containing metadata transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                           }
                         }
                       },
@@ -853,6 +857,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "docTransformerConfig": {
                             "type": "string",
                             "description": "Inline JSON configuration for document transformers. Keys are transformer names and values are their configuration. Alternative to docTransformerConfigBase64 for simple configurations."
+                          },
+                          "docTransformerConfigFile": {
+                            "type": "string",
+                            "description": "[Expert] Path to a JSON file containing document transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                           },
                           "documentsPerBulkRequest": {
                             "type": "number",
@@ -1223,7 +1231,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "kafkaTrafficPropertyFile": {
                       "type": "string",
-                      "description": "Path to a Java properties file with additional or overridden Kafka consumer configuration. Mounted into the replayer container."
+                      "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                     },
                     "lookaheadTimeSeconds": {
                       "type": "number",
@@ -1269,6 +1277,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "description": "Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations containing special characters."
                     },
+                    "transformerConfigFile": {
+                      "type": "string",
+                      "description": "[Expert] Path to a JSON file containing request transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                    },
                     "tupleTransformerConfig": {
                       "type": "string",
                       "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs for stateful transformations."
@@ -1276,6 +1288,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "tupleTransformerConfigBase64": {
                       "type": "string",
                       "description": "Base64-encoded tuple transformer configuration."
+                    },
+                    "tupleTransformerConfigFile": {
+                      "type": "string",
+                      "description": "[Expert] Path to a JSON file containing tuple transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                     },
                     "userAgent": {
                       "type": "string",
@@ -2029,6 +2045,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "transformerConfig": {
                         "type": "string",
                         "description": "Inline JSON configuration for metadata transformers. Keys are transformer names and values are their configuration. Alternative to transformerConfigBase64 for simple configurations."
+                      },
+                      "transformerConfigFile": {
+                        "type": "string",
+                        "description": "[Expert] Path to a JSON file containing metadata transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                       }
                     },
                     "description": "Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."
@@ -2143,6 +2163,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "docTransformerConfig": {
                         "type": "string",
                         "description": "Inline JSON configuration for document transformers. Keys are transformer names and values are their configuration. Alternative to docTransformerConfigBase64 for simple configurations."
+                      },
+                      "docTransformerConfigFile": {
+                        "type": "string",
+                        "description": "[Expert] Path to a JSON file containing document transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                       },
                       "documentsPerBulkRequest": {
                         "type": "number",
@@ -2387,7 +2411,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "sslConfigFile": {
                     "type": "string",
-                    "description": "Path to a YAML file with OpenSearch security SSL configuration (plugins.security.ssl.http.* keys). Legacy option for non-Kubernetes deployments. For Kubernetes, prefer the 'tls' configuration instead."
+                    "description": "[Expert] Path to a YAML file with OpenSearch security SSL configuration (plugins.security.ssl.http.* keys). The file must be mounted into the container by the user. For Kubernetes deployments, prefer the 'tls' option instead."
                   },
                   "tls": {
                     "oneOf": [
@@ -2652,7 +2676,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "kafkaTrafficPropertyFile": {
                     "type": "string",
-                    "description": "Path to a Java properties file with additional or overridden Kafka consumer configuration. Mounted into the replayer container."
+                    "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                   },
                   "lookaheadTimeSeconds": {
                     "type": "number",
@@ -2707,6 +2731,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "description": "Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations containing special characters."
                   },
+                  "transformerConfigFile": {
+                    "type": "string",
+                    "description": "[Expert] Path to a JSON file containing request transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                  },
                   "tupleTransformerConfig": {
                     "type": "string",
                     "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs for stateful transformations."
@@ -2714,6 +2742,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "tupleTransformerConfigBase64": {
                     "type": "string",
                     "description": "Base64-encoded tuple transformer configuration."
+                  },
+                  "tupleTransformerConfigFile": {
+                    "type": "string",
+                    "description": "[Expert] Path to a JSON file containing tuple transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                   },
                   "userAgent": {
                     "type": "string",

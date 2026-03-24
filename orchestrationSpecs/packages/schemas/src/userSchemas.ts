@@ -220,7 +220,7 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
     numThreads: z.number().default(1).optional()
         .describe("Number of Netty worker threads for the proxy to handle concurrent connections."),
     sslConfigFile: z.string().optional()
-        .describe("Path to a YAML file with OpenSearch security SSL configuration (plugins.security.ssl.http.* keys). Legacy option for non-Kubernetes deployments. For Kubernetes, prefer the 'tls' configuration instead."),
+        .describe("[Expert] Path to a YAML file with OpenSearch security SSL configuration (plugins.security.ssl.http.* keys). The file must be mounted into the container by the user. For Kubernetes deployments, prefer the 'tls' option instead."),
     tls: PROXY_TLS_CONFIG.optional()
         .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile."),
     enableMSKAuth: z.boolean().default(false).optional()
@@ -266,7 +266,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK."),
     kafkaTrafficPropertyFile: z.string().optional()
-        .describe("Path to a Java properties file with additional or overridden Kafka consumer configuration. Mounted into the replayer container."),
+        .describe("[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."),
     lookaheadTimeSeconds: z.number().default(400).optional()
         .describe("Number of seconds of captured traffic to buffer ahead of the current replay position. Must be strictly greater than observedPacketConnectionTimeout. Larger values improve throughput but increase memory usage."),
     maxConcurrentRequests: z.number().default(10000).optional()
@@ -289,10 +289,14 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
         .describe("Inline request transformer configuration as a JSON string. Defines transformations applied to each request before replaying to the target."),
     transformerConfigEncoded: z.string().optional()
         .describe("Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations containing special characters."),
+    transformerConfigFile: z.string().optional()
+        .describe("[Expert] Path to a JSON file containing request transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."),
     tupleTransformerConfig: z.string().optional()
         .describe("Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs for stateful transformations."),
     tupleTransformerConfigBase64: z.string().optional()
         .describe("Base64-encoded tuple transformer configuration."),
+    tupleTransformerConfigFile: z.string().optional()
+        .describe("[Expert] Path to a JSON file containing tuple transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."),
     userAgent: z.string().optional()
         .describe("String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."),
 }).describe("Process-level configuration options for the traffic replayer application. These control how captured traffic is consumed from Kafka and replayed to the target cluster.");
@@ -388,6 +392,8 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
         .describe("Base64-encoded JSON configuration for metadata transformers. Defines custom transformations applied to index mappings and settings during migration."),
     transformerConfig: z.string().optional()
         .describe("Inline JSON configuration for metadata transformers. Keys are transformer names and values are their configuration. Alternative to transformerConfigBase64 for simple configurations."),
+    transformerConfigFile: z.string().optional()
+        .describe("[Expert] Path to a JSON file containing metadata transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."),
 }).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
 
 export const USER_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(USER_METADATA_WORKFLOW_OPTIONS);
@@ -434,6 +440,8 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("Base64-encoded JSON configuration for document transformers. Defines custom transformations applied to each document during the backfill (e.g. field renaming, type conversion)."),
     docTransformerConfig: z.string().optional()
         .describe("Inline JSON configuration for document transformers. Keys are transformer names and values are their configuration. Alternative to docTransformerConfigBase64 for simple configurations."),
+    docTransformerConfigFile: z.string().optional()
+        .describe("[Expert] Path to a JSON file containing document transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."),
     documentsPerBulkRequest: z.number().default(0x7fffffff).optional()
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
