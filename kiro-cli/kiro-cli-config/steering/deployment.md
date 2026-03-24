@@ -49,11 +49,16 @@ chmod +x aws-bootstrap.sh
 ### Bootstrap Script Parameters
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--org-name` | opensearch-project | GitHub org |
-| `--branch` | main | Git branch |
-| `--tag` | (auto) | Specific version tag |
+| `--deploy-create-vpc-cfn` | - | Deploy with a new VPC |
+| `--deploy-import-vpc-cfn` | - | Deploy into an existing VPC |
+| `--skip-cfn-deploy` | - | Skip CFN deployment (stack already exists) |
+| `--stack-name` | - | CloudFormation stack name |
+| `--stage` | dev | Stage name for CFN exports |
+| `--region` | - | AWS region |
+| `--version` | latest | Release version for artifacts |
 | `--skip-console-exec` | false | Skip kubectl exec into console |
 | `--build-images` | false | Build images from source |
+| `--use-public-images` | false | Opt out of mirroring to private ECR |
 | `--namespace` | ma | Kubernetes namespace |
 
 ## Access Migration Console
