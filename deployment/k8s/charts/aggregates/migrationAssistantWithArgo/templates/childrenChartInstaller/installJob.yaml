@@ -12,7 +12,7 @@ metadata:
     "helm.sh/hook-weight": "0"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 3
+  backoffLimit: 1
   ttlSecondsAfterFinished: 600
   template:
     metadata:
@@ -22,14 +22,21 @@ spec:
     spec:
       serviceAccountName: {{ .Values.installer.serviceAccount.name }}
       restartPolicy: Never
+{{- if and .Values.conditionalPackageInstalls.kyverno .Values.kyvernoPolicies.zeroResourceRequests }}
+      volumes:
+        - name: policy
+          configMap:
+            name: {{ .Release.Name }}-kyverno-zero-resources-policy
+{{- end }}
       containers:
         - name: helm-installer
           image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
-          {{- with .Values.installer.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+{{- if and .Values.conditionalPackageInstalls.kyverno .Values.kyvernoPolicies.zeroResourceRequests }}
+          volumeMounts:
+            - name: policy
+              mountPath: /policy
+{{- end }}
           command:
             - /bin/sh
             - -c
@@ -107,49 +114,7 @@ spec:
       {{- if $.Values.kyvernoPolicies.zeroResourceRequests }}
               echo "Applying zero-resource-requests ClusterPolicy before installing other charts..."
               kubectl wait --for=condition=Established crd/clusterpolicies.kyverno.io --timeout=60s
-              cat <<'POLICY_EOF' | kubectl apply -f -
-              apiVersion: kyverno.io/v1
-              kind: ClusterPolicy
-              metadata:
-                name: zero-resource-requests
-                annotations:
-                  policies.kyverno.io/title: Zero Resource Requests for Dev
-                  policies.kyverno.io/description: Zeros cpu/memory requests and limits for dev environments.
-              spec:
-                rules:
-                  - name: zero-resources
-                    match:
-                      any:
-                        - resources:
-                            kinds:
-                              - Pod
-                            operations:
-                              - CREATE
-                    mutate:
-                      patchStrategicMerge:
-                        metadata:
-                          annotations:
-                            kyverno.io/mutated-by: "zero-resource-requests"
-                        spec:
-                          containers:
-                            - (name): "*"
-                              resources:
-                                requests:
-                                  cpu: "0"
-                                  memory: "0"
-                                limits:
-                                  cpu: "0"
-                                  memory: "0"
-                          initContainers:
-                            - (name): "*"
-                              resources:
-                                requests:
-                                  cpu: "0"
-                                  memory: "0"
-                                limits:
-                                  cpu: "0"
-                                  memory: "0"
-              POLICY_EOF
+              kubectl apply -f /policy/policy.yaml
               echo "Waiting for zero-resource-requests policy to be ready..."
               kubectl wait --for=condition=Ready clusterpolicy/zero-resource-requests --timeout=60s
               echo "Verifying policy is actively enforcing via canary pod..."
