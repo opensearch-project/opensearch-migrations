@@ -177,22 +177,23 @@ class Cluster:
         except Exception:
             return False
 
-    def detect_serverless_collection_type(self) -> Optional[str]:
+    def detect_serverless_collection_type(self, skip_root_probe: bool = False) -> Optional[str]:
         """Detect AOSS collection type by mirroring Java OpenSearchClientFactory logic:
-        1. Probe GET / — if 200, not serverless (return None)
-        2. If 404, probe with invalid KNN index to detect SEARCH/TIMESERIES/VECTOR from error message.
+        1. Probe GET / — if 200, not serverless (return None). Skip if skip_root_probe=True.
+        2. If 404 (or skip_root_probe), probe with invalid KNN index to detect SEARCH/TIMESERIES/VECTOR.
         Returns 'SEARCH', 'TIMESERIES', 'VECTOR', 'UNKNOWN' (serverless but undetected), or None (not serverless)."""
-        # Step 1: probe root API (mirrors Java getClusterVersion())
-        try:
-            r = self.call_api("/", raise_error=False, timeout=5)
-            if r.status_code == 200:
-                return None  # Not serverless
-            if r.status_code != 404:
-                logger.debug(f"Unexpected status {r.status_code} from GET /, cannot determine serverless type")
+        if not skip_root_probe:
+            # Step 1: probe root API (mirrors Java getClusterVersion())
+            try:
+                r = self.call_api("/", raise_error=False, timeout=5)
+                if r.status_code == 200:
+                    return None  # Not serverless
+                if r.status_code != 404:
+                    logger.debug(f"Unexpected status {r.status_code} from GET /, cannot determine serverless type")
+                    return None
+            except Exception as e:
+                logger.debug(f"GET / probe failed: {e}")
                 return None
-        except Exception as e:
-            logger.debug(f"GET / probe failed: {e}")
-            return None
 
         # Step 2: KNN probe to detect collection type (mirrors Java detectServerlessCollectionType())
         probe_index = f"migrations_type_probe_{int(time.time())}"

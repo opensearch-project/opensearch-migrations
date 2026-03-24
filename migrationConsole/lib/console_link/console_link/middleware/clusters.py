@@ -67,10 +67,19 @@ def cat_indices(cluster: Cluster, refresh=False, as_json=False):
 
 
 def connection_check(cluster: Cluster) -> ConnectionResult:
-    # Probe GET / to detect serverless (mirrors Java getClusterVersion logic)
-    collection_type = cluster.detect_serverless_collection_type()
-    if collection_type is not None:
-        # collection_type is None only for non-serverless clusters
+    # Probe GET / — mirrors Java getClusterVersion logic.
+    # For non-serverless: returns the response directly (avoids a second GET /).
+    # For serverless (404): detect collection type via KNN probe.
+    caught_exception = None
+    r = None
+    try:
+        r = cluster.call_api("/", raise_error=False, timeout=5)
+    except Exception as e:
+        caught_exception = e
+
+    if caught_exception is None and r is not None and r.status_code == 404:
+        # Serverless — detect collection type (skip root probe, we already know it's 404)
+        cluster.detect_serverless_collection_type(skip_root_probe=True)
         try:
             cluster.call_api("/_cat/indices", timeout=3)
             return ConnectionResult(connection_message="Successfully connected to serverless collection!",
@@ -80,22 +89,17 @@ def connection_check(cluster: Cluster) -> ConnectionResult:
             return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {e}",
                                     connection_established=False)
 
-    cluster_details_path = "/"
-    caught_exception = None
-    r = None
-    try:
-        r = cluster.call_api(cluster_details_path, timeout=3)
-    except Exception as e:
-        caught_exception = e
-        logging.debug(f"Unable to access cluster: {cluster} with exception: {e}")
-    if caught_exception is None:
-        response_json = r.json()
-        return ConnectionResult(connection_message="Successfully connected!",
-                                connection_established=True,
-                                cluster_version=response_json['version']['number'])
-    else:
-        return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {caught_exception}",
-                                connection_established=False)
+    # Non-serverless — use the response from the probe directly
+    if caught_exception is None and r is not None and r.status_code == 200:
+        try:
+            response_json = r.json()
+            return ConnectionResult(connection_message="Successfully connected!",
+                                    connection_established=True,
+                                    cluster_version=response_json['version']['number'])
+        except Exception as e:
+            caught_exception = e
+    return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {caught_exception or r}",
+                            connection_established=False)
 
 
 def run_test_benchmarks(cluster: Cluster):
