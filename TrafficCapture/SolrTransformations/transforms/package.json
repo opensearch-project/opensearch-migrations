@@ -22,6 +22,7 @@
     "esbuild": "^0.25.0",
     "eslint": "^10.0.2",
     "eslint-config-prettier": "^10.1.8",
+    "peggy": "^5.1.0",
     "prettier": "^3.8.1",
     "vitest": "^4.0.18"
   },

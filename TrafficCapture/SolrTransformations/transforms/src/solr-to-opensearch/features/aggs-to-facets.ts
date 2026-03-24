@@ -17,13 +17,18 @@ import type { ResponseContext, JavaMap } from '../context';
 import { isMapLike } from './utils';
 
 /**
- * Convert a single OpenSearch terms aggregation bucket to a Solr facet bucket.
+ * Convert a single OpenSearch aggregation bucket to a Solr facet bucket.
  *
- * Maps: key → val, doc_count → count
+ * Maps: key → val, doc_count → count.
+ *
+ * For date_histogram buckets, OpenSearch returns `key` as epoch millis and
+ * `key_as_string` as the formatted date string. Solr returns ISO-8601 strings,
+ * so we prefer `key_as_string` when present.
  */
 function convertBucket(osBucket: JavaMap): JavaMap {
   const solrBucket = new Map<string, any>();
-  solrBucket.set('val', osBucket.get('key'));
+  const keyAsString = osBucket.get('key_as_string');
+  solrBucket.set('val', keyAsString ?? osBucket.get('key'));
   solrBucket.set('count', osBucket.get('doc_count'));
   return solrBucket;
 }

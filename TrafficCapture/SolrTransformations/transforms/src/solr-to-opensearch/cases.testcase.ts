@@ -113,7 +113,7 @@ export const testCases: TestCase[] = [
     requestPath:
       '/solr/testcollection/select?q=*:*&wt=json&json.facet=' +
       encodeURIComponent(JSON.stringify({
-        categories: { type: 'terms', field: 'category', sort: 'count desc' },
+          categories: { type: 'terms', field: 'category', sort: 'count desc' },
       })),
     solrSchema: {
       fields: {
@@ -176,6 +176,135 @@ export const testCases: TestCase[] = [
     ],
   }),
 
+  solrTest('facet-basic-range', {
+    description: 'Basic range facet on a numeric field using start/end/gap',
+    documents: [
+      { id: '1', title: 'cheap item', price: 10 },
+      { id: '2', title: 'mid item', price: 35 },
+      { id: '3', title: 'pricey item', price: 55 },
+      { id: '4', title: 'expensive item', price: 80 },
+      { id: '5', title: 'luxury item', price: 95 },
+    ],
+    requestPath:
+      '/solr/testcollection/select?q=*:*&wt=json&json.facet=' +
+      encodeURIComponent(
+        JSON.stringify({
+          prices: { type: 'range', field: 'price', start: 0, end: 100, gap: 20 },
+        }),
+      ),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        price: { type: 'pfloat' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        price: { type: 'float' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      {
+        path: '$.response',
+        rule: 'ignore',
+        reason: 'Facet test — only validating $.facets, not hits',
+      },
+    ],
+  }),
+
+  solrTest('facet-arbitrary-range', {
+    description: 'Arbitrary range facet with custom bucket boundaries',
+    documents: [
+      { id: '1', title: 'cheap item', price: 10 },
+      { id: '2', title: 'mid item', price: 35 },
+      { id: '3', title: 'pricey item', price: 55 },
+      { id: '4', title: 'expensive item', price: 80 },
+      { id: '5', title: 'luxury item', price: 95 },
+    ],
+    requestPath:
+      '/solr/testcollection/select?q=*:*&wt=json&json.facet=' +
+      encodeURIComponent(
+        JSON.stringify({
+          price_ranges: {
+            type: 'range',
+            field: 'price',
+            ranges: [
+              { range: '[0,25)' },
+              { range: '[25,50)' },
+              { range: '[50,75)' },
+              { range: '[75,*)' },
+            ],
+          },
+        }),
+      ),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        price: { type: 'pfloat' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        price: { type: 'float' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      {
+        path: '$.response',
+        rule: 'ignore',
+        reason: 'Facet test — only validating $.facets, not hits',
+      },
+    ],
+  }),
+
+  solrTest('facet-date-range', {
+    description: 'Date range facet using start/end/gap with +1MONTH calendar interval',
+    documents: [
+      { id: '1', title: 'jan event', event_date: '2024-01-15T00:00:00Z' },
+      { id: '2', title: 'feb event', event_date: '2024-02-10T00:00:00Z' },
+      { id: '3', title: 'mar event', event_date: '2024-03-20T00:00:00Z' },
+      { id: '4', title: 'mar event 2', event_date: '2024-03-25T00:00:00Z' },
+      { id: '5', title: 'apr event', event_date: '2024-04-05T00:00:00Z' },
+    ],
+    requestPath:
+      '/solr/testcollection/select?q=*:*&wt=json&json.facet=' +
+      encodeURIComponent(
+        JSON.stringify({
+          monthly: {
+            type: 'range',
+            field: 'event_date',
+            start: '2024-01-01T00:00:00Z',
+            end: '2024-05-01T00:00:00Z',
+            gap: '+1MONTH',
+          },
+        }),
+      ),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        event_date: { type: 'pdate' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        event_date: { type: 'date' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      {
+        path: '$.response',
+        rule: 'ignore',
+        reason: 'Facet test — only validating $.facets, not hits',
+      },
+    ],
+  }),
+
   // ───────────────────────────────────────────────────────────
   // Field list (fl) tests — _source filtering
   // ───────────────────────────────────────────────────────────
@@ -202,4 +331,85 @@ export const testCases: TestCase[] = [
       },
     },
   }),
+
+  // ───────────────────────────────────────────────────────────
+  // Highlighting tests
+  // ───────────────────────────────────────────────────────────
+
+  solrTest('highlighting-basic', {
+    description: 'Basic highlighting with hl=true on a text field',
+    documents: [
+      { id: '1', title: 'OpenSearch Migrations', description: 'A guide to search migration tools' },
+      { id: '2', title: 'Apache Solr', description: 'Enterprise search platform with advanced features' },
+      { id: '3', title: 'Elasticsearch Guide', description: 'Full-text search and analytics engine' },
+    ],
+    requestPath: '/solr/testcollection/select?q=description:search&hl=true&hl.fl=description&fl=id,title&rows=3&wt=json',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        description: { type: 'text_general' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        description: { type: 'text' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.highlighting[*][*][*]', rule: 'regex', expected: '.*<em>.*</em>.*', reason: 'Solr and OpenSearch both use UnifiedHighlighter but passage scoring differs — fragment text boundaries may not match exactly, so we only verify tags are present' },
+    ],
+  }),
+
+  solrTest('highlighting-custom-tags', {
+    description: 'Highlighting with custom pre/post tags',
+    documents: [
+      { id: '1', title: 'Apple iPhone 15 Pro', description: 'Flagship smartphone from Apple' },
+      { id: '2', title: 'Samsung Galaxy S24', description: 'Premium smartphone with AI camera' },
+    ],
+    requestPath: '/solr/testcollection/select?q=description:smartphone&hl=true&hl.fl=description&hl.simple.pre=%3Cb%3E&hl.simple.post=%3C%2Fb%3E&fl=id,title&wt=json',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        description: { type: 'text_general' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        description: { type: 'text' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.highlighting[*][*][*]', rule: 'regex', expected: '.*<b>.*</b>.*', reason: 'Verifies custom pre/post tags (<b></b>) are applied instead of default <em></em> — fragment text may still differ between highlighters' },
+    ],
+  }),
+
+  solrTest('highlighting-multiple-fields', {
+    description: 'Highlighting across multiple fields',
+    documents: [
+      { id: '1', title: 'Apple MacBook Pro', description: 'Professional laptop from Apple with M3 chip' },
+      { id: '2', title: 'Dell XPS Laptop', description: 'Premium ultrabook with Intel processor' },
+    ],
+    requestPath: '/solr/testcollection/select?q=*:*&hl=true&hl.fl=title,description&hl.q=Apple&fl=id,title&wt=json',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        description: { type: 'text_general' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        description: { type: 'text' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.highlighting[*][*][*]', rule: 'regex', expected: '.*<em>.*</em>.*', reason: 'Fragment text may differ between Solr and OpenSearch highlighters' },
+    ],
+  }),
 ];
+

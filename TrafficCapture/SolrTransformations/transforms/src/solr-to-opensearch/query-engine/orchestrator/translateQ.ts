@@ -23,6 +23,9 @@
  *     and attaches warnings for unsupported parts.
  */
 
+import { parseSolrQuery } from '../parser/parser';
+import { transformNode } from '../transformer/astToOpenSearch';
+
 export interface TranslateResult {
   /**
    * The OpenSearch Query DSL as a nested Map structure.
@@ -59,6 +62,16 @@ export interface TranslationWarning {
 export type TranslationMode = 'partial' | 'passthrough-on-error';
 
 /**
+ * Build a query_string passthrough DSL Map.
+ * Wraps the raw Solr query so OpenSearch can attempt to execute it as-is.
+ */
+function passthroughDsl(query: string): Map<string, any> {
+  return new Map([
+    ['query_string', new Map([['query', query]])],
+  ]);
+}
+
+/**
  * Translate a Solr query into OpenSearch Query DSL.
  *
  * @param params - All Solr request parameters. The orchestrator reads `q`
@@ -72,16 +85,42 @@ export type TranslationMode = 'partial' | 'passthrough-on-error';
  */
 export function translateQ(
   params: ReadonlyMap<string, string>,
-  mode?: TranslationMode,
+  mode: TranslationMode = 'passthrough-on-error',
 ): TranslateResult {
-  // TODO: implement
-  // 1. Read q from params (default to '*:*')
-  // 2. Call parseSolrQuery(q, params) from ../parser/parser
-  // 3. If ast is null (parse failure): return query_string passthrough
-  //    + warnings (same behavior for both modes — no AST to work with)
-  // 4. Call transformNode(ast) from ../transformer/astToOpenSearch
-  //    - In passthrough-on-error mode: abort on first unsupported construct, return passthrough
-  //    - In partial mode: translate supported parts, collect warnings
-  // 5. Return { dsl, warnings }
-  throw new Error('Not implemented');
+  const query = params.get('q') || '*:*';
+
+  // Stage 1: Parse
+  const { ast, errors } = parseSolrQuery(query, params);
+
+  // Parse failure — passthrough regardless of mode (no AST to work with)
+  if (ast === null) {
+    const warnings: TranslationWarning[] = errors.map((e) => ({
+      construct: 'parse_error',
+      position: e.position,
+      message: e.message,
+    }));
+    return { dsl: passthroughDsl(query), warnings };
+  }
+
+  // Stage 2: Transform
+  try {
+    const dsl = transformNode(ast);
+    return { dsl, warnings: [] };
+  } catch (err: unknown) {
+    // Transform failure — unsupported node type or unexpected error
+    const message = (err as Error).message;
+    const warning: TranslationWarning = {
+      construct: 'transform_error',
+      message,
+    };
+
+    if (mode === 'passthrough-on-error') {
+      return { dsl: passthroughDsl(query), warnings: [warning] };
+    }
+
+    // Partial mode: return what we have (passthrough for now)
+    // TODO: implement partial translation of subtrees when more rules exist —
+    // walk the AST, translate supported nodes, passthrough unsupported ones.
+    return { dsl: passthroughDsl(query), warnings: [warning] };
+  }
 }
