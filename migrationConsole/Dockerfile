@@ -133,7 +133,6 @@ RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \
     echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
     echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc && \
     echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc && \
-    echo 'source /.venv/bin/activate' >> ~/.bashrc && \
     echo 'console completion bash 2> /dev/null > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\\t) \\[\\e[92m\\]migration-console \\[\\e[0m\\](\\w) -> "'>> ~/.bashrc
