@@ -1511,7 +1511,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "required": [
               "autoCreate"
             ],
-            "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap:9092'."
+            "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."
           },
           {
             "type": "object",
@@ -2864,7 +2864,7 @@ exports[`test schemas matches expected union field schemas render as expected 1`
             "required": [
               "autoCreate"
             ],
-            "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap:9092'."
+            "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."
           },
           {
             "type": "object",

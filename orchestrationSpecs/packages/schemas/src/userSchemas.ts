@@ -582,7 +582,8 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
 
 export const KAFKA_CLUSTER_CONFIG = z.union([
     z.object({autoCreate: KAFKA_CLUSTER_CREATION_CONFIG})
-        .describe("Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap:9092'."),
+        .describe("Auto-create a new Strimzi Kafka cluster with the specified configuration. " +
+            "The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."),
     z.object({existing: KAFKA_CLIENT_CONFIG })
         .describe("Use an existing Kafka cluster by providing connection details.")
 ]).describe("Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one.");
