@@ -36,6 +36,17 @@ NAMESPACE="${BUILDKIT_NAMESPACE:-buildkit}"
 if [[ "$CONTEXT" =~ (eks:|gke_|aks-|migration-eks-) ]]; then
   echo "Detected cloud K8s, using kubernetes driver with native multi-arch builds"
   
+  # Resource requests/limits for buildkit pods — ensures pods get scheduled on
+  # appropriately sized nodes and aren't evicted during large builds.
+  # do-not-disrupt prevents Karpenter from evicting build nodes mid-build.
+  BUILDKIT_RESOURCE_OPTS=(
+    --driver-opt="requests.cpu=${BUILDKIT_REQUESTS_CPU:-4}"
+    --driver-opt="requests.memory=${BUILDKIT_REQUESTS_MEMORY:-8Gi}"
+    --driver-opt="limits.cpu=${BUILDKIT_LIMITS_CPU:-8}"
+    --driver-opt="limits.memory=${BUILDKIT_LIMITS_MEMORY:-16Gi}"
+    '--driver-opt=annotations.karpenter.sh/do-not-disrupt=true'
+  )
+
   docker buildx create \
     --name="$BUILDER_NAME" \
     --driver=kubernetes \
@@ -44,6 +55,7 @@ if [[ "$CONTEXT" =~ (eks:|gke_|aks-|migration-eks-) ]]; then
     --driver-opt="namespace=${NAMESPACE}" \
     --driver-opt="nodeselector=kubernetes.io/arch=amd64" \
     --driver-opt='"tolerations=key=build-nodepool,value=true,effect=NoSchedule"' \
+    "${BUILDKIT_RESOURCE_OPTS[@]}" \
     ${BUILDKIT_IMAGE:+--driver-opt="image=${BUILDKIT_IMAGE}"}
 
   docker buildx create \
@@ -55,6 +67,7 @@ if [[ "$CONTEXT" =~ (eks:|gke_|aks-|migration-eks-) ]]; then
     --driver-opt="namespace=${NAMESPACE}" \
     --driver-opt="nodeselector=kubernetes.io/arch=arm64" \
     --driver-opt='"tolerations=key=build-nodepool,value=true,effect=NoSchedule"' \
+    "${BUILDKIT_RESOURCE_OPTS[@]}" \
     ${BUILDKIT_IMAGE:+--driver-opt="image=${BUILDKIT_IMAGE}"}
 else
   echo "Detected local K8s, using remote driver with port-forwards"
