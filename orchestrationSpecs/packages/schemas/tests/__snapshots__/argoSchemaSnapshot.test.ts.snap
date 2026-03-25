@@ -2061,7 +2061,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "podReplicas": {
                         "type": "number",
                         "default": 1,
-                        "description": "Number of RFS (Reindex From Snapshot) pod replicas in the Kubernetes Deployment. Each replica processes shards independently using distributed work coordination."
+                        "description": "Number of RFS (Reindex From Snapshot) pod replicas. Each replica processes shards independently."
                       },
                       "jvmArgs": {
                         "type": "string",

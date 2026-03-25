@@ -434,7 +434,7 @@ export const USER_METADATA_OPTIONS = z.object({
 
 export const USER_RFS_WORKFLOW_OPTIONS = z.object({
     podReplicas: z.number().default(1).optional()
-        .describe("Number of RFS (Reindex From Snapshot) pod replicas in the Kubernetes Deployment. Each replica processes shards independently using distributed work coordination."),
+        .describe("Number of RFS (Reindex From Snapshot) pod replicas. Each replica processes shards independently."),
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
