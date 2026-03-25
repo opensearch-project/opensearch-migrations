@@ -36,8 +36,8 @@ versions.each { minor, info ->
     def base = baseImage(corretto)
     def javaHome = javaHomePath(corretto)
 
-    // Local docker build with cross-process file locking to prevent parallel JUnit
-    // processes from building the same image simultaneously
+    // Local docker build with timestamp-based locking to prevent parallel builds.
+    // Lock file contains epoch minute; locks older than 2 minutes are treated as stale.
     tasks.register("buildImage_${safeName}") {
         group = 'docker'
         description = "Build ${imagePrefix}:${version}"
@@ -50,41 +50,51 @@ versions.each { minor, info ->
             def lockDir = new File(System.getProperty("java.io.tmpdir"), "custom-es-image-locks")
             lockDir.mkdirs()
             def lockFile = new File(lockDir, "es-${safeName}.lock")
-            def raf = new RandomAccessFile(lockFile, "rw")
-            try {
-                def deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(60)
-                def lock = raf.channel.tryLock()
-                while (lock == null) {
-                    if (System.nanoTime() >= deadline) {
-                        throw new GradleException("Timed out after 60s waiting for lock on ${lockFile}")
-                    }
-                    Thread.sleep(1000)
-                    lock = raf.channel.tryLock()
-                }
+            def staleMinutes = 2
+
+            // Wait if another process is building (non-stale lock exists)
+            while (lockFile.exists()) {
                 try {
-                    // Re-check if image was built by another process while we waited
-                    def check = ['docker', 'image', 'inspect', tag].execute()
-                    check.waitFor()
-                    if (check.exitValue() == 0) {
-                        logger.lifecycle("Image {} already exists (built by another process), skipping.", tag)
-                        return
+                    def lockedMinute = lockFile.text.trim() as long
+                    def nowMinute = System.currentTimeMillis().intdiv(60_000)
+                    if (nowMinute - lockedMinute >= staleMinutes) {
+                        logger.lifecycle("Stale lock for {} ({}min old), ignoring.", tag, nowMinute - lockedMinute)
+                        lockFile.delete()
+                        break
                     }
-                    exec {
-                        commandLine 'docker', 'build',
-                                '--build-arg', "CORRETTO_VERSION=${corretto}",
-                                '--build-arg', "BASE_IMAGE=${base}",
-                                '--build-arg', "JAVA_HOME_PATH=${javaHome}",
-                                '--build-arg', "ES_VERSION=${version}",
-                                '--build-arg', "TARBALL_URL=${url}",
-                                '-f', dockerfilePath,
-                                '-t', tag,
-                                contextPath
-                    }
-                } finally {
-                    lock.release()
+                } catch (Exception ignored) {
+                    // Corrupt/empty lock file — treat as stale
+                    lockFile.delete()
+                    break
+                }
+                logger.lifecycle("Waiting for another process to finish building {}...", tag)
+                Thread.sleep(5000)
+            }
+
+            // Check if image already exists (another process may have just built it)
+            def check = ['docker', 'image', 'inspect', tag].execute()
+            check.waitFor()
+            if (check.exitValue() == 0) {
+                logger.lifecycle("Image {} already exists, skipping.", tag)
+                return
+            }
+
+            // Write lock with current epoch minute
+            lockFile.text = "${System.currentTimeMillis().intdiv(60_000)}"
+            try {
+                exec {
+                    commandLine 'docker', 'build',
+                            '--build-arg', "CORRETTO_VERSION=${corretto}",
+                            '--build-arg', "BASE_IMAGE=${base}",
+                            '--build-arg', "JAVA_HOME_PATH=${javaHome}",
+                            '--build-arg', "ES_VERSION=${version}",
+                            '--build-arg', "TARBALL_URL=${url}",
+                            '-f', dockerfilePath,
+                            '-t', tag,
+                            contextPath
                 }
             } finally {
-                raf.close()
+                lockFile.delete()
             }
         }
     }
