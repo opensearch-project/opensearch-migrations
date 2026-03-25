@@ -120,7 +120,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "kafkaTopic": {
                       "type": "string",
                       "default": "",
-                      "description": "Kafka topic name for captured traffic. If empty, defaults to the proxy name."
+                      "description": "Default Kafka topic name for this cluster. Can be overridden per-proxy via the capture config's kafkaTopic field."
                     },
                     "label": {
                       "type": "string"
@@ -1138,7 +1138,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "kafkaTopic": {
                       "type": "string",
                       "default": "",
-                      "description": "Kafka topic name for captured traffic. If empty, defaults to the proxy name."
+                      "description": "Default Kafka topic name for this cluster. Can be overridden per-proxy via the capture config's kafkaTopic field."
                     },
                     "label": {
                       "type": "string"
@@ -1529,13 +1529,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "kafkaTopic": {
                     "type": "string",
                     "default": "",
-                    "description": "Kafka topic name for captured traffic. If empty, defaults to the proxy name."
+                    "description": "Default Kafka topic name for this cluster. Can be overridden per-proxy via the capture config's kafkaTopic field."
                   }
                 },
                 "required": [
                   "kafkaConnection"
                 ],
-                "description": "Client connection configuration for an existing Kafka cluster."
+                "description": "Connection configuration for an externally managed Kafka cluster."
               }
             },
             "required": [

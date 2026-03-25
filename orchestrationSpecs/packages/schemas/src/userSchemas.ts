@@ -119,12 +119,12 @@ export const KAFKA_CLIENT_CONFIG = z.object({
         .describe("Enable SASL/IAM authentication for Amazon MSK. When true, configures the Kafka client with the required SASL properties for IAM-based authentication."),
     kafkaConnection: z.string()
         .describe("Comma-delimited list of Kafka broker addresses in 'HOSTNAME:PORT' format (e.g. 'broker1:9092,broker2:9092'). " +
-            "If empty, a matching Kafka cluster must be managed by this workflow via kafkaClusterConfiguration.")
+            "Required when using an externally managed Kafka cluster.")
         .regex(new RegExp(`^(?:[a-z0-9][-a-z0-9.]*:${PORT_NUMBER_PATTERN}(?:,(?!$)|$))*$`)),
     kafkaTopic: z.string()
-        .describe("Kafka topic name for captured traffic. If empty, defaults to the proxy name.")
+        .describe("Default Kafka topic name for this cluster. Can be overridden per-proxy via the capture config's kafkaTopic field.")
         .default(""),
-}).describe("Client connection configuration for an existing Kafka cluster.");
+}).describe("Connection configuration for an externally managed Kafka cluster.");
 
 export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 
