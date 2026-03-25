@@ -1728,7 +1728,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "jvmArgs": {
                                   "type": "string",
                                   "default": "",
-                                  "description": "Additional JVM arguments passed to the CreateSnapshot process via JDK_JAVA_OPTIONS (e.g. '-Xmx2g')."
+                                  "description": "Additional JVM arguments passed to the CreateSnapshot process via JDK_JAVA_OPTIONS (e.g. '-Xmx2g'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
                                 },
                                 "loggingConfigurationOverrideConfigMap": {
                                   "type": "string",
@@ -1964,7 +1964,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "jvmArgs": {
                         "type": "string",
                         "default": "",
-                        "description": "Additional JVM arguments passed to the metadata migration process via JDK_JAVA_OPTIONS."
+                        "description": "Additional JVM arguments passed to the metadata migration process via JDK_JAVA_OPTIONS. If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
                       },
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
@@ -2066,7 +2066,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "jvmArgs": {
                         "type": "string",
                         "default": "",
-                        "description": "Additional JVM arguments passed to the RFS process via JDK_JAVA_OPTIONS (e.g. '-Xmx6g'). Tune based on shard sizes and available memory."
+                        "description": "Additional JVM arguments passed to the RFS process via JDK_JAVA_OPTIONS (e.g. '-Xmx6g'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
                       },
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
@@ -2600,7 +2600,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "jvmArgs": {
                     "type": "string",
                     "default": "",
-                    "description": "Additional JVM arguments passed to the replayer process via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC')."
+                    "description": "Additional JVM arguments passed to the replayer process via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
                   },
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",

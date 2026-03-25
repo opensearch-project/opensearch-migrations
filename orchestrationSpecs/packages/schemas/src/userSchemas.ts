@@ -259,7 +259,8 @@ export const USER_PROXY_OPTIONS = z.object({
 
 export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
-        .describe("Additional JVM arguments passed to the replayer process via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC')."),
+        .describe("Additional JVM arguments passed to the replayer process via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). " +
+            "If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
             "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
@@ -336,7 +337,8 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
     snapshotPrefix: z.string().default("").optional()
         .describe("Prefix for auto-generated snapshot names. The final snapshot name is constructed as '<sourceLabel>_<snapshotPrefix>_<uniqueRunNonce>'. If empty, the snapshot record key name is used as the prefix."),
     jvmArgs: z.string().default("").optional()
-        .describe("Additional JVM arguments passed to the CreateSnapshot process via JDK_JAVA_OPTIONS (e.g. '-Xmx2g')."),
+        .describe("Additional JVM arguments passed to the CreateSnapshot process via JDK_JAVA_OPTIONS (e.g. '-Xmx2g'). " +
+            "If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
             "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
@@ -367,7 +369,8 @@ export const USER_CREATE_SNAPSHOT_OPTIONS = z.object({
 
 export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
-        .describe("Additional JVM arguments passed to the metadata migration process via JDK_JAVA_OPTIONS."),
+        .describe("Additional JVM arguments passed to the metadata migration process via JDK_JAVA_OPTIONS. " +
+            "If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
             "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
@@ -426,7 +429,8 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
     podReplicas: z.number().default(1).optional()
         .describe("Number of RFS (Reindex From Snapshot) pod replicas in the Kubernetes Deployment. Each replica processes shards independently using distributed work coordination."),
     jvmArgs: z.string().default("").optional()
-        .describe("Additional JVM arguments passed to the RFS process via JDK_JAVA_OPTIONS (e.g. '-Xmx6g'). Tune based on shard sizes and available memory."),
+        .describe("Additional JVM arguments passed to the RFS process via JDK_JAVA_OPTIONS (e.g. '-Xmx6g'). " +
+            "If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
             "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
