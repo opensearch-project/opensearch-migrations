@@ -189,6 +189,7 @@ subprojects {
                 useJUnitPlatform()
                 //  Disable parallel test execution, see MIGRATIONS-1666
                 systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+                systemProperty 'project.root', rootProject.projectDir.absolutePath
                 systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
 
                 // Register BucketTestExtension for all tests to enable test striping

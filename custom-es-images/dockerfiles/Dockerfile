@@ -57,6 +57,7 @@ RUN dnf install -y --allowerasing tar gzip findutils curl && dnf clean all && \
 # --- Stage 2: Build cgroups v2 fix for ES 5.1-5.2 ---
 FROM ${BASE_IMAGE} AS cgroup-fixer
 ARG ES_VERSION
+COPY cgroup_fix.c /tmp/fix.c
 
 RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     MINOR=$(echo "${ES_VERSION}" | cut -d. -f2) && \
@@ -68,7 +69,6 @@ RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
       else \
         dnf install -y gcc glibc-devel && dnf clean all; \
       fi && \
-      printf '#define _GNU_SOURCE\n#include <stdio.h>\n#include <string.h>\n#include <dlfcn.h>\n#include <fcntl.h>\n#include <stdarg.h>\n#include <unistd.h>\nstatic const char *rp="/proc/self/cgroup";\nstatic const char *fp="/tmp/cgroup_filtered";\nstatic const char *fix(const char *p){return (p&&strcmp(p,rp)==0)?fp:p;}\ntypedef int (*open_t)(const char*,int,...);\nint open(const char *p,int f,...){open_t r=(open_t)dlsym(RTLD_NEXT,"open");mode_t m=0;if(f&O_CREAT){va_list a;va_start(a,f);m=va_arg(a,mode_t);va_end(a);}return r(fix(p),f,m);}\nint open64(const char *p,int f,...){open_t r=(open_t)dlsym(RTLD_NEXT,"open64");mode_t m=0;if(f&O_CREAT){va_list a;va_start(a,f);m=va_arg(a,mode_t);va_end(a);}return r(fix(p),f,m);}\nint openat(int d,const char *p,int f,...){typedef int(*fn)(int,const char*,int,...);fn r=(fn)dlsym(RTLD_NEXT,"openat");mode_t m=0;if(f&O_CREAT){va_list a;va_start(a,f);m=va_arg(a,mode_t);va_end(a);}return r(d,fix(p),f,m);}\ntypedef FILE*(*fopen_t)(const char*,const char*);\nFILE*fopen(const char*p,const char*m){fopen_t r=(fopen_t)dlsym(RTLD_NEXT,"fopen");return r(fix(p),m);}\nFILE*fopen64(const char*p,const char*m){fopen_t r=(fopen_t)dlsym(RTLD_NEXT,"fopen64");return r(fix(p),m);}\n' > /tmp/fix.c && \
       gcc -shared -fPIC -o /opt/fix/libcgroup_fix.so /tmp/fix.c -ldl; \
     else \
       touch /opt/fix/.skip; \
@@ -90,8 +90,6 @@ RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
       printf 'network.host: 0.0.0.0\ndiscovery.zen.minimum_master_nodes: 1\n' >> /tmp/config/elasticsearch.yml; \
     elif [ "$MAJOR" -eq 5 ] && [ "$MINOR" -lt 4 ]; then \
       printf 'http.host: 0.0.0.0\ntransport.host: _local_\ndiscovery.zen.minimum_master_nodes: 1\n' >> /tmp/config/elasticsearch.yml; \
-    elif [ "$MAJOR" -eq 5 ]; then \
-      printf 'network.host: 0.0.0.0\ndiscovery.type: single-node\n' >> /tmp/config/elasticsearch.yml; \
     else \
       printf 'network.host: 0.0.0.0\ndiscovery.type: single-node\n' >> /tmp/config/elasticsearch.yml; \
     fi && \

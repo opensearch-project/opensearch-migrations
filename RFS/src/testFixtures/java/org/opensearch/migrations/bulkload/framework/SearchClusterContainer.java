@@ -2,6 +2,8 @@ package org.opensearch.migrations.bulkload.framework;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -9,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
@@ -295,6 +298,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         }
     }
 
+    private static final int BUILD_TIMEOUT_MINUTES = 10;
+
     /**
      * Build a custom-elasticsearch image on demand via Gradle if not already available locally.
      */
@@ -306,21 +311,26 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         String[] parts = tag.split("\\.");
         String taskName = "buildImage_" + parts[0] + "_" + parts[1]; // e.g. "buildImage_7_10"
 
-        File dir = new File(System.getProperty("user.dir"));
-        while (dir != null && !new File(dir, "gradlew").exists()) {
-            dir = dir.getParentFile();
+        // project.root is injected by Gradle via systemProperty in build.gradle
+        String projectRoot = System.getProperty("project.root");
+        if (projectRoot == null) {
+            throw new RuntimeException(
+                "System property 'project.root' not set. Run tests via Gradle (./gradlew test).");
         }
-        if (dir == null) {
-            throw new RuntimeException("Cannot find gradlew to build " + version.imageName);
-        }
+        Path rootPath = Paths.get(projectRoot);
 
         log.info("Building Docker image on-demand: {} (task: :custom-es-images:{})", version.imageName, taskName);
         try {
             Process p = new ProcessBuilder(
-                new File(dir, "gradlew").getAbsolutePath(),
+                rootPath.resolve("gradlew").toString(),
                 ":custom-es-images:" + taskName
-            ).directory(dir).inheritIO().start();
-            if (p.waitFor() != 0) {
+            ).directory(rootPath.toFile()).inheritIO().start();
+            if (!p.waitFor(BUILD_TIMEOUT_MINUTES, TimeUnit.MINUTES)) {
+                p.destroyForcibly();
+                throw new RuntimeException(
+                    "Gradle build timed out after " + BUILD_TIMEOUT_MINUTES + " minutes for image: " + version.imageName);
+            }
+            if (p.exitValue() != 0) {
                 throw new RuntimeException("Gradle build failed for image: " + version.imageName);
             }
         } catch (IOException | InterruptedException e) {
