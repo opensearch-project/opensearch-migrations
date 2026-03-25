@@ -63,7 +63,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type",
                             "size"
                           ],
-                          "description": "Use persistent storage backed by a PersistentVolumeClaim. Required for production workloads."
+                          "description": "Use persistent storage backed by a PersistentVolumeClaim. Required for production workloads. Size should account for expected traffic volume and Kafka retention period. If the disk fills up, Kafka brokers will become unresponsive and require manual intervention."
                         }
                       ],
                       "default": {
@@ -1484,7 +1484,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type",
                           "size"
                         ],
-                        "description": "Use persistent storage backed by a PersistentVolumeClaim. Required for production workloads."
+                        "description": "Use persistent storage backed by a PersistentVolumeClaim. Required for production workloads. Size should account for expected traffic volume and Kafka retention period. If the disk fills up, Kafka brokers will become unresponsive and require manual intervention."
                       }
                     ],
                     "default": {

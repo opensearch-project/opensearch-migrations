@@ -560,14 +560,20 @@ export const USER_RFS_OPTIONS = z.object({
 export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
     replicas:      z.number().int().min(1).default(1).optional()
         .describe("Number of Kafka broker replicas in the Strimzi Kafka cluster. Increase for higher availability and throughput."),
-    storage:       z.discriminatedUnion("type", [
-                       z.object({ type: z.literal("ephemeral") })
-                           .describe("Use ephemeral (emptyDir) storage. Data is lost when pods restart. Suitable for development and testing."),
-                       z.object({ type: z.literal("persistent-claim"), size: z.string()
-                           .describe("Size of the PersistentVolumeClaim (e.g. '10Gi', '100Gi').") })
-                           .describe("Use persistent storage backed by a PersistentVolumeClaim. Required for production workloads.")
-                   ]).default({ type: "ephemeral" }).optional()
-                   .describe("Storage configuration for Kafka broker data."),
+    storage: z.discriminatedUnion("type", [
+        z.object({ type: z.literal("ephemeral") })
+            .describe("Use ephemeral (emptyDir) storage. Data is lost when pods restart. Suitable for development and testing."),
+        z.object({
+            type: z.literal("persistent-claim"),
+            size: z.string()
+                .describe("Size of the PersistentVolumeClaim (e.g. '10Gi', '100Gi').")
+        }).describe("Use persistent storage backed by a PersistentVolumeClaim. Required for production workloads. " +
+            // TODO: Add guidance on sizing based on traffic volume and retention duration.
+            // Kafka does not gracefully handle disk exhaustion — brokers may become unresponsive.
+            "Size should account for expected traffic volume and Kafka retention period. " +
+            "If the disk fills up, Kafka brokers will become unresponsive and require manual intervention.")
+    ]).default({ type: "ephemeral" }).optional()
+        .describe("Storage configuration for Kafka broker data."),
     partitions:    z.number().int().min(1).default(1).optional()
         .describe("Number of partitions for auto-created Kafka topics. More partitions enable higher parallelism for consumers."),
     topicReplicas: z.number().int().min(1).default(1).optional()
