@@ -299,9 +299,12 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     }
 
     private static final int BUILD_TIMEOUT_MINUTES = 10;
+    private static final int MAX_BUILD_RETRIES = 3;
+    private static final long RETRY_DELAY_MS = 15_000;
 
     /**
      * Build a custom-elasticsearch image on demand via Gradle if not already available locally.
+     * Retries up to {@link #MAX_BUILD_RETRIES} times to handle transient failures (e.g. Docker Hub outages).
      */
     private static void ensureCustomImageAvailable(ContainerVersion version) {
         if (!version.imageName.startsWith("custom-elasticsearch:") || isImageAvailable(version)) {
@@ -320,24 +323,36 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         Path rootPath = Paths.get(projectRoot);
 
         log.info("Building Docker image on-demand: {} (task: :custom-es-images:{})", version.imageName, taskName);
-        try {
-            Process p = new ProcessBuilder(
-                rootPath.resolve("gradlew").toString(),
-                ":custom-es-images:" + taskName
-            ).directory(rootPath.toFile()).inheritIO().start();
-            if (!p.waitFor(BUILD_TIMEOUT_MINUTES, TimeUnit.MINUTES)) {
-                p.destroyForcibly();
-                throw new RuntimeException(
-                    "Gradle build timed out after " + BUILD_TIMEOUT_MINUTES + " minutes for image: " + version.imageName);
-            }
-            if (p.exitValue() != 0) {
-                throw new RuntimeException("Gradle build failed for image: " + version.imageName);
-            }
-        } catch (IOException | InterruptedException e) {
-            if (e instanceof InterruptedException) {
+        for (int attempt = 1; attempt <= MAX_BUILD_RETRIES; attempt++) {
+            try {
+                Process p = new ProcessBuilder(
+                    rootPath.resolve("gradlew").toString(),
+                    ":custom-es-images:" + taskName
+                ).directory(rootPath.toFile()).inheritIO().start();
+                if (!p.waitFor(BUILD_TIMEOUT_MINUTES, TimeUnit.MINUTES)) {
+                    p.destroyForcibly();
+                    throw new RuntimeException(
+                        "Gradle build timed out after " + BUILD_TIMEOUT_MINUTES + " minutes for image: " + version.imageName);
+                }
+                if (p.exitValue() != 0) {
+                    throw new RuntimeException("Gradle build failed for image: " + version.imageName);
+                }
+                return; // success
+            } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                throw new RuntimeException("Failed to build image: " + version.imageName, e);
+            } catch (Exception e) {
+                if (attempt < MAX_BUILD_RETRIES) {
+                    log.warn("Build attempt {}/{} failed for {}, retrying in {}s...",
+                        attempt, MAX_BUILD_RETRIES, version.imageName, RETRY_DELAY_MS / 1000, e);
+                    try { Thread.sleep(RETRY_DELAY_MS); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("Interrupted during retry wait", ie);
+                    }
+                } else {
+                    throw new RuntimeException("Failed to build image after " + MAX_BUILD_RETRIES + " attempts: " + version.imageName, e);
+                }
             }
-            throw new RuntimeException("Failed to build image: " + version.imageName, e);
         }
     }
 

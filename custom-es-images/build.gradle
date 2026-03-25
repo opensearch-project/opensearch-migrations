@@ -70,16 +70,33 @@ versions.each { minor, info ->
                         logger.lifecycle("Image {} already exists (built by another process), skipping.", tag)
                         return
                     }
-                    exec {
-                        commandLine 'docker', 'build',
-                                '--build-arg', "CORRETTO_VERSION=${corretto}",
-                                '--build-arg', "BASE_IMAGE=${base}",
-                                '--build-arg', "JAVA_HOME_PATH=${javaHome}",
-                                '--build-arg', "ES_VERSION=${version}",
-                                '--build-arg', "TARBALL_URL=${url}",
-                                '-f', dockerfilePath,
-                                '-t', tag,
-                                contextPath
+                    def maxRetries = 3
+                    def lastException = null
+                    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+                        try {
+                            exec {
+                                commandLine 'docker', 'build',
+                                        '--build-arg', "CORRETTO_VERSION=${corretto}",
+                                        '--build-arg', "BASE_IMAGE=${base}",
+                                        '--build-arg', "JAVA_HOME_PATH=${javaHome}",
+                                        '--build-arg', "ES_VERSION=${version}",
+                                        '--build-arg', "TARBALL_URL=${url}",
+                                        '-f', dockerfilePath,
+                                        '-t', tag,
+                                        contextPath
+                            }
+                            lastException = null
+                            break
+                        } catch (Exception e) {
+                            lastException = e
+                            if (attempt < maxRetries) {
+                                logger.warn("Docker build attempt {}/{} failed for {}, retrying in 15s...", attempt, maxRetries, tag)
+                                Thread.sleep(15000)
+                            }
+                        }
+                    }
+                    if (lastException != null) {
+                        throw lastException
                     }
                 } finally {
                     lock.release()
