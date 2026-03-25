@@ -2548,11 +2548,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "additionalProperties": {
             "type": "object",
             "properties": {
-              "skipApprovals": {
-                "type": "boolean",
-                "default": false,
-                "description": "When true, skips all manual approval gates for this replayer."
-              },
               "fromProxy": {
                 "type": "string",
                 "description": "Name of the capture proxy to replay traffic from. Must match a key in traffic.proxies."

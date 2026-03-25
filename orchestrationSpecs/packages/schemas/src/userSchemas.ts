@@ -653,8 +653,6 @@ export const SNAPSHOT_MIGRATION_FILTER = z.object({
 }).describe("Reference to a specific snapshot from a specific source cluster, used to express dependencies.");
 
 export const REPLAYER_CONFIG = z.object({
-    skipApprovals: z.boolean().default(false).optional()
-        .describe("When true, skips all manual approval gates for this replayer."),
     fromProxy: z.string()
         .describe("Name of the capture proxy to replay traffic from. Must match a key in traffic.proxies."),
     toTarget: z.string()
