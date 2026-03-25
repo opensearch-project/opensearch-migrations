@@ -116,7 +116,7 @@ export const OPTIONAL_HTTP_ENDPOINT_PATTERN = `^(?:https?:\\/\\/${HOSTNAME_PATTE
 
 export const KAFKA_CLIENT_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional()
-        .describe("Enable SASL/IAM authentication for Amazon MSK. When true, configures the Kafka client with the required SASL properties for IAM-based authentication."),
+        .describe("Enable SASL/IAM authentication for Amazon MSK. When true, configures the Kafka client with the required SASL properties for IAM-based authentication. Uses the pod's IAM role via EKS Pod Identity."),
     kafkaConnection: z.string()
         .describe("Comma-delimited list of Kafka broker addresses in 'HOSTNAME:PORT' format (e.g. 'broker1:9092,broker2:9092'). " +
             "Required when using an externally managed Kafka cluster.")
@@ -230,7 +230,7 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
     tls: PROXY_TLS_CONFIG.optional()
         .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile."),
     enableMSKAuth: z.boolean().default(false).optional()
-        .describe("Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK."),
+        .describe("Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity."),
     suppressCaptureForHeaderMatch: z.array(z.string()).default([]).optional()
         .describe("List of header patterns. Requests matching any of these header patterns will be forwarded but not captured to Kafka."),
     suppressCaptureForMethod: z.string().default("").optional()
@@ -277,7 +277,7 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
-        .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK."),
+        .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity."),
     kafkaTrafficPropertyFile: z.string().optional()
         .describe("[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."),
     lookaheadTimeSeconds: z.number().default(400).optional()
@@ -585,7 +585,7 @@ export const HTTP_AUTH_SIGV4 = z.object({
         service: z.string().default("es").optional()
             .describe("AWS service name for SigV4 signing. Use 'es' for Amazon OpenSearch Service or 'aoss' for OpenSearch Serverless."),
     })
-}).describe("AWS SigV4 request signing authentication. Uses the pod's IAM role credentials.");
+}).describe("AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity.");
 
 export const HTTP_AUTH_MTLS = z.object({
     mtls: z.object({

@@ -570,7 +570,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "required": [
                             "sigv4"
                           ],
-                          "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials."
+                          "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
                         },
                         {
                           "type": "object",
@@ -992,7 +992,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "required": [
                             "sigv4"
                           ],
-                          "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials."
+                          "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
                         },
                         {
                           "type": "object",
@@ -1361,7 +1361,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "required": [
                             "sigv4"
                           ],
-                          "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials."
+                          "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
                         },
                         {
                           "type": "object",
@@ -1522,7 +1522,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "enableMSKAuth": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Enable SASL/IAM authentication for Amazon MSK. When true, configures the Kafka client with the required SASL properties for IAM-based authentication."
+                    "description": "Enable SASL/IAM authentication for Amazon MSK. When true, configures the Kafka client with the required SASL properties for IAM-based authentication. Uses the pod's IAM role via EKS Pod Identity."
                   },
                   "kafkaConnection": {
                     "type": "string",
@@ -1615,7 +1615,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "required": [
                   "sigv4"
                 ],
-                "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials."
+                "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
               },
               {
                 "type": "object",
@@ -1883,7 +1883,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "required": [
                   "sigv4"
                 ],
-                "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials."
+                "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
               },
               {
                 "type": "object",
@@ -2513,7 +2513,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "enableMSKAuth": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK."
+                    "description": "Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity."
                   },
                   "suppressCaptureForHeaderMatch": {
                     "type": "array",
@@ -2676,7 +2676,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "kafkaTrafficEnableMSKAuth": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK."
+                    "description": "Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity."
                   },
                   "kafkaTrafficPropertyFile": {
                     "type": "string",
