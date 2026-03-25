@@ -73,10 +73,17 @@ public class SolrSnapshotCreator {
     public void createSnapshot() {
         for (var collection : collections) {
             var asyncId = backupName + "-" + collection;
-            var url = String.format(
-                "%s/solr/admin/collections?action=BACKUP&name=%s&collection=%s&location=%s&async=%s&wt=json",
-                solrBaseUrl, backupName, collection, backupLocation, asyncId
-            );
+            var urlBuilder = new StringBuilder(String.format(
+                "%s/solr/admin/collections?action=BACKUP&name=%s&collection=%s&async=%s&wt=json",
+                solrBaseUrl, backupName, collection, asyncId
+            ));
+            if (backupLocation != null && backupLocation.startsWith("s3://")) {
+                // S3 backups use the configured repository; pass location as sub-path
+                urlBuilder.append("&repository=default-s3");
+            } else if (backupLocation != null) {
+                urlBuilder.append("&location=").append(backupLocation);
+            }
+            var url = urlBuilder.toString();
             log.info("Initiating SolrCloud backup for collection '{}': async={}", collection, asyncId);
             var response = getJson(url);
             var status = response.path("responseHeader").path(STATUS_FIELD).asInt(-1);
