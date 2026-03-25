@@ -637,22 +637,25 @@ def _solr_backup_status(cluster: Cluster, snapshot_name: str, deep_check: bool =
         status_obj = _get_solr_snapshot_status(cluster, snapshot_name)
 
         if not deep_check:
-            return CommandResult(success=True, value=status_obj.status.value)
+            # Return SUCCESS/IN_PROGRESS/FAILED to match ES snapshot status format
+            state_map = {StepState.COMPLETED: "SUCCESS", StepState.RUNNING: "IN_PROGRESS", StepState.FAILED: "FAILED"}
+            return CommandResult(success=True, value=state_map.get(status_obj.status, status_obj.status.value))
 
         start_time = status_obj.started.strftime('%Y-%m-%d %H:%M:%S') if status_obj.started else ''
         finish_time = status_obj.finished.strftime('%Y-%m-%d %H:%M:%S') if status_obj.finished else ''
         eta_str = format_duration(int(status_obj.eta_ms)) if status_obj.eta_ms else "0h 0m 0s"
         data_mb = (status_obj.data_total_bytes or 0) / (1024 ** 2)
 
+        # Use same field names as ES snapshot status for compatibility with workflow checkScript
         message = (
-            f"Backup status: {status_obj.status.value}\n"
+            f"Snapshot status: {status_obj.status.value}\n"
             f"Start time: {start_time}\n"
             f"Finished time: {finish_time}\n"
             f"Percent completed: {status_obj.percentage_completed:.2f}%\n"
             f"Estimated time to completion: {eta_str}\n"
-            f"Data size: {data_mb:.3f} MiB\n"
+            f"Data processed: {data_mb:.3f}/{data_mb:.3f} MiB\n"
             f"Total shards: {status_obj.shard_total}\n"
-            f"Completed shards: {status_obj.shard_complete}\n"
+            f"Successful shards: {status_obj.shard_complete}\n"
         )
         return CommandResult(success=True, value=message)
     except Exception as e:
