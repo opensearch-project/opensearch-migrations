@@ -86,19 +86,12 @@ tasks.register('copyDockerRuntimeJars', Sync) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     description = 'Copy runtime JARs and app jar to docker build directory'
 
-    // Define the destination directory
     def buildDir = project.file("./docker/build/runtimeJars")
     into buildDir
 
-    // Add all the required runtime JARs to be copied
     from configurations.runtimeClasspath
     from tasks.named('jar')
     include '*.jar'
-
-    // Explicit inputs for incremental build support
-    inputs.files(configurations.runtimeClasspath)
-    inputs.files(tasks.named('jar'))
-    outputs.dir(buildDir)
 }
 
 DockerServiceProps[] dockerServices = [
