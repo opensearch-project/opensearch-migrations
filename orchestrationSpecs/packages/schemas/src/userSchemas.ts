@@ -688,12 +688,6 @@ export const EXTERNALLY_MANAGED_SNAPSHOT = z.object({
 export const GENERATE_SNAPSHOT = z.object({
     createSnapshotConfig: USER_CREATE_SNAPSHOT_OPTIONS
         .describe("Configuration for creating a new snapshot of the source cluster."),
-    requiredForCompleteMigration: z.union([
-        z.object({toTargets: z.array(z.string())
-            .describe("List of target cluster labels that require this snapshot for a complete migration.")
-        }),
-        z.boolean().default(true).optional()
-    ]).describe("Whether this snapshot is required for migration completeness. Can be true/false or specify specific target clusters.")
 }).describe("Configuration to create a new snapshot of the source cluster as part of the migration workflow.");
 
 export const SNAPSHOT_NAME_CONFIG = z.union([

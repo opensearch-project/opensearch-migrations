@@ -1755,30 +1755,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 }
                               },
                               "description": "Configuration for creating a new snapshot of the source cluster."
-                            },
-                            "requiredForCompleteMigration": {
-                              "anyOf": [
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "toTargets": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      },
-                                      "description": "List of target cluster labels that require this snapshot for a complete migration."
-                                    }
-                                  },
-                                  "required": [
-                                    "toTargets"
-                                  ]
-                                },
-                                {
-                                  "type": "boolean",
-                                  "default": true
-                                }
-                              ],
-                              "description": "Whether this snapshot is required for migration completeness. Can be true/false or specify specific target clusters."
                             }
                           },
                           "required": [
@@ -3142,30 +3118,6 @@ exports[`test schemas matches expected union field schemas render as expected 1`
                   }
                 },
                 "description": "Configuration for creating a new snapshot of the source cluster."
-              },
-              "requiredForCompleteMigration": {
-                "anyOf": [
-                  {
-                    "type": "object",
-                    "properties": {
-                      "toTargets": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        },
-                        "description": "List of target cluster labels that require this snapshot for a complete migration."
-                      }
-                    },
-                    "required": [
-                      "toTargets"
-                    ]
-                  },
-                  {
-                    "type": "boolean",
-                    "default": true
-                  }
-                ],
-                "description": "Whether this snapshot is required for migration completeness. Can be true/false or specify specific target clusters."
               }
             },
             "required": [
