@@ -752,11 +752,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "transformerConfig": {
                             "type": "string",
-                            "description": "Inline JSON configuration for metadata transformers. Keys are transformer names and values are their configuration. Alternative to transformerConfigBase64 for simple configurations."
+                            "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
                           },
                           "transformerConfigFile": {
                             "type": "string",
-                            "description": "[Expert] Path to a JSON file containing metadata transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                            "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                           }
                         }
                       },
@@ -858,11 +858,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "docTransformerConfig": {
                             "type": "string",
-                            "description": "Inline JSON configuration for document transformers. Keys are transformer names and values are their configuration. Alternative to docTransformerConfigBase64 for simple configurations."
+                            "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion)."
                           },
                           "docTransformerConfigFile": {
                             "type": "string",
-                            "description": "[Expert] Path to a JSON file containing document transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                            "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                           },
                           "documentsPerBulkRequest": {
                             "type": "number",
@@ -1273,27 +1273,27 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "transformerConfig": {
                       "type": "string",
-                      "description": "Inline request transformer configuration as a JSON string. Defines transformations applied to each request before replaying to the target."
+                      "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
                     },
                     "transformerConfigEncoded": {
                       "type": "string",
-                      "description": "Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations that would be cumbersome to otherwise encode in a JSON field."
+                      "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
                     },
                     "transformerConfigFile": {
                       "type": "string",
-                      "description": "[Expert] Path to a JSON file containing request transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                      "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                     },
                     "tupleTransformerConfig": {
                       "type": "string",
-                      "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs for stateful transformations."
+                      "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
                     },
                     "tupleTransformerConfigBase64": {
                       "type": "string",
-                      "description": "Base64-encoded tuple transformer configuration."
+                      "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
                     },
                     "tupleTransformerConfigFile": {
                       "type": "string",
-                      "description": "[Expert] Path to a JSON file containing tuple transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                      "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                     },
                     "userAgent": {
                       "type": "string",
@@ -2042,15 +2042,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "transformerConfigBase64": {
                         "type": "string",
                         "default": "",
-                        "description": "Base64-encoded JSON configuration for metadata transformers. Defines custom transformations applied to index mappings and settings during migration."
+                        "description": "Base64-encoded JSON transformer configuration. Metadata transformers modify index mappings and settings during migration."
                       },
                       "transformerConfig": {
                         "type": "string",
-                        "description": "Inline JSON configuration for metadata transformers. Keys are transformer names and values are their configuration. Alternative to transformerConfigBase64 for simple configurations."
+                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
                       },
                       "transformerConfigFile": {
                         "type": "string",
-                        "description": "[Expert] Path to a JSON file containing metadata transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                        "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                       }
                     },
                     "description": "Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."
@@ -2160,15 +2160,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "docTransformerConfigBase64": {
                         "type": "string",
                         "default": "",
-                        "description": "Base64-encoded JSON configuration for document transformers. Defines custom transformations applied to each document during the backfill (e.g. field renaming, type conversion)."
+                        "description": "Base64-encoded JSON transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion)."
                       },
                       "docTransformerConfig": {
                         "type": "string",
-                        "description": "Inline JSON configuration for document transformers. Keys are transformer names and values are their configuration. Alternative to docTransformerConfigBase64 for simple configurations."
+                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion)."
                       },
                       "docTransformerConfigFile": {
                         "type": "string",
-                        "description": "[Expert] Path to a JSON file containing document transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                        "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                       },
                       "documentsPerBulkRequest": {
                         "type": "number",
@@ -2729,27 +2729,27 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "transformerConfig": {
                     "type": "string",
-                    "description": "Inline request transformer configuration as a JSON string. Defines transformations applied to each request before replaying to the target."
+                    "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
                   },
                   "transformerConfigEncoded": {
                     "type": "string",
-                    "description": "Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations that would be cumbersome to otherwise encode in a JSON field."
+                    "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
                   },
                   "transformerConfigFile": {
                     "type": "string",
-                    "description": "[Expert] Path to a JSON file containing request transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                    "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                   },
                   "tupleTransformerConfig": {
                     "type": "string",
-                    "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs for stateful transformations."
+                    "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
                   },
                   "tupleTransformerConfigBase64": {
                     "type": "string",
-                    "description": "Base64-encoded tuple transformer configuration."
+                    "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
                   },
                   "tupleTransformerConfigFile": {
                     "type": "string",
-                    "description": "[Expert] Path to a JSON file containing tuple transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                    "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                   },
                   "userAgent": {
                     "type": "string",

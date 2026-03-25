@@ -1,5 +1,11 @@
 import {z} from "zod";
 import { DEFAULT_RESOURCES, parseK8sQuantity } from "./schemaUtilities";
+
+const REQUEST_TRANSFORMER_SUFFIX = " Request transformers modify each captured HTTP request before it is replayed to the target cluster.";
+const TUPLE_TRANSFORMER_SUFFIX = " Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.";
+const METADATA_TRANSFORMER_SUFFIX = " Metadata transformers modify index mappings and settings during migration.";
+const DOC_TRANSFORMER_SUFFIX = " Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion).";
+const EXPERT_FILE_SUFFIX = " [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.";
 import deepmerge from "deepmerge";
 
 export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): readonly (keyof T)[] {
@@ -299,17 +305,17 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     targetServerResponseTimeoutSeconds: z.number().default(150).optional()
         .describe("Maximum seconds to wait for a response from the target cluster before timing out a replayed request."),
     transformerConfig: z.string().optional()
-        .describe("Inline request transformer configuration as a JSON string. Defines transformations applied to each request before replaying to the target."),
+        .describe("Inline request transformer configuration as a JSON string." + REQUEST_TRANSFORMER_SUFFIX),
     transformerConfigEncoded: z.string().optional()
-        .describe("Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations that would be cumbersome to otherwise encode in a JSON field."),
+        .describe("Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field." + REQUEST_TRANSFORMER_SUFFIX),
     transformerConfigFile: z.string().optional()
-        .describe("[Expert] Path to a JSON file containing request transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."),
+        .describe("Path to a JSON file containing request transformer configuration." + REQUEST_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
     tupleTransformerConfig: z.string().optional()
-        .describe("Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs for stateful transformations."),
+        .describe("Inline tuple transformer configuration as a JSON string." + TUPLE_TRANSFORMER_SUFFIX),
     tupleTransformerConfigBase64: z.string().optional()
-        .describe("Base64-encoded tuple transformer configuration."),
+        .describe("Base64-encoded tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX),
     tupleTransformerConfigFile: z.string().optional()
-        .describe("[Expert] Path to a JSON file containing tuple transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."),
+        .describe("Path to a JSON file containing tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
     userAgent: z.string().optional()
         .describe("String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."),
 }).describe("Process-level configuration options for the traffic replayer application. These control how captured traffic is consumed from Kafka and replayed to the target cluster.");
@@ -410,11 +416,11 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
     transformerConfigBase64: z.string().default("").optional()
-        .describe("Base64-encoded JSON configuration for metadata transformers. Defines custom transformations applied to index mappings and settings during migration."),
+        .describe("Base64-encoded JSON transformer configuration." + METADATA_TRANSFORMER_SUFFIX),
     transformerConfig: z.string().optional()
-        .describe("Inline JSON configuration for metadata transformers. Keys are transformer names and values are their configuration. Alternative to transformerConfigBase64 for simple configurations."),
+        .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + METADATA_TRANSFORMER_SUFFIX),
     transformerConfigFile: z.string().optional()
-        .describe("[Expert] Path to a JSON file containing metadata transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."),
+        .describe("Path to a JSON file containing transformer configuration." + METADATA_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
 }).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
 
 export const USER_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(USER_METADATA_WORKFLOW_OPTIONS);
@@ -466,11 +472,11 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
     allowLooseVersionMatching: z.boolean().default(true).optional()
         .describe("When true, allows document migration between clusters with non-exact version compatibility."),
     docTransformerConfigBase64: z.string().default("").optional()
-        .describe("Base64-encoded JSON configuration for document transformers. Defines custom transformations applied to each document during the backfill (e.g. field renaming, type conversion)."),
+        .describe("Base64-encoded JSON transformer configuration." + DOC_TRANSFORMER_SUFFIX),
     docTransformerConfig: z.string().optional()
-        .describe("Inline JSON configuration for document transformers. Keys are transformer names and values are their configuration. Alternative to docTransformerConfigBase64 for simple configurations."),
+        .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + DOC_TRANSFORMER_SUFFIX),
     docTransformerConfigFile: z.string().optional()
-        .describe("[Expert] Path to a JSON file containing document transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."),
+        .describe("Path to a JSON file containing transformer configuration." + DOC_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
     documentsPerBulkRequest: z.number().default(0x7fffffff).optional()
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
