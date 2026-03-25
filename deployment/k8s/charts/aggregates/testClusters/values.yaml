@@ -140,7 +140,9 @@ solrSource:
   solrOptions:
     javaMemory: "-Xms512m -Xmx512m"
   dataStorage:
-    type: "ephemeral"
+    type: "persistent"
+    persistent:
+      reclaimPolicy: "Delete"
   podOptions:
     # Solr startup can be slow; relax probes to avoid restart loops
     startupProbe:
