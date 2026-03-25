@@ -5,7 +5,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
+import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
@@ -15,7 +17,6 @@ import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.solr.SolrBackupSource;
-import org.opensearch.migrations.bulkload.solr.SolrClient;
 import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
@@ -34,11 +35,10 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import java.util.stream.Stream;
-
 /**
- * E2E: Solr 8 backup (Lucene snapshot) → pipeline → OpenSearch 3.
- * Validates the snapshot-based document migration path for Solr sources.
+ * E2E: Solr 8 backup (Lucene snapshot) → RfsMigrateDocuments → OpenSearch 3.
+ * Validates the snapshot-based document migration path for Solr sources,
+ * wired through the RfsMigrateDocuments CLI entry point.
  */
 @Slf4j
 @Tag("isolatedTest")
@@ -57,6 +57,10 @@ public class SolrSnapshotToOpenSearchTest {
         );
     }
 
+    /**
+     * Tests the full RfsMigrateDocuments CLI path: detects Solr version,
+     * reads backup from local dir, fetches schema from source, migrates docs.
+     */
     @ParameterizedTest(name = "{0} → {1}")
     @MethodSource("solr8ToOpenSearch3")
     void snapshotBasedDocumentMigration(
@@ -74,23 +78,20 @@ public class SolrSnapshotToOpenSearchTest {
             createSolrCore(solr, COLLECTION_NAME);
             indexMovieDocuments(solr, COLLECTION_NAME);
 
-            // Fetch schema and create backup
-            var schema = fetchSchema(solr, COLLECTION_NAME);
+            // Create backup (Lucene snapshot)
             var backupDir = createBackup(solr, COLLECTION_NAME);
 
-            // Migrate via pipeline
-            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
-            var targetClient = new OpenSearchClientFactory(
-                ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext()
-            ).determineVersionAndCreate();
-            var sink = new OpenSearchDocumentSink(
-                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
-            );
-            var pipeline = new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE);
+            // Run RfsMigrateDocuments with Solr source version
+            int exitCode = SourceTestBase.runProcessAgainstTarget(new String[]{
+                "--source-version", "SOLR 8.11.4",
+                "--source-host", solr.getSolrUrl(),
+                "--snapshot-local-dir", backupDir.toString(),
+                "--target-host", target.getUrl(),
+                "--index-allowlist", COLLECTION_NAME
+            });
+            assertEquals(0, exitCode, "RfsMigrateDocuments should exit successfully");
 
-            var cursors = pipeline.migrateAll().collectList().block();
-
-            assertThat("Should have progress cursors", cursors.size(), greaterThan(0));
+            // Verify documents migrated
             verifyDocCount(target, COLLECTION_NAME, 5);
 
             // Verify a specific document
@@ -106,6 +107,43 @@ public class SolrSnapshotToOpenSearchTest {
             var hits = MAPPER.readTree(resp.body).path("hits").path("hits");
             assertThat("Should find Inception", hits.size(), equalTo(1));
             assertThat(hits.get(0).path("_source").path("director").asText(), equalTo("Christopher Nolan"));
+        }
+    }
+
+    /**
+     * Tests the pipeline-level integration directly (no CLI).
+     */
+    @ParameterizedTest(name = "pipeline: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch3")
+    void pipelineLevelMigration(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            createSolrCore(solr, COLLECTION_NAME);
+            indexMovieDocuments(solr, COLLECTION_NAME);
+
+            var schema = fetchSchema(solr, COLLECTION_NAME);
+            var backupDir = createBackup(solr, COLLECTION_NAME);
+
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
+            var targetClient = new OpenSearchClientFactory(
+                ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext()
+            ).determineVersionAndCreate();
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
+            var pipeline = new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE);
+
+            var cursors = pipeline.migrateAll().collectList().block();
+            assertThat("Should have progress cursors", cursors.size(), greaterThan(0));
+            verifyDocCount(target, COLLECTION_NAME, 5);
         }
     }
 

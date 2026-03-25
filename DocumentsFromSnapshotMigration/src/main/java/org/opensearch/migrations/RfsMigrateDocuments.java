@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
+import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
@@ -33,6 +34,7 @@ import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.solr.SolrClient;
+import org.opensearch.migrations.bulkload.solr.SolrBackupSource;
 import org.opensearch.migrations.bulkload.solr.SolrDocumentSource;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
@@ -392,6 +394,17 @@ public class RfsMigrateDocuments {
         boolean areAllS3ArgsProvided = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
         boolean areAnyS3ArgsProvided = args.s3LocalDir != null || args.s3RepoUri != null || args.s3Region != null;
 
+        // Solr backup path only requires --snapshot-local-dir and --source-host
+        if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
+            if (args.snapshotLocalDir == null) {
+                throw new ParameterException("--snapshot-local-dir is required for Solr backup migration.");
+            }
+            if (args.sourceArgs.host == null) {
+                throw new ParameterException("--source-host is required for Solr backup migration (to fetch schema).");
+            }
+            return;
+        }
+
         if (args.snapshotName == null) {
             throw new ParameterException("--snapshot-name is required when --source-type is SNAPSHOT.");
         }
@@ -497,6 +510,11 @@ public class RfsMigrateDocuments {
 
         if (arguments.sourceType == SourceType.SOLR_API) {
             runSolrMigration(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
+            return;
+        }
+
+        if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
+            runSolrBackupMigration(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
             return;
         }
 
@@ -891,6 +909,72 @@ public class RfsMigrateDocuments {
         } finally {
             try { source.close(); } catch (Exception e) { log.warn("Error closing Solr source", e); }
             try { sink.close(); } catch (Exception e) { log.warn("Error closing sink", e); }
+        }
+    }
+
+    private static void runSolrBackupMigration(
+        Args arguments,
+        OpenSearchClient targetClient,
+        Supplier<IJsonTransformer> docTransformerSupplier,
+        boolean useServerGeneratedIds,
+        RootDocumentMigrationContext context
+    ) {
+        if (arguments.sourceArgs.host == null) {
+            throw new ParameterException(
+                "When source version is SOLR, --source-host must be provided to fetch schema."
+            );
+        }
+        if (arguments.snapshotLocalDir == null) {
+            throw new ParameterException(
+                "When source version is SOLR, --snapshot-local-dir must point to the Solr backup directory."
+            );
+        }
+
+        log.info("Starting Solr backup document migration from {}", arguments.snapshotLocalDir);
+
+        var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
+        var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
+
+        var solrClient = new SolrClient(
+            arguments.sourceArgs.host,
+            arguments.sourceArgs.username,
+            arguments.sourceArgs.password
+        );
+
+        try {
+            var collections = solrClient.listCollections();
+            if (!arguments.indexAllowlist.isEmpty()) {
+                collections.retainAll(arguments.indexAllowlist);
+            }
+            log.info("Migrating {} Solr collection(s): {}", collections.size(), collections);
+
+            var backupDir = Paths.get(arguments.snapshotLocalDir);
+
+            for (var collection : collections) {
+                log.info("Migrating collection: {}", collection);
+                var schema = solrClient.getSchema(collection);
+                var source = new SolrBackupSource(backupDir, collection, schema);
+                var sink = new OpenSearchDocumentSink(
+                    targetClient, docTransformerSupplier, useServerGeneratedIds, allowlist, () -> null
+                );
+                var pipeline = new DocumentMigrationPipeline(
+                    source, sink,
+                    arguments.numDocsPerBulkRequest,
+                    arguments.numBytesPerBulkRequest,
+                    1,
+                    arguments.maxConnections
+                );
+                try {
+                    pipeline.migrateAll().blockLast();
+                    log.info("Collection {} migration completed", collection);
+                } finally {
+                    try { source.close(); } catch (Exception e) { log.warn("Error closing source", e); }
+                    try { sink.close(); } catch (Exception e) { log.warn("Error closing sink", e); }
+                }
+            }
+            log.info("Solr backup document migration completed successfully");
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to migrate Solr backup", e);
         }
     }
 
