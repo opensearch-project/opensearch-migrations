@@ -49,7 +49,7 @@ spec:
       {{- if .Values.ecrAuth.token }}
               echo "{{ .Values.ecrAuth.token }}" | helm registry login --username AWS --password-stdin {{ .Values.ecrAuth.registry }}
       {{- else }}
-              /.venv/bin/aws ecr get-login-password --region "${AWS_DEFAULT_REGION}" 2>/dev/null | \
+              aws ecr get-login-password --region "${AWS_DEFAULT_REGION}" 2>/dev/null | \
                 helm registry login --username AWS --password-stdin {{ .Values.ecrAuth.registry }} || \
                 echo "WARNING: Could not authenticate with ECR. OCI chart pulls may fail."
       {{- end }}
