@@ -51,7 +51,7 @@ def _ensure_custom_image_available(image: str) -> None:
         return
     tag = image.split(":")[1]  # e.g. "7.10.2"
     parts = tag.split(".")
-    task_name = f"buildImage_{parts[0]}_{parts[1]}"
+    es_minor = f"{parts[0]}.{parts[1]}"
 
     gradlew = None
     d = Path.cwd()
@@ -64,8 +64,11 @@ def _ensure_custom_image_available(image: str) -> None:
     if gradlew is None:
         raise RuntimeError(f"Cannot find gradlew to build {image}")
 
-    logger.info("Building Docker image on-demand: %s (task: :custom-es-images:%s)", image, task_name)
-    result = subprocess.run([str(gradlew), f":custom-es-images:{task_name}"], cwd=str(gradlew.parent))
+    logger.info("Building Docker image on-demand: %s (esMinor=%s)", image, es_minor)
+    result = subprocess.run(
+        [str(gradlew), ":custom-es-images:buildImage", f"-PesMinor={es_minor}"],
+        cwd=str(gradlew.parent),
+    )
     if result.returncode != 0:
         raise RuntimeError(f"Gradle build failed for image: {image}")
 
