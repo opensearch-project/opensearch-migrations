@@ -1496,7 +1496,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "integer",
                     "minimum": 1,
                     "default": 1,
-                    "description": "Number of partitions for auto-created Kafka topics. More partitions enable higher parallelism for consumers."
+                    "description": "[Expert] Number of partitions for auto-created Kafka topics. Values greater than 1 are experimental and have not been fully tested."
                   },
                   "topicReplicas": {
                     "type": "integer",

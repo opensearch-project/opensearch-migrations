@@ -575,7 +575,7 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
     ]).default({ type: "ephemeral" }).optional()
         .describe("Storage configuration for Kafka broker data."),
     partitions:    z.number().int().min(1).default(1).optional()
-        .describe("Number of partitions for auto-created Kafka topics. More partitions enable higher parallelism for consumers."),
+        .describe("[Expert] Number of partitions for auto-created Kafka topics. Values greater than 1 are experimental and have not been fully tested."),
     topicReplicas: z.number().int().min(1).default(1).optional()
         .describe("Replication factor for auto-created Kafka topics. Must not exceed the number of broker replicas. Higher values improve durability."),
 }).describe("Configuration for auto-creating a Strimzi Kafka cluster. Used when no existing Kafka cluster is provided.");
