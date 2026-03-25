@@ -29,8 +29,8 @@ All images are configured for single-node development use with security disabled
 # List all versions
 make list
 
-# Build and test a specific version
-./build.sh 7.10 && ./test.sh 7.10
+# Build a specific version via Gradle
+../gradlew :custom-es-images:buildImage_es_7_10
 
 # Build and test all versions for a major
 make bt-7
@@ -43,9 +43,9 @@ make bt-all
 
 ```bash
 # Build
-./build.sh 7.10 7.17 8.11    # Specific versions
-./build.sh --major 6          # All 6.x
-./build.sh --all              # Everything
+../gradlew :custom-es-images:buildImage_es_7_10    # Specific version
+../gradlew :custom-es-images:buildMajor_6           # All 6.x
+../gradlew :custom-es-images:buildAll               # Everything
 
 # Test
 ./test.sh 7.10 7.17           # Specific versions
@@ -82,7 +82,6 @@ Images are also built **on-demand** during test execution — if a test needs `c
 custom-es-images/
 ├── versions.json              # Version manifest (67 versions, each with version + tarball URL template)
 ├── build.gradle               # Gradle build (build, push tasks per version)
-├── build.sh                   # Standalone build script
 ├── test.sh                    # Health check + version verify test
 ├── feature-test.sh            # Comprehensive feature tests (CRUD, bulk, search, snapshots, etc.)
 ├── benchmark.sh               # Benchmark script (startup, memory, image size)

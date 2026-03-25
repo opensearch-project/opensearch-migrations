@@ -10,17 +10,17 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 list: ## List all available versions
-	@./build.sh --list
+	@python3 -c "import json; [print(v['version']) for v in json.load(open('versions.json'))]"
 
 build-all: ## Build all ES versions
-	./build.sh --all
+	../gradlew :custom-es-images:buildAll
 
 test-all: ## Test all ES versions
 	./test.sh --all
 
 # Per-major targets: build-1, build-2, build-5, build-6, build-7, build-8
 $(foreach m,$(MAJORS),build-$(m)): build-%: ## Build all minor versions for major version %
-	./build.sh --major $*
+	../gradlew :custom-es-images:buildMajor_$*
 
 # Per-major test targets
 $(foreach m,$(MAJORS),test-$(m)): test-%: ## Test all minor versions for major version %
