@@ -143,6 +143,7 @@ solrSource:
     type: "persistent"
     persistent:
       reclaimPolicy: "Delete"
+      pvc: {}
   podOptions:
     # Solr startup can be slow; relax probes to avoid restart loops
     startupProbe:
