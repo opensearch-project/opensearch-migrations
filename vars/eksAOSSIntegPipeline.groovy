@@ -53,7 +53,7 @@ def call(Map config = [:]) {
                         env.STACK_NAME = "MA-Serverless-${maStageName}-${currentBuild.number}-${params.REGION}"
                         env.eksClusterName = "migration-eks-cluster-${maStageName}-${params.REGION}"
                         env.eksKubeContext = env.eksClusterName
-                        env.CLUSTER_STACK = "OpenSearch-${maStageName}-${params.REGION}"
+                        env.CLUSTER_STACK = "OpenSearch-${maStageName}-${currentBuild.number}-${params.REGION}"
 
                         echo """
                             ================================================================
