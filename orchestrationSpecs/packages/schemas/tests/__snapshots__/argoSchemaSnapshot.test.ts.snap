@@ -2028,7 +2028,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "otelCollectorEndpoint": {
                         "type": "string",
                         "default": "http://otel-collector:4317",
-                        "description": "URL for the OpenTelemetry Collector for metadata migration metrics."
+                        "description": "[Expert] URL for the OpenTelemetry Collector for metadata migration metrics. Only change if using a separate OTel collector."
                       },
                       "output": {
                         "type": "string",
@@ -2199,7 +2199,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "otelCollectorEndpoint": {
                         "type": "string",
                         "default": "http://otel-collector:4317",
-                        "description": "URL for the OpenTelemetry Collector for RFS backfill metrics and progress tracking."
+                        "description": "[Expert] URL for the OpenTelemetry Collector for RFS backfill metrics and progress tracking. Only change if using a separate OTel collector."
                       },
                       "serverGeneratedIds": {
                         "type": "string",
@@ -2367,7 +2367,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "otelCollectorEndpoint": {
                     "type": "string",
                     "default": "http://otel-collector:4317",
-                    "description": "URL for the OpenTelemetry Collector to which the proxy sends metrics and traces."
+                    "description": "[Expert] URL for the OpenTelemetry Collector to which the proxy sends metrics and traces. Only change if using a separate OTel collector."
                   },
                   "setHeader": {
                     "type": "array",
@@ -2705,7 +2705,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "otelCollectorEndpoint": {
                     "type": "string",
                     "default": "http://otel-collector:4317",
-                    "description": "URL for the OpenTelemetry Collector to which the replayer sends metrics and traces."
+                    "description": "[Expert] URL for the OpenTelemetry Collector to which the replayer sends metrics and traces. Only change if using a separate OTel collector."
                   },
                   "quiescentPeriodMs": {
                     "type": "number",

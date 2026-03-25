@@ -206,7 +206,7 @@ export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
 
 export const USER_PROXY_PROCESS_OPTIONS = z.object({
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("URL for the OpenTelemetry Collector to which the proxy sends metrics and traces."),
+        .describe("[Expert] URL for the OpenTelemetry Collector to which the proxy sends metrics and traces. Only change if using a separate OTel collector."),
     setHeader: z.array(z.string()).optional()
         .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format."),
     destinationConnectionPoolSize: z.number().default(0).optional()
@@ -289,7 +289,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     observedPacketConnectionTimeout: z.number().default(360).optional()
         .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("URL for the OpenTelemetry Collector to which the replayer sends metrics and traces."),
+        .describe("[Expert] URL for the OpenTelemetry Collector to which the replayer sends metrics and traces. Only change if using a separate OTel collector."),
     quiescentPeriodMs: z.number().default(5000).optional()
         .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."),
     removeAuthHeader: z.boolean().default(false).optional()
@@ -406,7 +406,7 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "'UNION': merge all types into a single mapping. " +
             "'SPLIT': create separate indices for each type."),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("URL for the OpenTelemetry Collector for metadata migration metrics."),
+        .describe("[Expert] URL for the OpenTelemetry Collector for metadata migration metrics. Only change if using a separate OTel collector."),
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
     transformerConfigBase64: z.string().default("").optional()
@@ -484,7 +484,7 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."),
     otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("URL for the OpenTelemetry Collector for RFS backfill metrics and progress tracking."),
+        .describe("[Expert] URL for the OpenTelemetry Collector for RFS backfill metrics and progress tracking. Only change if using a separate OTel collector."),
     serverGeneratedIds: z.enum(["AUTO", "ALWAYS", "NEVER"]).default("AUTO").optional()
         .describe("Controls document ID generation on the target. " +
             "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
