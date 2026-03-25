@@ -1,9 +1,13 @@
 package org.opensearch.migrations.cli;
 
+import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.Optional;
 
+import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -11,14 +15,21 @@ import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
+import org.opensearch.migrations.bulkload.solr.SolrSnapshotReader;
 import org.opensearch.migrations.cluster.ClusterReader;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 
 import com.beust.jcommander.ParameterException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @AllArgsConstructor
 public class ClusterReaderExtractor {
+    private static final ObjectMapper MAPPER = new ObjectMapper();
     private final MigrateOrEvaluateArgs arguments;
 
     public ClusterReader extractClusterReader() {
@@ -29,6 +40,12 @@ public class ClusterReaderExtractor {
             throw new ParameterException("If an s3 repo is being used, s3-region and s3-local-dir-path must be set");
         }
 
+        // Solr backup: prefer snapshot over remote when snapshot args are provided
+        if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR
+                && (arguments.fileSystemRepoPath != null || arguments.s3RepoUri != null)) {
+            return getSolrSnapshotReader();
+        }
+
         if (arguments.sourceArgs != null && arguments.sourceArgs.host != null) {
             return getRemoteReader(arguments.sourceArgs.toConnectionContext());
         }
@@ -37,7 +54,12 @@ public class ClusterReaderExtractor {
             throw new ParameterException("Unable to read from snapshot without --source-version parameter");
         }
 
-        // Get file finder
+        // Solr backup: read metadata from backup directory
+        if (arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
+            return getSolrSnapshotReader();
+        }
+
+        // ES/OS snapshot path
         var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(arguments.sourceVersion, true);
 
         SourceRepo repo = null;
@@ -55,10 +77,43 @@ public class ClusterReaderExtractor {
             throw new ParameterException("Unable to find valid resource provider");
         }
 
-        if (arguments.sourceVersion == null) {
-            throw new ParameterException("Unable to read from snapshot without --source-version parameter");
-        }
         return getSnapshotReader(arguments.sourceVersion, repo);
+    }
+
+    private ClusterReader getSolrSnapshotReader() {
+        Path backupDir;
+        if (arguments.fileSystemRepoPath != null) {
+            backupDir = Path.of(arguments.fileSystemRepoPath);
+        } else if (arguments.s3LocalDirPath != null) {
+            var s3Repo = S3Repo.createRaw(
+                Path.of(arguments.s3LocalDirPath),
+                new S3Uri(arguments.s3RepoUri),
+                arguments.s3Region,
+                Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
+            );
+            backupDir = s3Repo.downloadAllFiles();
+        } else {
+            throw new ParameterException("Solr snapshot requires --file-system-repo-path or S3 args");
+        }
+
+        // Discover collections and parse schemas from backup directory
+        var schemas = new LinkedHashMap<String, JsonNode>();
+        try (var dirs = Files.list(backupDir)) {
+            dirs.filter(Files::isDirectory)
+                .forEach(dir -> {
+                    var name = dir.getFileName().toString();
+                    schemas.put(name, SolrSchemaXmlParser.findAndParse(dir));
+                });
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to list backup directory: " + backupDir, e);
+        }
+
+        if (!arguments.dataFilterArgs.indexAllowlist.isEmpty()) {
+            schemas.keySet().retainAll(arguments.dataFilterArgs.indexAllowlist);
+        }
+
+        log.info("Solr snapshot reader: found {} collection(s) in {}", schemas.size(), backupDir);
+        return new SolrSnapshotReader(arguments.sourceVersion, backupDir, schemas);
     }
 
     ClusterReader getRemoteReader(ConnectionContext connection) {

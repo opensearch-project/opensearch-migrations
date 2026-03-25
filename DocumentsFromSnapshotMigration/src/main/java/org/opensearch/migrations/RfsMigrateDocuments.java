@@ -37,6 +37,7 @@ import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.solr.SolrClient;
 import org.opensearch.migrations.bulkload.solr.SolrBackupSource;
+import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
 import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
 import org.opensearch.migrations.bulkload.solr.SolrDocumentSource;
 import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
@@ -992,11 +993,11 @@ public class RfsMigrateDocuments {
                     try {
                         schemas.put(collection, solrClient.getSchema(collection));
                     } catch (Exception e) {
-                        log.warn("Failed to fetch schema for {} from source, using empty schema", collection, e);
-                        schemas.put(collection, mapper.createObjectNode());
+                        log.warn("Failed to fetch schema for {} from source, falling back to backup schema", collection, e);
+                        schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
                     }
                 } else {
-                    schemas.put(collection, mapper.createObjectNode());
+                    schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
                 }
             }
 

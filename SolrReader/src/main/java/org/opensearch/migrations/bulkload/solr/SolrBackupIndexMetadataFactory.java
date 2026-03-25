@@ -15,8 +15,8 @@ import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * IndexMetadata.Factory for Solr backups. Provides shard counts from the backup
- * directory structure so the work coordinator can create per-shard work items.
+ * IndexMetadata.Factory for Solr backups. Reads schema from the backup directory
+ * and converts to OpenSearch mappings via SolrSchemaConverter.
  */
 @Slf4j
 public class SolrBackupIndexMetadataFactory implements IndexMetadata.Factory {
@@ -33,20 +33,40 @@ public class SolrBackupIndexMetadataFactory implements IndexMetadata.Factory {
     @Override
     public IndexMetadata fromRepo(String snapshotName, String indexName) {
         var schema = schemas.get(indexName);
-        var source = new SolrBackupSource(backupDir.resolve(indexName), indexName,
-            schema != null ? schema.path("schema") : MAPPER.createObjectNode());
+        var schemaNode = schema != null ? schema.path("schema") : MAPPER.createObjectNode();
+
+        // Discover shard count from backup directory
+        var source = new SolrBackupSource(backupDir.resolve(indexName), indexName, schemaNode);
         int shardCount = source.listPartitions(indexName).size();
         log.info("Solr collection {} has {} shard(s)", indexName, shardCount);
-        return new SolrBackupIndexMetadata(indexName, shardCount);
+
+        // Build OpenSearch-compatible index metadata with proper mappings
+        var indexNode = MAPPER.createObjectNode();
+
+        var mappings = SolrSchemaConverter.convertToOpenSearchMappings(
+            schemaNode.path("fields"),
+            schemaNode.path("dynamicFields"),
+            schemaNode.path("copyFields"),
+            schemaNode.path("fieldTypes")
+        );
+        indexNode.set("mappings", mappings);
+        indexNode.set("aliases", MAPPER.createObjectNode());
+
+        var settings = MAPPER.createObjectNode();
+        var indexSettings = MAPPER.createObjectNode();
+        indexSettings.put("number_of_shards", String.valueOf(shardCount));
+        indexSettings.put("number_of_replicas", "1");
+        settings.set("index", indexSettings);
+        indexNode.set("settings", settings);
+
+        return new SolrIndexMetadata(indexName, indexNode);
     }
 
     @Override
     public SnapshotRepo.Provider getRepoDataProvider() {
         return new SnapshotRepo.Provider() {
             @Override
-            public List<SnapshotRepo.Snapshot> getSnapshots() {
-                return List.of();
-            }
+            public List<SnapshotRepo.Snapshot> getSnapshots() { return List.of(); }
 
             @Override
             public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
@@ -81,16 +101,5 @@ public class SolrBackupIndexMetadataFactory implements IndexMetadata.Factory {
     @Override
     public String getIndexFileId(String snapshotName, String indexName) {
         return indexName;
-    }
-
-    private record SolrBackupIndexMetadata(String name, int shardCount) implements IndexMetadata {
-        @Override public ObjectNode getRawJson() { return MAPPER.createObjectNode(); }
-        @Override public String getId() { return name; }
-        @Override public String getName() { return name; }
-        @Override public int getNumberOfShards() { return shardCount; }
-        @Override public JsonNode getSettings() { return MAPPER.createObjectNode(); }
-        @Override public JsonNode getMappings() { return MAPPER.createObjectNode(); }
-        @Override public JsonNode getAliases() { return MAPPER.createObjectNode(); }
-        @Override public IndexMetadata deepCopy() { return this; }
     }
 }
