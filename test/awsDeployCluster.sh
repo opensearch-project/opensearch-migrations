@@ -11,28 +11,28 @@ export AWS_MAX_ATTEMPTS="${AWS_MAX_ATTEMPTS:-10}"
 write_cluster_outputs() {
   local stage="$1"
   local outfile="$2"
+  local region
+  region=$(aws configure get region || echo "")
 
-  stacks=$(aws cloudformation list-stacks \
-    --query "StackSummaries[?StackStatus!='DELETE_COMPLETE' && StackStatus!='DELETE_IN_PROGRESS'].StackName" \
-    --output text | tr '\t' '\n')
-
-  if [[ -z "$stacks" ]]; then
-    echo "No stacks found when listing stacks."
+  if [[ -z "$region" ]]; then
+    echo "Error: Unable to determine AWS region. Set AWS_DEFAULT_REGION or configure a default region."
     return 1
   fi
 
   # v0.3.x: single stack named OpenSearch-{stage}-{region}
-  stack_name=$(echo "$stacks" | grep "^OpenSearch-${stage}-" | head -n 1)
-  if [[ -z "$stack_name" ]]; then
-    echo "No OpenSearch stack found for stage: $stage"
-    return 1
-  fi
-  echo "Found stack: $stack_name"
+  local stack_name="OpenSearch-${stage}-${region}"
+  echo "Looking up stack: $stack_name"
 
   outputs=$(aws cloudformation describe-stacks \
     --stack-name "$stack_name" \
     --query "Stacks[0].Outputs" \
-    --output json)
+    --output json 2>/dev/null)
+
+  if [[ -z "$outputs" || "$outputs" == "null" ]]; then
+    echo "No OpenSearch stack found: $stack_name"
+    return 1
+  fi
+  echo "Found stack: $stack_name"
 
   # VPC ID (inline in same stack, may not exist for serverless-only)
   # CDK strips hyphens from stage name in CFN OutputKeys

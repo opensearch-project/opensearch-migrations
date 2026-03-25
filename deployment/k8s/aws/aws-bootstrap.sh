@@ -121,7 +121,7 @@ while [[ $# -gt 0 ]]; do
       echo "                                            bootstrap the EKS cluster (install helm chart, images, etc)."
       echo ""
       echo "CloudFormation deployment options:"
-      echo "  --stack-name <name>                       CloudFormation stack name (required with --deploy-*-cfn)."
+      echo "  --stack-name <name>                       CloudFormation stack name (required)."
       echo "  --vpc-id <id>                             VPC ID (required with --deploy-import-vpc-cfn)."
       echo "  --subnet-ids <id1,id2>                    Comma-separated subnet IDs, each in a different AZ"
       echo "                                            (required with --deploy-import-vpc-cfn)."
@@ -249,8 +249,8 @@ validate_args() {
     echo "Error: --build-cfn requires --deploy-create-vpc-cfn or --deploy-import-vpc-cfn." >&2
     exit 1
   fi
-  if [[ "$deploy_cfn" == "true" && -z "$cfn_stack_name" ]]; then
-    echo "Error: --stack-name is required with --deploy-create-vpc-cfn or --deploy-import-vpc-cfn." >&2
+  if [[ -z "$cfn_stack_name" ]]; then
+    echo "Error: --stack-name is always required." >&2
     exit 1
   fi
   if [[ "$deploy_import_vpc" == "true" ]]; then
@@ -434,40 +434,28 @@ install_helm() {
 }
 
 get_cfn_export() {
-  prefix="MigrationsExportString"
-  names=()
-  values=()
+  local prefix="MigrationsExportString"
 
-  # Example CFN stack output value will look like: export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-dev-us-east-2;
-  # export MIGRATIONS_ECR_REGISTRY=123456789012.dkr.ecr.us-east-2.amazonaws.com/migration-ecr-dev-us-east-2;...
-  while read -r name value; do
-    # If stage_filter is set, only include exports that contain the stage name
-    if [[ -n "$stage_filter" && ! "$name" =~ $stage_filter ]]; then
-      continue
-    fi
-    names+=("$name")
-    values+=("$value")
-  done < <(aws cloudformation list-exports \
-    ${region:+--region "$region"} \
-    --query "Exports[?starts_with(Name, \`${prefix}\`)].[Name,Value]" \
-    --output text)
-
-  if [ ${#names[@]} -eq 0 ]; then
-    echo "Error: No exports found starting with '$prefix'${stage_filter:+ matching stage '$stage_filter'}" >&2
-    return 1
-  elif [ ${#names[@]} -eq 1 ]; then
-    echo "${values[0]}"
-  else
-    echo "Multiple Cloudformation stacks with migration exports found:" >&2
-    for i in "${!names[@]}"; do
-      echo "  [$i] ${names[$i]}" >&2
-    done
-    echo >&2
-    echo "Please re-run with the --stage flag to select the correct stack." >&2
+  if [[ -z "$cfn_stack_name" ]]; then
+    echo "Error: --stack-name is required to retrieve CloudFormation exports." >&2
+    echo "Specify the name of the Migration Assistant CloudFormation stack." >&2
     echo "For example:" >&2
-    echo "  $0 --stage <stage-name>" >&2
+    echo "  $0 --stack-name <your-stack-name>" >&2
     return 1
   fi
+
+  local value
+  value=$(aws cloudformation describe-stacks \
+    --stack-name "$cfn_stack_name" \
+    ${region:+--region "$region"} \
+    --query "Stacks[0].Outputs[?OutputKey=='${prefix}'].OutputValue" \
+    --output text 2>/dev/null)
+  if [[ -n "$value" && "$value" != "None" ]]; then
+    echo "$value"
+    return 0
+  fi
+  echo "Error: No '${prefix}' output found on stack '$cfn_stack_name'" >&2
+  return 1
 }
 
 render_dashboard_json() {
@@ -704,7 +692,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
 fi
 
 if ! output=$(get_cfn_export); then
-  echo "Unable to find any CloudFormation stacks with a 'MigrationsExportString' export${region:+ in region '$region'}${stage_filter:+ matching stage '$stage_filter'}." >&2
+  echo "Unable to find 'MigrationsExportString' output on stack '$cfn_stack_name'${region:+ in region '$region'}." >&2
   echo "Has the Migration Assistant CloudFormation template been deployed?" >&2
   if [[ -z "$region" ]]; then
     echo "No --region specified; used default region from AWS CLI config." >&2
