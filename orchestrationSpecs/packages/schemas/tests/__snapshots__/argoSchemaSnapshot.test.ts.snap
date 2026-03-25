@@ -1766,7 +1766,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                       "items": {
                                         "type": "string"
                                       },
-                                      "description": "List of target cluster names that require this snapshot for a complete migration."
+                                      "description": "List of target cluster labels that require this snapshot for a complete migration."
                                     }
                                   },
                                   "required": [
@@ -1929,11 +1929,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           },
           "fromSource": {
             "type": "string",
-            "description": "Name of the source cluster to migrate from. Must match a key in sourceClusters."
+            "description": "Label of the source cluster to migrate from. Must match a key in sourceClusters."
           },
           "toTarget": {
             "type": "string",
-            "description": "Name of the target cluster to migrate to. Must match a key in targetClusters."
+            "description": "Label of the target cluster to migrate to. Must match a key in targetClusters."
           },
           "perSnapshotConfig": {
             "type": "object",
@@ -3158,7 +3158,7 @@ exports[`test schemas matches expected union field schemas render as expected 1`
                         "items": {
                           "type": "string"
                         },
-                        "description": "List of target cluster names that require this snapshot for a complete migration."
+                        "description": "List of target cluster labels that require this snapshot for a complete migration."
                       }
                     },
                     "required": [

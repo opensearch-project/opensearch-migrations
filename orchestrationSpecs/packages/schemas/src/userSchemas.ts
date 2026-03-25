@@ -692,7 +692,7 @@ export const GENERATE_SNAPSHOT = z.object({
         .describe("Configuration for creating a new snapshot of the source cluster."),
     requiredForCompleteMigration: z.union([
         z.object({toTargets: z.array(z.string())
-            .describe("List of target cluster names that require this snapshot for a complete migration.")
+            .describe("List of target cluster labels that require this snapshot for a complete migration.")
         }),
         z.boolean().default(true).optional()
     ]).describe("Whether this snapshot is required for migration completeness. Can be true/false or specify specific target clusters.")
@@ -779,9 +779,9 @@ export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
     skipApprovals : z.boolean().default(false).optional()
         .describe("When true, skips all manual approval gates for migrations in this configuration block."),
     fromSource: z.string()
-        .describe("Name of the source cluster to migrate from. Must match a key in sourceClusters."),
+        .describe("Label of the source cluster to migrate from. Must match a key in sourceClusters."),
     toTarget: z.string()
-        .describe("Name of the target cluster to migrate to. Must match a key in targetClusters."),
+        .describe("Label of the target cluster to migrate to. Must match a key in targetClusters."),
     perSnapshotConfig: PER_SNAPSHOT_MIGRATION_CONFIG_RECORD.optional()
         .describe("Per-snapshot migration configurations. Each entry maps a snapshot name to one or more migration passes (metadata + document backfill)."),
 }).describe("A snapshot-based migration configuration binding a source cluster to a target cluster with per-snapshot migration settings.").superRefine((data, ctx) => {
