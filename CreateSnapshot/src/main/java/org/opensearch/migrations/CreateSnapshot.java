@@ -184,15 +184,19 @@ public class CreateSnapshot {
             return;
         }
         // Auto-detect Solr from the source cluster
+        boolean isSolr = false;
         try {
             var version = ClusterVersionDetector.detect(arguments.sourceArgs.toConnectionContext());
             if (version.getFlavor() == Flavor.SOLR) {
                 log.info("Detected Solr source ({}), using Solr backup path", version);
-                runSolrBackup();
-                return;
+                isSolr = true;
             }
         } catch (Exception e) {
             log.debug("Version detection failed, assuming Elasticsearch: {}", e.getMessage());
+        }
+        if (isSolr) {
+            runSolrBackup();
+            return;
         }
         runElasticsearchSnapshot();
     }

@@ -78,8 +78,8 @@ public class SolrSnapshotCreator {
                 solrBaseUrl, backupName, collection, asyncId
             ));
             if (backupLocation != null && backupLocation.startsWith("s3://")) {
-                // S3 backups use the configured repository; pass location as sub-path
-                urlBuilder.append("&repository=default-s3");
+                // S3 backups use the configured repository; location is a path within the bucket
+                urlBuilder.append("&repository=default-s3&location=/");
             } else if (backupLocation != null) {
                 urlBuilder.append("&location=").append(backupLocation);
             }
