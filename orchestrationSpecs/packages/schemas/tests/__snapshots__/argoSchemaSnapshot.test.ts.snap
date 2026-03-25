@@ -1731,7 +1731,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "loggingConfigurationOverrideConfigMap": {
                                   "type": "string",
                                   "default": "",
-                                  "description": "Name of a Kubernetes ConfigMap containing a custom Log4j configuration for the snapshot creation process."
+                                  "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                                 },
                                 "indexAllowlist": {
                                   "type": "array",
@@ -1967,7 +1967,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
                         "default": "",
-                        "description": "Name of a Kubernetes ConfigMap containing a custom Log4j configuration for the metadata migration process."
+                        "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                       },
                       "skipEvaluateApproval": {
                         "type": "boolean",
@@ -2069,7 +2069,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
                         "default": "",
-                        "description": "Name of a Kubernetes ConfigMap containing a custom Log4j configuration for the RFS process."
+                        "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                       },
                       "skipApproval": {
                         "type": "boolean",
@@ -2279,7 +2279,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
                     "default": "",
-                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j configuration. When set, the ConfigMap is mounted into the container to override logging behavior."
+                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                   },
                   "internetFacing": {
                     "type": "boolean",
@@ -2601,7 +2601,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
                     "default": "",
-                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j configuration for the replayer."
+                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                   },
                   "podReplicas": {
                     "type": "number",
