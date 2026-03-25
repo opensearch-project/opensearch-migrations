@@ -128,7 +128,7 @@ Finally, you can migrate the documents:
   || { exit_code=$?; [[ $exit_code -ne 3 ]] && echo "Command failed with exit code $exit_code. Consider rerunning the command."; }
 ```
 
-Each execution of this last tool moves the documents from a single shard of the source snapshot before exiting.  To migrate all the shards of the source snapshot, keep running the tool until it throws a `NoWorkLeftException`.  You can also look at the work coordination metadata stored in a special index created on the target cluster, but that requires specialized knowledge.
+Each execution of this last tool moves the documents from a single shard of the source snapshot before exiting.  To migrate all the shards of the source snapshot, keep running the tool until it throws a `NoWorkLeftException`.  You can also look at the work coordination metadata stored in a special index created on the coordinator cluster (a dedicated single-node OpenSearch cluster by default), but that requires specialized knowledge.
 
 ## How to run an ES 6.8 Source Cluster w/ an attached debugger
 

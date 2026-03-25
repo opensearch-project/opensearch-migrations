@@ -261,6 +261,93 @@ export const testCases: TestCase[] = [
     ],
   }),
 
+  solrTest('facet-query', {
+    description: 'Query facet counting documents matching specific queries',
+    documents: [
+      { id: '1', title: 'laptop', category: 'electronics', price: 999 },
+      { id: '2', title: 'phone', category: 'electronics', price: 699 },
+      { id: '3', title: 'shirt', category: 'clothing', price: 29 },
+      { id: '4', title: 'pants', category: 'clothing', price: 59 },
+      { id: '5', title: 'apple', category: 'food', price: 3 },
+      { id: '6', title: 'banana', category: 'food', price: 2 },
+    ],
+    requestPath:
+      '/solr/testcollection/select?q=*:*&wt=json&json.facet=' +
+      encodeURIComponent(
+        JSON.stringify({
+          expensive: { type: 'query', q: 'price:[100 TO *]' },
+          cheap: { type: 'query', q: 'price:[* TO 50]' },
+          electronics: { type: 'query', q: 'category:electronics' },
+        }),
+      ),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        category: { type: 'string' },
+        price: { type: 'pfloat' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        category: { type: 'keyword' },
+        price: { type: 'float' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      {
+        path: '$.response',
+        rule: 'ignore',
+        reason: 'Facet test — only validating $.facets, not hits',
+      },
+    ],
+  }),
+
+  solrTest('facet-date-range', {
+    description: 'Date range facet using start/end/gap with +1MONTH calendar interval',
+    documents: [
+      { id: '1', title: 'jan event', event_date: '2024-01-15T00:00:00Z' },
+      { id: '2', title: 'feb event', event_date: '2024-02-10T00:00:00Z' },
+      { id: '3', title: 'mar event', event_date: '2024-03-20T00:00:00Z' },
+      { id: '4', title: 'mar event 2', event_date: '2024-03-25T00:00:00Z' },
+      { id: '5', title: 'apr event', event_date: '2024-04-05T00:00:00Z' },
+    ],
+    requestPath:
+      '/solr/testcollection/select?q=*:*&wt=json&json.facet=' +
+      encodeURIComponent(
+        JSON.stringify({
+          monthly: {
+            type: 'range',
+            field: 'event_date',
+            start: '2024-01-01T00:00:00Z',
+            end: '2024-05-01T00:00:00Z',
+            gap: '+1MONTH',
+          },
+        }),
+      ),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        event_date: { type: 'pdate' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        event_date: { type: 'date' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      {
+        path: '$.response',
+        rule: 'ignore',
+        reason: 'Facet test — only validating $.facets, not hits',
+      },
+    ],
+  }),
+
   // ───────────────────────────────────────────────────────────
   // Field list (fl) tests — _source filtering
   // ───────────────────────────────────────────────────────────

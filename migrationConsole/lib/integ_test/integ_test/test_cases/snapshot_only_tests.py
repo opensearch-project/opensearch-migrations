@@ -28,7 +28,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
     - BYOS_S3_REGION: AWS region for S3 (default: us-west-2)
     - BYOS_S3_ENDPOINT: S3 endpoint (optional, for custom endpoints)
     - BYOS_POD_REPLICAS: Number of RFS worker pods (default: 1)
-    - BYOS_MONITOR_RETRY_LIMIT: Max retries for workflow monitoring (default: 1000000, effectively infinite)
+    - BYOS_MONITOR_RETRY_LIMIT: Max retries for workflow monitoring (default: 900 ≈ 15 hours)
     """
     requires_explicit_selection = True
 
@@ -63,9 +63,8 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         self.s3_region = os.environ.get('BYOS_S3_REGION', 'us-west-2')
         self.s3_endpoint = os.environ.get('BYOS_S3_ENDPOINT', '')
         self.pod_replicas = int(os.environ.get('BYOS_POD_REPLICAS', '1'))
-        # Monitor retry limit: number of 60-second workflow monitor intervals.
-        # Default 1000000 effectively means "wait forever" — Argo workflow-level retries handle failures.
-        self.monitor_retry_limit = int(os.environ.get('BYOS_MONITOR_RETRY_LIMIT', '1000000'))
+        # Monitor retry limit: ~1 retry/min after backoff cap. Default 33 (~30 min), 900 for ~15 hours
+        self.monitor_retry_limit = int(os.environ.get('BYOS_MONITOR_RETRY_LIMIT', '900'))
 
     def import_existing_clusters(self):
         """Import target cluster from configmap."""
@@ -88,9 +87,8 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         self.workflow_snapshot_and_migration_config = [{
             "snapshotConfig": {
                 "snapshotNameConfig": {
-                    "externallyManagedSnapshot": self.snapshot_name
-                },
-                "repoName": "default"
+                    "externallyManagedSnapshotName": self.snapshot_name
+                }
             },
             "migrations": [{
                 "metadataMigrationConfig": {},
@@ -98,7 +96,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             }]
         }]
 
-    def prepare_workflow_parameters(self):
+    def prepare_workflow_parameters(self, keep_workflows: bool = False):
         """Build workflow parameters for snapshot-only migration."""
         snapshot_repo = {"awsRegion": self.s3_region, "s3RepoPathUri": self.s3_repo_uri}
         if self.s3_endpoint:
@@ -108,7 +106,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             "endpoint": "",
             "version": f"{self.source_version.cluster_type} "
                        f"{self.source_version.major_version}.{self.source_version.minor_version}",
-            "snapshotRepos": {"default": snapshot_repo}
+            "snapshotRepo": snapshot_repo
         }
 
         self.workflow_template = "full-migration-imported-clusters"
@@ -129,8 +127,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
 
     def display_final_cluster_state(self):
         """Display target cluster indices."""
-        response = cat_indices(cluster=self.target_cluster, refresh=True)
-        target_response = response.decode("utf-8") if isinstance(response, bytes) else response
+        target_response = cat_indices(cluster=self.target_cluster, refresh=True).decode("utf-8")
         logger.info("Target cluster indices after migration:")
         logger.info("TARGET CLUSTER")
         logger.info(target_response)

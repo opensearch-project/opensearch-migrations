@@ -1,0 +1,52 @@
+{{- if and .Values.conditionalPackageInstalls.kyverno .Values.kyvernoPolicies.zeroResourceRequests }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-kyverno-zero-resources-policy
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-1"
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+  policy.yaml: |
+    apiVersion: kyverno.io/v1
+    kind: ClusterPolicy
+    metadata:
+      name: zero-resource-requests
+      annotations:
+        policies.kyverno.io/title: Zero Resource Requests for Dev
+        policies.kyverno.io/description: Zeros cpu/memory requests and limits for dev environments.
+    spec:
+      rules:
+        - name: zero-resources
+          match:
+            any:
+              - resources:
+                  kinds:
+                    - Pod
+                  operations:
+                    - CREATE
+          preconditions:
+            all:
+              - key: "{{`{{ request.object.metadata.annotations.\"kyverno.io/mutated-by\" || '' }}`}}"
+                operator: NotEquals
+                value: "zero-resource-requests"
+          mutate:
+            patchStrategicMerge:
+              metadata:
+                annotations:
+                  kyverno.io/mutated-by: "zero-resource-requests"
+              spec:
+                containers:
+                  - (name): "*"
+                    resources:
+                      requests:
+                        cpu: "0"
+                        memory: "0"
+                initContainers:
+                  - (name): "*"
+                    resources:
+                      requests:
+                        cpu: "0"
+                        memory: "0"
+{{- end }}

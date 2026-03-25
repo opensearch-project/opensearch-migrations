@@ -14,7 +14,8 @@
 #   - CFN templates from GitHub releases
 #   - Helm chart from GitHub releases
 #   - Dashboard JSON files from GitHub releases
-#   - Container images for pods will use images from public.ecr.aws/opensearchproject
+#   - Container images are mirrored from public registries to private ECR
+#     (use --use-public-images to opt out and pull directly from public.ecr.aws)
 #
 # Developers can override any of these with --build-* flags to use locally
 # built artifacts from a repo checkout. When mixing built and downloaded
@@ -60,7 +61,7 @@ build_chart_and_dashboards=false
 version=""
 create_vpc_endpoints=""
 ignore_checks=false
-push_images_to_ecr=false
+push_images_to_ecr=true
 ma_images_source=""
 skip_setting_k8s_context=false
 skip_test_images=false
@@ -98,7 +99,7 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --ignore-checks) ignore_checks=true; shift 1 ;;
-    --push-all-images-to-private-ecr) push_images_to_ecr=true; shift 1 ;;
+    --use-public-images) push_images_to_ecr=false; shift 1 ;;
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
     --skip-test-images) skip_test_images=true; shift 1 ;;
@@ -130,12 +131,9 @@ while [[ $# -gt 0 ]]; do
       echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,efs."
       echo "                                            Or specify a comma-separated subset, e.g. 's3,ecr,ecrDocker'."
       echo "  --ignore-checks                           Skip subnet connectivity and VPC endpoint pre-flight checks."
-      echo "  --push-all-images-to-private-ecr          Mirror all required public images and helm charts to the"
-      echo "                                            private ECR registry. Enables deployment on isolated subnets"
-      echo "                                            without internet access. For public networks, this removes"
-      echo "                                            additional dependencies and reduces the risk of a failure due"
-      echo "                                            to images becoming unavailable."
-      echo "                                            Run from a machine with internet."
+      echo "  --use-public-images                       Opt out of mirroring images to private ECR. Use public images"
+      echo "                                            from public.ecr.aws/opensearchproject and public helm chart"
+      echo "                                            registries directly. Requires internet access from the cluster."
       echo "  --ma-images-source <registry>             Copy MA images from another ECR registry instead of"
       echo "                                            public.ecr.aws. Use when images were built on a separate"
       echo "                                            cluster (e.g. one with internet access)."
@@ -212,7 +210,7 @@ if [[ "$build_images" == "true" ]]; then
   use_public_images=false
 fi
 
-# --ma-images-source implies --push-all-images-to-private-ecr
+# --ma-images-source implies mirroring to private ECR
 if [[ -n "$ma_images_source" ]]; then
   push_images_to_ecr=true
 fi
@@ -384,9 +382,9 @@ if [[ "$deploy_import_vpc" == "true" && -n "$subnet_ids" && "$ignore_checks" != 
     fi
     if [[ "$push_images_to_ecr" != "true" ]]; then
       echo "" >&2
-      echo "Error: --push-all-images-to-private-ecr is required when using isolated subnets (no NAT/IGW)." >&2
+      echo "Error: --use-public-images cannot be used with isolated subnets (no NAT/IGW)." >&2
       echo "  Images cannot be pulled from public registries (docker.io, quay.io, etc)." >&2
-      echo "  Use --push-all-images-to-private-ecr to mirror public images to private ECR." >&2
+      echo "  Remove --use-public-images to mirror public images to private ECR." >&2
       echo "  Use --ma-images-source to copy MA images from a build cluster's ECR." >&2
       echo "  Use --ignore-checks to skip this check." >&2
       exit 1
@@ -880,9 +878,9 @@ if [[ "$ignore_checks" != "true" && -n "${VPC_ID:-}" ]]; then
       # Isolated subnets require mirroring — public registries are unreachable.
       if [[ "$push_images_to_ecr" != "true" ]]; then
         echo "" >&2
-        echo "Error: --build-images or --push-all-images-to-private-ecr is required when using isolated subnets (no NAT/IGW)." >&2
+        echo "Error: --use-public-images cannot be used with isolated subnets (no NAT/IGW)." >&2
         echo "  public.ecr.aws has no VPC endpoint — public images cannot be pulled." >&2
-        echo "  Use --push-all-images-to-private-ecr to mirror public images to private ECR," >&2
+        echo "  Remove --use-public-images to mirror public images to private ECR," >&2
         echo "  or --build-images to build from source and push to private ECR." >&2
         echo "  Or use --ignore-checks to skip this check." >&2
         exit 1

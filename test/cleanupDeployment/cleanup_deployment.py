@@ -12,7 +12,10 @@ logger = logging.getLogger(__name__)
 
 INDEPENDENT_STACKS = ['MigrationConsole', 'ReindexFromSnapshot', 'TrafficReplayer', 'TargetClusterProxy',
                       'CaptureProxy', 'KafkaBroker', 'OpenSearchContainer', 'CaptureProxyES', 'Elasticsearch']
-CORE_STACKS_ORDERED = ['MigrationInfra', 'OpenSearchDomain', 'OpenSearch',
+# CDK v0.3.x uses a single 'OpenSearch-{stage}-{region}' stack.
+# 'NetworkInfra' and 'infra-stack'/'network-stack' are kept for backward compatibility
+# with older deployments that used the v0.1.x multi-stack pattern.
+CORE_STACKS_ORDERED = ['MigrationInfra', 'OpenSearch', 'OpenSearchDomain',
                        'NetworkInfra', 'infra-stack', 'network-stack']
 CFN_INITIAL_STATUS_SKIP = ['DELETE_IN_PROGRESS', 'DELETE_COMPLETE']
 MAX_DELETE_STACK_RETRIES = 3

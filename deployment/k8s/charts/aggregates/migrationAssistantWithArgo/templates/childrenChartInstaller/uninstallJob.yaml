@@ -12,7 +12,7 @@ metadata:
     "helm.sh/hook-weight": "-10"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 3
+  backoffLimit: 1
   ttlSecondsAfterFinished: 600
   template:
     metadata:
@@ -26,10 +26,6 @@ spec:
         - name: helm-uninstaller
           image: {{ .Values.images.installer.repository}}:{{ .Values.images.installer.tag }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
-          {{- with .Values.installer.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
           command:
             - /bin/sh
             - -c
@@ -60,7 +56,7 @@ metadata:
     "helm.sh/hook-weight": "10"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 3
+  backoffLimit: 1
   ttlSecondsAfterFinished: 600
   template:
     metadata:

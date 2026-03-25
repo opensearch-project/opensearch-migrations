@@ -13,7 +13,7 @@ from .test_cases.basic_tests import *
 from .test_cases.multi_type_tests import *
 from .test_cases.backfill_tests import *
 from .test_cases.snapshot_only_tests import *
-from .test_cases.solr_tests import *
+from .test_cases.aoss_collection_tests import *
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,8 @@ def pytest_addoption(parser):
                      help="Specify test IDs like '0001,0003' to filter tests to execute")
     parser.addoption("--source_version", action="store", default=None)
     parser.addoption("--target_version", action="store", default=None)
+    parser.addoption("--target_type", action="store", default="OS",
+                     help="Target type: 'OS' (default) or 'AOSS' for Amazon OpenSearch Serverless")
     parser.addoption("--keep_workflows", action="store_true", default=False,
                      help="If set, will not delete Argo workflows created by tests")
     parser.addoption("--reuse_clusters", action="store_true", default=False,
@@ -62,16 +64,19 @@ def pytest_generate_tests(metafunc):
     if metafunc.function.__name__ == "test_migration_assistant_workflow":
         source_version = metafunc.config.getoption("source_version")
         target_version = metafunc.config.getoption("target_version")
+        target_type = metafunc.config.getoption("target_type")
         reuse_clusters = metafunc.config.getoption("reuse_clusters")
-        if not source_version or not target_version:
-            raise ValueError("The migration_assistant_workflow test requires both a '--source_version' "
-                             "and '--target_version' parameter")
+        if not source_version:
+            raise ValueError("The migration_assistant_workflow test requires a '--source_version' parameter")
+        if target_type != "AOSS" and not target_version:
+            raise ValueError("The migration_assistant_workflow test requires a '--target_version' parameter "
+                             "(or use '--target_type=AOSS' for serverless targets)")
         unique_id = metafunc.config.getoption("unique_id")
         metafunc.config.test_summary["source_version"] = source_version
-        metafunc.config.test_summary["target_version"] = target_version
+        metafunc.config.test_summary["target_version"] = target_version if target_type != "AOSS" else "AOSS"
         test_ids_list = metafunc.config.getoption("test_ids")
         user_args = MATestUserArguments(source_version=source_version, target_version=target_version,
-                                        unique_id=unique_id, reuse_clusters=reuse_clusters)
+                                        target_type=target_type, unique_id=unique_id, reuse_clusters=reuse_clusters)
         test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
         metafunc.parametrize("test_case", test_cases_param)
 
