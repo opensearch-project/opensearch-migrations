@@ -122,7 +122,7 @@ export const KAFKA_CLIENT_CONFIG = z.object({
             "If empty, a matching Kafka cluster must be managed by this workflow via kafkaClusterConfiguration.")
         .regex(new RegExp(`^(?:[a-z0-9][-a-z0-9.]*:${PORT_NUMBER_PATTERN}(?:,(?!$)|$))*$`)),
     kafkaTopic: z.string()
-        .describe("Kafka topic name for captured traffic. If empty, defaults to the name of the associated proxy or target label.")
+        .describe("Kafka topic name for captured traffic. If empty, defaults to the proxy name.")
         .default(""),
 }).describe("Client connection configuration for an existing Kafka cluster.");
 

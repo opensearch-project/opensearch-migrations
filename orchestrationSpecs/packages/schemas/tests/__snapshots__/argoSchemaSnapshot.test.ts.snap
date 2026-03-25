@@ -120,7 +120,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "kafkaTopic": {
                       "type": "string",
                       "default": "",
-                      "description": "Kafka topic name for captured traffic. If empty, defaults to the name of the associated proxy or target label."
+                      "description": "Kafka topic name for captured traffic. If empty, defaults to the proxy name."
                     },
                     "label": {
                       "type": "string"
@@ -1138,7 +1138,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "kafkaTopic": {
                       "type": "string",
                       "default": "",
-                      "description": "Kafka topic name for captured traffic. If empty, defaults to the name of the associated proxy or target label."
+                      "description": "Kafka topic name for captured traffic. If empty, defaults to the proxy name."
                     },
                     "label": {
                       "type": "string"
@@ -1529,7 +1529,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "kafkaTopic": {
                     "type": "string",
                     "default": "",
-                    "description": "Kafka topic name for captured traffic. If empty, defaults to the name of the associated proxy or target label."
+                    "description": "Kafka topic name for captured traffic. If empty, defaults to the proxy name."
                   }
                 },
                 "required": [
