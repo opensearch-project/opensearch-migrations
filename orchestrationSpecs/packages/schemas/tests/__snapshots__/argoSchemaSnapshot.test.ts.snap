@@ -1277,7 +1277,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "transformerConfigEncoded": {
                       "type": "string",
-                      "description": "Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations containing special characters."
+                      "description": "Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations that would be cumbersome to otherwise encode in a JSON field."
                     },
                     "transformerConfigFile": {
                       "type": "string",
@@ -2733,7 +2733,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "transformerConfigEncoded": {
                     "type": "string",
-                    "description": "Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations containing special characters."
+                    "description": "Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations that would be cumbersome to otherwise encode in a JSON field."
                   },
                   "transformerConfigFile": {
                     "type": "string",

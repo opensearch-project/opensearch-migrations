@@ -301,7 +301,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     transformerConfig: z.string().optional()
         .describe("Inline request transformer configuration as a JSON string. Defines transformations applied to each request before replaying to the target."),
     transformerConfigEncoded: z.string().optional()
-        .describe("Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations containing special characters."),
+        .describe("Base64-encoded request transformer configuration. Alternative to transformerConfig for configurations that would be cumbersome to otherwise encode in a JSON field."),
     transformerConfigFile: z.string().optional()
         .describe("[Expert] Path to a JSON file containing request transformer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."),
     tupleTransformerConfig: z.string().optional()
