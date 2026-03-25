@@ -261,6 +261,49 @@ export const testCases: TestCase[] = [
     ],
   }),
 
+  solrTest('facet-query', {
+    description: 'Query facet counting documents matching specific queries',
+    documents: [
+      { id: '1', title: 'laptop', category: 'electronics', price: 999 },
+      { id: '2', title: 'phone', category: 'electronics', price: 699 },
+      { id: '3', title: 'shirt', category: 'clothing', price: 29 },
+      { id: '4', title: 'pants', category: 'clothing', price: 59 },
+      { id: '5', title: 'apple', category: 'food', price: 3 },
+      { id: '6', title: 'banana', category: 'food', price: 2 },
+    ],
+    requestPath:
+      '/solr/testcollection/select?q=*:*&wt=json&json.facet=' +
+      encodeURIComponent(
+        JSON.stringify({
+          expensive: { type: 'query', q: 'price:[100 TO *]' },
+          cheap: { type: 'query', q: 'price:[* TO 50]' },
+          electronics: { type: 'query', q: 'category:electronics' },
+        }),
+      ),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        category: { type: 'string' },
+        price: { type: 'pfloat' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        category: { type: 'keyword' },
+        price: { type: 'float' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      {
+        path: '$.response',
+        rule: 'ignore',
+        reason: 'Facet test — only validating $.facets, not hits',
+      },
+    ],
+  }),
+
   solrTest('facet-date-range', {
     description: 'Date range facet using start/end/gap with +1MONTH calendar interval',
     documents: [
