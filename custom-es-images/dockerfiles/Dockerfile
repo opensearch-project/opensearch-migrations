@@ -62,7 +62,7 @@ COPY cgroup_fix.c /tmp/fix.c
 RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     MINOR=$(echo "${ES_VERSION}" | cut -d. -f2) && \
     mkdir -p /opt/fix && \
-    if [ "$MAJOR" -eq 5 ] && [ "$MINOR" -le 2 ]; then \
+    if [ "$MAJOR" -eq 5 ] && [ "$MINOR" -ge 1 ] && [ "$MINOR" -le 2 ]; then \
       # Detect Alpine (apk) vs AL2023 (dnf) for compiler installation
       if command -v apk >/dev/null 2>&1; then \
         apk add --no-cache gcc musl-dev; \
@@ -104,7 +104,7 @@ RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
       printf 'xpack.ml.enabled: false\n' >> /tmp/config/elasticsearch.yml; \
     fi && \
     # Entrypoint script
-    if [ "$MAJOR" -eq 5 ] && [ "$MINOR" -le 2 ]; then \
+    if [ "$MAJOR" -eq 5 ] && [ "$MINOR" -ge 1 ] && [ "$MINOR" -le 2 ]; then \
       printf '#!/bin/bash\ngrep -v "^0::" /proc/self/cgroup > /tmp/cgroup_filtered\nexport LD_PRELOAD=/usr/local/lib/libcgroup_fix.so\nexport ES_JAVA_OPTS="${ES_JAVA_OPTS} -XX:-UseContainerSupport"\nexec /usr/share/elasticsearch/bin/elasticsearch "$@"\n' > /tmp/scripts/entrypoint.sh; \
     else \
       printf '#!/bin/bash\nexec /usr/share/elasticsearch/bin/elasticsearch "$@"\n' > /tmp/scripts/entrypoint.sh; \

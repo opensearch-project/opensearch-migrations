@@ -1,7 +1,7 @@
 /*
- * cgroup_fix.c — LD_PRELOAD shim for ES 5.0–5.2 on cgroups v2
+ * cgroup_fix.c — LD_PRELOAD shim for ES 5.1–5.2 on cgroups v2
  *
- * ES 5.0–5.2 reads /proc/self/cgroup expecting cgroups v1 format.
+ * ES 5.1–5.2 reads /proc/self/cgroup expecting cgroups v1 format.
  * On cgroups v2, the "0::" line causes a parse failure. This shim intercepts
  * open/fopen calls for /proc/self/cgroup and redirects them to a filtered
  * copy that strips the v2 line.
