@@ -714,8 +714,7 @@ export const SNAPSHOT_INFO = z.object({
 }).describe("Snapshot repository and snapshot configuration for a source cluster.");
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    version: CLUSTER_VERSION_STRING
-        .describe("Version of the source cluster in '<ENGINE> <MAJOR>.<MINOR>.<PATCH>' format (e.g. 'ES 7.10.2', 'OS 1.3.0'). Required for compatibility checks and migration strategy selection."),
+    version: CLUSTER_VERSION_STRING,
     snapshotInfo: SNAPSHOT_INFO.optional()
         .describe("Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source.")
 }).describe("Connection and snapshot configuration for a source Elasticsearch or OpenSearch cluster.").superRefine((data, ctx) => {
