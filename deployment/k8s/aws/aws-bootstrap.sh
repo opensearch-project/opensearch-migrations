@@ -1107,6 +1107,11 @@ if [[ "$build_chart_and_dashboards" != "true" ]]; then
 fi
 
 # --- helm install ---
+# Ensure gp2 is the default StorageClass so dynamically-provisioned PVCs
+# (e.g. RFS coordinator) bind without an explicit storageClassName.
+if kubectl get storageclass gp2 >/dev/null 2>&1; then
+  kubectl annotate storageclass gp2 storageclass.kubernetes.io/is-default-class=true --overwrite >/dev/null 2>&1
+fi
 # When using packaged chart, valuesEks.yaml is extracted from the tgz since
 # helm can't reference files inside an archive. When using the local chart,
 # values files are referenced directly. To add new values files, update both paths.
