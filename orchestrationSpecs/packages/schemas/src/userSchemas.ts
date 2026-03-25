@@ -500,8 +500,9 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "'ALWAYS': always use server-generated IDs (discards source IDs). " +
             "'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."),
     allowedDocExceptionTypes: z.array(z.string()).default([]).optional()
-        .describe("List of document-level exception types to treat as successful operations during bulk migration. " +
-            "Enables idempotent migrations by allowing specific errors (e.g. 'version_conflict_engine_exception') to be treated as success rather than failure."),
+        .describe("List of document-level exception types to treat as non-fatal during bulk migration. " +
+            "For example, set to ['version_conflict_engine_exception'] when migrating into a data stream, " +
+            "where backing index writes may conflict with existing documents."),
     coordinatorRetryMaxRetries: z.number().default(7).optional()
         .describe("Maximum number of retries when marking work items as completed on the coordinator."),
     coordinatorRetryInitialDelayMs: z.number().default(1000).optional()

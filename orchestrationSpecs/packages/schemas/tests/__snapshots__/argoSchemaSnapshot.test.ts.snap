@@ -2217,7 +2217,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "List of document-level exception types to treat as successful operations during bulk migration. Enables idempotent migrations by allowing specific errors (e.g. 'version_conflict_engine_exception') to be treated as success rather than failure."
+                        "description": "List of document-level exception types to treat as non-fatal during bulk migration. For example, set to ['version_conflict_engine_exception'] when migrating into a data stream, where backing index writes may conflict with existing documents."
                       },
                       "coordinatorRetryMaxRetries": {
                         "type": "number",
