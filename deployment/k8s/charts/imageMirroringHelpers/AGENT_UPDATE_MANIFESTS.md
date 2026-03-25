@@ -112,7 +112,7 @@ Deploy to an isolated subnet (no NAT/IGW) with:
 ```bash
 ./aws-bootstrap.sh \
   --deploy-import-vpc-cfn --build-cfn --build-images \
-  --build-chart-and-dashboards --push-all-images-to-private-ecr \
+  --build-chart-and-dashboards \
   --create-vpc-endpoints --stack-name ... --stage ... \
   --vpc-id ... --subnet-ids ... --region ...
 ```

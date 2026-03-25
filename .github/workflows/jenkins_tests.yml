@@ -41,6 +41,7 @@ jobs:
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
           jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
 
   elasticsearch-5x-k8s-local-test:
     needs: [get-require-approval, sanitize-input]
@@ -60,6 +61,7 @@ jobs:
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
           jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
 
   eks-integ-test:
     if: |
@@ -80,6 +82,81 @@ jobs:
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: ${{ github.event_name == 'push' && 'main-eks-integ-test' || 'pr-eks-integ-test' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "180"
+
+  eks-aoss-search-integ-test:
+    if: |
+      github.event_name == 'push' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'run-aoss-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    concurrency:
+      group: ${{ github.workflow }}-eks-aoss-search-integ-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-eks-aoss-search-integ-test' || 'pr-eks-aoss-search-integ-test' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
+
+  eks-aoss-timeseries-integ-test:
+    if: |
+      github.event_name == 'push' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'run-aoss-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    concurrency:
+      group: ${{ github.workflow }}-eks-aoss-timeseries-integ-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-eks-aoss-timeseries-integ-test' || 'pr-eks-aoss-timeseries-integ-test' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
+
+  eks-aoss-vector-integ-test:
+    if: |
+      github.event_name == 'push' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'run-aoss-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    concurrency:
+      group: ${{ github.workflow }}-eks-aoss-vector-integ-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-eks-aoss-vector-integ-test' || 'pr-eks-aoss-vector-integ-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"

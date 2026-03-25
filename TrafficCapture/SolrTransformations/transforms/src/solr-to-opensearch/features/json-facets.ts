@@ -9,7 +9,7 @@
  */
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext, JavaMap } from '../context';
-import { convertSort, isMapLike } from './utils';
+import { convertSort, isMapLike, isSolrDateMathGap, convertSolrDateGap } from './utils';
 
 const FEATURE_NAME = 'json-facets';
 
@@ -211,9 +211,41 @@ function convertArbitraryRangeFacet(def: JavaMap, ranges: any): JavaMap {
 }
 
 /**
- * Convert Solr uniform range (start/end/gap) to an OpenSearch `histogram` aggregation.
+ * Determine whether a uniform range facet targets a date or numeric field.
+ *
+ * Current strategy: inspect the `gap` value for Solr date-math patterns
+ * (e.g. "+1MONTH", "+5MINUTES").
+ *
+ * Future: this function can be extended to accept explicit schema / field-type
+ * metadata when that support becomes available.
+ */
+type FieldTypeHint = 'numeric' | 'date';
+
+function detectFieldType(def: JavaMap): FieldTypeHint {
+  const gap = def.get('gap');
+  if (gap != null && typeof gap === 'string' && isSolrDateMathGap(gap)) {
+    return 'date';
+  }
+  return 'numeric';
+}
+
+/**
+ * Convert Solr uniform range (start/end/gap) to the appropriate OpenSearch
+ * aggregation — either `histogram` (numeric) or `date_histogram` (date).
  */
 function convertUniformRangeFacet(def: JavaMap): JavaMap {
+  const fieldType = detectFieldType(def);
+  if (fieldType === 'date') {
+    return convertDateHistogramFacet(def);
+  }
+  return convertNumericHistogramFacet(def);
+}
+
+/**
+ * Convert Solr uniform range (start/end/gap) to an OpenSearch `histogram` aggregation
+ * for numeric fields.
+ */
+function convertNumericHistogramFacet(def: JavaMap): JavaMap {
   const histogramInner = new Map<string, any>();
   histogramInner.set('field', def.get('field'));
 
@@ -239,7 +271,54 @@ function convertUniformRangeFacet(def: JavaMap): JavaMap {
   const mincount = def.get('mincount');
   if (mincount != null) histogramInner.set('min_doc_count', mincount);
 
-  // These Solr parameters have no direct OpenSearch histogram equivalent — warn if present.
+  warnUnsupportedRangeParams(def);
+  warnUnknownRangeKeys(def);
+
+  return new Map<string, any>([['histogram', histogramInner]]);
+}
+
+/**
+ * Convert Solr uniform range (start/end/gap) to an OpenSearch `date_histogram`
+ * aggregation for date fields.
+ *
+ * Unlike the numeric path, date extended_bounds pass through the raw start/end
+ * strings (no arithmetic), and the gap is translated via convertSolrDateGap().
+ */
+function convertDateHistogramFacet(def: JavaMap): JavaMap {
+  const dateHistInner = new Map<string, any>();
+  dateHistInner.set('field', def.get('field'));
+
+  const gap = def.get('gap');
+  if (gap != null) {
+    const interval = convertSolrDateGap(gap);
+    dateHistInner.set(interval.type, interval.value);
+  }
+
+  // Return ISO-8601 date strings (like Solr) instead of epoch millis
+  dateHistInner.set('format', 'strict_date_time_no_millis');
+
+  const start = def.get('start');
+  if (start != null) {
+    // Only set extended_bounds.min (start).
+    // Solr's "end" is exclusive — the last bucket starts *before* end.
+    // Setting extended_bounds.max = end would create an extra empty bucket
+    // at the end boundary, so we omit it.
+    const bounds = new Map<string, any>();
+    bounds.set('min', start);
+    dateHistInner.set('extended_bounds', bounds);
+  }
+
+  const mincount = def.get('mincount');
+  if (mincount != null) dateHistInner.set('min_doc_count', mincount);
+
+  warnUnsupportedRangeParams(def);
+  warnUnknownRangeKeys(def);
+
+  return new Map<string, any>([['date_histogram', dateHistInner]]);
+}
+
+/** Warn about Solr range parameters that have no direct OpenSearch histogram equivalent. */
+function warnUnsupportedRangeParams(def: JavaMap): void {
   const unsupportedParams: string[] = [];
   const hardend = def.get('hardend');
   if (hardend != null) unsupportedParams.push(`hardend=${hardend}`);
@@ -255,7 +334,10 @@ function convertUniformRangeFacet(def: JavaMap): JavaMap {
       `[${FEATURE_NAME}] Range facet parameters with no direct OpenSearch histogram equivalent: ${unsupportedParams.join(', ')}`,
     );
   }
+}
 
+/** Warn about unknown keys in a uniform range facet definition. */
+function warnUnknownRangeKeys(def: JavaMap): void {
   const knownKeys = new Set([
     'type',
     'field',
@@ -268,8 +350,6 @@ function convertUniformRangeFacet(def: JavaMap): JavaMap {
     'other',
   ]);
   warnUnknownKeys(def, knownKeys, 'range');
-
-  return new Map<string, any>([['histogram', histogramInner]]);
 }
 
 // endregion

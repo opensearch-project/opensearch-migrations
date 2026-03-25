@@ -15,10 +15,6 @@
 
 set -e -x
 
-# Activate the Python virtual environment to get access to workflow CLI
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
 echo "Building and submitting migration workflow..."
 
 # Decode base64 migration config from environment variable and write to file

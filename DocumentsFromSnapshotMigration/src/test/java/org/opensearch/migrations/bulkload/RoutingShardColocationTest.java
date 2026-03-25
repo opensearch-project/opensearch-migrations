@@ -76,7 +76,7 @@ public class RoutingShardColocationTest extends SourceTestBase {
     private static final SearchClusterContainer.ContainerVersion[] TARGET_VERSIONS = {
         SearchClusterContainer.OS_V1_3_20,
         SearchClusterContainer.OS_V2_19_4,
-        SearchClusterContainer.OS_V3_0_0
+        SearchClusterContainer.OS_LATEST
     };
 
     private static Stream<Arguments> scenarios() {
