@@ -247,7 +247,7 @@ class S3Snapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return _solr_backup_status(self.source_cluster, self.snapshot_name)
+            return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
@@ -313,7 +313,7 @@ class FileSystemSnapshot(Snapshot):
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
         if self._is_solr_source():
-            return _solr_backup_status(self.source_cluster, self.snapshot_name)
+            return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
@@ -631,10 +631,14 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     return SnapshotStateAndDetails(state, snapshot_info)
 
 
-def _solr_backup_status(cluster: Cluster, snapshot_name: str) -> CommandResult:
+def _solr_backup_status(cluster: Cluster, snapshot_name: str, deep_check: bool = False) -> CommandResult:
     """Check SolrCloud backup status via Collections API REQUESTSTATUS."""
     try:
         status_obj = _get_solr_snapshot_status(cluster, snapshot_name)
+
+        if not deep_check:
+            return CommandResult(success=True, value=status_obj.status.value)
+
         start_time = status_obj.started.strftime('%Y-%m-%d %H:%M:%S') if status_obj.started else ''
         finish_time = status_obj.finished.strftime('%Y-%m-%d %H:%M:%S') if status_obj.finished else ''
         eta_str = format_duration(int(status_obj.eta_ms)) if status_obj.eta_ms else "0h 0m 0s"
