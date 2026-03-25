@@ -404,49 +404,28 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Migration references unknown target cluster '${toTarget}'`);
             }
 
-            const isSolrSource = sourceCluster.version?.toUpperCase().startsWith("SOLR");
+            // When perSnapshotConfig is not provided, auto-generate it from snapshotInfo.snapshots
+            // so the workflow creates/waits for snapshots the same way for both ES and Solr sources.
+            const effectivePerSnapshotConfig = perSnapshotConfig ?? (
+                sourceCluster.snapshotInfo?.snapshots
+                    ? Object.fromEntries(
+                        Object.keys(sourceCluster.snapshotInfo.snapshots).map(snapName => [
+                            snapName,
+                            [USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG.parse({
+                                metadataMigrationConfig: {},
+                                documentBackfillConfig: {},
+                            })]
+                        ])
+                    )
+                    : undefined
+            );
 
-            // For Solr sources without perSnapshotConfig, generate a direct migration
-            // using the first repo from snapshotInfo.repos (same mechanism as ES)
-            if (isSolrSource && !perSnapshotConfig) {
-                const repos = sourceCluster.snapshotInfo?.repos ?? {};
-                const repoEntries = Object.entries(repos);
-                if (repoEntries.length === 0) {
-                    throw new Error(`Solr source '${fromSource}' requires snapshotInfo.repos with an S3 repo config`);
-                }
-                const [repoName, rawRepoConfig] = repoEntries[0];
-                const repoConfig = await rewriteRepoEndpointIfLocalStack(rawRepoConfig, repoName);
-
-                const { enabled: _e2, ...restOfTarget } = targetCluster;
-                results.push({
-                    label: `${fromSource}-to-${toTarget}`,
-                    snapshotNameResolution: { externalSnapshotName: "solr-direct-migration" },
-                    migrations: autoLabelMigrations([
-                        USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG.parse({
-                            metadataMigrationConfig: {},
-                            documentBackfillConfig: {},
-                        })
-                    ]),
-                    sourceVersion: sourceCluster.version || "",
-                    sourceLabel: fromSource,
-                    targetConfig: { ...restOfTarget, label: toTarget },
-                    snapshotConfig: {
-                        label: repoName,
-                        repoConfig,
-                    },
-                    sourceEndpoint: sourceCluster.endpoint || "",
-                    sourceAllowInsecure: sourceCluster.allowInsecure ?? false,
-                    sourceAuth: sourceCluster.authConfig,
-                });
-                continue;
-            }
-
-            if (!perSnapshotConfig) continue;
+            if (!effectivePerSnapshotConfig) continue;
 
             const { enabled: _e2, ...restOfTarget } = targetCluster;
             const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
 
-            for (const [snapshotName, migrations] of Object.entries(perSnapshotConfig)) {
+            for (const [snapshotName, migrations] of Object.entries(effectivePerSnapshotConfig)) {
                 const snapshotDef = sourceCluster.snapshotInfo?.snapshots[snapshotName];
                 if (!snapshotDef) {
                     throw new Error(`Migration references snapshot '${snapshotName}' not defined in source '${fromSource}'`);
