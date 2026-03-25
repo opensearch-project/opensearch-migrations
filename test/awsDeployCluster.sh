@@ -8,17 +8,16 @@ set -euo pipefail
 write_cluster_outputs() {
   local stage="$1"
   local outfile="$2"
-  local region
-  region=$(aws configure get region || echo "")
+  local cdk_outputs_file="$3"
 
-  if [[ -z "$region" ]]; then
-    echo "Error: Unable to determine AWS region. Set AWS_DEFAULT_REGION or configure a default region."
+  # Get the stack name from CDK outputs file (top-level key is the stack name)
+  local stack_name
+  stack_name=$(jq -r 'keys[0]' "$cdk_outputs_file")
+  if [[ -z "$stack_name" || "$stack_name" == "null" ]]; then
+    echo "Error: Could not determine stack name from CDK outputs file: $cdk_outputs_file"
     return 1
   fi
-
-  # v0.3.x: single stack named OpenSearch-{stage}-{region}
-  local stack_name="OpenSearch-${stage}-${region}"
-  echo "Looking up stack: $stack_name"
+  echo "Found stack: $stack_name"
 
   outputs=$(aws cloudformation describe-stacks \
     --stack-name "$stack_name" \
@@ -26,10 +25,9 @@ write_cluster_outputs() {
     --output json 2>/dev/null)
 
   if [[ -z "$outputs" || "$outputs" == "null" ]]; then
-    echo "No OpenSearch stack found: $stack_name"
+    echo "No outputs found on stack: $stack_name"
     return 1
   fi
-  echo "Found stack: $stack_name"
 
   # VPC ID (inline in same stack, may not exist for serverless-only)
   # CDK strips hyphens from stage name in CFN OutputKeys
@@ -136,7 +134,9 @@ cd ..
 cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 
 cd amazon-opensearch-service-sample-cdk
-cdk deploy "*" --require-approval never --concurrency 3
+CDK_OUTPUTS_FILE="$ROOT_REPO_PATH/test/tmp/cdk-outputs-${STAGE}.json"
+mkdir -p "$ROOT_REPO_PATH/test/tmp"
+cdk deploy "*" --require-approval never --concurrency 3 --outputs-file "$CDK_OUTPUTS_FILE"
 
 CLUSTER_DETAILS_OUTPUT_FILE_PATH="$ROOT_REPO_PATH/test/tmp/cluster-details-${STAGE}.json"
-write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH"
+write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH" "$CDK_OUTPUTS_FILE"
