@@ -17,8 +17,6 @@ def call(Map config = [:]) {
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: config.defaultStage ?: "Eks${vpcMode}Vpc", description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: "us-east-1", description: 'AWS region for deployment')
-            booleanParam(name: 'BUILD_IMAGES', defaultValue: false, description: 'Build container images from source instead of using public images')
-            booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
         }
 
         options {
@@ -100,8 +98,6 @@ def call(Map config = [:]) {
                             def bootstrapArgs = isImportVpc ?
                                 "--deploy-import-vpc-cfn --vpc-id ${env.TEST_VPC_ID} --subnet-ids ${env.TEST_SUBNET_IDS}" :
                                 "--deploy-create-vpc-cfn"
-                            def buildImagesArg = params.BUILD_IMAGES ? "--build-images" : ""
-                            def buildChartArg = params.BUILD_CHART_AND_DASHBOARDS ? "--build-chart-and-dashboards" : ""
 
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 7200, roleSessionName: 'jenkins-session') {
@@ -110,13 +106,15 @@ def call(Map config = [:]) {
                                         ./deployment/k8s/aws/aws-bootstrap.sh \
                                           ${bootstrapArgs} \
                                           --build-cfn \
+                                          --build-images \
+                                          --build-chart-and-dashboards \
                                           --stack-name "${env.STACK_NAME}" \
                                           --stage "${stage}" \
                                           --region "${params.REGION}" \
                                           --version latest \
                                           --skip-console-exec \
-                                          ${buildImagesArg} \
-                                          ${buildChartArg}
+                                          --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
+                                          --base-dir "\$(pwd)"
                                     """
                                 }
                             }
