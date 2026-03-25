@@ -1,6 +1,7 @@
 conditionalPackageInstalls:
   source: true
   target: true
+  solrSource: false
 
 useDedicatedKarpenterPool: false
 
@@ -121,3 +122,29 @@ target:
   singleNode: true
   persistence:
     enabled: false
+
+# Solr Operator configuration (only used when conditionalPackageInstalls.solrSource is true)
+solr-operator:
+  zookeeper-operator:
+    install: true
+    crd:
+      create: true
+
+# SolrCloud source cluster via the Solr Operator
+# Override image.tag to deploy a specific Solr version (e.g. "8.11.4", "9.7.0")
+solrSource:
+  fullnameOverride: "solr-source"
+  replicas: 1
+  image:
+    tag: "9.7.0"
+  solrOptions:
+    javaMemory: "-Xms512m -Xmx512m"
+  dataStorage:
+    type: "ephemeral"
+  zk:
+    provided:
+      replicas: 1
+  # S3 backup repository for localstack
+  # The Solr S3 backup repository requires the s3-repository contrib module.
+  # backupRepositories are passed through to the SolrCloud CR spec.
+  backupRepositories: []

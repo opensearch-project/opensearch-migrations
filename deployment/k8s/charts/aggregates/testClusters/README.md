@@ -4,6 +4,34 @@ This scrappy chart is only for developer tests - even then, developers may be
 annoyed by the lack of durability and redundancy, especially if one needs to
 test within and environment where pods may be reassigned aggressively.
 
+## Solr Source Cluster
+
+This chart can optionally deploy a SolrCloud source cluster using the
+[Apache Solr Operator](https://solr.apache.org/operator/) instead of (or
+alongside) the default Elasticsearch source.
+
+### Quick Start
+
+```bash
+# Deploy Solr 9.7.0 as the source (disables Elasticsearch source)
+helm install test-clusters . -f valuesSolrSource.yaml
+
+# Deploy a specific Solr version
+helm install test-clusters . -f valuesSolrSource.yaml --set solrSource.image.tag=8.11.4
+
+# Deploy Solr alongside Elasticsearch (both sources)
+helm install test-clusters . -f valuesSolrSource.yaml --set conditionalPackageInstalls.source=true
+```
+
+The `valuesSolrSource.yaml` overlay:
+- Enables the Solr Operator and ZooKeeper Operator
+- Creates a single-node SolrCloud with ephemeral storage
+- Configures an S3 backup repository pointing at localstack (`http://localstack:4566`)
+- Creates a `solr-s3-credentials` Secret with test credentials for localstack
+
+The Solr version is controlled by `solrSource.image.tag` and can be any
+published Docker Hub `solr` image tag.
+
 ## S3 Snapshot Support
 
 The default base image for ES 7.10 that this installation uses constructed by

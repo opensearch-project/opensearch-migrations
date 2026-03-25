@@ -1,0 +1,36 @@
+# Values for deploying a Solr source cluster via the Solr Operator.
+# Disables the default Elasticsearch source and enables Solr instead.
+#
+# Usage:
+#   helm install test-clusters . -f valuesSolrSource.yaml
+#
+# Override the Solr version:
+#   helm install test-clusters . -f valuesSolrSource.yaml --set solrSource.image.tag=8.11.4
+
+conditionalPackageInstalls:
+  source: false
+  solrSource: true
+
+solrSource:
+  image:
+    tag: "9.7.0"
+  solrOptions:
+    javaMemory: "-Xms512m -Xmx512m"
+    # Load the S3 repository module so backups can target S3/localstack
+    solrModules:
+      - s3-repository
+  backupRepositories:
+    - name: localstack-s3
+      s3:
+        region: us-east-1
+        bucket: solr-backups
+        # For cross-namespace localstack, override with:
+        #   --set 'solrSource.backupRepositories[0].s3.endpoint=http://localstack.<namespace>:4566'
+        endpoint: "http://localstack:4566"
+        credentials:
+          accessKeyIdSecret:
+            name: solr-s3-credentials
+            key: access-key-id
+          secretAccessKeySecret:
+            name: solr-s3-credentials
+            key: secret-access-key
