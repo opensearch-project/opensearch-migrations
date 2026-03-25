@@ -15,10 +15,15 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JavascriptTransformer;
 import org.opensearch.migrations.transform.shim.netty.BasicAuthSigningHandler;
 import org.opensearch.migrations.transform.shim.netty.SigV4SigningHandler;
+import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
 import org.opensearch.migrations.transform.shim.validation.DocCountValidator;
 import org.opensearch.migrations.transform.shim.validation.DocIdValidator;
 import org.opensearch.migrations.transform.shim.validation.FieldIgnoringEquality;
@@ -110,6 +115,11 @@ public class ShimMain {
             description = "Port for the health check endpoint. If not set, no health server is started.")
         public int healthPort = -1;
 
+        @Parameter(names = {"--otelCollectorEndpoint"},
+            description = "OpenTelemetry Collector endpoint URL (e.g. http://localhost:4317). "
+                + "If not set, instrumentation runs in no-op mode.")
+        public String otelCollectorEndpoint;
+
         @Parameter(names = {"--watchTransforms"},
             description = "Watch transform JS files for changes and hot-reload them.")
         public boolean watchTransforms;
@@ -139,9 +149,15 @@ public class ShimMain {
         Set<String> activeTargets = parseActiveTargets(params, targets);
         List<ValidationRule> validators = parseValidators(params);
 
+        var otelSdk = RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(
+            params.otelCollectorEndpoint, "shimProxy", "shim-" + params.listenPort);
+        var rootContext = new RootShimProxyContext(otelSdk,
+            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
+
         var proxy = new ShimProxy(
             params.listenPort, targets, params.primary, activeTargets, validators,
-            null, params.insecureBackend, Duration.ofMillis(params.timeoutMs), params.maxContentLength);
+            null, params.insecureBackend, Duration.ofMillis(params.timeoutMs), params.maxContentLength,
+            rootContext);
 
         TransformFileWatcher watcher = null;
         if (params.watchTransforms && !watchedTransforms.isEmpty()) {
