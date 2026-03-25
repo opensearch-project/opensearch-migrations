@@ -65,6 +65,11 @@ function rangeInner(aggs: JavaMap): JavaMap {
   return aggs.get(FACET_NAME).get('range');
 }
 
+/** Extract the inner "filter" map from the aggs result for the default facet name. */
+function filterInner(aggs: JavaMap): JavaMap {
+  return aggs.get(FACET_NAME).get('filter');
+}
+
 /** Build a terms facet context, apply the transform, and return the inner terms map. */
 function applyBodyTerms(obj: Record<string, any>): JavaMap {
   return termsInner(applyAndGetAggs(ctxWithBodyFacet({ type: 'terms', ...obj })));
@@ -83,6 +88,11 @@ function applyBodyRange(obj: Record<string, any>): JavaMap {
 /** Build a date range facet context, apply the transform, and return the inner date_histogram map. */
 function applyBodyDateHistogram(obj: Record<string, any>): JavaMap {
   return dateHistogramInner(applyAndGetAggs(ctxWithBodyFacet({ type: 'range', ...obj })));
+}
+
+/** Build a query facet context, apply the transform, and return the inner filter map. */
+function applyBodyQuery(obj: Record<string, any>): JavaMap {
+  return filterInner(applyAndGetAggs(ctxWithBodyFacet({ type: 'query', ...obj })));
 }
 
 // endregion
@@ -752,6 +762,66 @@ describe('convertSort with Map input', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Query facet → OpenSearch filter aggregation
+// ---------------------------------------------------------------------------
+
+describe('query facet conversion (filter)', () => {
+  it('should produce a filter aggregation with a query_string for a free-text query', () => {
+    const inner = applyBodyQuery({ q: 'hello world' });
+    expect(inner.get('query_string')).toBeDefined();
+    expect(inner.get('query_string').get('query')).toBe('hello world');
+  });
+
+  it('should produce a filter aggregation with query_string for a Lucene range query', () => {
+    const inner = applyBodyQuery({ q: 'popularity:[100 TO *]' });
+    expect(inner.get('query_string')).toBeDefined();
+    expect(inner.get('query_string').get('query')).toBe('popularity:[100 TO *]');
+  });
+
+  it('should return a Map with exactly one top-level "filter" key', () => {
+    const aggs = applyAndGetAggs(
+      ctxWithBodyFacet({ type: 'query', q: 'status:active' }),
+    );
+    const agg = aggs.get(FACET_NAME);
+    expect(agg.size).toBe(1);
+    expect(agg.has('filter')).toBe(true);
+  });
+
+  it('should produce match_all for q: "*:*"', () => {
+    const inner = applyBodyQuery({ q: '*:*' });
+    expect(inner.get('match_all')).toBeDefined();
+  });
+
+  it('should produce a query_string for q: "field:value"', () => {
+    const inner = applyBodyQuery({ q: 'status:active' });
+    expect(inner.get('query_string')).toBeDefined();
+    expect(inner.get('query_string').get('query')).toBe('status:active');
+  });
+
+  it('should default to match_all when q is absent', () => {
+    const inner = applyBodyQuery({});
+    expect(inner.get('match_all')).toBeDefined();
+  });
+
+  it('should work from a query-string param', () => {
+    const ctx = ctxWithParamFacet({ type: 'query', q: 'hello world' });
+    request.apply(ctx);
+    const inner = filterInner(ctx.body.get('aggs'));
+    expect(inner.get('query_string')).toBeDefined();
+    expect(inner.get('query_string').get('query')).toBe('hello world');
+  });
+
+  it('should warn about unknown keys in a query facet definition', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    applyBodyQuery({ q: '*:*', unknownParam: 'bar' });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Unprocessed keys in query facet'),
+    );
+    warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Edge cases and warning paths (json-facets.ts coverage gaps)
 // ---------------------------------------------------------------------------
 
@@ -831,8 +901,8 @@ describe('edge cases and warning paths', () => {
 
   it('should throw for an unimplemented facet type', () => {
     expect(() => {
-      applyAndGetAggs(ctxWithBodyFacet({ type: 'query', field: 'x' }));
-    }).toThrow("Facet type 'query' is not implemented");
+      applyAndGetAggs(ctxWithBodyFacet({ type: 'heatmap', field: 'x' }));
+    }).toThrow("Facet type 'heatmap' is not implemented");
   });
 
   it('should return empty map for non-map facet definition', () => {
