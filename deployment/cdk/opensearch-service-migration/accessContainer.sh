@@ -2,6 +2,9 @@
 
 # Example usage: ./accessContainer.sh migration-console dev us-east-1
 
+export AWS_RETRY_MODE="${AWS_RETRY_MODE:-adaptive}"
+export AWS_MAX_ATTEMPTS="${AWS_MAX_ATTEMPTS:-10}"
+
 service_name=$1
 stage=$2
 region=$3

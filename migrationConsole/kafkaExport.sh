@@ -1,5 +1,8 @@
 #!/bin/bash
 
+export AWS_RETRY_MODE="${AWS_RETRY_MODE:-adaptive}"
+export AWS_MAX_ATTEMPTS="${AWS_MAX_ATTEMPTS:-10}"
+
 broker_endpoints="${MIGRATION_KAFKA_BROKER_ENDPOINTS}"
 kafka_command_config=""
 kafka_consumer_config=""
