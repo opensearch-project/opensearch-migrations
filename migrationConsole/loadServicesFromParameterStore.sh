@@ -2,9 +2,6 @@
 
 set -eou pipefail
 
-export AWS_RETRY_MODE="${AWS_RETRY_MODE:-adaptive}"
-export AWS_MAX_ATTEMPTS="${AWS_MAX_ATTEMPTS:-10}"
-
 # Check if the environment variable MIGRATION_SERVICES_YAML_PARAMETER is set
 if [ -z "${MIGRATION_SERVICES_YAML_PARAMETER+x}" ]; then
   echo "Environment variable MIGRATION_SERVICES_YAML_PARAMETER is not set. Exiting successfully and "

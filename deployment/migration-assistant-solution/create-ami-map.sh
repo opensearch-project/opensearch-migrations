@@ -1,8 +1,5 @@
 #!/bin/bash
 
-export AWS_RETRY_MODE="${AWS_RETRY_MODE:-adaptive}"
-export AWS_MAX_ATTEMPTS="${AWS_MAX_ATTEMPTS:-10}"
-
 # Get regions that are "not-opted-in"
 NOT_OPTED_IN=$(aws ec2 describe-regions \
   --query "Regions[?OptInStatus=='not-opted-in'].RegionName" \

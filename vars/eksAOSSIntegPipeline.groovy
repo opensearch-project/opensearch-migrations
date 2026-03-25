@@ -30,11 +30,6 @@ def call(Map config = [:]) {
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
         }
-        environment {
-            AWS_RETRY_MODE = 'adaptive'
-            AWS_MAX_ATTEMPTS = '10'
-        }
-
 
         triggers {
             GenericTrigger(

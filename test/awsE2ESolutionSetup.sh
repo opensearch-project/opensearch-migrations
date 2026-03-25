@@ -1,8 +1,5 @@
 #!/bin/bash
 
-export AWS_RETRY_MODE="${AWS_RETRY_MODE:-adaptive}"
-export AWS_MAX_ATTEMPTS="${AWS_MAX_ATTEMPTS:-10}"
-
 # Note: As this script will deploy an E2E solution in AWS, it assumes all the dependencies of the migration solution (e.g. aws cli, cdk cli,
 # configured aws credentials, git, java, docker) as well as 'jq'
 

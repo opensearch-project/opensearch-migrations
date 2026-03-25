@@ -1,8 +1,6 @@
 import groovy.json.JsonOutput
 
 def call(Map config = [:]) {
-    env.AWS_RETRY_MODE = 'adaptive'
-    env.AWS_MAX_ATTEMPTS = '10'
     def sourceContextId = 'source-single-node-ec2'
     def migrationContextId = 'full-migration'
     def time = new Date().getTime()

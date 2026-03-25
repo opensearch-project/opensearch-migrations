@@ -25,11 +25,6 @@ def call(Map config = [:]) {
             skipDefaultCheckout(true)
         }
 
-        environment {
-            AWS_RETRY_MODE = 'adaptive'
-            AWS_MAX_ATTEMPTS = '10'
-        }
-
         stages {
             stage('Checkout') {
                 steps {

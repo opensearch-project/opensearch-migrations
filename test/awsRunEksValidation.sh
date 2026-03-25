@@ -2,9 +2,6 @@
 
 set -euo pipefail
 
-export AWS_RETRY_MODE="${AWS_RETRY_MODE:-adaptive}"
-export AWS_MAX_ATTEMPTS="${AWS_MAX_ATTEMPTS:-10}"
-
 usage() {
   echo ""
   echo "Script to validate EKS Migration Assistant deployment"
