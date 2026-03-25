@@ -2008,7 +2008,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "allowLooseVersionMatching": {
                         "type": "boolean",
                         "default": true,
-                        "description": "When true, allows metadata migration between clusters with non-exact version compatibility (e.g. ES 7.x to OS 2.x). When false, requires strict version matching."
+                        "description": "[Expert] Allows migration between clusters with non-exact version compatibility (e.g. ES 7.x to OS 2.x). Only disable if metadata has parsing issues on snapshots that require strict version matching."
                       },
                       "clusterAwarenessAttributes": {
                         "type": "number",
@@ -2155,7 +2155,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "allowLooseVersionMatching": {
                         "type": "boolean",
                         "default": true,
-                        "description": "When true, allows document migration between clusters with non-exact version compatibility."
+                        "description": "[Expert] Allows document migration between clusters with non-exact version compatibility. Only disable if snapshot parsing issues require strict version matching."
                       },
                       "docTransformerConfigBase64": {
                         "type": "string",

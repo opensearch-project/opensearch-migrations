@@ -403,7 +403,8 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "An empty list includes all non-system index templates."),
 
     allowLooseVersionMatching: z.boolean().default(true).optional()
-        .describe("When true, allows metadata migration between clusters with non-exact version compatibility (e.g. ES 7.x to OS 2.x). When false, requires strict version matching."),
+        .describe("[Expert] Allows migration between clusters with non-exact version compatibility (e.g. ES 7.x to OS 2.x). " +
+            "Only disable if metadata has parsing issues on snapshots that require strict version matching."),
     clusterAwarenessAttributes: z.number().default(1).optional()
         .describe("Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."),
     multiTypeBehavior: z.enum(["NONE", "UNION", "SPLIT"]).default("NONE").optional()
@@ -469,7 +470,8 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). " +
             "An empty list includes all non-system indices from the snapshot."),
     allowLooseVersionMatching: z.boolean().default(true).optional()
-        .describe("When true, allows document migration between clusters with non-exact version compatibility."),
+        .describe("[Expert] Allows document migration between clusters with non-exact version compatibility. " +
+            "Only disable if snapshot parsing issues require strict version matching."),
     docTransformerConfigBase64: z.string().default("").optional()
         .describe("Base64-encoded JSON transformer configuration." + DOC_TRANSFORMER_SUFFIX),
     docTransformerConfig: z.string().optional()
