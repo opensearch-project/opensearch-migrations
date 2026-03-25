@@ -197,7 +197,10 @@ export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
     podReplicas: z.number().default(1).optional()
         .describe("Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.PROXY, (v ?? {})), RESOURCE_REQUIREMENTS)
-        .describe("Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults (Guaranteed QoS).")
+        .describe("Kubernetes resource limits and requests for the capture proxy container. " +
+            "Partial overrides are deep-merged with the built-in defaults. " +
+            "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
+            "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit.")
         .default(DEFAULT_RESOURCES.PROXY),
 }).describe("Kubernetes deployment-level options for the capture proxy.");
 
@@ -265,7 +268,10 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
     podReplicas: z.number().default(1).optional()
         .describe("Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.REPLAYER, (v ?? {})), RESOURCE_REQUIREMENTS)
-        .describe("Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults (Guaranteed QoS)."),
+        .describe("Kubernetes resource limits and requests for the replayer container. " +
+            "Partial overrides are deep-merged with the built-in defaults. " +
+            "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
+            "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."),
 }).describe("Kubernetes deployment-level options for the traffic replayer.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
@@ -441,7 +447,11 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
                     ),
             }),
         }))
-        .describe("Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."),
+        .describe("Kubernetes resource limits and requests for the RFS container. " +
+            "Partial overrides are deep-merged with the built-in defaults. " +
+            "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
+            "Setting requests lower than limits results in 'Burstable' QoS. " +
+            "Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."),
 }).describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
 
 export const USER_RFS_PROCESS_OPTIONS = z.object({
