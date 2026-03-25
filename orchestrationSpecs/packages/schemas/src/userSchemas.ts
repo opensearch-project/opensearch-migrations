@@ -6,6 +6,8 @@ const TUPLE_TRANSFORMER_SUFFIX = " Tuple transformers operate on request-respons
 const METADATA_TRANSFORMER_SUFFIX = " Metadata transformers modify index mappings and settings during migration.";
 const DOC_TRANSFORMER_SUFFIX = " Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion).";
 const EXPERT_FILE_SUFFIX = " [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.";
+const JVM_ARGS_DESC = "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). " +
+    "If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage.";
 import deepmerge from "deepmerge";
 
 export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): readonly (keyof T)[] {
@@ -265,8 +267,7 @@ export const USER_PROXY_OPTIONS = z.object({
 
 export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
-        .describe("Additional JVM arguments passed to the replayer process via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). " +
-            "If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."),
+        .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
             "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
@@ -343,8 +344,7 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
     snapshotPrefix: z.string().default("").optional()
         .describe("Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."),
     jvmArgs: z.string().default("").optional()
-        .describe("Additional JVM arguments passed to the CreateSnapshot process via JDK_JAVA_OPTIONS (e.g. '-Xmx2g'). " +
-            "If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."),
+        .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
             "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
@@ -375,8 +375,7 @@ export const USER_CREATE_SNAPSHOT_OPTIONS = z.object({
 
 export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
-        .describe("Additional JVM arguments passed to the metadata migration process via JDK_JAVA_OPTIONS. " +
-            "If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."),
+        .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
             "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
@@ -435,8 +434,7 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
     podReplicas: z.number().default(1).optional()
         .describe("Number of RFS (Reindex From Snapshot) pod replicas in the Kubernetes Deployment. Each replica processes shards independently using distributed work coordination."),
     jvmArgs: z.string().default("").optional()
-        .describe("Additional JVM arguments passed to the RFS process via JDK_JAVA_OPTIONS (e.g. '-Xmx6g'). " +
-            "If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."),
+        .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
             "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
