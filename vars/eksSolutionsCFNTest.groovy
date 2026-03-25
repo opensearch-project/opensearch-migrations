@@ -22,8 +22,6 @@ def call(Map config = [:]) {
         }
 
         options {
-            // Acquire lock on a given deployment stage
-            lock(label: params.STAGE, quantity: 1, variable: 'stage')
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
@@ -45,12 +43,13 @@ def call(Map config = [:]) {
         }
 
         environment {
-            TEST_VPC_STACK_NAME = "test-vpc-${stage}-${currentBuild.number}-${params.REGION}"
+            TEST_VPC_STACK_NAME = "test-vpc-${env.stage}-${currentBuild.number}-${params.REGION}"
         }
 
         stages {
             stage('Checkout') {
                 steps {
+                    env.stage = params.STAGE
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }

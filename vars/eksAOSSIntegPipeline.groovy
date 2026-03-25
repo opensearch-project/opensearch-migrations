@@ -25,7 +25,6 @@ def call(Map config = [:]) {
         }
 
         options {
-            lock(label: params.STAGE ?: defaultStageId, quantity: 1, variable: 'maStageName')
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
@@ -48,6 +47,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout & Print Params') {
                 steps {
+                    env.maStageName = params.STAGE ?: defaultStageId
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
                     script {
                         env.STACK_NAME = "MA-Serverless-${maStageName}-${currentBuild.number}-${params.REGION}"

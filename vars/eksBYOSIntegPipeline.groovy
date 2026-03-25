@@ -83,7 +83,6 @@ def call(Map config = [:]) {
             )
         }
         options {
-            lock(label: params.STAGE, quantity: 1, variable: 'maStageName')
             timeout(time: 18, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
@@ -105,6 +104,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout & Print params') {
                 steps {
+                    env.maStageName = params.STAGE
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
                         echo """
