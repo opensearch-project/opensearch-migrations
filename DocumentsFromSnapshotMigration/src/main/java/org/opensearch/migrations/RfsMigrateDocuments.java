@@ -2,6 +2,7 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
@@ -928,14 +929,19 @@ public class RfsMigrateDocuments {
         boolean useServerGeneratedIds,
         RootDocumentMigrationContext context
     ) {
-        if (arguments.sourceArgs.host == null) {
-            throw new ParameterException(
-                "When source version is SOLR, --source-host must be provided to fetch schema."
-            );
-        }
         if (arguments.coordinatorArgs.host == null) {
             throw new ParameterException(
                 "When source version is SOLR, --coordinator-host must be provided for work coordination."
+            );
+        }
+
+        // Solr client for schema fetch (optional — if source is unavailable, use empty schema)
+        SolrClient solrClient = null;
+        if (arguments.sourceArgs.host != null) {
+            solrClient = new SolrClient(
+                arguments.sourceArgs.host,
+                arguments.sourceArgs.username,
+                arguments.sourceArgs.password
             );
         }
 
@@ -959,14 +965,15 @@ public class RfsMigrateDocuments {
             );
         }
 
-        var solrClient = new SolrClient(
-            arguments.sourceArgs.host,
-            arguments.sourceArgs.username,
-            arguments.sourceArgs.password
-        );
-
         try {
-            var collections = solrClient.listCollections();
+            // Discover collections from backup directory structure
+            var collections = new java.util.ArrayList<String>();
+            try (var dirs = Files.list(backupDir)) {
+                dirs.filter(Files::isDirectory)
+                    .map(p -> p.getFileName().toString())
+                    .forEach(collections::add);
+            }
+            log.info("Discovered {} collection(s) in backup dir {}: {}", collections.size(), backupDir, collections);
             if (!arguments.indexAllowlist.isEmpty()) {
                 collections.retainAll(arguments.indexAllowlist);
             }
@@ -979,8 +986,18 @@ public class RfsMigrateDocuments {
             // Build a combined SolrBackupSource for all collections
             // Each collection's shards become work items via the IndexMetadata.Factory
             var schemas = new java.util.LinkedHashMap<String, JsonNode>();
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             for (var collection : collections) {
-                schemas.put(collection, solrClient.getSchema(collection));
+                if (solrClient != null) {
+                    try {
+                        schemas.put(collection, solrClient.getSchema(collection));
+                    } catch (Exception e) {
+                        log.warn("Failed to fetch schema for {} from source, using empty schema", collection, e);
+                        schemas.put(collection, mapper.createObjectNode());
+                    }
+                } else {
+                    schemas.put(collection, mapper.createObjectNode());
+                }
             }
 
             var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas);

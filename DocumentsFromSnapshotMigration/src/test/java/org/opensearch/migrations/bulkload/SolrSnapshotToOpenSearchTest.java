@@ -4,7 +4,14 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.RfsMigrateDocuments;
@@ -14,10 +21,22 @@ import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
+import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
+import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
 import org.opensearch.migrations.bulkload.solr.SolrBackupSource;
+import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
 import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
+import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
+import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
+import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
+import org.opensearch.migrations.bulkload.worker.CompletionStatus;
+import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
+import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -81,12 +100,14 @@ public class SolrSnapshotToOpenSearchTest {
             // Create backup (Lucene snapshot)
             var backupDir = createBackup(solr, COLLECTION_NAME);
 
-            // Run RfsMigrateDocuments with Solr source version
+            // Run RfsMigrateDocuments with Solr source version and coordinator
             int exitCode = SourceTestBase.runProcessAgainstTarget(new String[]{
                 "--source-version", "SOLR 8.11.4",
                 "--source-host", solr.getSolrUrl(),
                 "--snapshot-local-dir", backupDir.toString(),
+                "--snapshot-name", "solr-migration",
                 "--target-host", target.getUrl(),
+                "--coordinator-host", target.getUrl(),
                 "--index-allowlist", COLLECTION_NAME
             });
             assertEquals(0, exitCode, "RfsMigrateDocuments should exit successfully");
@@ -130,9 +151,9 @@ public class SolrSnapshotToOpenSearchTest {
             indexMovieDocuments(solr, COLLECTION_NAME);
 
             var schema = fetchSchema(solr, COLLECTION_NAME);
-            var backupDir = createBackup(solr, COLLECTION_NAME);
+            var backupRoot = createBackup(solr, COLLECTION_NAME);
 
-            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
+            var source = new SolrBackupSource(backupRoot.resolve(COLLECTION_NAME), COLLECTION_NAME, schema);
             var targetClient = new OpenSearchClientFactory(
                 ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext()
             ).determineVersionAndCreate();
@@ -144,6 +165,101 @@ public class SolrSnapshotToOpenSearchTest {
             var cursors = pipeline.migrateAll().collectList().block();
             assertThat("Should have progress cursors", cursors.size(), greaterThan(0));
             verifyDocCount(target, COLLECTION_NAME, 5);
+        }
+    }
+
+    /**
+     * Tests the full coordinator-based flow: work items are created per shard,
+     * acquired via lease, and processed one at a time — matching the ES backfill path.
+     */
+    @ParameterizedTest(name = "coordinator: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch3")
+    void coordinatorBasedMigration(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            createSolrCore(solr, COLLECTION_NAME);
+            indexMovieDocuments(solr, COLLECTION_NAME);
+
+            var schema = fetchSchema(solr, COLLECTION_NAME);
+            var backupDir = createBackup(solr, COLLECTION_NAME);
+
+            var connectionContext = ConnectionContextTestParams.builder()
+                .host(target.getUrl()).build().toConnectionContext();
+            var targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
+            var targetVersion_ = targetClient.getClusterVersion();
+
+            var schemas = Map.<String, JsonNode>of(COLLECTION_NAME, MAPPER.createObjectNode().set("schema", schema));
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas);
+            var documentSource = new SolrMultiCollectionSource(backupDir, schemas);
+
+            var coordinatorFactory = new WorkCoordinatorFactory(targetVersion_);
+            var progressCursor = new AtomicReference<WorkItemCursor>();
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+            var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            try (var workCoordinator = coordinatorFactory.get(
+                     new CoordinateWorkHttpClient(connectionContext),
+                     SourceTestBase.TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                     UUID.randomUUID().toString(),
+                     Clock.systemUTC(),
+                     workItemRef::set);
+                 var processManager = new LeaseExpireTrigger(w -> {
+                     log.debug("Lease expired for {} (test)", w);
+                 })) {
+
+                var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);
+
+                // Set up work items (like ShardWorkPreparer does for ES)
+                new ShardWorkPreparer().run(
+                    scopedWorkCoordinator, indexMetadataFactory,
+                    "solr-test", List.of(COLLECTION_NAME), testContext
+                );
+
+                // Process shards one at a time until no work left
+                int shardsProcessed = 0;
+                while (true) {
+                    var runner = DocumentMigrationBootstrap.builder()
+                        .targetClient(targetClient)
+                        .snapshotName("solr-test")
+                        .maxDocsPerBatch(1000)
+                        .maxBytesPerBatch(Long.MAX_VALUE)
+                        .batchConcurrency(10)
+                        .allowlist(DocumentExceptionAllowlist.empty())
+                        .externalDocumentSource(documentSource)
+                        .workCoordinator(scopedWorkCoordinator)
+                        .maxInitialLeaseDuration(Duration.ofMinutes(5))
+                        .cursorConsumer(progressCursor::set)
+                        .cancellationTriggerConsumer(r -> {})
+                        .build();
+
+                    var status = runner.migrateOneShard(testContext::createReindexContext);
+                    if (status == CompletionStatus.NOTHING_DONE) break;
+                    shardsProcessed++;
+                }
+
+                assertThat("Should have processed at least 1 shard", shardsProcessed, greaterThan(0));
+            }
+
+            verifyDocCount(target, COLLECTION_NAME, 5);
+
+            // Verify specific document content
+            var restClient = new RestClient(connectionContext);
+            var ctx = DocumentMigrationTestContext.factory().noOtelTracking();
+            restClient.get("_refresh", ctx.createUnboundRequestContext());
+            var resp = restClient.get(
+                COLLECTION_NAME + "/_search?q=title:Inception&size=1",
+                ctx.createUnboundRequestContext()
+            );
+            var hits = MAPPER.readTree(resp.body).path("hits").path("hits");
+            assertThat("Should find Inception", hits.size(), equalTo(1));
         }
     }
 
@@ -192,18 +308,20 @@ public class SolrSnapshotToOpenSearchTest {
         Thread.sleep(3000);
 
         var snapshotDir = "/var/solr/data/snapshot.migration_backup";
-        var localBackupDir = tempDir.toPath().resolve("solr_backup");
-        Files.createDirectories(localBackupDir);
+        // Create backup with collection subdirectory structure expected by SolrMultiCollectionSource
+        var backupRoot = tempDir.toPath().resolve("solr_backup");
+        var collectionDir = backupRoot.resolve(collection);
+        Files.createDirectories(collectionDir);
 
         var listResult = solr.execInContainer("ls", snapshotDir);
         for (var fileName : listResult.getStdout().trim().split("\n")) {
             if (fileName.isEmpty()) continue;
             solr.copyFileFromContainer(
                 snapshotDir + "/" + fileName,
-                localBackupDir.resolve(fileName).toString()
+                collectionDir.resolve(fileName).toString()
             );
         }
-        return localBackupDir;
+        return backupRoot;
     }
 
     private static void verifyDocCount(SearchClusterContainer cluster, String indexName, int expected) {
