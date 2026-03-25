@@ -1723,7 +1723,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "snapshotPrefix": {
                                   "type": "string",
                                   "default": "",
-                                  "description": "Prefix for auto-generated snapshot names. The final snapshot name is constructed as '<sourceLabel>_<snapshotPrefix>_<uniqueRunNonce>'. If empty, the snapshot record key name is used as the prefix."
+                                  "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."
                                 },
                                 "jvmArgs": {
                                   "type": "string",

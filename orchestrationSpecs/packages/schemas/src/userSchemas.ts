@@ -341,7 +341,7 @@ export const USER_REPLAYER_OPTIONS = z.object({
 // The workflow manages snapshot completion polling separately via checkSnapshotStatus.
 export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
     snapshotPrefix: z.string().default("").optional()
-        .describe("Prefix for auto-generated snapshot names. The final snapshot name is constructed as '<sourceLabel>_<snapshotPrefix>_<uniqueRunNonce>'. If empty, the snapshot record key name is used as the prefix."),
+        .describe("Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."),
     jvmArgs: z.string().default("").optional()
         .describe("Additional JVM arguments passed to the CreateSnapshot process via JDK_JAVA_OPTIONS (e.g. '-Xmx2g'). " +
             "If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."),
