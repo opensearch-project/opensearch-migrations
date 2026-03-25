@@ -2,8 +2,10 @@ package org.opensearch.migrations;
 
 import java.util.List;
 
+import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
+import org.opensearch.migrations.bulkload.common.ClusterVersionDetector;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
@@ -181,18 +183,37 @@ public class CreateSnapshot {
             runSolrBackup();
             return;
         }
+        // Auto-detect Solr from the source cluster
+        try {
+            var version = ClusterVersionDetector.detect(arguments.sourceArgs.toConnectionContext());
+            if (version.getFlavor() == Flavor.SOLR) {
+                log.info("Detected Solr source ({}), using Solr backup path", version);
+                runSolrBackup();
+                return;
+            }
+        } catch (Exception e) {
+            log.debug("Version detection failed, assuming Elasticsearch: {}", e.getMessage());
+        }
         runElasticsearchSnapshot();
     }
 
     private void runSolrBackup() {
         var backupLocation = arguments.fileSystemRepoPath != null
             ? arguments.fileSystemRepoPath : arguments.s3RepoUri;
-        if (arguments.solrCollections.isEmpty()) {
-            throw new ParameterException("--solr-collections is required when --source-type=solr");
-        }
         var solrUrl = arguments.sourceArgs.toConnectionContext().getUri().toString();
         var username = arguments.sourceArgs.getUsername();
         var password = arguments.sourceArgs.getPassword();
+
+        // Auto-discover collections if not specified
+        if (arguments.solrCollections.isEmpty()) {
+            var client = new SolrClient(solrUrl, username, password);
+            try {
+                arguments.solrCollections = client.listCollections();
+                log.info("Auto-discovered {} Solr collection(s): {}", arguments.solrCollections.size(), arguments.solrCollections);
+            } catch (Exception e) {
+                throw new ParameterException("Failed to discover Solr collections: " + e.getMessage());
+            }
+        }
 
         if (isSolrCloud(solrUrl, username, password)) {
             runSolrCloudBackup(solrUrl, backupLocation, username, password);
