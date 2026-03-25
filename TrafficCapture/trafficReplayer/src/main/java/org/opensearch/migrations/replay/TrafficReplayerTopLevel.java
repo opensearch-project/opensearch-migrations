@@ -124,15 +124,46 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         return makeNettyPacketConsumerConnectionPool(serverUri, allowInsecureConnections, numSendingThreads, null);
     }
 
+    public static ClientConnectionPool
+    makeNettyPacketConsumerConnectionPool(
+        URI serverUri,
+        boolean allowInsecureConnections,
+        int numSendingThreads,
+        String caCertPath,
+        String clientCertPath,
+        String clientCertKeyPath
+    ) {
+        return makeNettyPacketConsumerConnectionPool(
+            serverUri, allowInsecureConnections, numSendingThreads, null,
+            caCertPath, clientCertPath, clientCertKeyPath
+        );
+    }
+
     public static ClientConnectionPool makeNettyPacketConsumerConnectionPool(
         URI serverUri,
         boolean allowInsecureConnections,
         int numSendingThreads,
         String connectionPoolName
     ) {
+        return makeNettyPacketConsumerConnectionPool(
+            serverUri, allowInsecureConnections, numSendingThreads, connectionPoolName,
+            null, null, null
+        );
+    }
+
+    public static ClientConnectionPool makeNettyPacketConsumerConnectionPool(
+        URI serverUri,
+        boolean allowInsecureConnections,
+        int numSendingThreads,
+        String connectionPoolName,
+        String caCertPath,
+        String clientCertPath,
+        String clientCertKeyPath
+    ) {
         return new ClientConnectionPool(
             NettyPacketToHttpConsumer.createClientConnectionFactory(
-                loadSslContext(serverUri, allowInsecureConnections), serverUri),
+                loadSslContext(serverUri, allowInsecureConnections, caCertPath, clientCertPath, clientCertKeyPath),
+                serverUri),
             connectionPoolName != null
                 ? connectionPoolName
                 : getTargetConnectionPoolName(targetConnectionPoolUniqueCounter.getAndIncrement()),
@@ -146,10 +177,34 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 
     @SneakyThrows
     public static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) {
+        return loadSslContext(serverUri, allowInsecureConnections, null, null, null);
+    }
+
+    @SneakyThrows
+    public static SslContext loadSslContext(
+        URI serverUri,
+        boolean allowInsecureConnections,
+        String caCertPath,
+        String clientCertPath,
+        String clientCertKeyPath
+    ) {
         if (serverUri.getScheme().equalsIgnoreCase("https")) {
             var sslContextBuilder = SslContextBuilder.forClient();
             if (allowInsecureConnections) {
                 sslContextBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
+            }
+            if (caCertPath != null) {
+                sslContextBuilder.trustManager(new java.io.File(caCertPath));
+            }
+            if (clientCertPath != null && clientCertKeyPath != null) {
+                sslContextBuilder.keyManager(
+                    new java.io.File(clientCertPath),
+                    new java.io.File(clientCertKeyPath)
+                );
+            } else if (clientCertPath != null || clientCertKeyPath != null) {
+                throw new IllegalArgumentException(
+                    "Both --target-client-cert and --target-client-cert-key must be provided together, or neither."
+                );
             }
             return sslContextBuilder.build();
         } else {

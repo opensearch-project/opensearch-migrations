@@ -78,6 +78,10 @@ public class ShimProxy {
     private NioEventLoopGroup workerGroup;
     private final AtomicInteger activeRequests = new AtomicInteger(0);
 
+    private final String backendCaCertPath;
+    private final String backendClientCertPath;
+    private final String backendClientCertKeyPath;
+
     public ShimProxy(
         int port,
         Map<String, Target> targets,
@@ -89,6 +93,24 @@ public class ShimProxy {
         Duration secondaryTimeout,
         int maxContentLength
     ) {
+        this(port, targets, primaryTarget, activeTargets, validators, sslEngineSupplier,
+            allowInsecureBackend, secondaryTimeout, maxContentLength, null, null, null);
+    }
+
+    public ShimProxy(
+        int port,
+        Map<String, Target> targets,
+        String primaryTarget,
+        Set<String> activeTargets,
+        List<ValidationRule> validators,
+        java.util.function.Supplier<SSLEngine> sslEngineSupplier,
+        boolean allowInsecureBackend,
+        Duration secondaryTimeout,
+        int maxContentLength,
+        String backendCaCertPath,
+        String backendClientCertPath,
+        String backendClientCertKeyPath
+    ) {
         this.port = port;
         this.targets = new LinkedHashMap<>(targets);
         this.primaryTarget = primaryTarget;
@@ -97,6 +119,9 @@ public class ShimProxy {
         this.sslEngineSupplier = sslEngineSupplier;
         this.secondaryTimeout = secondaryTimeout != null ? secondaryTimeout : DEFAULT_TIMEOUT;
         this.maxContentLength = maxContentLength > 0 ? maxContentLength : DEFAULT_MAX_CONTENT_LENGTH;
+        this.backendCaCertPath = backendCaCertPath;
+        this.backendClientCertPath = backendClientCertPath;
+        this.backendClientCertKeyPath = backendClientCertKeyPath;
         this.backendSslContext = buildBackendSslContext(allowInsecureBackend);
 
         if (!this.targets.containsKey(primaryTarget)) {
@@ -139,6 +164,19 @@ public class ShimProxy {
         try {
             var builder = SslContextBuilder.forClient();
             if (allowInsecure) builder.trustManager(InsecureTrustManagerFactory.INSTANCE);
+            if (backendCaCertPath != null) {
+                builder.trustManager(new java.io.File(backendCaCertPath));
+            }
+            if (backendClientCertPath != null && backendClientCertKeyPath != null) {
+                builder.keyManager(
+                    new java.io.File(backendClientCertPath),
+                    new java.io.File(backendClientCertKeyPath)
+                );
+            } else if (backendClientCertPath != null || backendClientCertKeyPath != null) {
+                throw new IllegalArgumentException(
+                    "Both --backendClientCert and --backendClientCertKey must be provided together, or neither."
+                );
+            }
             return builder.build();
         } catch (Exception e) {
             throw new IllegalStateException("Failed to create backend SSL context", e);

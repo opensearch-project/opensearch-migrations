@@ -148,6 +148,24 @@ public class TrafficReplayer {
             arity = 0, description = "Do not check the server's certificate")
         boolean allowInsecureConnections;
         @Parameter(
+            required = false,
+            names = { "--target-cacert", "--targetCaCert" },
+            arity = 1,
+            description = "Path to the target CA certificate PEM file for custom trust")
+        String targetCaCertPath;
+        @Parameter(
+            required = false,
+            names = { "--target-client-cert", "--targetClientCert" },
+            arity = 1,
+            description = "Path to the target client TLS certificate PEM file for mutual TLS")
+        String targetClientCertPath;
+        @Parameter(
+            required = false,
+            names = { "--target-client-cert-key", "--targetClientCertKey" },
+            arity = 1,
+            description = "Path to the target client TLS certificate key PEM file for mutual TLS")
+        String targetClientCertKeyPath;
+        @Parameter(
                 names = {ArgNameConstants.TARGET_USERNAME_ARG_CAMEL_CASE, ArgNameConstants.TARGET_USERNAME_ARG_KEBAB_CASE },
                 description = "Username to use for basic auth with the target cluster/domain",
                 required = false)
@@ -525,7 +543,10 @@ public class TrafficReplayer {
                 TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     uri,
                     params.allowInsecureConnections,
-                    params.numClientThreads
+                    params.numClientThreads,
+                    params.targetCaCertPath,
+                    params.targetClientCertPath,
+                    params.targetClientCertKeyPath
                 ),
                 trafficStreamLimiter,
                 orderedRequestTracker

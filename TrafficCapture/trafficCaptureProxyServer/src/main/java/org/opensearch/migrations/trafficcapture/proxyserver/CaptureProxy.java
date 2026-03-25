@@ -116,6 +116,21 @@ public class CaptureProxy {
             arity = 0,
             description = "Do not check the destination server's certificate")
         public boolean allowInsecureConnectionsToBackside;
+        @Parameter(required = false,
+            names = { "--destinationCaCert" },
+            arity = 1,
+            description = "Path to the destination CA certificate PEM file for custom trust")
+        public String destinationCaCertPath;
+        @Parameter(required = false,
+            names = { "--destinationClientCert" },
+            arity = 1,
+            description = "Path to the destination client TLS certificate PEM file for mutual TLS")
+        public String destinationClientCertPath;
+        @Parameter(required = false,
+            names = { "--destinationClientCertKey" },
+            arity = 1,
+            description = "Path to the destination client TLS certificate key PEM file for mutual TLS")
+        public String destinationClientCertKeyPath;
         @Parameter(required = true,
             names = { "--destinationUri" },
             arity = 1,
@@ -330,10 +345,30 @@ public class CaptureProxy {
 
     protected static SslContext loadBacksideSslContext(URI serverUri, boolean allowInsecureConnections)
         throws SSLException {
+        return loadBacksideSslContext(serverUri, allowInsecureConnections, null, null, null);
+    }
+
+    protected static SslContext loadBacksideSslContext(
+        URI serverUri,
+        boolean allowInsecureConnections,
+        String caCertPath,
+        String clientCertPath,
+        String clientCertKeyPath
+    ) throws SSLException {
         if (serverUri.getScheme().equalsIgnoreCase("https")) {
             var sslContextBuilder = SslContextBuilder.forClient();
             if (allowInsecureConnections) {
                 sslContextBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
+            }
+            if (caCertPath != null) {
+                sslContextBuilder.trustManager(new File(caCertPath));
+            }
+            if (clientCertPath != null && clientCertKeyPath != null) {
+                sslContextBuilder.keyManager(new File(clientCertPath), new File(clientCertKeyPath));
+            } else if (clientCertPath != null || clientCertKeyPath != null) {
+                throw new ParameterException(
+                    "Both --destinationClientCert and --destinationClientCertKey must be provided together, or neither."
+                );
             }
             return sslContextBuilder.build();
         } else {
@@ -433,7 +468,9 @@ public class CaptureProxy {
                 : Duration.parse(params.destinationConnectionPoolTimeout);
             var backsideConnectionPool = new BacksideConnectionPool(
                 backsideUri,
-                loadBacksideSslContext(backsideUri, params.allowInsecureConnectionsToBackside),
+                loadBacksideSslContext(backsideUri, params.allowInsecureConnectionsToBackside,
+                    params.destinationCaCertPath, params.destinationClientCertPath,
+                    params.destinationClientCertKeyPath),
                 params.destinationConnectionPoolSize,
                 pooledConnectionTimeout
             );

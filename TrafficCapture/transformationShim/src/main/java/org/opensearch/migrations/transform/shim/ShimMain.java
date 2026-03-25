@@ -98,6 +98,18 @@ public class ShimMain {
             description = "Trust all backend TLS certificates.")
         public boolean insecureBackend;
 
+        @Parameter(names = {"--backendCaCert"},
+            description = "Path to backend CA certificate PEM file for custom trust.")
+        public String backendCaCertPath;
+
+        @Parameter(names = {"--backendClientCert"},
+            description = "Path to backend client TLS certificate PEM file for mutual TLS.")
+        public String backendClientCertPath;
+
+        @Parameter(names = {"--backendClientCertKey"},
+            description = "Path to backend client TLS certificate key PEM file for mutual TLS.")
+        public String backendClientCertKeyPath;
+
         @Parameter(names = {"--timeout"},
             description = "Secondary target timeout in milliseconds.")
         public long timeoutMs = 30000;
@@ -141,7 +153,8 @@ public class ShimMain {
 
         var proxy = new ShimProxy(
             params.listenPort, targets, params.primary, activeTargets, validators,
-            null, params.insecureBackend, Duration.ofMillis(params.timeoutMs), params.maxContentLength);
+            null, params.insecureBackend, Duration.ofMillis(params.timeoutMs), params.maxContentLength,
+            params.backendCaCertPath, params.backendClientCertPath, params.backendClientCertKeyPath);
 
         TransformFileWatcher watcher = null;
         if (params.watchTransforms && !watchedTransforms.isEmpty()) {
