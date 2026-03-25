@@ -1756,7 +1756,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 "includeGlobalState": {
                                   "type": "boolean",
                                   "default": true,
-                                  "description": "When true, includes cluster global state (persistent settings, templates, etc.) in the snapshot."
+                                  "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist."
                                 }
                               },
                               "description": "Configuration for creating a new snapshot of the source cluster."

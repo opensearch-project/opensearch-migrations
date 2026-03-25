@@ -362,7 +362,8 @@ export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
     compressionEnabled: z.boolean().default(true).optional()
         .describe("[Expert] Enables metadata compression for the snapshot. Can be turned off if issues are observed with snapshot configuration extraction."),
     includeGlobalState: z.boolean().default(true).optional()
-        .describe("When true, includes cluster global state (persistent settings, templates, etc.) in the snapshot."),
+        .describe("[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. " +
+            "Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist."),
 }).describe("Process-level options for the CreateSnapshot command, controlling which indices are snapshotted and rate limiting.");
 
 export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS);
