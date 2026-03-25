@@ -228,7 +228,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     async transform(input: InputConfig): Promise<OutputConfig> {
         const processedInput = await this.preprocessInput(input);
-        return this.transformSync(processedInput);
+        return await this.transformSync(processedInput);
     }
 
     private async preprocessInput(input: InputConfig): Promise<InputConfig> {
@@ -249,11 +249,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         return { ...input, sourceClusters: processedSourceClusters };
     }
 
-    private transformSync(userConfig: InputConfig): OutputConfig {
+    private async transformSync(userConfig: InputConfig): Promise<OutputConfig> {
         const kafkaClusters = this.buildKafkaClusters(userConfig);
         const proxies = this.buildProxies(userConfig);
         const snapshots = this.buildSnapshots(userConfig);
-        const snapshotMigrations = this.buildSnapshotMigrations(userConfig);
+        const snapshotMigrations = await this.buildSnapshotMigrations(userConfig);
         const trafficReplays = this.buildTrafficReplays(userConfig);
 
         const output = {
@@ -392,7 +392,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Build snapshot migration configs from snapshotMigrationConfigs + perSnapshotConfig. */
-    private buildSnapshotMigrations(userConfig: InputConfig) {
+    private async buildSnapshotMigrations(userConfig: InputConfig) {
         const results: any[] = [];
 
         for (const mc of userConfig.snapshotMigrationConfigs) {
@@ -406,8 +406,17 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
             const isSolrSource = sourceCluster.version?.toUpperCase().startsWith("SOLR");
 
-            // For Solr sources without perSnapshotConfig, generate a direct HTTP API migration
+            // For Solr sources without perSnapshotConfig, generate a direct migration
+            // using the first repo from snapshotInfo.repos (same mechanism as ES)
             if (isSolrSource && !perSnapshotConfig) {
+                const repos = sourceCluster.snapshotInfo?.repos ?? {};
+                const repoEntries = Object.entries(repos);
+                if (repoEntries.length === 0) {
+                    throw new Error(`Solr source '${fromSource}' requires snapshotInfo.repos with an S3 repo config`);
+                }
+                const [repoName, rawRepoConfig] = repoEntries[0];
+                const repoConfig = await rewriteRepoEndpointIfLocalStack(rawRepoConfig, repoName);
+
                 const { enabled: _e2, ...restOfTarget } = targetCluster;
                 results.push({
                     label: `${fromSource}-to-${toTarget}`,
@@ -422,13 +431,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     sourceLabel: fromSource,
                     targetConfig: { ...restOfTarget, label: toTarget },
                     snapshotConfig: {
-                        label: "solr-direct",
-                        repoConfig: {
-                            awsRegion: "us-east-1",
-                            s3RepoPathUri: "s3://solr-direct-migration/placeholder",
-                            useLocalStack: false,
-                            repoName: "solr-direct",
-                        }
+                        label: repoName,
+                        repoConfig,
                     },
                     sourceEndpoint: sourceCluster.endpoint || "",
                     sourceAllowInsecure: sourceCluster.allowInsecure ?? false,
