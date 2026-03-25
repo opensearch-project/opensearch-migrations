@@ -1651,11 +1651,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$",
             "description": "Version of the source cluster in '<ENGINE> <MAJOR>.<MINOR>.<PATCH>' format (e.g. 'ES 7.10.2', 'OS 1.3.0'). Required for compatibility checks and migration strategy selection."
           },
-          "enabled": {
-            "type": "boolean",
-            "default": true,
-            "description": "When false, this source cluster is excluded from the migration. Useful for temporarily disabling a source without removing its configuration."
-          },
           "snapshotInfo": {
             "type": "object",
             "properties": {
@@ -1913,11 +1908,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               }
             ],
             "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
-          },
-          "enabled": {
-            "type": "boolean",
-            "default": true,
-            "description": "When false, this target cluster is excluded from the migration. Useful for temporarily disabling a target without removing its configuration."
           }
         },
         "required": [

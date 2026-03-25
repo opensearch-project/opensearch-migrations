@@ -92,7 +92,7 @@ export const NAMED_KAFKA_CLUSTER_CONFIG = z.object({
 });
 
 export const NAMED_SOURCE_CLUSTER_CONFIG =
-    makeOptionalDefaultedFieldsRequired(SOURCE_CLUSTER_CONFIG.omit({enabled: true}).safeExtend({
+    makeOptionalDefaultedFieldsRequired(SOURCE_CLUSTER_CONFIG.safeExtend({
         label: z.string(), // override to required
         proxy: SOURCE_PROXY_CONFIG.optional(),
     }));
@@ -101,7 +101,7 @@ export const NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO =
     NAMED_SOURCE_CLUSTER_CONFIG.omit({snapshotInfo: true});
 
 export const NAMED_TARGET_CLUSTER_CONFIG =
-    makeOptionalDefaultedFieldsRequired(TARGET_CLUSTER_CONFIG.omit({enabled: true}).safeExtend({
+    makeOptionalDefaultedFieldsRequired(TARGET_CLUSTER_CONFIG.safeExtend({
         label: z.string().regex(/^[a-zA-Z0-9_]+$/), // override to required
     }));
 

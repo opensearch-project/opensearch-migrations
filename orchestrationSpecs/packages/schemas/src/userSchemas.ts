@@ -626,8 +626,6 @@ export const CLUSTER_CONFIG = z.object({
 }).describe("Base connection configuration for an Elasticsearch or OpenSearch cluster.");
 
 export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    enabled: z.boolean().default(true).optional()
-        .describe("When false, this target cluster is excluded from the migration. Useful for temporarily disabling a target without removing its configuration."),
     endpoint:  z.string().regex(new RegExp(HTTP_ENDPOINT_PATTERN))
         .describe("HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."),
 }).describe("Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint.");
@@ -726,8 +724,6 @@ export const SNAPSHOT_INFO = z.object({
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING
         .describe("Version of the source cluster in '<ENGINE> <MAJOR>.<MINOR>.<PATCH>' format (e.g. 'ES 7.10.2', 'OS 1.3.0'). Required for compatibility checks and migration strategy selection."),
-    enabled: z.boolean().default(true).optional()
-        .describe("When false, this source cluster is excluded from the migration. Useful for temporarily disabling a source without removing its configuration."),
     snapshotInfo: SNAPSHOT_INFO.optional()
         .describe("Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source.")
 }).describe("Connection and snapshot configuration for a source Elasticsearch or OpenSearch cluster.").superRefine((data, ctx) => {
