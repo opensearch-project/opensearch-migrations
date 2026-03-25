@@ -412,12 +412,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 results.push({
                     label: `${fromSource}-to-${toTarget}`,
                     snapshotNameResolution: { externalSnapshotName: "solr-direct-migration" },
-                    migrations: autoLabelMigrations([
-                        USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG.parse({
-                            metadataMigrationConfig: {},
-                            documentBackfillConfig: {},
-                        })
-                    ]),
+                    migrations: autoLabelMigrations([{
+                        metadataMigrationConfig: {},
+                    }]),
                     sourceVersion: sourceCluster.version || "",
                     sourceLabel: fromSource,
                     targetConfig: { ...restOfTarget, label: toTarget },

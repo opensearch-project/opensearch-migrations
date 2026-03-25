@@ -662,10 +662,6 @@
                     "value": "{{inputs.parameters.migrationLabel}}"
                   },
                   {
-                    "name": "sourceEndpoint",
-                    "value": "{{inputs.parameters.sourceEndpoint}}"
-                  },
-                  {
                     "name": "imageReindexFromSnapshotLocation",
                     "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
                   },
