@@ -504,11 +504,11 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "For example, set to ['version_conflict_engine_exception'] when migrating into a data stream, " +
             "where backing index writes may conflict with existing documents."),
     coordinatorRetryMaxRetries: z.number().default(7).optional()
-        .describe("Maximum number of retries when marking work items as completed on the coordinator."),
+        .describe("[Expert] Maximum number of retries when marking work items as completed on the coordinator."),
     coordinatorRetryInitialDelayMs: z.number().default(1000).optional()
-        .describe("Initial delay in milliseconds for coordinator completion retries. Doubles with each attempt up to coordinatorRetryMaxDelayMs."),
+        .describe("[Expert] Initial delay in milliseconds for coordinator completion retries. Doubles with each attempt up to coordinatorRetryMaxDelayMs."),
     coordinatorRetryMaxDelayMs: z.number().default(64000).optional()
-        .describe("Maximum delay in milliseconds for any single coordinator completion retry."),
+        .describe("[Expert] Maximum delay in milliseconds for any single coordinator completion retry."),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
 
 export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);

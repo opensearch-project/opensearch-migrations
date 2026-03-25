@@ -2222,17 +2222,17 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "coordinatorRetryMaxRetries": {
                         "type": "number",
                         "default": 7,
-                        "description": "Maximum number of retries when marking work items as completed on the coordinator."
+                        "description": "[Expert] Maximum number of retries when marking work items as completed on the coordinator."
                       },
                       "coordinatorRetryInitialDelayMs": {
                         "type": "number",
                         "default": 1000,
-                        "description": "Initial delay in milliseconds for coordinator completion retries. Doubles with each attempt up to coordinatorRetryMaxDelayMs."
+                        "description": "[Expert] Initial delay in milliseconds for coordinator completion retries. Doubles with each attempt up to coordinatorRetryMaxDelayMs."
                       },
                       "coordinatorRetryMaxDelayMs": {
                         "type": "number",
                         "default": 64000,
-                        "description": "Maximum delay in milliseconds for any single coordinator completion retry."
+                        "description": "[Expert] Maximum delay in milliseconds for any single coordinator completion retry."
                       }
                     },
                     "description": "Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."
