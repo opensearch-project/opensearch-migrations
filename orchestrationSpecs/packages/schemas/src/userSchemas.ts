@@ -383,9 +383,9 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
             "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
             "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."),
     skipEvaluateApproval: z.boolean().default(false).optional()
-        .describe("When true, skips the manual approval gate before the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."),
+        .describe("When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."),
     skipMigrateApproval: z.boolean().default(false).optional()
-        .describe("When true, skips the manual approval gate before the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster.")
+        .describe("When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster.")
 }).describe("Workflow-level options for metadata migration, controlling JVM settings and approval gates.");
 
 export const USER_METADATA_PROCESS_OPTIONS = z.object({
@@ -442,7 +442,7 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
             "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
             "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."),
     skipApproval: z.boolean().default(false).optional()
-        .describe("When true, skips the manual approval gate before starting the document backfill. Useful for automated pipelines where human approval is not needed."),
+        .describe("When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."),
     useTargetClusterForWorkCoordination: z.boolean().default(false)
         .describe("When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). " +
             "When false (default), a dedicated single-node OpenSearch coordinator cluster is automatically deployed, used for the lifetime of the migration, then torn down on completion. " +

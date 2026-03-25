@@ -1974,12 +1974,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "skipEvaluateApproval": {
                         "type": "boolean",
                         "default": false,
-                        "description": "When true, skips the manual approval gate before the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."
+                        "description": "When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."
                       },
                       "skipMigrateApproval": {
                         "type": "boolean",
                         "default": false,
-                        "description": "When true, skips the manual approval gate before the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster."
+                        "description": "When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster."
                       },
                       "componentTemplateAllowlist": {
                         "type": "array",
@@ -2076,7 +2076,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "skipApproval": {
                         "type": "boolean",
                         "default": false,
-                        "description": "When true, skips the manual approval gate before starting the document backfill. Useful for automated pipelines where human approval is not needed."
+                        "description": "When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."
                       },
                       "useTargetClusterForWorkCoordination": {
                         "type": "boolean",
