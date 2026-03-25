@@ -65,13 +65,13 @@ The primary build mechanism for CI and on-demand image building is Gradle (`buil
 
 ```bash
 # Build a specific version
-./gradlew :custom-es-images:buildImage_7_10
+./gradlew :custom-es-images:buildImage_es_7_10
 
 # Build all images for a major version
 ./gradlew :custom-es-images:buildMajor_7
 
 # Build and push to registry
-./gradlew :custom-es-images:pushImage_7_10 -PpushVersions=7.10 -PregistryEndpoint=localhost:5001
+./gradlew :custom-es-images:pushImage_es_7_10 -PpushVersions=7.10 -PregistryEndpoint=localhost:5001
 ```
 
 Images are also built **on-demand** during test execution — if a test needs `custom-elasticsearch:7.10.2` and it's not available locally, the test framework automatically invokes the Gradle build task.

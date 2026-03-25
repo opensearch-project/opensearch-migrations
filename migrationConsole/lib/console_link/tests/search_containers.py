@@ -51,7 +51,7 @@ def _ensure_custom_image_available(image: str) -> None:
         return
     tag = image.split(":")[1]  # e.g. "7.10.2"
     parts = tag.split(".")
-    task_name = f"buildImage_{parts[0]}_{parts[1]}"
+    task_name = f"buildImage_es_{parts[0]}_{parts[1]}"
 
     gradlew = None
     d = Path.cwd()

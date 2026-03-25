@@ -309,7 +309,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         }
         String tag = version.imageName.split(":")[1]; // e.g. "7.10.2"
         String[] parts = tag.split("\\.");
-        String taskName = "buildImage_" + parts[0] + "_" + parts[1]; // e.g. "buildImage_7_10"
+        String taskName = "buildImage_es_" + parts[0] + "_" + parts[1]; // e.g. "buildImage_es_7_10"
 
         // project.root is injected by Gradle via systemProperty in build.gradle
         String projectRoot = System.getProperty("project.root");

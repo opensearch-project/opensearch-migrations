@@ -2,7 +2,7 @@ import groovy.json.JsonSlurper
 import org.opensearch.migrations.image.RegistryImageBuildUtils.Registry
 import org.opensearch.migrations.image.ImageRegistryFormatterFactory
 
-// Used by buildImage_* tasks to look up version info (url, full version tag) for a given esMinor
+// Used by buildImage_es_* tasks to look up version info (url, full version tag) for a given esMinor
 def versionsFile = file('versions.json')
 def versions = new JsonSlurper().parse(versionsFile) as Map<String, Map>
 def imagePrefix = findProperty('esImagePrefix') ?: 'custom-elasticsearch'
@@ -38,7 +38,7 @@ versions.each { minor, info ->
 
     // Local docker build with cross-process FileLock to prevent parallel builds.
     // OS releases the lock automatically if the process dies; 4-minute timeout as safety net.
-    tasks.register("buildImage_${safeName}") {
+    tasks.register("buildImage_es_${safeName}") {
         group = 'docker'
         description = "Build ${imagePrefix}:${version}"
         inputs.file('dockerfiles/Dockerfile')
@@ -95,7 +95,7 @@ versions.each { minor, info ->
 tasks.register('buildAll') {
     group = 'docker'
     description = 'Build all ES images locally'
-    dependsOn tasks.matching { it.name.startsWith('buildImage_') }
+    dependsOn tasks.matching { it.name.startsWith('buildImage_es_') }
 }
 
 // Per-major aggregate tasks
@@ -105,7 +105,7 @@ tasks.register('buildAll') {
         tasks.register("buildMajor_${major}") {
             group = 'docker'
             description = "Build all ES ${major}.x images"
-            dependsOn majorVersions.collect { "buildImage_${it.replace('.', '_')}" }
+            dependsOn majorVersions.collect { "buildImage_es_${it.replace('.', '_')}" }
         }
     }
 }
@@ -128,7 +128,7 @@ if (!pushVersionsList.isEmpty()) {
         def (dest, cacheDest) = formatter.getFullTargetImageIdentifier(
                 registry.containerUrl, "custom_elasticsearch", version, null)
 
-        tasks.register("pushImage_${safeName}", Exec) {
+        tasks.register("pushImage_es_${safeName}", Exec) {
             group = 'docker'
             description = "Build and push ${imagePrefix}:${version} to ${registry.containerUrl}"
             def corretto = correttoVersion(minor)
@@ -161,6 +161,6 @@ if (!pushVersionsList.isEmpty()) {
     tasks.register('pushAll') {
         group = 'docker'
         description = 'Push all opt-in ES images to registry'
-        dependsOn tasks.matching { it.name.startsWith('pushImage_') }
+        dependsOn tasks.matching { it.name.startsWith('pushImage_es_') }
     }
 }

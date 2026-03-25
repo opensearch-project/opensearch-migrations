@@ -235,7 +235,7 @@ jobs:
           # Only save cache on push events
           read-only: ${{ github.event_name != 'push' }}
       - name: Build custom ES images
-        run: ./gradlew :custom-es-images:buildImage_7_10 --info
+        run: ./gradlew :custom-es-images:buildImage_es_7_10 --info
       - name: Start Docker Solution
         run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:
