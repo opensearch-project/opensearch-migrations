@@ -254,6 +254,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "maxTrafficBufferSize": {
                       "type": "number",
+                      "minimum": 1,
+                      "maximum": 1048576,
                       "default": 1048576
                     },
                     "noCapture": {
@@ -2396,6 +2398,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "maxTrafficBufferSize": {
                     "type": "number",
+                    "minimum": 1,
+                    "maximum": 1048576,
                     "default": 1048576,
                     "description": "Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka."
                   },

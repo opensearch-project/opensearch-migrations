@@ -219,7 +219,7 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
         .describe("Kafka producer client ID used when publishing captured traffic to Kafka. Useful for identifying this proxy in Kafka broker logs and metrics."),
     listenPort: z.number()
         .describe("TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL."),
-    maxTrafficBufferSize: z.number().default(1048576).optional()
+    maxTrafficBufferSize: z.number().min(1).max(1048576).default(1048576).optional()
         .describe("Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka."),
     noCapture: z.boolean().default(false).optional()
         .describe("When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording."),
