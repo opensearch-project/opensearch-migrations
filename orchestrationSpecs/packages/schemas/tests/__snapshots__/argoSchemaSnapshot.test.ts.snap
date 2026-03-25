@@ -1548,8 +1548,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         ],
         "description": "Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one."
       },
-      "default": {},
-      "description": "Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster name."
+      "description": "Kafka cluster configurations. Required when traffic capture proxies are configured. Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."
     },
     "sourceClusters": {
       "type": "object",
@@ -1994,7 +1993,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "otelCollectorEndpoint": {
                         "type": "string",
                         "default": "http://otel-collector:4317",
-                        "description": "[Expert] URL for the OpenTelemetry Collector for metadata migration metrics. Only change if using a separate OTel collector."
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
                       },
                       "output": {
                         "type": "string",
@@ -2165,7 +2164,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "otelCollectorEndpoint": {
                         "type": "string",
                         "default": "http://otel-collector:4317",
-                        "description": "[Expert] URL for the OpenTelemetry Collector for RFS backfill metrics and progress tracking. Only change if using a separate OTel collector."
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
                       },
                       "serverGeneratedIds": {
                         "type": "string",
@@ -2229,7 +2228,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "type": "string",
                 "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
                 "default": "default",
-                "description": "Name of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration. Defaults to 'default', which auto-creates a cluster if none is configured."
+                "description": "Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration."
               },
               "kafkaTopic": {
                 "type": "string",
@@ -2333,7 +2332,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "otelCollectorEndpoint": {
                     "type": "string",
                     "default": "http://otel-collector:4317",
-                    "description": "[Expert] URL for the OpenTelemetry Collector to which the proxy sends metrics and traces. Only change if using a separate OTel collector."
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
                   },
                   "setHeader": {
                     "type": "array",
@@ -2666,7 +2665,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "otelCollectorEndpoint": {
                     "type": "string",
                     "default": "http://otel-collector:4317",
-                    "description": "[Expert] URL for the OpenTelemetry Collector to which the replayer sends metrics and traces. Only change if using a separate OTel collector."
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
                   },
                   "quiescentPeriodMs": {
                     "type": "number",

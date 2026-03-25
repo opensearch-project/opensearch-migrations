@@ -122,6 +122,9 @@ export const HOSTNAME_PATTERN = "[^:\\/\\s]+";
 export const HTTP_ENDPOINT_PATTERN = `^https?:\\/\\/${HOSTNAME_PATTERN}${OPTIONAL_PORT_PATTERN}(?:\\/)?$`;
 export const OPTIONAL_HTTP_ENDPOINT_PATTERN = `^(?:https?:\\/\\/${HOSTNAME_PATTERN}${OPTIONAL_PORT_PATTERN}(?:\\/)?)?$`;
 
+const OTEL_COLLECTOR_ENDPOINT = z.string().default("http://otel-collector:4317").optional()
+    .describe("URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317').");
+
 export const KAFKA_CLIENT_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for Amazon MSK. When true, configures the Kafka client with the required SASL properties for IAM-based authentication. Uses the pod's IAM role via EKS Pod Identity."),
@@ -213,8 +216,7 @@ export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
 }).describe("Kubernetes deployment-level options for the capture proxy.");
 
 export const USER_PROXY_PROCESS_OPTIONS = z.object({
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("[Expert] URL for the OpenTelemetry Collector to which the proxy sends metrics and traces. Only change if using a separate OTel collector."),
+    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
     setHeader: z.array(z.string()).optional()
         .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format."),
     destinationConnectionPoolSize: z.number().default(0).optional()
@@ -295,8 +297,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
         .describe("Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."),
     observedPacketConnectionTimeout: z.number().default(360).optional()
         .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("[Expert] URL for the OpenTelemetry Collector to which the replayer sends metrics and traces. Only change if using a separate OTel collector."),
+    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
     quiescentPeriodMs: z.number().default(5000).optional()
         .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."),
     removeAuthHeader: z.boolean().default(false).optional()
@@ -412,8 +413,7 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "'NONE': fail if multi-type indices are encountered. " +
             "'UNION': merge all types into a single mapping. " +
             "'SPLIT': create separate indices for each type."),
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("[Expert] URL for the OpenTelemetry Collector for metadata migration metrics. Only change if using a separate OTel collector."),
+    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
     transformerConfigBase64: z.string().default("").optional()
@@ -492,8 +492,7 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing."),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."),
-    otelCollectorEndpoint: z.string().default("http://otel-collector:4317").optional()
-        .describe("[Expert] URL for the OpenTelemetry Collector for RFS backfill metrics and progress tracking. Only change if using a separate OTel collector."),
+    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
     serverGeneratedIds: z.enum(["AUTO", "ALWAYS", "NEVER"]).default("AUTO").optional()
         .describe("Controls document ID generation on the target. " +
             "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
@@ -636,7 +635,7 @@ export const SOURCE_CLUSTER_REPOS_RECORD =
 
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
-        .describe("Name of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration. Defaults to 'default', which auto-creates a cluster if none is configured."),
+        .describe("Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration."),
     kafkaTopic: z.string().regex(K8S_NAMING_PATTERN).default("").optional()
         .describe("Kafka topic name for captured traffic. If empty, defaults to the proxy name (the key in the proxies record)."),
     source: z.string()
@@ -801,8 +800,9 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
     z.object({
         skipApprovals : z.boolean().default(false).optional()
             .describe("Global flag to skip all manual approval gates across the entire migration. When true, overrides all per-component skipApproval settings."),
-        kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional()
-            .describe("Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster name."),
+        kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.optional()
+            .describe("Kafka cluster configurations. Required when traffic capture proxies are configured. " +
+                "Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."),
         sourceClusters: SOURCE_CLUSTERS_MAP
             .describe("Source Elasticsearch or OpenSearch clusters to migrate from."),
         targetClusters: TARGET_CLUSTERS_MAP
@@ -814,6 +814,14 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 "All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency.")
             .optional()
     }).describe("Top-level migration configuration defining source clusters, target clusters, snapshot migrations, and optional traffic capture/replay.").superRefine((data, ctx) => {
+        if (data.traffic && Object.keys(data.traffic.proxies).length > 0 &&
+            (!data.kafkaClusterConfiguration || Object.keys(data.kafkaClusterConfiguration).length === 0)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "kafkaClusterConfiguration is required when traffic capture proxies are configured.",
+                path: ['kafkaClusterConfiguration']
+            });
+        }
         for (let i = 0; i < data.snapshotMigrationConfigs.length; i++) {
             const mc = data.snapshotMigrationConfigs[i];
 
