@@ -46,6 +46,7 @@ dependencies {
 
 
     testImplementation testFixtures(project(":RFS"))
+    testImplementation testFixtures(project(":SolrReader"))
     testImplementation testFixtures(project(":RfsPipeline"))
     testImplementation testFixtures(project(":coreUtilities"))
     testImplementation testFixtures(project(":testHelperFixtures"))
