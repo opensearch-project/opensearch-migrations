@@ -11,6 +11,8 @@ conditionalPackageInstalls:
   source: false
   solrSource: true
 
+solrSourceLocalstackCredentials: true
+
 solrSource:
   image:
     tag: "9.7.0"

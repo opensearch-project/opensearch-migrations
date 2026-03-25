@@ -148,3 +148,7 @@ solrSource:
   # The Solr S3 backup repository requires the s3-repository contrib module.
   # backupRepositories are passed through to the SolrCloud CR spec.
   backupRepositories: []
+
+# Create a Secret with dummy localstack credentials for Solr S3 backups.
+# Only needed when using localstack; EKS Pod Identity provides credentials automatically.
+solrSourceLocalstackCredentials: false

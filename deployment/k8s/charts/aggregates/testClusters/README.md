@@ -10,7 +10,7 @@ This chart can optionally deploy a SolrCloud source cluster using the
 [Apache Solr Operator](https://solr.apache.org/operator/) instead of (or
 alongside) the default Elasticsearch source.
 
-### Quick Start
+### Quick Start (localstack)
 
 ```bash
 # Deploy Solr 9.7.0 as the source (disables Elasticsearch source)
@@ -31,6 +31,25 @@ The `valuesSolrSource.yaml` overlay:
 
 The Solr version is controlled by `solrSource.image.tag` and can be any
 published Docker Hub `solr` image tag.
+
+### EKS with S3 via Pod Identity
+
+The Solr Operator's S3 backup repository uses the standard AWS SDK credential
+chain, so [Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html)
+credentials are picked up automatically — no keystore sidecar hacks needed
+(unlike the Elasticsearch source).
+
+```bash
+helm install test-clusters . \
+  -f valuesSolrSource.yaml \
+  -f valuesSolrSourceEks.yaml \
+  --set solrSource.serviceAccount.name=<your-sa-with-s3-access>
+```
+
+The `valuesSolrSourceEks.yaml` overlay layers on top of `valuesSolrSource.yaml`:
+- Sets `serviceAccount.name` so Solr pods inherit the IAM role
+- Removes explicit S3 credentials (SDK auto-discovers from Pod Identity)
+- Adds tolerations for the dedicated search node pool
 
 ## S3 Snapshot Support
 

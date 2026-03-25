@@ -1,0 +1,46 @@
+# Values for deploying a Solr source cluster on EKS with S3 via Pod Identity.
+# Disables the default Elasticsearch source and enables Solr instead.
+#
+# The Solr Operator's S3 backup repository uses the standard AWS SDK credential
+# chain, so Pod Identity credentials are picked up automatically when the
+# SolrCloud pods run under a service account mapped to an IAM role.
+#
+# Usage:
+#   helm install test-clusters . \
+#     -f valuesSolrSource.yaml \
+#     -f valuesSolrSourceEks.yaml \
+#     --set solrSource.serviceAccount.name=<your-sa-with-s3-access>
+
+conditionalPackageInstalls:
+  source: false
+  solrSource: true
+
+useDedicatedKarpenterPool: true
+
+solrSourceLocalstackCredentials: false
+
+solrSource:
+  # Set this to a service account with an IAM role that has S3 access.
+  # With EKS Pod Identity / IRSA, the AWS SDK in Solr auto-discovers credentials.
+  serviceAccount:
+    create: false
+    name: "migration-console-access-role"
+
+  solrOptions:
+    solrModules:
+      - s3-repository
+
+  # No explicit credentials needed — Pod Identity provides them via the service account
+  backupRepositories:
+    - name: default-s3
+      s3:
+        region: us-east-2
+        bucket: solr-backups
+
+  podOptions:
+    tolerations:
+      - key: dedicated-search
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+    nodeSelector: {}
