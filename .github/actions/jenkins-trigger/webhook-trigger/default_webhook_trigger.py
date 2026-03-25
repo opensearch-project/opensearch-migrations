@@ -196,7 +196,7 @@ def handle_job_monitoring(config: JenkinsConfig, response: Response) -> JobResul
         return JobResult(status="NO_JOBS_TRIGGERED", workflow_url=None)
 
     if len(triggered_jobs) > 1:
-        logging.info(
+        logging.warning(
             f"Multiple pipelines were triggered: {triggered_jobs}. "
             f"Monitoring only the specified job: {config.job_name}"
         )
