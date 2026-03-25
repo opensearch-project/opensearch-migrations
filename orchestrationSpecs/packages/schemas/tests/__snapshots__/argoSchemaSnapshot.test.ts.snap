@@ -439,7 +439,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "compressionEnabled": {
                             "type": "boolean",
-                            "default": false
+                            "default": true
                           },
                           "includeGlobalState": {
                             "type": "boolean",
@@ -1748,8 +1748,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 },
                                 "compressionEnabled": {
                                   "type": "boolean",
-                                  "default": false,
-                                  "description": "When true, enables metadata compression for the snapshot. Reduces snapshot size at the cost of slightly increased CPU usage during creation."
+                                  "default": true,
+                                  "description": "[Expert] Enables metadata compression for the snapshot. Can be turned off if issues are observed with snapshot configuration extraction."
                                 },
                                 "includeGlobalState": {
                                   "type": "boolean",
