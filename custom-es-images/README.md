@@ -67,9 +67,6 @@ The primary build mechanism for CI and on-demand image building is Gradle (`buil
 # Build a specific version
 ./gradlew :custom-es-images:buildImage_7_10
 
-# Build core test images (versions used in integration tests)
-./gradlew :custom-es-images:buildCoreTestImages
-
 # Build all images for a major version
 ./gradlew :custom-es-images:buildMajor_7
 
