@@ -2,6 +2,7 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
@@ -394,13 +395,17 @@ public class RfsMigrateDocuments {
         boolean areAllS3ArgsProvided = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
         boolean areAnyS3ArgsProvided = args.s3LocalDir != null || args.s3RepoUri != null || args.s3Region != null;
 
-        // Solr backup path only requires --snapshot-local-dir and --source-host
+        // Solr backup path requires --source-host and either local dir or S3 args
         if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
-            if (args.snapshotLocalDir == null) {
-                throw new ParameterException("--snapshot-local-dir is required for Solr backup migration.");
-            }
             if (args.sourceArgs.host == null) {
                 throw new ParameterException("--source-host is required for Solr backup migration (to fetch schema).");
+            }
+            boolean hasLocal = args.snapshotLocalDir != null;
+            boolean hasS3 = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
+            if (!hasLocal && !hasS3) {
+                throw new ParameterException(
+                    "For Solr backup migration, provide either --snapshot-local-dir or S3 args (--s3-local-dir, --s3-repo-uri, --s3-region)."
+                );
             }
             return;
         }
@@ -924,13 +929,26 @@ public class RfsMigrateDocuments {
                 "When source version is SOLR, --source-host must be provided to fetch schema."
             );
         }
-        if (arguments.snapshotLocalDir == null) {
+
+        // Resolve backup directory: local or S3
+        Path backupDir;
+        if (arguments.snapshotLocalDir != null) {
+            backupDir = Paths.get(arguments.snapshotLocalDir);
+            log.info("Starting Solr backup document migration from local dir: {}", backupDir);
+        } else if (arguments.s3RepoUri != null && arguments.s3Region != null && arguments.s3LocalDir != null) {
+            log.info("Downloading Solr backup from S3: {}", arguments.s3RepoUri);
+            var s3Repo = S3Repo.createRaw(
+                Paths.get(arguments.s3LocalDir),
+                new S3Uri(arguments.s3RepoUri),
+                arguments.s3Region,
+                arguments.s3Endpoint != null ? URI.create(arguments.s3Endpoint) : null
+            );
+            backupDir = s3Repo.downloadAllFiles();
+        } else {
             throw new ParameterException(
-                "When source version is SOLR, --snapshot-local-dir must point to the Solr backup directory."
+                "When source version is SOLR, provide either --snapshot-local-dir or S3 args (--s3-local-dir, --s3-repo-uri, --s3-region)."
             );
         }
-
-        log.info("Starting Solr backup document migration from {}", arguments.snapshotLocalDir);
 
         var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
         var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
@@ -947,8 +965,6 @@ public class RfsMigrateDocuments {
                 collections.retainAll(arguments.indexAllowlist);
             }
             log.info("Migrating {} Solr collection(s): {}", collections.size(), collections);
-
-            var backupDir = Paths.get(arguments.snapshotLocalDir);
 
             for (var collection : collections) {
                 log.info("Migrating collection: {}", collection);
