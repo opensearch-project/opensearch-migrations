@@ -20,6 +20,7 @@ import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -93,6 +94,12 @@ public class SolrBackupSource implements DocumentSource {
         // Check if this is a flat backup (segments_N at top level)
         if (hasSegmentsFile(backupDir)) {
             return List.of(backupDir);
+        }
+
+        // Check for S3 backup structure: index/ directory at top level
+        var indexDir = backupDir.resolve("index");
+        if (hasSegmentsFile(indexDir)) {
+            return List.of(indexDir);
         }
 
         // Look for SolrCloud shard structure: shardN/data/index/
@@ -194,6 +201,49 @@ public class SolrBackupSource implements DocumentSource {
                     "No segments_N file found in: " + dir));
         } catch (IOException e) {
             throw new IllegalStateException("Failed to list directory: " + dir, e);
+        }
+    }
+
+    /**
+     * Renames UUID-named files in a Solr S3 backup to their original Lucene filenames
+     * using the shard_backup_metadata mapping files.
+     *
+     * <p>Solr's S3 backup repository stores index files with UUID names and keeps
+     * a mapping in {@code shard_backup_metadata/md_shardN_0.json}. This method
+     * reads those mappings and renames the files in the {@code index/} directory
+     * so that standard Lucene readers can open them.
+     */
+    public static void restoreFileNames(Path backupDir) throws IOException {
+        var metadataDir = backupDir.resolve("shard_backup_metadata");
+        if (!Files.isDirectory(metadataDir)) {
+            log.debug("No shard_backup_metadata directory found in {}, skipping rename", backupDir);
+            return;
+        }
+        var mapper = new ObjectMapper();
+        try (var mdFiles = Files.list(metadataDir)) {
+            mdFiles.filter(p -> p.getFileName().toString().endsWith(".json")).forEach(mdFile -> {
+                try {
+                    var tree = mapper.readTree(mdFile.toFile());
+                    var indexDir = backupDir.resolve("index");
+                    tree.fields().forEachRemaining(entry -> {
+                        var uuid = entry.getKey();
+                        var fileName = entry.getValue().path("fileName").asText(null);
+                        if (fileName == null) return;
+                        var src = indexDir.resolve(uuid);
+                        var dst = indexDir.resolve(fileName);
+                        if (Files.exists(src) && !Files.exists(dst)) {
+                            try {
+                                Files.move(src, dst);
+                            } catch (IOException e) {
+                                log.warn("Failed to rename {} to {}", src, dst, e);
+                            }
+                        }
+                    });
+                    log.info("Restored Lucene filenames from {}", mdFile.getFileName());
+                } catch (IOException e) {
+                    log.warn("Failed to read shard metadata: {}", mdFile, e);
+                }
+            });
         }
     }
 

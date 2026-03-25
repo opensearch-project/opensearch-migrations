@@ -968,6 +968,8 @@ public class RfsMigrateDocuments {
 
             for (var collection : collections) {
                 log.info("Migrating collection: {}", collection);
+                // Solr S3 backups use UUID filenames; restore original Lucene names
+                SolrBackupSource.restoreFileNames(backupDir.resolve(collection));
                 var schema = solrClient.getSchema(collection);
                 var source = new SolrBackupSource(backupDir, collection, schema);
                 var sink = new OpenSearchDocumentSink(
