@@ -4,6 +4,9 @@
 # Usage:
 #   helm install test-clusters . -f valuesSolrSource.yaml
 #
+# For EKS with real S3 (Pod Identity):
+#   helm install test-clusters . -f valuesSolrSource.yaml -f valuesSolrSourceEks.yaml
+#
 # Override the Solr version:
 #   helm install test-clusters . -f valuesSolrSource.yaml --set solrSource.image.tag=8.11.4
 
@@ -18,9 +21,34 @@ solrSource:
     tag: "9.7.0"
   solrOptions:
     javaMemory: "-Xms512m -Xmx512m"
-    # Load the S3 repository module so backups can target S3/localstack
     solrModules:
       - s3-repository
+
+  # The operator's solrModules field doesn't always set SOLR_MODULES env var,
+  # so we set it explicitly along with disabling the security manager
+  # (required for AWS credential file access).
+  podOptions:
+    envVars:
+      - name: SOLR_MODULES
+        value: s3-repository
+      - name: SOLR_SECURITY_MANAGER_ENABLED
+        value: "false"
+    # Solr startup can be slow; relax probes to avoid restart loops
+    startupProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      failureThreshold: 30
+      timeoutSeconds: 5
+    livenessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      failureThreshold: 5
+      timeoutSeconds: 5
+    readinessProbe:
+      periodSeconds: 10
+      failureThreshold: 5
+      timeoutSeconds: 5
+
   backupRepositories:
     - name: localstack-s3
       s3:

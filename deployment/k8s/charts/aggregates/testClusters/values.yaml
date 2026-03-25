@@ -141,12 +141,26 @@ solrSource:
     javaMemory: "-Xms512m -Xmx512m"
   dataStorage:
     type: "ephemeral"
+  podOptions:
+    # Solr startup can be slow; relax probes to avoid restart loops
+    startupProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      failureThreshold: 30
+      timeoutSeconds: 5
+    livenessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      failureThreshold: 5
+      timeoutSeconds: 5
+    readinessProbe:
+      periodSeconds: 10
+      failureThreshold: 5
+      timeoutSeconds: 5
   zk:
     provided:
       replicas: 1
-  # S3 backup repository for localstack
-  # The Solr S3 backup repository requires the s3-repository contrib module.
-  # backupRepositories are passed through to the SolrCloud CR spec.
+  # S3 backup repository — configured per-environment in valuesSolrSource*.yaml
   backupRepositories: []
 
 # Create a Secret with dummy localstack credentials for Solr S3 backups.
