@@ -50,7 +50,7 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
                     script {
-                        env.STACK_NAME = "MA-Serverless-${maStageName}-${params.REGION}"
+                        env.STACK_NAME = "MA-Serverless-${maStageName}-${currentBuild.number}-${params.REGION}"
                         env.eksClusterName = "migration-eks-cluster-${maStageName}-${params.REGION}"
                         env.eksKubeContext = env.eksClusterName
                         env.CLUSTER_STACK = "OpenSearch-${maStageName}-${params.REGION}"
