@@ -36,7 +36,11 @@ import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.solr.SolrClient;
 import org.opensearch.migrations.bulkload.solr.SolrBackupSource;
+import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
 import org.opensearch.migrations.bulkload.solr.SolrDocumentSource;
+import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
+
+import com.fasterxml.jackson.databind.JsonNode;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
@@ -929,6 +933,11 @@ public class RfsMigrateDocuments {
                 "When source version is SOLR, --source-host must be provided to fetch schema."
             );
         }
+        if (arguments.coordinatorArgs.host == null) {
+            throw new ParameterException(
+                "When source version is SOLR, --coordinator-host must be provided for work coordination."
+            );
+        }
 
         // Resolve backup directory: local or S3
         Path backupDir;
@@ -950,9 +959,6 @@ public class RfsMigrateDocuments {
             );
         }
 
-        var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
-        var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
-
         var solrClient = new SolrClient(
             arguments.sourceArgs.host,
             arguments.sourceArgs.username,
@@ -964,34 +970,85 @@ public class RfsMigrateDocuments {
             if (!arguments.indexAllowlist.isEmpty()) {
                 collections.retainAll(arguments.indexAllowlist);
             }
-            log.info("Migrating {} Solr collection(s): {}", collections.size(), collections);
 
+            // Restore UUID filenames and build document sources per collection
             for (var collection : collections) {
-                log.info("Migrating collection: {}", collection);
-                // Solr S3 backups use UUID filenames; restore original Lucene names
                 SolrBackupSource.restoreFileNames(backupDir.resolve(collection));
-                var schema = solrClient.getSchema(collection);
-                var source = new SolrBackupSource(backupDir, collection, schema);
-                var sink = new OpenSearchDocumentSink(
-                    targetClient, docTransformerSupplier, useServerGeneratedIds, allowlist, () -> null
-                );
-                var pipeline = new DocumentMigrationPipeline(
-                    source, sink,
-                    arguments.numDocsPerBulkRequest,
-                    arguments.numBytesPerBulkRequest,
-                    1,
-                    arguments.maxConnections
-                );
-                try {
-                    pipeline.migrateAll().blockLast();
-                    log.info("Collection {} migration completed", collection);
-                } finally {
-                    try { source.close(); } catch (Exception e) { log.warn("Error closing source", e); }
-                    try { sink.close(); } catch (Exception e) { log.warn("Error closing sink", e); }
-                }
+            }
+
+            // Build a combined SolrBackupSource for all collections
+            // Each collection's shards become work items via the IndexMetadata.Factory
+            var schemas = new java.util.LinkedHashMap<String, JsonNode>();
+            for (var collection : collections) {
+                schemas.put(collection, solrClient.getSchema(collection));
+            }
+
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas);
+            var documentSource = new SolrMultiCollectionSource(backupDir, schemas);
+
+            // Now flow through the standard coordinator path
+            var targetConnectionContext = arguments.targetArgs.toConnectionContext();
+            var targetVersion = targetClient.getClusterVersion();
+            var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
+
+            var workerId = ProcessHelpers.getNodeInstanceName();
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+            var progressCursor = new AtomicReference<WorkItemCursor>();
+            var cancellationRunnableRef = new AtomicReference<Runnable>();
+            var workItemTimeProvider = new WorkItemTimeProvider();
+            var completionRetryConfig = new OpenSearchWorkCoordinator.CompletionRetryConfig(
+                arguments.coordinatorRetryMaxRetries,
+                arguments.coordinatorRetryInitialDelayMs,
+                arguments.coordinatorRetryMaxDelayMs);
+            var coordinatorFactory = new WorkCoordinatorFactory(
+                coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig);
+            var cleanShutdownCompleted = new AtomicBoolean(false);
+            var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
+            var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
+
+            try (var workCoordinator = coordinatorFactory.get(
+                     new CoordinateWorkHttpClient(coordinatorInfo.connectionContext()),
+                     TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                     workerId,
+                     Clock.systemUTC(),
+                     workItemRef::set);
+                 var processManager = new LeaseExpireTrigger(
+                    w -> exitOnLeaseTimeout(
+                            workItemRef, workCoordinator, w, progressCursor, workItemTimeProvider,
+                            arguments.initialLeaseDuration,
+                            () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
+                            cleanShutdownCompleted,
+                            context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
+                    Clock.systemUTC())) {
+
+                var scopedWorkCoordinator = prepareWorkCoordination(
+                    workCoordinator, processManager, indexMetadataFactory,
+                    arguments.snapshotName, arguments.indexAllowlist, context);
+
+                var runner = DocumentMigrationBootstrap.builder()
+                    .targetClient(targetClient)
+                    .snapshotName(arguments.snapshotName)
+                    .maxDocsPerBatch(arguments.numDocsPerBulkRequest)
+                    .maxBytesPerBatch(arguments.numBytesPerBulkRequest)
+                    .batchConcurrency(arguments.maxConnections)
+                    .transformerSupplier(docTransformerSupplier)
+                    .allowServerGeneratedIds(useServerGeneratedIds)
+                    .allowlist(allowlist)
+                    .externalDocumentSource(documentSource)
+                    .workCoordinator(scopedWorkCoordinator)
+                    .workItemTimeProvider(workItemTimeProvider)
+                    .maxInitialLeaseDuration(arguments.initialLeaseDuration)
+                    .cursorConsumer(progressCursor::set)
+                    .cancellationTriggerConsumer(cancellationRunnableRef::set)
+                    .build();
+
+                runner.migrateOneShard(context::createReindexContext);
+                cleanShutdownCompleted.set(true);
             }
             log.info("Solr backup document migration completed successfully");
-        } catch (IOException e) {
+        } catch (NoWorkLeftException e) {
+            log.info("No more Solr work items to process: {}", e.getMessage());
+        } catch (Exception e) {
             throw new RuntimeException("Failed to migrate Solr backup", e);
         }
     }

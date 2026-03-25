@@ -175,7 +175,7 @@ public class DocumentMigrationBootstrap {
             workItemTimeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
         }
 
-        var partition = new EsShardPartition(snapshotName, wi.getIndexName(), wi.getShardNumber());
+        var partition = resolvePartition(wi);
         long startingOffset = wi.getStartingDocId() != null && wi.getStartingDocId() >= 0
             ? wi.getStartingDocId() : 0;
 
@@ -254,6 +254,24 @@ public class DocumentMigrationBootstrap {
         } finally {
             progressMonitor.close();
         }
+    }
+
+    /**
+     * Maps a work item to the appropriate Partition. For external sources (e.g. Solr),
+     * looks up the partition from the source's listPartitions by shard index.
+     */
+    private org.opensearch.migrations.bulkload.pipeline.model.Partition resolvePartition(
+            IWorkCoordinator.WorkItemAndDuration.WorkItem wi) {
+        if (externalDocumentSource != null) {
+            var partitions = externalDocumentSource.listPartitions(wi.getIndexName());
+            int shardIdx = wi.getShardNumber();
+            if (shardIdx < partitions.size()) {
+                return partitions.get(shardIdx);
+            }
+            throw new IllegalStateException("Shard index " + shardIdx + " out of range for " +
+                wi.getIndexName() + " (has " + partitions.size() + " partitions)");
+        }
+        return new EsShardPartition(snapshotName, wi.getIndexName(), wi.getShardNumber());
     }
 
     private DocumentSource createDocumentSource() {
