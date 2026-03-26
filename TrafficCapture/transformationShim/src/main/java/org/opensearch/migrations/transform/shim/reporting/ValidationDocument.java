@@ -50,7 +50,10 @@ public record ValidationDocument(
         @JsonProperty("value_drifts") List<ValueDrift> valueDrifts
     ) {}
 
-    /** Per-key value drift within a comparison. */
+    /**
+     * Per-key value drift within a comparison. The {@code key} identifies a specific
+     * bucket entry (e.g. "books") within the parent comparison's named field (e.g. "category").
+     */
     public record ValueDrift(
         @JsonProperty("key") String key,
         @JsonProperty("baseline_value") Number baselineValue,

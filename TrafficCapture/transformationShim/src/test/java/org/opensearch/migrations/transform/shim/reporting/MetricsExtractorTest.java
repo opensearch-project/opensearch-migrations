@@ -95,45 +95,23 @@ class MetricsExtractorTest {
         assertNull(MetricsExtractor.computeResponseTimeDelta(12L, null));
     }
 
-    // --- extractCollectionName ---
+    // --- extractLong ---
 
     @Test
-    void collectionName_selectEndpoint() {
-        assertEquals("mycore", MetricsExtractor.extractCollectionName("/solr/mycore/select"));
+    void extractLong_validPath() {
+        var map = Map.<String, Object>of("response", Map.of("numFound", 42));
+        assertEquals(42L, MetricsExtractor.extractLong(map, "response.numFound"));
     }
 
     @Test
-    void collectionName_updateEndpoint() {
-        assertEquals("my-collection", MetricsExtractor.extractCollectionName("/solr/my-collection/update"));
+    void extractLong_nullMap() {
+        assertNull(MetricsExtractor.extractLong(null, "response.numFound"));
     }
 
     @Test
-    void collectionName_withQueryString() {
-        assertEquals("core1", MetricsExtractor.extractCollectionName("/solr/core1/select?q=*:*&rows=10"));
-    }
-
-    @Test
-    void collectionName_nonMatching() {
-        assertNull(MetricsExtractor.extractCollectionName("/other/path"));
-        assertNull(MetricsExtractor.extractCollectionName(null));
-    }
-
-    // --- normalizeEndpoint ---
-
-    @Test
-    void normalize_selectEndpoint() {
-        assertEquals("/solr/{collection}/select", MetricsExtractor.normalizeEndpoint("/solr/mycore/select"));
-    }
-
-    @Test
-    void normalize_updateEndpoint() {
-        assertEquals("/solr/{collection}/update", MetricsExtractor.normalizeEndpoint("/solr/core1/update"));
-    }
-
-    @Test
-    void normalize_nonMatching() {
-        assertNull(MetricsExtractor.normalizeEndpoint("/other/path"));
-        assertNull(MetricsExtractor.normalizeEndpoint(null));
+    void extractLong_missingPath() {
+        var map = Map.<String, Object>of("other", 1);
+        assertNull(MetricsExtractor.extractLong(map, "response.numFound"));
     }
 
     // --- mergeTransformMetrics ---

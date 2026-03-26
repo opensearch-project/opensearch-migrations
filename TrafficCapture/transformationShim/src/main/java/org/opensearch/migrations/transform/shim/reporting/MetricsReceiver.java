@@ -24,10 +24,12 @@ public class MetricsReceiver {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final MetricsSink sink;
+    private final MetricsExtractor extractor;
     private final boolean includeRequestBody;
 
-    public MetricsReceiver(MetricsSink sink, boolean includeRequestBody) {
+    public MetricsReceiver(MetricsSink sink, MetricsExtractor extractor, boolean includeRequestBody) {
         this.sink = sink;
+        this.extractor = extractor;
         this.includeRequestBody = includeRequestBody;
     }
 
@@ -107,20 +109,22 @@ public class MetricsReceiver {
     ) {
         try {
             String uri = originalRequest != null ? originalRequest.uri() : null;
-            String collectionName = MetricsExtractor.extractCollectionName(uri);
-            String normalizedEndpoint = MetricsExtractor.normalizeEndpoint(uri);
+            String collectionName = extractor.extractCollectionName(uri);
+            String normalizedEndpoint = extractor.normalizeEndpoint(uri);
 
-            Long primaryHitCount = extractLong(primaryResponse, "response.numFound");
-            Long secondaryHitCount = extractLong(secondaryResponse, "response.numFound");
+            var primaryBody = primaryResponse != null && primaryResponse.isSuccess() ? primaryResponse.parsedBody() : null;
+            var secondaryBody = secondaryResponse != null && secondaryResponse.isSuccess() ? secondaryResponse.parsedBody() : null;
+
+            Long primaryHitCount = MetricsExtractor.extractLong(primaryBody, extractor.hitCountPath());
+            Long secondaryHitCount = MetricsExtractor.extractLong(secondaryBody, extractor.hitCountPath());
             Double hitCountDrift = MetricsExtractor.computeDriftPercentage(primaryHitCount, secondaryHitCount);
 
-            Long primaryQtime = extractLong(primaryResponse, "responseHeader.QTime");
-            Long secondaryQtime = extractLong(secondaryResponse, "responseHeader.QTime");
+            Long primaryQtime = MetricsExtractor.extractLong(primaryBody, extractor.queryTimePath());
+            Long secondaryQtime = MetricsExtractor.extractLong(secondaryBody, extractor.queryTimePath());
             Long responseTimeDelta = MetricsExtractor.computeResponseTimeDelta(primaryQtime, secondaryQtime);
 
-            List<ValidationDocument.ComparisonEntry> comparisons = FacetComparator.compareFacets(
-                    primaryResponse != null ? primaryResponse.parsedBody() : null,
-                    secondaryResponse != null ? secondaryResponse.parsedBody() : null);
+            List<ValidationDocument.ComparisonEntry> comparisons = extractor.compareResults(
+                    primaryBody, secondaryBody);
 
             Map<String, Object> customMetrics = transformMetrics != null
                     ? new LinkedHashMap<>(transformMetrics) : new LinkedHashMap<>();
@@ -174,9 +178,4 @@ public class MetricsReceiver {
         }
     }
 
-    private Long extractLong(TargetResponse response, String path) {
-        if (response == null || !response.isSuccess() || response.parsedBody() == null) return null;
-        Number n = MetricsExtractor.extractNestedField(response.parsedBody(), path);
-        return n != null ? n.longValue() : null;
-    }
 }

@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class MetricsReceiverTest {
 
+    private static final MetricsExtractor SOLR_EXTRACTOR = new SolrMetricsExtractor();
+
     /** Simple in-memory sink for testing. */
     static class CapturingSink implements MetricsSink {
         final List<ValidationDocument> documents = new ArrayList<>();
@@ -45,7 +47,7 @@ class MetricsReceiverTest {
     @Test
     void collectExtractsHitCountsAndLatency() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/mycore/select", Map.of("Host", "localhost"), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/mycore/_search", Map.of(), null);
         var primary = successResponse("solr", solrResponseBody(100, 12));
@@ -67,7 +69,7 @@ class MetricsReceiverTest {
     @Test
     void collectPopulatesOriginalRequest() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/core1/select?q=*:*", Map.of(), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/core1/_search", Map.of(), null);
         var primary = successResponse("solr", solrResponseBody(10, 1));
@@ -84,7 +86,7 @@ class MetricsReceiverTest {
     @Test
     void requestBodyIncludedWhenFlagTrue() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, true);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, true);
         var reqMap = Map.<String, Object>of("method", "POST", "URI", "/solr/c/update",
             "headers", Map.of(), "payload", "{\"add\":{}}");
         var transformedReqs = Map.of("opensearch", Map.<String, Object>of("method", "POST", "URI", "/c/_bulk"));
@@ -101,7 +103,7 @@ class MetricsReceiverTest {
     @Test
     void requestBodyExcludedWhenFlagFalse() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var reqMap = Map.<String, Object>of("method", "POST", "URI", "/solr/c/update",
             "headers", Map.of(), "payload", "{\"add\":{}}");
         var transformedReqs = Map.of("opensearch", Map.<String, Object>of("method", "POST", "URI", "/c/_bulk"));
@@ -117,7 +119,7 @@ class MetricsReceiverTest {
     @Test
     void nullResponsesProduceNullFields() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null);
         collector.process(original, transformed, null, null, Map.of());
@@ -131,7 +133,7 @@ class MetricsReceiverTest {
     @Test
     void customMetricsEmptyWhenNoneEmitted() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null);
         var primary = successResponse("solr", Map.of());
@@ -144,7 +146,7 @@ class MetricsReceiverTest {
     @Test
     void customMetricsMergedFromMultipleTargets() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null);
         var primary = successResponse("solr", Map.of());
@@ -166,7 +168,7 @@ class MetricsReceiverTest {
             @Override public void flush() {}
             @Override public void close() {}
         };
-        var collector = new MetricsReceiver(throwingSink, false);
+        var collector = new MetricsReceiver(throwingSink, SOLR_EXTRACTOR, false);
         assertDoesNotThrow(() ->
             collector.process(requestMap("GET", "/solr/c/select"), null, Map.of(), emptyPerTargetMetrics()));
     }
@@ -174,7 +176,7 @@ class MetricsReceiverTest {
     @Test
     void guardSkipsWhenResponseCountIsNotTwo() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         // Only 1 response — should skip
         var responses = Map.of("solr", successResponse("solr", solrResponseBody(10, 1)));
         var transformedReqs = Map.of("opensearch", Map.<String, Object>of("method", "GET", "URI", "/os/_search"));
@@ -185,7 +187,7 @@ class MetricsReceiverTest {
     @Test
     void guardSkipsWhenTransformedRequestCountIsNotOne() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var responses = Map.of(
             "solr", successResponse("solr", solrResponseBody(10, 1)),
             "opensearch", successResponse("opensearch", solrResponseBody(10, 1))
@@ -198,7 +200,7 @@ class MetricsReceiverTest {
     @Test
     void guardSkipsWhenResponsesNull() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         collector.process(requestMap("GET", "/solr/c/select"), null, null, emptyPerTargetMetrics());
         assertTrue(sink.documents.isEmpty());
     }
@@ -206,7 +208,7 @@ class MetricsReceiverTest {
     @Test
     void guardSkipsWhenTransformedRequestsNull() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var responses = Map.of(
             "solr", successResponse("solr", solrResponseBody(10, 1)),
             "opensearch", successResponse("opensearch", solrResponseBody(10, 1))
@@ -218,7 +220,7 @@ class MetricsReceiverTest {
     @Test
     void mapOverloadResolvesAndDelegatesToResolvedOverload() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var transformedReqs = Map.of("opensearch", Map.<String, Object>of("method", "GET", "URI", "/c/_search"));
         var responses = Map.of(
             "solr", successResponse("solr", solrResponseBody(50, 5)),
@@ -238,7 +240,7 @@ class MetricsReceiverTest {
     @Test
     void mapOverloadWithNullPerTargetMetrics() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var transformedReqs = Map.of("opensearch", Map.<String, Object>of("method", "GET", "URI", "/c/_search"));
         var responses = Map.of(
             "solr", successResponse("solr", solrResponseBody(10, 1)),
@@ -253,7 +255,7 @@ class MetricsReceiverTest {
     @Test
     void nullOriginalRequestProducesNullUri() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var primary = successResponse("solr", solrResponseBody(10, 1));
         var secondary = successResponse("opensearch", solrResponseBody(10, 1));
         collector.process(null, null, primary, secondary, Map.of());
@@ -266,7 +268,7 @@ class MetricsReceiverTest {
     @Test
     void buildRequestRecordHandlesNonStringAndNonMapValues() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         // method is Integer, URI is Integer, headers is a String — all non-matching types
         var reqMap = Map.<String, Object>of("method", 123, "URI", 456, "headers", "not-a-map");
         var transformedReqs = Map.of("opensearch", reqMap);
@@ -285,7 +287,7 @@ class MetricsReceiverTest {
     @Test
     void objectPayloadSerializedAsJson() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, true);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, true);
         var payload = Map.of("key", "value");
         var reqMap = new LinkedHashMap<String, Object>();
         reqMap.put("method", "POST");
@@ -308,7 +310,7 @@ class MetricsReceiverTest {
     @Test
     void nullPayloadProducesNullBody() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, true);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, true);
         var reqMap = new LinkedHashMap<String, Object>();
         reqMap.put("method", "POST");
         reqMap.put("URI", "/solr/c/update");
@@ -327,7 +329,7 @@ class MetricsReceiverTest {
     @Test
     void extractLongReturnsNullWhenFieldMissing() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         // parsedBody has no "response.numFound" path
         var primary = successResponse("solr", Map.of("other", "data"));
         var secondary = successResponse("opensearch", Map.of("other", "data"));
@@ -348,7 +350,7 @@ class MetricsReceiverTest {
             @Override public void flush() {}
             @Override public void close() {}
         };
-        var collector = new MetricsReceiver(throwingSink, false);
+        var collector = new MetricsReceiver(throwingSink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null);
         var primary = successResponse("solr", solrResponseBody(10, 1));
@@ -363,7 +365,7 @@ class MetricsReceiverTest {
             @Override public void flush() {}
             @Override public void close() {}
         };
-        var collector = new MetricsReceiver(throwingSink, false);
+        var collector = new MetricsReceiver(throwingSink, SOLR_EXTRACTOR, false);
         var transformedReqs = Map.of("opensearch", Map.<String, Object>of("method", "GET", "URI", "/c/_search"));
         var responses = Map.of(
             "solr", successResponse("solr", solrResponseBody(10, 1)),
@@ -376,7 +378,7 @@ class MetricsReceiverTest {
     @Test
     void nonEmptyFacetComparisonsIncluded() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         // Build response bodies with facet_counts so FacetComparator produces non-empty comparisons
         var facets = Map.<String, Object>of("facet_counts",
             Map.of("facet_fields", Map.of("category", List.of("books", 10, "movies", 5))));
@@ -397,7 +399,7 @@ class MetricsReceiverTest {
     @Test
     void includeRequestBodyTrueButNoPayloadKey() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, true);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, true);
         // No "payload" key in the request map
         var reqMap = Map.<String, Object>of("method", "GET", "URI", "/solr/c/select", "headers", Map.of());
         var transformedReqs = Map.of("opensearch", Map.<String, Object>of("method", "GET", "URI", "/c/_search"));
@@ -413,7 +415,7 @@ class MetricsReceiverTest {
     @Test
     void extractLongReturnsNullForErrorResponse() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var primary = TargetResponse.error("solr", Duration.ofMillis(10), new RuntimeException("fail"));
         var secondary = successResponse("opensearch", solrResponseBody(10, 1));
         collector.process(
@@ -429,7 +431,7 @@ class MetricsReceiverTest {
     @Test
     void resolvedOverloadWorksDirectly() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null);
         var primary = successResponse("solr", solrResponseBody(100, 12));
@@ -448,7 +450,7 @@ class MetricsReceiverTest {
     @Test
     void toJsonStringFallsBackToToStringOnSerializationFailure() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, true);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, true);
         // InputStream is not serializable by Jackson and will throw
         var unserializable = new java.io.InputStream() {
             @Override public int read() { return -1; }
@@ -472,14 +474,14 @@ class MetricsReceiverTest {
     @Test
     void buildRequestRecordWithNullMap() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         assertNull(collector.buildRequestRecord(null));
     }
 
     @Test
     void guardSkipsWhenMultipleTransformedRequests() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var responses = Map.of(
             "solr", successResponse("solr", solrResponseBody(10, 1)),
             "opensearch", successResponse("opensearch", solrResponseBody(10, 1))
@@ -496,7 +498,7 @@ class MetricsReceiverTest {
     @Test
     void extractLongReturnsNullWhenParsedBodyNull() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, false);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         // Success response but with null parsedBody
         var primary = new TargetResponse("solr", 200, new byte[0], null,
             Duration.ofMillis(10), Duration.ZERO, Duration.ZERO, null);
@@ -517,7 +519,7 @@ class MetricsReceiverTest {
     @Test
     void stringPayloadReturnedDirectly() {
         var sink = new CapturingSink();
-        var collector = new MetricsReceiver(sink, true);
+        var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, true);
         var reqMap = new LinkedHashMap<String, Object>();
         reqMap.put("method", "POST");
         reqMap.put("URI", "/solr/c/update");

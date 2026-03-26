@@ -1,6 +1,6 @@
 # Validation Reporting Framework
 
-The validation reporting framework captures per-request comparison data from the Transformation Shim and streams it to an external OpenSearch cluster for visualization, aggregation, and alerting via OpenSearch Dashboards.
+The validation reporting framework captures per-request comparison data when requests are proxied to multiple targets in parallel. It is designed as a reusable library that can be integrated into any component that performs dual-target validation — including the Transformation Shim, Traffic Capture, and Replayer. Comparison documents are streamed to a configurable sink (the `MetricsSink` interface); the current implementation indexes into an external OpenSearch cluster for visualization, aggregation, and alerting via OpenSearch Dashboards.
 
 ## Why
 
@@ -20,7 +20,7 @@ Each proxied request produces a single **ValidationDocument** indexed into the r
 
 Both `original_request` and `transformed_request` use a generic `RequestRecord` structure: `method`, `uri`, `headers`, and optionally `body`.
 
-Hit counts and latencies are extracted from the **post-transform** response bodies — both targets are in Solr format after the response transform runs, so the same field paths (`response.numFound`, `responseHeader.QTime`) work for both.
+Hit counts and latencies are extracted from the **post-transform** response bodies via a pluggable `MetricsExtractor` interface. Each implementation defines the field paths and URI patterns for its source system. For example, the Solr implementation uses `response.numFound` and `responseHeader.QTime`. Result comparisons (e.g. facet diffs) are also delegated to the extractor, making the framework reusable across different source and target systems.
 
 ## Architecture
 
@@ -65,15 +65,13 @@ sink:
     auth:
       username: admin
       password: admin
-      tls:
-        insecure: true
 ```
 
-When `--reporting-config` is not provided, reporting is disabled and no sink is initialized.
+TLS is enabled by default. When `--reporting-config` is not provided, reporting is disabled and no sink is initialized.
 
-## Custom Transform Metrics
+## Transform Metrics
 
-TypeScript transforms can emit arbitrary key-value metrics via the `_metrics` side-channel. Both request and response transforms receive a `_metrics` map in their bindings:
+Request and response transforms can emit arbitrary key-value metrics via the `_metrics` side-channel. For TypeScript transforms, this looks like:
 
 ```typescript
 // In any transform function:
@@ -96,8 +94,8 @@ All in `org.opensearch.migrations.transform.shim.reporting`:
 | `MetricsReceiver` | Extracts metrics from target responses, builds document, submits to sink |
 | `MetricsSink` | Interface — `submit()`, `flush()`, `close()` |
 | `OpenSearchMetricsSink` | Bulk-indexes documents into the reporting cluster |
-| `MetricsExtractor` | Static utilities — nested field extraction, drift computation, URI parsing |
-| `FacetComparator` | Compares post-transform Solr-format facet structures |
+| `MetricsExtractor` | Interface — field path resolution, URI parsing, result comparison; `SolrMetricsExtractor` is the Solr implementation |
+| `FacetComparator` | Compares Solr-format facet structures (used internally by `SolrMetricsExtractor`) |
 | `ReportingConfig` | YAML config POJO, parsed at startup |
 
 ## OpenSearch Index
