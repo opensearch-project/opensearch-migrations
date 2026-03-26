@@ -97,7 +97,7 @@ def call(Map config = [:]) {
             migrationContext: migration_cdk_context,
             sourceContextId: sourceContextId,
             migrationContextId: migrationContextId,
-            defaultStageId: 'es68e2e',
+            defaultStageId: 'full-es68',
             skipCaptureProxyOnNodeSetup: true,
             jobName: config.jobName ?: 'full-es68source-e2e-test',
             testUniqueId: testUniqueId,

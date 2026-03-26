@@ -59,7 +59,7 @@ def call(Map config = [:]) {
             migrationContext: migration_cdk_context,
             sourceContextId: sourceContextId,
             migrationContextId: migrationContextId,
-            defaultStageId: 'rfsintg',
+            defaultStageId: 'rfs-integ',
             skipCaptureProxyOnNodeSetup: true,
             jobName: config.jobName ?: 'rfs-default-e2e-test',
             integTestCommand: '/root/lib/integ_test/integ_test/backfill_tests.py'

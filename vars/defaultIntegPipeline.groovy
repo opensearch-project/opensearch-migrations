@@ -35,6 +35,8 @@ def call(Map config = [:]) {
         }
 
         options {
+            // Acquire lock on a given deployment stage
+            lock(label: params.STAGE, quantity: 1, variable: 'stage')
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
@@ -59,7 +61,6 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     script {
-                        env.stage = "${params.STAGE}-${currentBuild.number}"
                         // Allow overwriting this step
                         if (config.checkoutStep) {
                             config.checkoutStep()

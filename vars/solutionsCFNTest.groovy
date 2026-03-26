@@ -13,6 +13,8 @@ def call(Map config = [:]) {
         }
 
         options {
+            // Acquire lock on a given deployment stage
+            lock(label: params.STAGE, quantity: 1, variable: 'stage')
             timeout(time: 1, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
@@ -37,7 +39,6 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
-                    script { env.stage = "${params.STAGE}-${currentBuild.number}" }
                 }
             }
 

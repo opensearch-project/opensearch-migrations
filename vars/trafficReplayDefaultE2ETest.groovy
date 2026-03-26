@@ -80,7 +80,7 @@ def call(Map config = [:]) {
             migrationContext: migration_cdk_context,
             sourceContextId: sourceContextId,
             migrationContextId: migrationContextId,
-            defaultStageId: 'awsintg',
+            defaultStageId: 'aws-integ',
             jobName: config.jobName ?: 'traffic-replay-default-e2e-test',
             //deployStep: {
             //    echo 'Custom Test Step'

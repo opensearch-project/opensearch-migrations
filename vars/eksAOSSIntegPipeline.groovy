@@ -6,6 +6,7 @@ def call(Map config = [:]) {
     def endpointEnvVar = envVarMap[collectionType]
     def defaultStageId = config.defaultStageId ?: "aosssrch"
     def jobName = config.jobName ?: "eks-aoss-${collectionType.toLowerCase()}-integ-test"
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
     def clusterContextFilePath = "tmp/cluster-context-aoss-${currentBuild.number}.json"
 
     pipeline {
@@ -25,6 +26,7 @@ def call(Map config = [:]) {
         }
 
         options {
+            lock(label: lockLabel, quantity: 1)
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)

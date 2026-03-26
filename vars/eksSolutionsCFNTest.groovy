@@ -7,6 +7,7 @@ def call(Map config = [:]) {
     def vpcMode = config.vpcMode ?: 'create'
     def isImportVpc = (vpcMode == 'import')
     def jobName = config.jobName ?: (isImportVpc ? "eksImportVPCSolutionsCFNTest" : "eksCreateVPCSolutionsCFNTest")
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -22,6 +23,7 @@ def call(Map config = [:]) {
         }
 
         options {
+            lock(label: lockLabel, quantity: 1)
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
