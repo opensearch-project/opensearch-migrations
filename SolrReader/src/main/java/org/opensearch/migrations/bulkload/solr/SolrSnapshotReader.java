@@ -1,6 +1,10 @@
 package org.opensearch.migrations.bulkload.solr;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.Flavor;
@@ -21,6 +25,22 @@ public class SolrSnapshotReader implements ClusterReader {
     private final Version version;
     private final Path backupDir;
     private final Map<String, JsonNode> schemas;
+
+    /**
+     * Discover Solr collection names from a backup directory.
+     * A valid collection directory contains backup_0.properties or an index/ subdirectory.
+     */
+    public static List<String> discoverCollections(Path backupDir) throws IOException {
+        var collections = new ArrayList<String>();
+        try (var dirs = Files.list(backupDir)) {
+            dirs.filter(Files::isDirectory)
+                .filter(d -> Files.exists(d.resolve("backup_0.properties")) || Files.exists(d.resolve("index")))
+                .map(p -> p.getFileName().toString())
+                .forEach(collections::add);
+        }
+        log.info("Discovered {} collection(s) in backup dir {}: {}", collections.size(), backupDir, collections);
+        return collections;
+    }
 
     public SolrSnapshotReader(Version version, Path backupDir, Map<String, JsonNode> schemas) {
         this.version = version;

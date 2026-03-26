@@ -40,6 +40,7 @@ import org.opensearch.migrations.bulkload.solr.SolrBackupSource;
 import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
 import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
 import org.opensearch.migrations.bulkload.solr.SolrDocumentSource;
+import org.opensearch.migrations.bulkload.solr.SolrSnapshotReader;
 import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -972,15 +973,7 @@ public class RfsMigrateDocuments {
 
         try {
             // Discover collections from backup directory structure
-            // A valid Solr backup collection dir contains backup_0.properties or an index/ subdirectory
-            var collections = new java.util.ArrayList<String>();
-            try (var dirs = Files.list(backupDir)) {
-                dirs.filter(Files::isDirectory)
-                    .filter(d -> Files.exists(d.resolve("backup_0.properties")) || Files.exists(d.resolve("index")))
-                    .map(p -> p.getFileName().toString())
-                    .forEach(collections::add);
-            }
-            log.info("Discovered {} collection(s) in backup dir {}: {}", collections.size(), backupDir, collections);
+            var collections = new java.util.ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
             if (!arguments.indexAllowlist.isEmpty()) {
                 collections.retainAll(arguments.indexAllowlist);
             }
