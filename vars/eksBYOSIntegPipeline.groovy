@@ -104,9 +104,9 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout & Print params') {
                 steps {
-                    env.maStageName = "${params.STAGE}-${currentBuild.number}"
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
+                        env.maStageName = "${params.STAGE}-${currentBuild.number}"
                         echo """
                             ================================================================
                             BYOS Migration Pipeline Configuration

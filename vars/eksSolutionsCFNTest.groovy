@@ -49,7 +49,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    env.stage = "${params.STAGE}-${currentBuild.number}"
+                    script { env.stage = "${params.STAGE}-${currentBuild.number}" }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }
