@@ -85,9 +85,9 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
     /** Standard scenarios - latest patch of each major version */
     static Stream<Arguments> scenarios() {
         return Stream.of(
-            Arguments.of(SearchClusterContainer.ODFE_V1_13_3, SearchClusterContainer.OS_V3_0_0), // ES 7.10.2 (latest ODFE)
-            Arguments.of(SearchClusterContainer.OS_V1_3_20, SearchClusterContainer.OS_V3_0_0),
-            Arguments.of(SearchClusterContainer.OS_V2_19_4, SearchClusterContainer.OS_V3_0_0)
+            Arguments.of(SearchClusterContainer.ODFE_V1_13_3, SearchClusterContainer.OS_LATEST), // ES 7.10.2 (latest ODFE)
+            Arguments.of(SearchClusterContainer.OS_V1_3_20, SearchClusterContainer.OS_LATEST),
+            Arguments.of(SearchClusterContainer.OS_V2_19_4, SearchClusterContainer.OS_LATEST)
         );
     }
 
@@ -95,13 +95,13 @@ public class KnnDocumentMigrationTest extends SourceTestBase {
     static Stream<Arguments> extendedScenarios() {
         return Stream.of(
             // ODFE versions (ES 7.4 - 7.9)
-            Arguments.of(SearchClusterContainer.ODFE_V1_4_0, SearchClusterContainer.OS_V3_0_0),   // ES 7.4.2
-            Arguments.of(SearchClusterContainer.ODFE_V1_7_0, SearchClusterContainer.OS_V3_0_0),   // ES 7.6.1
-            Arguments.of(SearchClusterContainer.ODFE_V1_8_0, SearchClusterContainer.OS_V3_0_0),   // ES 7.7.0
-            Arguments.of(SearchClusterContainer.ODFE_V1_9_0, SearchClusterContainer.OS_V3_0_0),   // ES 7.8.0
-            Arguments.of(SearchClusterContainer.ODFE_V1_11_0, SearchClusterContainer.OS_V3_0_0), // ES 7.9.1
+            Arguments.of(SearchClusterContainer.ODFE_V1_4_0, SearchClusterContainer.OS_LATEST),   // ES 7.4.2
+            Arguments.of(SearchClusterContainer.ODFE_V1_7_0, SearchClusterContainer.OS_LATEST),   // ES 7.6.1
+            Arguments.of(SearchClusterContainer.ODFE_V1_8_0, SearchClusterContainer.OS_LATEST),   // ES 7.7.0
+            Arguments.of(SearchClusterContainer.ODFE_V1_9_0, SearchClusterContainer.OS_LATEST),   // ES 7.8.0
+            Arguments.of(SearchClusterContainer.ODFE_V1_11_0, SearchClusterContainer.OS_LATEST), // ES 7.9.1
             // OS 2.9 for zstd codec testing
-            Arguments.of(SearchClusterContainer.OS_V2_9_0, SearchClusterContainer.OS_V3_0_0)
+            Arguments.of(SearchClusterContainer.OS_V2_9_0, SearchClusterContainer.OS_LATEST)
         );
     }
 

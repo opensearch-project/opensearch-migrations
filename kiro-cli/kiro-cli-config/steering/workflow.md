@@ -28,10 +28,10 @@ Should I proceed with this change? (yes/no)
 
 ## Run Commands in Migration Console
 ```bash
-# For workflow/console commands (need venv)
-kubectl exec migration-console-0 -n ma -- bash -c "source /.venv/bin/activate && <command>"
+# For workflow/console commands
+kubectl exec migration-console-0 -n ma -- <command>
 
-# For simple file reads (no venv needed)
+# For simple file reads
 kubectl exec migration-console-0 -n ma -- cat <file>
 ```
 
@@ -54,7 +54,7 @@ kubectl exec migration-console-0 -n ma -- cat /root/.workflowUser.schema.json
 cat << 'EOF' | kubectl exec -i migration-console-0 -n ma -- bash -c "cat > /tmp/config.yaml"
 { "sourceClusters": { ... }, "targetClusters": { ... }, "migrationConfigs": [...] }
 EOF
-kubectl exec migration-console-0 -n ma -- bash -c "source /.venv/bin/activate && cat /tmp/config.yaml | workflow configure edit --stdin"
+kubectl exec migration-console-0 -n ma -- bash -c "cat /tmp/config.yaml | workflow configure edit --stdin"
 ```
 
 ## Execution Commands
@@ -115,7 +115,7 @@ kubectl logs -n ma -l workflows.argoproj.io/workflow=migration-workflow --tail=2
 
 5. If user wants async: provide command to check status later
    ```bash
-   kubectl exec migration-console-0 -n ma -- bash -c "source /.venv/bin/activate && workflow status"
+   kubectl exec migration-console-0 -n ma -- workflow status
    ```
 
 ## Pre-Migration Estimation (REQUIRED)

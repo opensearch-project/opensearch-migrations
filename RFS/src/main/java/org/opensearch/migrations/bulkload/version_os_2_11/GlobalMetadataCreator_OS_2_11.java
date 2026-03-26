@@ -4,10 +4,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
+import org.opensearch.migrations.bulkload.common.InvalidResponse;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.metadata.CreationResult;
@@ -168,11 +170,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
                         log.warn("Template {} already exists on the target, it will not be created during a migration", templateName);
                     }
                 } else if (mode == MigrationMode.PERFORM) {
-                    var createdTemplate = templateType.creator.createTemplate(client, templateName, templateBody, context);
-                    if (createdTemplate.isEmpty()) {
-                        creationResult.failureType(CreationFailureType.ALREADY_EXISTS);
-                        log.warn("Template {} already exists on the target, unable to create", templateName);
-                    }
+                    createTemplateWithRetry(templateType, templateName, templateBody, context, creationResult);
                 }
             } catch (Exception e) {
                 creationResult.failureType(CreationFailureType.TARGET_CLUSTER_FAILURE);
@@ -180,5 +178,59 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
             }
             return creationResult.build();
         }).collect(Collectors.toList());
+    }
+
+    private void createTemplateWithRetry(
+        TemplateTypes templateType,
+        String templateName,
+        ObjectNode templateBody,
+        IClusterMetadataContext context,
+        CreationResult.CreationResultBuilder creationResult
+    ) {
+        while (true) {
+            try {
+                var createdTemplate = templateType.creator.createTemplate(client, templateName, templateBody, context);
+                if (createdTemplate.isEmpty()) {
+                    creationResult.failureType(CreationFailureType.ALREADY_EXISTS);
+                    log.warn("Template {} already exists on the target, unable to create", templateName);
+                }
+                return;
+            } catch (Exception e) {
+                var unsupportedParams = findUnsupportedMappingParams(e);
+                if (unsupportedParams.isEmpty()) {
+                    throw e;
+                }
+                removeUnsupportedMappingParams(templateName, templateBody, unsupportedParams);
+            }
+        }
+    }
+
+    private static Set<String> findUnsupportedMappingParams(Throwable e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof InvalidResponse ir) {
+                var params = ir.getUnsupportedMappingParameters();
+                if (!params.isEmpty()) {
+                    return params;
+                }
+            }
+        }
+        return Set.of();
+    }
+
+    private void removeUnsupportedMappingParams(String templateName, ObjectNode templateBody, Set<String> params) {
+        // Legacy templates: mappings at top level; index/component templates: mappings under "template"
+        var mappings = templateBody.get("mappings");
+        if (mappings == null) {
+            var template = templateBody.get("template");
+            if (template != null) {
+                mappings = template.get("mappings");
+            }
+        }
+        if (mappings != null && mappings.isObject()) {
+            for (var param : params) {
+                ((ObjectNode) mappings).remove(param);
+            }
+        }
+        log.info("Reattempting creation of template '{}' after removing unsupported mapping parameters: {}", templateName, params);
     }
 }
