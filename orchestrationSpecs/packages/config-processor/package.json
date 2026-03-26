@@ -21,7 +21,7 @@
   "dependencies": {
     "@opensearch-migrations/schemas": "*",
     "ci": "^2.3.0",
-    "yaml": "^2.8.1",
+    "yaml": "^2.8.3",
     "zod": "^4"
   },
   "devDependencies": {
