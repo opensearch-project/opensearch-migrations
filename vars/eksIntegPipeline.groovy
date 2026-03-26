@@ -77,7 +77,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    env.maStageName = params.STAGE
+                    env.maStageName = "${params.STAGE}-${currentBuild.number}"
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }
@@ -127,7 +127,7 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 150, unit: 'MINUTES') {
                         script {
-                            env.STACK_NAME_SUFFIX = "${maStageName}-${currentBuild.number}-${params.REGION}"
+                            env.STACK_NAME_SUFFIX = "${maStageName}-${params.REGION}"
                             def clusterDetails = readJSON text: env.clusterDetailsJson
                             def targetCluster = clusterDetails.target
                             def vpcId = targetCluster.vpcId
@@ -281,7 +281,7 @@ def call(Map config = [:]) {
                 timeout(time: 75, unit: 'MINUTES') {
                     script {
                         def region = params.REGION
-                        def clusterStackName = "OpenSearch-${maStageName}-${currentBuild.number}-${region}"
+                        def clusterStackName = "OpenSearch-${maStageName}-${region}"
                         def maStackName = "Migration-Assistant-Infra-Import-VPC-eks-${maStageName}-${region}"
 
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {

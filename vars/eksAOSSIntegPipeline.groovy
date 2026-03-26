@@ -47,13 +47,13 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout & Print Params') {
                 steps {
-                    env.maStageName = params.STAGE ?: defaultStageId
+                    env.maStageName = "${params.STAGE ?: defaultStageId}-${currentBuild.number}"
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
                     script {
-                        env.STACK_NAME = "MA-Serverless-${maStageName}-${currentBuild.number}-${params.REGION}"
+                        env.STACK_NAME = "MA-Serverless-${maStageName}-${params.REGION}"
                         env.eksClusterName = "migration-eks-cluster-${maStageName}-${params.REGION}"
                         env.eksKubeContext = env.eksClusterName
-                        env.CLUSTER_STACK = "OpenSearch-${maStageName}-${currentBuild.number}-${params.REGION}"
+                        env.CLUSTER_STACK = "OpenSearch-${maStageName}-${params.REGION}"
 
                         echo """
                             ================================================================

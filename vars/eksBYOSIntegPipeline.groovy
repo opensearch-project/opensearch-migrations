@@ -104,7 +104,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout & Print params') {
                 steps {
-                    env.maStageName = params.STAGE
+                    env.maStageName = "${params.STAGE}-${currentBuild.number}"
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
                         echo """
@@ -195,7 +195,7 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         dir('deployment/migration-assistant-solution') {
                             script {
-                                env.STACK_NAME_SUFFIX = "${maStageName}-${currentBuild.number}-${params.REGION}"
+                                env.STACK_NAME_SUFFIX = "${maStageName}-${params.REGION}"
                                 env.MA_STACK_NAME = "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}"
                                 def clusterDetails = readJSON text: env.clusterDetailsJson
                                 def targetCluster = clusterDetails.target

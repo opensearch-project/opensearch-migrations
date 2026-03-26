@@ -43,13 +43,13 @@ def call(Map config = [:]) {
         }
 
         environment {
-            TEST_VPC_STACK_NAME = "test-vpc-${env.stage}-${currentBuild.number}-${params.REGION}"
+            TEST_VPC_STACK_NAME = "test-vpc-${env.stage}-${params.REGION}"
         }
 
         stages {
             stage('Checkout') {
                 steps {
-                    env.stage = params.STAGE
+                    env.stage = "${params.STAGE}-${currentBuild.number}"
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }
@@ -94,7 +94,7 @@ def call(Map config = [:]) {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
                             def templateName = isImportVpc ? "Migration-Assistant-Infra-Import-VPC-eks" : "Migration-Assistant-Infra-Create-VPC-eks"
-                            env.STACK_NAME = "${templateName}-${stage}-${currentBuild.number}-${params.REGION}"
+                            env.STACK_NAME = "${templateName}-${stage}-${params.REGION}"
 
                             def bootstrapArgs = isImportVpc ?
                                 "--deploy-import-vpc-cfn --vpc-id ${env.TEST_VPC_ID} --subnet-ids ${env.TEST_SUBNET_IDS}" :

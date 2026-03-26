@@ -59,7 +59,7 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     script {
-                        env.stage = params.STAGE
+                        env.stage = "${params.STAGE}-${currentBuild.number}"
                         // Allow overwriting this step
                         if (config.checkoutStep) {
                             config.checkoutStep()

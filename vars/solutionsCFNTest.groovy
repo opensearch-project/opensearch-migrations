@@ -37,7 +37,7 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
-                    script { env.stage = params.STAGE }
+                    script { env.stage = "${params.STAGE}-${currentBuild.number}" }
                 }
             }
 
@@ -46,7 +46,7 @@ def call(Map config = [:]) {
                     timeout(time: 15, unit: 'MINUTES') {
                         dir('deployment/migration-assistant-solution') {
                             script {
-                                env.STACK_NAME_SUFFIX = "${stage}-${currentBuild.number}-${params.REGION}"
+                                env.STACK_NAME_SUFFIX = "${stage}-${params.REGION}"
                                 sh "npm install"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
