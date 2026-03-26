@@ -8,72 +8,46 @@ set -euo pipefail
 write_cluster_outputs() {
   local stage="$1"
   local outfile="$2"
+  local cdk_outputs_file="$3"
 
-  stacks=$(aws cloudformation list-stacks \
-    --query "StackSummaries[?StackStatus!='DELETE_COMPLETE' && StackStatus!='DELETE_IN_PROGRESS'].StackName" \
-    --output text | tr '\t' '\n')
+  # cdk --outputs-file produces: {"StackName": {"OutputKey": "OutputValue", ...}}
+  # Flatten to a single object of all outputs across stacks
+  outputs=$(jq 'to_entries | map(.value) | add // {}' "$cdk_outputs_file")
 
-  if [[ -z "$stacks" ]]; then
-    echo "No stacks found when listing stacks."
-    return 1
-  fi
-
-  # v0.3.x: single stack named OpenSearch-{stage}-{region}
-  stack_name=$(echo "$stacks" | grep "^OpenSearch-${stage}-" | head -n 1)
-  if [[ -z "$stack_name" ]]; then
-    echo "No OpenSearch stack found for stage: $stage"
-    return 1
-  fi
-  echo "Found stack: $stack_name"
-
-  outputs=$(aws cloudformation describe-stacks \
-    --stack-name "$stack_name" \
-    --query "Stacks[0].Outputs" \
-    --output json)
-
-  # VPC ID (inline in same stack, may not exist for serverless-only)
   # CDK strips hyphens from stage name in CFN OutputKeys
   stage_nohyphen=$(echo "$stage" | tr -d '-')
-  vpc_id=$(echo "$outputs" | jq -r --arg key "VpcIdExport${stage_nohyphen}" \
-    '.[] | select(.OutputKey == $key) | .OutputValue // empty')
+  vpc_id=$(echo "$outputs" | jq -r --arg key "VpcIdExport${stage_nohyphen}" '.[$key] // empty')
 
   tmpfile=$(mktemp)
   echo "{}" > "$tmpfile"
 
   # Process ClusterEndpoint outputs (managed domains)
-  # CFN OutputKey strips hyphens from CDK logical IDs, so we match with regex
-  while IFS= read -r output; do
-    output_key=$(echo "$output" | jq -r '.OutputKey')
-    # Extract cluster_id: strip "ClusterEndpointExport" prefix and stage name (no hyphens)
+  while read -r output_key; do
     cluster_id=$(echo "$output_key" | sed "s/^ClusterEndpointExport${stage_nohyphen}//")
-    endpoint=$(echo "$output" | jq -r '.OutputValue')
+    endpoint=$(echo "$outputs" | jq -r --arg k "$output_key" '.[$k]')
     [[ ! "$endpoint" =~ ^https?:// ]] && endpoint="https://$endpoint"
 
-    # Look up SG and subnets using same no-hyphen pattern
-    sg=$(echo "$outputs" | jq -r --arg id "ClusterAccessSecurityGroupIdExport${stage_nohyphen}${cluster_id}" \
-      '.[] | select(.OutputKey == $id) | .OutputValue // empty')
-    subnets=$(echo "$outputs" | jq -r --arg id "ClusterSubnets${stage_nohyphen}${cluster_id}" \
-      '.[] | select(.OutputKey == $id) | .OutputValue // empty')
+    sg=$(echo "$outputs" | jq -r --arg k "ClusterAccessSecurityGroupIdExport${stage_nohyphen}${cluster_id}" '.[$k] // empty')
+    subnets=$(echo "$outputs" | jq -r --arg k "ClusterSubnets${stage_nohyphen}${cluster_id}" '.[$k] // empty')
 
     jq --arg id "$cluster_id" --arg vpc "${vpc_id:-}" --arg endpoint "$endpoint" \
        --arg sg "${sg:-}" --arg subnets "${subnets:-}" \
        '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $sg, subnetIds: $subnets}}' \
        "$tmpfile" > "$tmpfile.new"
     mv "$tmpfile.new" "$tmpfile"
-  done < <(echo "$outputs" | jq -c '.[] | select(.OutputKey | test("^ClusterEndpointExport"))')
+  done < <(echo "$outputs" | jq -r 'keys[] | select(test("^ClusterEndpointExport"))')
 
   # Process CollectionEndpoint outputs (serverless)
-  while IFS= read -r output; do
-    output_key=$(echo "$output" | jq -r '.OutputKey')
+  while read -r output_key; do
     cluster_id=$(echo "$output_key" | sed "s/^CollectionEndpointExport${stage_nohyphen}//")
-    endpoint=$(echo "$output" | jq -r '.OutputValue')
+    endpoint=$(echo "$outputs" | jq -r --arg k "$output_key" '.[$k]')
     [[ ! "$endpoint" =~ ^https?:// ]] && endpoint="https://$endpoint"
 
     jq --arg id "$cluster_id" --arg endpoint "$endpoint" \
        '. + {($id): {vpcId: "", endpoint: $endpoint, securityGroupId: "", subnetIds: ""}}' \
        "$tmpfile" > "$tmpfile.new"
     mv "$tmpfile.new" "$tmpfile"
-  done < <(echo "$outputs" | jq -c '.[] | select(.OutputKey | test("^CollectionEndpointExport"))')
+  done < <(echo "$outputs" | jq -r 'keys[] | select(test("^CollectionEndpointExport"))')
 
   mv "$tmpfile" "$outfile"
   echo "Wrote outputs to $outfile"
@@ -136,7 +110,9 @@ cd ..
 cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 
 cd amazon-opensearch-service-sample-cdk
-cdk deploy "*" --require-approval never --concurrency 3
+CDK_OUTPUTS_FILE=$(mktemp)
+cdk deploy "*" --require-approval never --concurrency 3 --outputs-file "$CDK_OUTPUTS_FILE"
 
 CLUSTER_DETAILS_OUTPUT_FILE_PATH="$ROOT_REPO_PATH/test/tmp/cluster-details-${STAGE}.json"
-write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH"
+write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH" "$CDK_OUTPUTS_FILE"
+rm -f "$CDK_OUTPUTS_FILE"
