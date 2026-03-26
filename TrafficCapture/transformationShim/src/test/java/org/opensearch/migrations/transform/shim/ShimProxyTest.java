@@ -156,6 +156,35 @@ class ShimProxyTest {
         assertEquals("beta", resp.headers().firstValue("X-Shim-Primary").orElse(null));
     }
 
+    @Test
+    void dualTarget_cursorMarkMerge() throws Exception {
+        String solrBody = "{\"response\":{\"numFound\":10},\"nextCursorMark\":\"SOLR_TOKEN\"}";
+        String osBody = "{\"response\":{\"numFound\":10},\"nextCursorMark\":\"OS_TOKEN\"}";
+        startBackend("A", backendPortA, solrBody);
+        startBackend("B", backendPortB, osBody);
+
+        Map<String, Target> targets = new LinkedHashMap<>();
+        targets.put("solr", new Target("solr", URI.create("http://localhost:" + backendPortA)));
+        targets.put("opensearch", new Target("opensearch", URI.create("http://localhost:" + backendPortB)));
+
+        proxy = new ShimProxy(proxyPort, targets, "solr", null, List.of(),
+            null, false, Duration.ofSeconds(5));
+        proxy.start();
+
+        var resp = httpGet("http://localhost:" + proxyPort + "/solr/test/select?q=*:*&cursorMark=*&sort=id+asc&wt=json");
+        assertEquals(200, resp.statusCode());
+
+        var body = MAPPER.readValue(resp.body(), Map.class);
+        String combinedToken = (String) body.get("nextCursorMark");
+        assertNotNull(combinedToken, "Expected merged nextCursorMark");
+
+        // Decode and verify combined token
+        String decoded = new String(java.util.Base64.getDecoder().decode(combinedToken), StandardCharsets.UTF_8);
+        var tokenMap = MAPPER.readValue(decoded, Map.class);
+        assertEquals("SOLR_TOKEN", tokenMap.get("solr"));
+        assertEquals("OS_TOKEN", tokenMap.get("os"));
+    }
+
     // --- Mock backends ---
 
     private void startBackend(String label, int port, String responseBody) throws InterruptedException {
