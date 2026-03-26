@@ -8,8 +8,8 @@ def intermediateUrl = rootProject.findProperty('intermediateRegistry') ?: publis
 def publishedRegistry = new Registry(publishedUrl.toString())
 def intermediateRegistry = new Registry(intermediateUrl.toString())
 
-// ECR pull-through cache: when set, rewrites upstream base image refs through ECR
-// Usage: ./gradlew buildImagesToRegistry -PpullThroughCacheEndpoint=123456789.dkr.ecr.us-east-1.amazonaws.com
+// ECR pull-through cache: auto-derived from ECR_PULL_THROUGH_ENDPOINT env var in root build.gradle.
+// Can be overridden with: ./gradlew buildImagesToRegistry -PpullThroughCacheEndpoint=123456789.dkr.ecr.us-east-1.amazonaws.com
 def ptcEndpoint = rootProject.findProperty('pullThroughCacheEndpoint')?.toString() ?: ''
 def ptc = new PullThroughCacheHelper(ptcEndpoint)
 

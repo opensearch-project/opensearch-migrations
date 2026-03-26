@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.transform.shim.netty.MultiTargetRoutingHandler;
+import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.migrations.transform.shim.validation.ValidationRule;
 
@@ -71,6 +72,7 @@ public class ShimProxy {
     private final SslContext backendSslContext;
     private final Duration secondaryTimeout;
     private final int maxContentLength;
+    private final RootShimProxyContext rootShimProxyContext;
 
     private Channel serverChannel;
     private Channel healthChannel;
@@ -87,7 +89,8 @@ public class ShimProxy {
         java.util.function.Supplier<SSLEngine> sslEngineSupplier,
         boolean allowInsecureBackend,
         Duration secondaryTimeout,
-        int maxContentLength
+        int maxContentLength,
+        RootShimProxyContext rootShimProxyContext
     ) {
         this.port = port;
         this.targets = new LinkedHashMap<>(targets);
@@ -98,6 +101,7 @@ public class ShimProxy {
         this.secondaryTimeout = secondaryTimeout != null ? secondaryTimeout : DEFAULT_TIMEOUT;
         this.maxContentLength = maxContentLength > 0 ? maxContentLength : DEFAULT_MAX_CONTENT_LENGTH;
         this.backendSslContext = buildBackendSslContext(allowInsecureBackend);
+        this.rootShimProxyContext = rootShimProxyContext;
 
         if (!this.targets.containsKey(primaryTarget)) {
             throw new IllegalArgumentException("Primary target '" + primaryTarget + "' not in targets");
@@ -114,7 +118,7 @@ public class ShimProxy {
         String primaryTarget,
         List<ValidationRule> validators
     ) {
-        this(port, targets, primaryTarget, null, validators, null, false, null, DEFAULT_MAX_CONTENT_LENGTH);
+        this(port, targets, primaryTarget, null, validators, null, false, null, DEFAULT_MAX_CONTENT_LENGTH, null);
     }
 
     /** Convenience constructor — no max content length override. */
@@ -129,7 +133,7 @@ public class ShimProxy {
         Duration secondaryTimeout
     ) {
         this(port, targets, primaryTarget, activeTargets, validators, sslEngineSupplier,
-            allowInsecureBackend, secondaryTimeout, DEFAULT_MAX_CONTENT_LENGTH);
+            allowInsecureBackend, secondaryTimeout, DEFAULT_MAX_CONTENT_LENGTH, null);
     }
 
     private SslContext buildBackendSslContext(boolean allowInsecure) {
@@ -218,7 +222,7 @@ public class ShimProxy {
 
         pipeline.addLast("multiTargetRouter", new MultiTargetRoutingHandler(
             targets, primaryTarget, activeTargets, validators, secondaryTimeout,
-            backendSslContext, maxContentLength, activeRequests));
+            backendSslContext, maxContentLength, activeRequests, rootShimProxyContext));
         addLoggingHandler(pipeline, "E");
     }
 

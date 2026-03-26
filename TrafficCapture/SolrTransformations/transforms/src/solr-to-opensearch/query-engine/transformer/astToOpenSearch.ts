@@ -38,6 +38,7 @@
 import type { ASTNode } from '../ast/nodes';
 import type { TransformRuleFn } from './types';
 import { boolRule } from './rules/boolRule';
+import { rangeRule } from './rules/rangeRule';
 
 /**
  * Registry of transform functions, keyed by AST node type.
@@ -47,8 +48,9 @@ import { boolRule } from './rules/boolRule';
  *   2. Register it here with the node's `type` discriminant as the key
  */
 const rules: Record<string, TransformRuleFn> = {
-  bool: boolRule,
   // TODO: register remaining rules as they are implemented
+  bool: boolRule,
+  range: rangeRule,
 };
 
 /**

@@ -325,6 +325,33 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Build Docker Images') {
+                steps {
+                    timeout(time: 1, unit: 'HOURS') {
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                    // Install QEMU for cross-architecture builds (arm64 on x86_64 host)
+                                    sh "docker run --privileged --rm tonistiigi/binfmt --install all"
+                                    def builderExists = sh(
+                                        script: "docker buildx ls | grep -q '^ecr-builder'",
+                                        returnStatus: true
+                                    ) == 0
+                                    if (builderExists) {
+                                        echo "Removing existing buildx builder ecr-builder"
+                                        sh "docker buildx rm ecr-builder"
+                                    }
+                                    echo "Creating buildx builder ecr-builder"
+                                    sh "docker buildx create --name ecr-builder --driver docker-container --bootstrap"
+                                    sh "docker buildx use ecr-builder"
+                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Run BYOS Migration Test') {
                 steps {
                     timeout(time: 12, unit: 'HOURS') {
