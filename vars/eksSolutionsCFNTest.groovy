@@ -17,7 +17,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: config.defaultStage ?: "Eks${vpcMode}Vpc", description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: "us-east-1", description: 'AWS region for deployment')
-            booleanParam(name: 'BUILD_IMAGES', defaultValue: false, description: 'Build container images from source instead of using public images')
+            booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source instead of using public images')
             booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
         }
 
@@ -109,13 +109,15 @@ def call(Map config = [:]) {
                                         ./deployment/k8s/aws/aws-bootstrap.sh \
                                           ${bootstrapArgs} \
                                           --build-cfn \
+                                          ${buildImagesArg} \
+                                          ${buildChartArg} \
                                           --stack-name "${env.STACK_NAME}" \
                                           --stage "${stage}" \
                                           --region "${params.REGION}" \
                                           --version latest \
                                           --skip-console-exec \
-                                          ${buildImagesArg} \
-                                          ${buildChartArg}
+                                          --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
+                                          --base-dir "\$(pwd)"
                                     """
                                 }
                             }
