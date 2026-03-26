@@ -177,7 +177,7 @@ public class SupportedClusters {
             // Target version coverage: OS 1.3
             new MigrationPair(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V1_3_20),
             // Target version coverage: OS 3.x
-            new MigrationPair(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V3_5_0)
+            new MigrationPair(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_LATEST)
         );
     }
 
