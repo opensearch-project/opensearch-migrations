@@ -85,9 +85,14 @@ public class ClusterReaderExtractor {
         if (arguments.fileSystemRepoPath != null) {
             backupDir = Path.of(arguments.fileSystemRepoPath);
         } else if (arguments.s3LocalDirPath != null) {
+            // Solr BACKUP API writes to s3://<bucket>/<backupName>/ (location=/ at repo root).
+            var repoUri = new S3Uri(arguments.s3RepoUri);
+            var backupS3Uri = arguments.snapshotName != null
+                ? "s3://" + repoUri.bucketName + "/" + arguments.snapshotName
+                : arguments.s3RepoUri;
             var s3Repo = S3Repo.createRaw(
                 Path.of(arguments.s3LocalDirPath),
-                new S3Uri(arguments.s3RepoUri),
+                new S3Uri(backupS3Uri),
                 arguments.s3Region,
                 Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
             );

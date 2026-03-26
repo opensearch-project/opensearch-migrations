@@ -952,10 +952,14 @@ public class RfsMigrateDocuments {
             backupDir = Paths.get(arguments.snapshotLocalDir);
             log.info("Starting Solr backup document migration from local dir: {}", backupDir);
         } else if (arguments.s3RepoUri != null && arguments.s3Region != null && arguments.s3LocalDir != null) {
-            log.info("Downloading Solr backup from S3: {}", arguments.s3RepoUri);
+            // Solr BACKUP API writes to s3://<bucket>/<backupName>/ (location=/ puts it at repo root).
+            // Derive the actual backup path from the bucket and snapshot name.
+            var repoUri = new S3Uri(arguments.s3RepoUri);
+            var backupS3Uri = "s3://" + repoUri.bucketName + "/" + arguments.snapshotName;
+            log.info("Downloading Solr backup from S3: {}", backupS3Uri);
             var s3Repo = S3Repo.createRaw(
                 Paths.get(arguments.s3LocalDir),
-                new S3Uri(arguments.s3RepoUri),
+                new S3Uri(backupS3Uri),
                 arguments.s3Region,
                 arguments.s3Endpoint != null ? URI.create(arguments.s3Endpoint) : null
             );
