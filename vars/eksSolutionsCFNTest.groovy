@@ -44,14 +44,13 @@ def call(Map config = [:]) {
             )
         }
 
-        environment {
-            TEST_VPC_STACK_NAME = "test-vpc-${env.stage}-${params.REGION}"
-        }
-
         stages {
             stage('Checkout') {
                 steps {
-                    script { env.stage = "${params.STAGE}-${currentBuild.number}" }
+                    script {
+                        env.maStageName = "${params.STAGE}-${currentBuild.number}"
+                        env.TEST_VPC_STACK_NAME = "test-vpc-${env.maStageName}-${params.REGION}"
+                    }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }
@@ -71,7 +70,7 @@ def call(Map config = [:]) {
                                           --stack-name "${env.TEST_VPC_STACK_NAME}" \
                                           --region "${params.REGION}" \
                                           --template-body '${getTestVpcTemplate()}' \
-                                          --parameters ParameterKey=Stage,ParameterValue=${stage}
+                                          --parameters ParameterKey=Stage,ParameterValue=${maStageName}
 
                                         echo "Waiting for test VPC stack CREATE_COMPLETE..."
                                         aws cloudformation wait stack-create-complete \
@@ -96,7 +95,7 @@ def call(Map config = [:]) {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
                             def templateName = isImportVpc ? "Migration-Assistant-Infra-Import-VPC-eks" : "Migration-Assistant-Infra-Create-VPC-eks"
-                            env.STACK_NAME = "${templateName}-${stage}-${params.REGION}"
+                            env.STACK_NAME = "${templateName}-${maStageName}-${params.REGION}"
 
                             def bootstrapArgs = isImportVpc ?
                                 "--deploy-import-vpc-cfn --vpc-id ${env.TEST_VPC_ID} --subnet-ids ${env.TEST_SUBNET_IDS}" :
@@ -114,7 +113,7 @@ def call(Map config = [:]) {
                                           ${buildImagesArg} \
                                           ${buildChartArg} \
                                           --stack-name "${env.STACK_NAME}" \
-                                          --stage "${stage}" \
+                                          --stage "${maStageName}" \
                                           --region "${params.REGION}" \
                                           --version latest \
                                           --skip-console-exec \
@@ -193,7 +192,7 @@ def call(Map config = [:]) {
                         // Clean up the kubeconfig context entry created by aws-bootstrap.sh
                         sh """
                             if command -v kubectl >/dev/null 2>&1; then
-                                kubectl config delete-context migration-eks-cluster-${stage}-${params.REGION} 2>/dev/null || echo "No kubectl context to clean up"
+                                kubectl config delete-context migration-eks-cluster-${maStageName}-${params.REGION} 2>/dev/null || echo "No kubectl context to clean up"
                             else
                                 echo "kubectl not found on agent; skipping context cleanup"
                             fi
