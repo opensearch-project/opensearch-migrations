@@ -10,57 +10,50 @@ set -euo pipefail
 # ClusterAccessSecurityGroupId-{stage}-{clusterId}. The outputs file keys have dashes stripped by CFN.
 write_cluster_outputs() {
   local stage="$1"
-  local cdk_outputs_file="$2"
-  local outfile="$3"
+  local outfile="$2"
+  local cdk_outputs_file="$3"
   local provided_vpc_id="${4:-}"
 
-  # Flatten all stack outputs into a single object {key: value, ...}
-  local flat_outputs
-  flat_outputs=$(jq '[to_entries[].value | to_entries[]] | from_entries' "$cdk_outputs_file")
+  # cdk --outputs-file produces: {"StackName": {"OutputKey": "OutputValue", ...}}
+  # Flatten to a single object of all outputs across stacks
+  outputs=$(jq 'to_entries | map(.value) | add // {}' "$cdk_outputs_file")
 
-  # Build dash-stripped stage prefix for key matching (CDK strips dashes from construct IDs)
-  local stage_stripped="${stage//-/}"
+  # CDK strips hyphens from stage name in CFN OutputKeys
+  stage_nohyphen=$(echo "$stage" | tr -d '-')
+  vpc_id="${provided_vpc_id:-$(echo "$outputs" | jq -r --arg key "VpcIdExport${stage_nohyphen}" '.[$key] // empty')}"
 
-  # Extract cluster IDs from endpoint output keys: ClusterEndpointExport{stage}{clusterId} → {clusterId}
-  local cluster_ids
-  cluster_ids=$(echo "$flat_outputs" | jq -r "keys[] | select(startswith(\"ClusterEndpointExport${stage_stripped}\")) | ltrimstr(\"ClusterEndpointExport${stage_stripped}\")")
+  tmpfile=$(mktemp)
+  echo "{}" > "$tmpfile"
 
-  if [[ -z "$cluster_ids" ]]; then
-    echo "No cluster outputs found in CDK outputs file for stage: $stage"
-    return 1
-  fi
+  # Process ClusterEndpoint outputs (managed domains)
+  while read -r output_key; do
+    cluster_id=$(echo "$output_key" | sed "s/^ClusterEndpointExport${stage_nohyphen}//")
+    endpoint=$(echo "$outputs" | jq -r --arg k "$output_key" '.[$k]')
+    [[ ! "$endpoint" =~ ^https?:// ]] && endpoint="https://$endpoint"
 
-  local vpc_id="${provided_vpc_id:-}"
-  local result="{}"
+    sg=$(echo "$outputs" | jq -r --arg k "ClusterAccessSecurityGroupIdExport${stage_nohyphen}${cluster_id}" '.[$k] // empty')
+    subnets=$(echo "$outputs" | jq -r --arg k "ClusterSubnets${stage_nohyphen}${cluster_id}" '.[$k] // empty')
 
-  for cluster_id_stripped in $cluster_ids; do
-    local endpoint sg subnets
-    endpoint=$(echo "$flat_outputs" | jq -r ".\"ClusterEndpointExport${stage_stripped}${cluster_id_stripped}\" // empty")
-    sg=$(echo "$flat_outputs" | jq -r ".\"ClusterAccessSecurityGroupIdExport${stage_stripped}${cluster_id_stripped}\" // empty")
-    subnets=$(echo "$flat_outputs" | jq -r ".\"ClusterSubnets${stage_stripped}${cluster_id_stripped}\" // empty")
+    jq --arg id "$cluster_id" --arg vpc "${vpc_id:-}" --arg endpoint "$endpoint" \
+       --arg sg "${sg:-}" --arg subnets "${subnets:-}" \
+       '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $sg, subnetIds: $subnets}}' \
+       "$tmpfile" > "$tmpfile.new"
+    mv "$tmpfile.new" "$tmpfile"
+  done < <(echo "$outputs" | jq -r 'keys[] | select(test("^ClusterEndpointExport"))')
 
-    # Recover original clusterId from context file (match by stripped version)
-    local cluster_id="$cluster_id_stripped"
-    local context_ids
-    context_ids=$(jq -r '.clusters[].clusterId // empty' "$CLUSTER_CDK_CONTEXT_FILE_PATH" 2>/dev/null || true)
-    for cid in $context_ids; do
-      if [[ "${cid//-/}" == "$cluster_id_stripped" ]]; then
-        cluster_id="$cid"
-        break
-      fi
-    done
+  # Process CollectionEndpoint outputs (serverless)
+  while read -r output_key; do
+    cluster_id=$(echo "$output_key" | sed "s/^CollectionEndpointExport${stage_nohyphen}//")
+    endpoint=$(echo "$outputs" | jq -r --arg k "$output_key" '.[$k]')
+    [[ ! "$endpoint" =~ ^https?:// ]] && endpoint="https://$endpoint"
 
-    echo "Found cluster: $cluster_id (endpoint=$endpoint)"
-    result=$(echo "$result" | jq \
-      --arg id "$cluster_id" \
-      --arg vpc "$vpc_id" \
-      --arg endpoint "https://$endpoint" \
-      --arg sg "$sg" \
-      --arg subnets "$subnets" \
-      '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $sg, subnetIds: $subnets}}')
-  done
+    jq --arg id "$cluster_id" --arg endpoint "$endpoint" \
+       '. + {($id): {vpcId: "", endpoint: $endpoint, securityGroupId: "", subnetIds: ""}}' \
+       "$tmpfile" > "$tmpfile.new"
+    mv "$tmpfile.new" "$tmpfile"
+  done < <(echo "$outputs" | jq -r 'keys[] | select(test("^CollectionEndpointExport"))')
 
-  echo "$result" > "$outfile"
+  mv "$tmpfile" "$outfile"
   echo "Wrote outputs to $outfile"
 }
 
@@ -100,7 +93,7 @@ while [[ $# -gt 0 ]]; do
       echo "Options:"
       echo "  -s, --stage <val>              Stage name (default: $STAGE)"
       echo "  -c, --context-file <path>      Path to context file (REQUIRED)"
-      echo "  --vpc-id <id>                  VPC ID to use in cluster outputs (skips NetworkInfra stack lookup)"
+      echo "  --vpc-id <id>                  VPC ID to use in cluster outputs (overrides CDK output)"
       echo "  --destroy                      Destroy all stacks instead of deploying"
       exit 0
       ;;
@@ -143,6 +136,6 @@ else
   CLUSTER_DETAILS_OUTPUT_FILE_PATH="$ROOT_REPO_PATH/test/tmp/cluster-details-${STAGE}.json"
   mkdir -p "$(dirname "$CLUSTER_DETAILS_OUTPUT_FILE_PATH")"
   cd ..
-  write_cluster_outputs "$STAGE" "$CDK_OUTPUTS_FILE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH" "$VPC_ID"
+  write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH" "$CDK_OUTPUTS_FILE" "$VPC_ID"
   rm -f "$CDK_OUTPUTS_FILE"
 fi

@@ -176,7 +176,7 @@ jobs:
       group: ${{ github.workflow }}-eks-byos-integ-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -187,3 +187,53 @@ jobs:
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
           jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
           job_timeout_minutes: "1080"
+
+  eks-cfn-create-vpc-test:
+    if: |
+      github.event_name == 'push' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'run-cfn-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-cfn-tests'))
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    concurrency:
+      group: ${{ github.workflow }}-eks-cfn-create-vpc-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-deploy-eks-cfn-create-vpc' || 'pr-deploy-eks-cfn-create-vpc' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
+
+  eks-cfn-import-vpc-test:
+    if: |
+      github.event_name == 'push' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'run-cfn-tests') ||
+      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-cfn-tests'))
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    concurrency:
+      group: ${{ github.workflow }}-eks-cfn-import-vpc-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-deploy-eks-cfn-import-vpc' || 'pr-deploy-eks-cfn-import-vpc' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
