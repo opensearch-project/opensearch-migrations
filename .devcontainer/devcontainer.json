@@ -1,0 +1,40 @@
+// Dev Container for opensearch-migrations
+// Docs: https://containers.dev/implementors/json_reference/
+{
+  "name": "opensearch-migrations",
+  "image": "mcr.microsoft.com/devcontainers/java:17-bookworm",
+
+  "features": {
+    // Docker-in-Docker for running docker compose (Solr, OpenSearch, shim)
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    // Node.js for TypeScript transform builds
+    "ghcr.io/devcontainers/features/node:1": { "version": "20" },
+    // Python for migration transform scripts and evals
+    "ghcr.io/devcontainers/features/python:1": { "version": "3.12" }
+  },
+
+  // Gradle wrapper handles its own install; just need JAVA_HOME
+  "remoteEnv": {
+    "JAVA_HOME": "/usr/lib/jvm/msopenjdk-current"
+  },
+
+  // First-run setup: make Gradle wrapper executable, install Python deps
+  "postCreateCommand": "chmod +x ./gradlew && pip install --quiet promptfoo 2>/dev/null || true",
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "vscjava.vscode-gradle",
+        "dbaeumer.vscode-eslint",
+        "ms-python.python"
+      ],
+      "settings": {
+        "java.configuration.updateBuildConfiguration": "automatic"
+      }
+    }
+  },
+
+  // Run as non-root (default vscode user in the base image)
+  "remoteUser": "vscode"
+}
