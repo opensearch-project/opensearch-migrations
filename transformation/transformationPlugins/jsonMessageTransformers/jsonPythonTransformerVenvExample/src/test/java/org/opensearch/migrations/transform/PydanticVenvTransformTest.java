@@ -1,104 +1,74 @@
 package org.opensearch.migrations.transform;
 
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.graalvm.python.embedding.GraalPyResources;
-import org.graalvm.python.embedding.VirtualFileSystem;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 
 /**
- * Tests the customer workflow: a Python transform that uses pydantic (a pip package)
- * loaded from an external venv via {@code pythonModulePath}.
+ * End-to-end test of the customer workflow for Python transforms with pip packages.
  *
- * <p>The GraalPy Gradle plugin pre-installs pydantic at build time into the VFS.
- * This test extracts that VFS to a temp directory — simulating what a customer would
- * have after running {@code graalpy -m venv /opt/venv && /opt/venv/bin/pip install pydantic}.
- * It then passes that directory as {@code pythonModulePath} to the provider, exactly
- * as a customer would in their transformer config.
+ * <p>Before this test runs, Gradle tasks execute the exact customer steps:
+ * <ol>
+ *   <li>{@code graalpy -m venv} — creates a GraalPy virtual environment</li>
+ *   <li>{@code pip install pydantic} — installs a pip package into the venv</li>
+ *   <li>{@code tar czf venv.tar.gz} — packages the venv for distribution</li>
+ * </ol>
+ *
+ * <p>This test then passes the tarball as {@code pythonModulePath} and the
+ * custom_transform entry_point.py as the script — exactly as a customer would
+ * configure their transformer.
  */
 public class PydanticVenvTransformTest {
 
-    private static Path extractedVenv;
-    private static Path scriptFile;
-
-    @BeforeAll
-    static void setUp() throws IOException {
-        // Extract the build-time VFS (which contains pydantic) to a temp directory.
-        // This simulates a customer's GraalPy venv with pip-installed packages.
-        extractedVenv = Files.createTempDirectory("pydantic-venv-");
-        var vfs = VirtualFileSystem.newBuilder()
-            .allowHostIO(VirtualFileSystem.HostIO.READ)
-            .build();
-        GraalPyResources.extractVirtualFileSystemResources(vfs, extractedVenv);
-
-        // Write the transform script to a temp file (simulates customer's entry_point.py)
-        try (var is = PydanticVenvTransformTest.class.getClassLoader()
-                .getResourceAsStream("pydantic_transform.py")) {
-            scriptFile = Files.createTempFile("pydantic-transform-", ".py");
-            Files.write(scriptFile, is.readAllBytes());
-        }
-    }
-
-    @AfterAll
-    static void tearDown() throws IOException {
-        if (scriptFile != null) Files.deleteIfExists(scriptFile);
-        if (extractedVenv != null) {
-            try (var walk = Files.walk(extractedVenv)) {
-                walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                    try { Files.delete(p); } catch (IOException ignored) {}
-                });
-            }
-        }
-    }
-
     @Test
     @SuppressWarnings("unchecked")
-    public void testPydanticTransformViaProvider() throws Exception {
+    public void testPydanticTransformViaTarball() throws Exception {
+        var tarball = System.getProperty("pydantic.venv.tarball");
+        var customTransformDir = System.getProperty("custom.transform.dir");
+
         var provider = new JsonPythonTransformerProvider();
         var config = Map.of(
-            "initializationScriptFile", scriptFile.toString(),
+            "initializationScriptFile", Path.of(customTransformDir, "entry_point.py").toString(),
             "bindingsObject", "{\"index_rewrites\": [{\"source_prefix\": \"logs-\", \"target_prefix\": \"migrated-\"}], \"add_fields\": {\"migrated\": true}}",
-            "pythonModulePath", extractedVenv.toString()
+            "pythonModulePath", tarball
         );
 
         try (var transformer = provider.createTransformer(config)) {
-            var op = new HashMap<String, Object>();
-            op.put("_index", "logs-2024.01");
-            op.put("_id", "doc1");
-
-            var body = new HashMap<String, Object>();
-            body.put("message", "hello");
-
-            var doc = new HashMap<String, Object>();
-            doc.put("operation", op);
-            doc.put("document", body);
-
             var batch = new ArrayList<Object>();
-            batch.add(doc);
+            batch.add(makeDoc("logs-2024.01", "doc1", Map.of("message", "hello")));
+            batch.add(makeDoc("metrics-cpu", "doc2", Map.of("value", 42)));
 
             var result = (List<Map<String, Object>>) transformer.transformJson(batch);
 
-            assertThat(result.size(), equalTo(1));
-            var resultDoc = result.get(0);
-            var resultOp = (Map<String, Object>) resultDoc.get("operation");
-            var resultBody = (Map<String, Object>) resultDoc.get("document");
+            // First doc: index rewritten, fields added
+            var doc1Op = (Map<String, Object>) result.get(0).get("operation");
+            var doc1Body = (Map<String, Object>) result.get(0).get("document");
+            assertThat(doc1Op.get("_index"), equalTo("migrated-2024.01"));
+            assertThat(doc1Body.get("migrated"), equalTo(true));
+            assertThat(doc1Body.get("message"), equalTo("hello"));
 
-            assertThat(resultOp.get("_index"), equalTo("migrated-2024.01"));
-            assertThat(resultOp.get("_id"), equalTo("doc1"));
-            assertThat(resultBody.get("migrated"), equalTo(true));
-            assertThat(resultBody.get("message"), equalTo("hello"));
+            // Second doc: no index rewrite (different prefix), but fields still added
+            var doc2Op = (Map<String, Object>) result.get(1).get("operation");
+            var doc2Body = (Map<String, Object>) result.get(1).get("document");
+            assertThat(doc2Op.get("_index"), equalTo("metrics-cpu"));
+            assertThat(doc2Body.get("migrated"), equalTo(true));
         }
+    }
+
+    private static Map<String, Object> makeDoc(String index, String id, Map<String, Object> fields) {
+        var op = new HashMap<String, Object>();
+        op.put("_index", index);
+        op.put("_id", id);
+        var doc = new HashMap<String, Object>();
+        doc.put("operation", op);
+        doc.put("document", new HashMap<>(fields));
+        return doc;
     }
 }
