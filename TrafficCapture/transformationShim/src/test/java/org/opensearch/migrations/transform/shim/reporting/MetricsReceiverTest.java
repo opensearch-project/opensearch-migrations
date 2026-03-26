@@ -50,9 +50,9 @@ class MetricsReceiverTest {
         var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/mycore/select", Map.of("Host", "localhost"), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/mycore/_search", Map.of(), null);
-        var primary = successResponse("solr", solrResponseBody(100, 12));
-        var secondary = successResponse("opensearch", solrResponseBody(95, 15));
-        collector.process(original, transformed, primary, secondary, Map.of());
+        var baseline = successResponse("solr", solrResponseBody(100, 12));
+        var candidate = successResponse("opensearch", solrResponseBody(95, 15));
+        collector.process(original, transformed, baseline, candidate, Map.of());
 
         assertEquals(1, sink.documents.size());
         var doc = sink.documents.get(0);
@@ -72,9 +72,9 @@ class MetricsReceiverTest {
         var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/core1/select?q=*:*", Map.of(), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/core1/_search", Map.of(), null);
-        var primary = successResponse("solr", solrResponseBody(10, 1));
-        var secondary = successResponse("opensearch", solrResponseBody(10, 1));
-        collector.process(original, transformed, primary, secondary, Map.of());
+        var baseline = successResponse("solr", solrResponseBody(10, 1));
+        var candidate = successResponse("opensearch", solrResponseBody(10, 1));
+        collector.process(original, transformed, baseline, candidate, Map.of());
 
         var doc = sink.documents.get(0);
         assertNotNull(doc.originalRequest());
@@ -136,9 +136,9 @@ class MetricsReceiverTest {
         var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null);
-        var primary = successResponse("solr", Map.of());
-        var secondary = successResponse("opensearch", Map.of());
-        collector.process(original, transformed, primary, secondary, null);
+        var baseline = successResponse("solr", Map.of());
+        var candidate = successResponse("opensearch", Map.of());
+        collector.process(original, transformed, baseline, candidate, null);
 
         assertTrue(sink.documents.get(0).customMetrics().isEmpty());
     }
@@ -149,12 +149,12 @@ class MetricsReceiverTest {
         var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null);
-        var primary = successResponse("solr", Map.of());
-        var secondary = successResponse("opensearch", Map.of());
+        var baseline = successResponse("solr", Map.of());
+        var candidate = successResponse("opensearch", Map.of());
         var mergedMetrics = new LinkedHashMap<String, Object>();
         mergedMetrics.put("solr-metric", 1);
         mergedMetrics.put("os-metric", 2);
-        collector.process(original, transformed, primary, secondary, mergedMetrics);
+        collector.process(original, transformed, baseline, candidate, mergedMetrics);
 
         var doc = sink.documents.get(0);
         assertEquals(1, doc.customMetrics().get("solr-metric"));
@@ -256,9 +256,9 @@ class MetricsReceiverTest {
     void nullOriginalRequestProducesNullUri() {
         var sink = new CapturingSink();
         var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
-        var primary = successResponse("solr", solrResponseBody(10, 1));
-        var secondary = successResponse("opensearch", solrResponseBody(10, 1));
-        collector.process(null, null, primary, secondary, Map.of());
+        var baseline = successResponse("solr", solrResponseBody(10, 1));
+        var candidate = successResponse("opensearch", solrResponseBody(10, 1));
+        collector.process(null, null, baseline, candidate, Map.of());
 
         var doc = sink.documents.get(0);
         assertNull(doc.collectionName());
@@ -331,12 +331,12 @@ class MetricsReceiverTest {
         var sink = new CapturingSink();
         var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         // parsedBody has no "response.numFound" path
-        var primary = successResponse("solr", Map.of("other", "data"));
-        var secondary = successResponse("opensearch", Map.of("other", "data"));
+        var baseline = successResponse("solr", Map.of("other", "data"));
+        var candidate = successResponse("opensearch", Map.of("other", "data"));
         collector.process(
             new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null),
             new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null),
-            primary, secondary, Map.of());
+            baseline, candidate, Map.of());
 
         var doc = sink.documents.get(0);
         assertNull(doc.baselineHitCount());
@@ -353,9 +353,9 @@ class MetricsReceiverTest {
         var collector = new MetricsReceiver(throwingSink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null);
-        var primary = successResponse("solr", solrResponseBody(10, 1));
-        var secondary = successResponse("opensearch", solrResponseBody(10, 1));
-        assertDoesNotThrow(() -> collector.process(original, transformed, primary, secondary, Map.of()));
+        var baseline = successResponse("solr", solrResponseBody(10, 1));
+        var candidate = successResponse("opensearch", solrResponseBody(10, 1));
+        assertDoesNotThrow(() -> collector.process(original, transformed, baseline, candidate, Map.of()));
     }
 
     @Test
@@ -382,14 +382,14 @@ class MetricsReceiverTest {
         // Build response bodies with facet_counts so FacetComparator produces non-empty comparisons
         var facets = Map.<String, Object>of("facet_counts",
             Map.of("facet_fields", Map.of("category", List.of("books", 10, "movies", 5))));
-        var primary = successResponse("solr", facets);
+        var baseline = successResponse("solr", facets);
         var secondaryFacets = Map.<String, Object>of("facet_counts",
             Map.of("facet_fields", Map.of("category", List.of("books", 8, "movies", 5))));
-        var secondary = successResponse("opensearch", secondaryFacets);
+        var candidate = successResponse("opensearch", secondaryFacets);
         collector.process(
             new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null),
             new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null),
-            primary, secondary, Map.of());
+            baseline, candidate, Map.of());
 
         var doc = sink.documents.get(0);
         assertNotNull(doc.comparisons());
@@ -416,12 +416,12 @@ class MetricsReceiverTest {
     void extractLongReturnsNullForErrorResponse() {
         var sink = new CapturingSink();
         var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
-        var primary = TargetResponse.error("solr", Duration.ofMillis(10), new RuntimeException("fail"));
-        var secondary = successResponse("opensearch", solrResponseBody(10, 1));
+        var baseline = TargetResponse.error("solr", Duration.ofMillis(10), new RuntimeException("fail"));
+        var candidate = successResponse("opensearch", solrResponseBody(10, 1));
         collector.process(
             new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null),
             new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null),
-            primary, secondary, Map.of());
+            baseline, candidate, Map.of());
 
         var doc = sink.documents.get(0);
         assertNull(doc.baselineHitCount());
@@ -434,9 +434,9 @@ class MetricsReceiverTest {
         var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null);
-        var primary = successResponse("solr", solrResponseBody(100, 12));
-        var secondary = successResponse("opensearch", solrResponseBody(95, 15));
-        collector.process(original, transformed, primary, secondary, Map.of("warn", 1));
+        var baseline = successResponse("solr", solrResponseBody(100, 12));
+        var candidate = successResponse("opensearch", solrResponseBody(95, 15));
+        collector.process(original, transformed, baseline, candidate, Map.of("warn", 1));
 
         assertEquals(1, sink.documents.size());
         var doc = sink.documents.get(0);
@@ -500,14 +500,14 @@ class MetricsReceiverTest {
         var sink = new CapturingSink();
         var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false);
         // Success response but with null parsedBody
-        var primary = new TargetResponse("solr", 200, new byte[0], null,
+        var baseline = new TargetResponse("solr", 200, new byte[0], null,
             Duration.ofMillis(10), Duration.ZERO, Duration.ZERO, null);
-        var secondary = new TargetResponse("opensearch", 200, new byte[0], null,
+        var candidate = new TargetResponse("opensearch", 200, new byte[0], null,
             Duration.ofMillis(10), Duration.ZERO, Duration.ZERO, null);
         collector.process(
             new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null),
             new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null),
-            primary, secondary, Map.of());
+            baseline, candidate, Map.of());
 
         var doc = sink.documents.get(0);
         assertNull(doc.baselineHitCount());

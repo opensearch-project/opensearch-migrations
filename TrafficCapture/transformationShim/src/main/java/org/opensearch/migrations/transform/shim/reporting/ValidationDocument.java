@@ -2,6 +2,7 @@ package org.opensearch.migrations.transform.shim.reporting;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -45,8 +46,8 @@ public record ValidationDocument(
         @JsonProperty("type") String type,             // e.g., "facet_field", "json_facet"
         @JsonProperty("name") String name,             // e.g., the facet field name
         @JsonProperty("keys_match") Boolean keysMatch,
-        @JsonProperty("missing_keys") List<String> missingKeys,
-        @JsonProperty("extra_keys") List<String> extraKeys,
+        @JsonProperty("missing_keys") Set<String> missingKeys,
+        @JsonProperty("extra_keys") Set<String> extraKeys,
         @JsonProperty("value_drifts") List<ValueDrift> valueDrifts
     ) {}
 

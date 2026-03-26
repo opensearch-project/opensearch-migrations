@@ -2,6 +2,7 @@ package org.opensearch.migrations.transform.shim.reporting;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.opensearch.migrations.transform.shim.reporting.ValidationDocument.ComparisonEntry;
 
@@ -34,7 +35,7 @@ class FacetComparatorTest {
         var results = FacetComparator.compareFacets(solr, os);
         ComparisonEntry entry = results.get(0);
         assertFalse(entry.keysMatch());
-        assertEquals(List.of("music"), entry.missingKeys());
+        assertEquals(Set.of("music"), entry.missingKeys());
         assertNull(entry.extraKeys());
     }
 
@@ -46,7 +47,7 @@ class FacetComparatorTest {
         ComparisonEntry entry = results.get(0);
         assertFalse(entry.keysMatch());
         assertNull(entry.missingKeys());
-        assertEquals(List.of("music"), entry.extraKeys());
+        assertEquals(Set.of("music"), entry.extraKeys());
     }
 
     @Test
@@ -78,7 +79,7 @@ class FacetComparatorTest {
         var results = FacetComparator.compareFacets(solr, Map.of());
         assertEquals(1, results.size());
         assertFalse(results.get(0).keysMatch());
-        assertEquals(List.of("books"), results.get(0).missingKeys());
+        assertEquals(Set.of("books"), results.get(0).missingKeys());
     }
 
     @Test
@@ -125,6 +126,6 @@ class FacetComparatorTest {
         var results = FacetComparator.compareFacets(Map.of(), os);
         assertEquals(1, results.size());
         assertFalse(results.get(0).keysMatch());
-        assertEquals(List.of("books"), results.get(0).extraKeys());
+        assertEquals(Set.of("books"), results.get(0).extraKeys());
     }
 }

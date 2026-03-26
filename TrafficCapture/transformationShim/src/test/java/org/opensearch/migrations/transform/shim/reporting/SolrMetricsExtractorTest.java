@@ -34,6 +34,11 @@ class SolrMetricsExtractorTest {
         assertNull(solr.extractCollectionName(null));
     }
 
+    @Test
+    void collectionName_fullUrl() {
+        assertEquals("mycore", solr.extractCollectionName("http://host:8983/solr/mycore/select?q=*:*"));
+    }
+
     // --- normalizeEndpoint ---
 
     @Test
@@ -50,6 +55,11 @@ class SolrMetricsExtractorTest {
     void normalize_nonMatching() {
         assertNull(solr.normalizeEndpoint("/other/path"));
         assertNull(solr.normalizeEndpoint(null));
+    }
+
+    @Test
+    void normalize_fullUrl() {
+        assertEquals("/solr/{collection}/select", solr.normalizeEndpoint("https://host:8983/solr/core1/select?q=test"));
     }
 
     // --- path accessors ---

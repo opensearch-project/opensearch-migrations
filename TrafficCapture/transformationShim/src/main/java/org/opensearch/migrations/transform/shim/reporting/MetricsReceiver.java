@@ -35,7 +35,7 @@ public class MetricsReceiver {
 
     /**
      * Entry point called from MultiTargetRoutingHandler.
-     * Validates preconditions, resolves primary/secondary targets, and delegates
+     * Validates preconditions, resolves baseline/candidate targets, and delegates
      * to the overload that takes resolved arguments.
      * Never throws — all exceptions are caught and logged.
      */
@@ -46,32 +46,32 @@ public class MetricsReceiver {
             Map<String, Map<String, Object>> perTargetTransformMetrics
     ) {
         try {
-            // Guard: need exactly 2 responses (primary + secondary)
+            // Guard: need exactly 2 responses (baseline + candidate)
             if (responses == null || responses.size() != 2) {
                 log.debug("Skipping metrics collection: expected 2 target responses, got {}",
                         responses != null ? responses.size() : 0);
                 return;
             }
 
-            // Guard: need exactly 1 transformed request (the secondary target)
+            // Guard: need exactly 1 transformed request (the candidate target)
             if (perTargetTransformedRequests == null || perTargetTransformedRequests.size() != 1) {
                 log.debug("Skipping metrics collection: expected 1 transformed request, got {}",
                         perTargetTransformedRequests != null ? perTargetTransformedRequests.size() : 0);
                 return;
             }
 
-            // Identify secondary target (the one with a transformed request)
-            String secondaryName = perTargetTransformedRequests.keySet().iterator().next();
-            Map<String, Object> transformedReqMap = perTargetTransformedRequests.get(secondaryName);
+            // Identify candidate target (the one with a transformed request)
+            String candidateName = perTargetTransformedRequests.keySet().iterator().next();
+            Map<String, Object> transformedReqMap = perTargetTransformedRequests.get(candidateName);
 
-            // Identify primary target (the other one)
-            TargetResponse primaryResponse = null;
-            TargetResponse secondaryResponse = null;
+            // Identify baseline target (the other one)
+            TargetResponse baselineResponse = null;
+            TargetResponse candidateResponse = null;
             for (var entry : responses.entrySet()) {
-                if (entry.getKey().equals(secondaryName)) {
-                    secondaryResponse = entry.getValue();
+                if (entry.getKey().equals(candidateName)) {
+                    candidateResponse = entry.getValue();
                 } else {
-                    primaryResponse = entry.getValue();
+                    baselineResponse = entry.getValue();
                 }
             }
 
@@ -79,32 +79,32 @@ public class MetricsReceiver {
             RequestRecord originalRequest = buildRequestRecord(originalRequestMap);
             RequestRecord transformedRequest = buildRequestRecord(transformedReqMap);
 
-            // Get secondary target's transform metrics
-            Map<String, Object> secondaryMetrics = perTargetTransformMetrics != null
-                    ? perTargetTransformMetrics.getOrDefault(secondaryName, Map.of())
+            // Get candidate target's transform metrics
+            Map<String, Object> candidateMetrics = perTargetTransformMetrics != null
+                    ? perTargetTransformMetrics.getOrDefault(candidateName, Map.of())
                     : Map.of();
 
-            process(originalRequest, transformedRequest, primaryResponse, secondaryResponse, secondaryMetrics);
+            process(originalRequest, transformedRequest, baselineResponse, candidateResponse, candidateMetrics);
         } catch (Exception e) {
             log.error("Error collecting validation metrics", e);
         }
     }
 
     /**
-     * Collect metrics from resolved primary and secondary target responses.
+     * Collect metrics from resolved baseline and candidate target responses.
      * Never throws — all exceptions are caught and logged.
      *
      * @param originalRequest    the original source request
-     * @param transformedRequest the transformed request sent to the secondary target
-     * @param primaryResponse    the primary target's response
-     * @param secondaryResponse  the secondary target's response
-     * @param transformMetrics   custom metrics emitted by the secondary target's transforms
+     * @param transformedRequest the transformed request sent to the candidate target
+     * @param baselineResponse   the baseline target's response
+     * @param candidateResponse  the candidate target's response
+     * @param transformMetrics   custom metrics emitted by the candidate target's transforms
      */
     public void process(
             RequestRecord originalRequest,
             RequestRecord transformedRequest,
-            TargetResponse primaryResponse,
-            TargetResponse secondaryResponse,
+            TargetResponse baselineResponse,
+            TargetResponse candidateResponse,
             Map<String, Object> transformMetrics
     ) {
         try {
@@ -112,19 +112,19 @@ public class MetricsReceiver {
             String collectionName = extractor.extractCollectionName(uri);
             String normalizedEndpoint = extractor.normalizeEndpoint(uri);
 
-            var primaryBody = primaryResponse != null && primaryResponse.isSuccess() ? primaryResponse.parsedBody() : null;
-            var secondaryBody = secondaryResponse != null && secondaryResponse.isSuccess() ? secondaryResponse.parsedBody() : null;
+            var baselineBody = baselineResponse != null && baselineResponse.isSuccess() ? baselineResponse.parsedBody() : null;
+            var candidateBody = candidateResponse != null && candidateResponse.isSuccess() ? candidateResponse.parsedBody() : null;
 
-            Long primaryHitCount = MetricsExtractor.extractLong(primaryBody, extractor.hitCountPath());
-            Long secondaryHitCount = MetricsExtractor.extractLong(secondaryBody, extractor.hitCountPath());
-            Double hitCountDrift = MetricsExtractor.computeDriftPercentage(primaryHitCount, secondaryHitCount);
+            Long baselineHitCount = MetricsExtractor.extractLong(baselineBody, extractor.hitCountPath());
+            Long candidateHitCount = MetricsExtractor.extractLong(candidateBody, extractor.hitCountPath());
+            Double hitCountDrift = MetricsExtractor.computeDriftPercentage(baselineHitCount, candidateHitCount);
 
-            Long primaryQtime = MetricsExtractor.extractLong(primaryBody, extractor.queryTimePath());
-            Long secondaryQtime = MetricsExtractor.extractLong(secondaryBody, extractor.queryTimePath());
-            Long responseTimeDelta = MetricsExtractor.computeResponseTimeDelta(primaryQtime, secondaryQtime);
+            Long baselineQtime = MetricsExtractor.extractLong(baselineBody, extractor.queryTimePath());
+            Long candidateQtime = MetricsExtractor.extractLong(candidateBody, extractor.queryTimePath());
+            Long responseTimeDelta = MetricsExtractor.computeResponseTimeDelta(baselineQtime, candidateQtime);
 
             List<ValidationDocument.ComparisonEntry> comparisons = extractor.compareResults(
-                    primaryBody, secondaryBody);
+                    baselineBody, candidateBody);
 
             Map<String, Object> customMetrics = transformMetrics != null
                     ? new LinkedHashMap<>(transformMetrics) : new LinkedHashMap<>();
@@ -136,11 +136,11 @@ public class MetricsReceiver {
                     transformedRequest,
                     collectionName,
                     normalizedEndpoint,
-                    primaryHitCount,
-                    secondaryHitCount,
+                    baselineHitCount,
+                    candidateHitCount,
                     hitCountDrift,
-                    primaryQtime,
-                    secondaryQtime,
+                    baselineQtime,
+                    candidateQtime,
                     responseTimeDelta,
                     comparisons.isEmpty() ? null : comparisons,
                     customMetrics
@@ -173,7 +173,7 @@ public class MetricsReceiver {
         try {
             return MAPPER.writeValueAsString(value);
         } catch (Exception e) {
-            log.debug("Failed to serialize payload to JSON, falling back to toString", e);
+            log.warn("Failed to serialize payload to JSON, falling back to toString", e);
             return value.toString();
         }
     }

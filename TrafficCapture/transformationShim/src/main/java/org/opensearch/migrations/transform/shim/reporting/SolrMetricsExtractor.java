@@ -1,5 +1,6 @@
 package org.opensearch.migrations.transform.shim.reporting;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -14,21 +15,23 @@ public final class SolrMetricsExtractor implements MetricsExtractor {
 
     private static final Pattern COLLECTION_PATTERN = Pattern.compile("^/solr/([^/]+)/(.+)$");
 
+    private static Matcher matchPath(String uri) {
+        if (uri == null) return null;
+        String path = URI.create(uri).getPath();
+        Matcher m = COLLECTION_PATTERN.matcher(path);
+        return m.matches() ? m : null;
+    }
+
     @Override
     public String extractCollectionName(String uri) {
-        if (uri == null) return null;
-        String path = uri.contains("?") ? uri.substring(0, uri.indexOf('?')) : uri;
-        Matcher m = COLLECTION_PATTERN.matcher(path);
-        return m.matches() ? m.group(1) : null;
+        Matcher m = matchPath(uri);
+        return m != null ? m.group(1) : null;
     }
 
     @Override
     public String normalizeEndpoint(String uri) {
-        if (uri == null) return null;
-        String path = uri.contains("?") ? uri.substring(0, uri.indexOf('?')) : uri;
-        Matcher m = COLLECTION_PATTERN.matcher(path);
-        if (!m.matches()) return null;
-        return "/solr/{collection}/" + m.group(2);
+        Matcher m = matchPath(uri);
+        return m != null ? "/solr/{collection}/" + m.group(2) : null;
     }
 
     @Override

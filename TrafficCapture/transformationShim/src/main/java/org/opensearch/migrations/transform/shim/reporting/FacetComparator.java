@@ -28,11 +28,6 @@ public final class FacetComparator {
         Map<String, Object> solrFacets = extractFacetFields(solrParsedBody);
         Map<String, Object> osFacets = extractFacetFields(osParsedBody);
 
-        if (solrFacets == null && osFacets == null) return Collections.emptyList();
-
-        if (solrFacets == null) solrFacets = Collections.emptyMap();
-        if (osFacets == null) osFacets = Collections.emptyMap();
-
         Set<String> allFieldNames = new LinkedHashSet<>();
         allFieldNames.addAll(solrFacets.keySet());
         allFieldNames.addAll(osFacets.keySet());
@@ -68,9 +63,9 @@ public final class FacetComparator {
         Set<String> osKeys = osBuckets.keySet();
 
         boolean keysMatch = solrKeys.equals(osKeys);
-        List<String> missingKeys = new ArrayList<>(solrKeys);
+        Set<String> missingKeys = new LinkedHashSet<>(solrKeys);
         missingKeys.removeAll(osKeys);
-        List<String> extraKeys = new ArrayList<>(osKeys);
+        Set<String> extraKeys = new LinkedHashSet<>(osKeys);
         extraKeys.removeAll(solrKeys);
 
         List<ValueDrift> valueDrifts = new ArrayList<>();

@@ -1,6 +1,5 @@
 package org.opensearch.migrations.transform.shim.reporting;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,10 +40,8 @@ public interface MetricsExtractor {
      * candidate parsed response bodies.
      * Returns an empty list when there is nothing to compare.
      */
-    default List<ValidationDocument.ComparisonEntry> compareResults(
-            Map<String, Object> baselineBody, Map<String, Object> candidateBody) {
-        return Collections.emptyList();
-    }
+    List<ValidationDocument.ComparisonEntry> compareResults(
+            Map<String, Object> baselineBody, Map<String, Object> candidateBody);
 
     // ---- static utility methods (implementation-agnostic) ----
 
