@@ -282,7 +282,7 @@ def call(Map config = [:]) {
             always {
                 timeout(time: 75, unit: 'MINUTES') {
                     script {
-                        def region = params.REGION
+                        def region = params.REGION ?: 'us-east-1'
                         def clusterStackName = "OpenSearch-${maStageName}-${region}"
                         def maStackName = "Migration-Assistant-Infra-Import-VPC-eks-${maStageName}-${region}"
 

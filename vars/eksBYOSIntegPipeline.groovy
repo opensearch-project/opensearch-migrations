@@ -433,7 +433,7 @@ ENVEOF
             always {
                 timeout(time: 3, unit: 'HOURS') {
                     script {
-                        def region = params.REGION
+                        def region = params.REGION ?: 'us-east-1'
                         def clusterStackName = "OpenSearch-${maStageName}-${region}"
                         def maStackName = "Migration-Assistant-Infra-Import-VPC-eks-${maStageName}-${region}"
                         def eksClusterName = env.eksClusterName ?: "migration-eks-cluster-${maStageName}-${region}"
