@@ -12,6 +12,7 @@ import type { RequestContext, ResponseContext } from './context';
 import * as selectUri from './features/select-uri';
 import * as queryQ from './features/query-q';
 import * as fieldList from './features/field-list';
+import * as sort from './features/sort';
 import * as jsonFacets from './features/json-facets';
 import * as highlighting from './features/highlighting';
 import * as hitsToDocs from './features/hits-to-docs';
@@ -27,6 +28,8 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
       jsonFacets.request, // json.facet → aggs
       fieldList.request, // fl=... → _source
       highlighting.request, // hl=true → highlight block
+      sort.request, // sort=... → sort DSL
+      jsonFacets.request, // json.facet → aggs
     ],
   },
 };

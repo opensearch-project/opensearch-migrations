@@ -259,7 +259,7 @@ charts:
         limits:   { cpu: 100m, memory: 64Mi }
 
   ack-acmpca-controller:
-    version: "1.0.16"
+    version: "1.2.2"
     repository: "oci://public.ecr.aws/aws-controllers-k8s/acmpca-chart"
     dependsOn: cert-manager
     values:
