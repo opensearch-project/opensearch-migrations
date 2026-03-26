@@ -102,9 +102,11 @@ public class ClusterReaderExtractor {
         }
 
         // Discover collections and parse schemas from backup directory
+        // A valid Solr backup collection dir contains backup_0.properties or an index/ subdirectory
         var schemas = new LinkedHashMap<String, JsonNode>();
         try (var dirs = Files.list(backupDir)) {
             dirs.filter(Files::isDirectory)
+                .filter(d -> Files.exists(d.resolve("backup_0.properties")) || Files.exists(d.resolve("index")))
                 .forEach(dir -> {
                     var name = dir.getFileName().toString();
                     schemas.put(name, SolrSchemaXmlParser.findAndParse(dir));
