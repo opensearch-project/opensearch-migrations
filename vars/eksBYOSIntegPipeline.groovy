@@ -30,6 +30,7 @@ static def expandVersionString(String input) {
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksbyos"
     def jobName = config.jobName ?: "byos-eks-integ-test"
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
     def clusterContextFilePath = "tmp/cluster-context-byos-${currentBuild.number}.json"
     def testIds = config.testIds ?: "0010"
     def sourceVersion = config.sourceVersion ?: ""
@@ -96,7 +97,7 @@ def call(Map config = [:]) {
             )
         }
         options {
-            lock(label: params.STAGE, quantity: 1, variable: 'maStageName')
+            lock(label: lockLabel, quantity: 1)
             timeout(time: 18, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
@@ -120,6 +121,7 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
+                        env.maStageName = "${params.STAGE}-${currentBuild.number}"
                         // Resolve TEST_PRESET → effective parameter values
                         def testPresets = [
                             'large-es7x-24B': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es7x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_7.10', rfsWorkers: '90', targetClusterSize: 'large'],
@@ -413,7 +415,7 @@ ENVEOF
             always {
                 timeout(time: 75, unit: 'MINUTES') {
                     script {
-                        def region = params.REGION
+                        def region = params.REGION ?: 'us-east-1'
                         def maStackName = env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
 
 

@@ -46,6 +46,7 @@ import org.opensearch.migrations.trafficcapture.proxyserver.netty.HeaderRemoverH
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.ProxyChannelInitializer;
 import org.opensearch.migrations.utils.ProcessHelpers;
+import org.opensearch.migrations.utils.URIHelper;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
 
@@ -307,25 +308,14 @@ public class CaptureProxy {
     // Utility method for converting uri string to an actual URI object. Similar logic is placed in the trafficReplayer
     // module: TrafficReplayer.java
     protected static URI convertStringToUri(String uriString) {
-        URI serverUri;
         try {
-            serverUri = new URI(uriString);
-        } catch (Exception e) {
+            return URIHelper.parseUriWithDefaultPort(uriString);
+        } catch (IllegalArgumentException e) {
             System.err.println("Exception parsing URI string: " + uriString);
             System.err.println(e.getMessage());
             System.exit(3);
             return null;
         }
-        if (serverUri.getPort() < 0) {
-            throw new IllegalArgumentException("Port not present for URI: " + serverUri);
-        }
-        if (serverUri.getHost() == null) {
-            throw new IllegalArgumentException("Hostname not present for URI: " + serverUri);
-        }
-        if (serverUri.getScheme() == null) {
-            throw new IllegalArgumentException("Scheme (http|https) is not present for URI: " + serverUri);
-        }
-        return serverUri;
     }
 
     protected static SslContext loadBacksideSslContext(URI serverUri, boolean allowInsecureConnections)
