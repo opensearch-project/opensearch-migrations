@@ -34,6 +34,7 @@ import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.migrations.utils.TrackedFutureJsonFormatter;
+import org.opensearch.migrations.utils.URIHelper;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
@@ -451,7 +452,7 @@ public class TrafficReplayer {
         var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
         URI uri;
         try {
-            uri = new URI(params.targetUriString);
+            uri = URIHelper.parseUriWithDefaultPort(params.targetUriString);
         } catch (Exception e) {
             final var msg = "Exception parsing " + params.targetUriString;
             System.err.println(msg);
