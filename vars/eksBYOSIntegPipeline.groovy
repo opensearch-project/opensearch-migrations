@@ -47,7 +47,7 @@ def call(Map config = [:]) {
             dataNodeType: "r8g.8xlarge.search",
             dedicatedManagerNodeType: "m6g.2xlarge.search",
             dataNodeCount: 24,
-            dedicatedManagerNodeCount: 4,
+            dedicatedManagerNodeCount: 3,
             ebsVolumeSize: 2048,
             ebsThroughput: 1000,  // gp3 max: 1000 MB/s (CDK validation limit)
             ebsIops: 10000
