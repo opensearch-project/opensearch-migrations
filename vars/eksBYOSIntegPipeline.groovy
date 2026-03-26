@@ -30,6 +30,7 @@ static def expandVersionString(String input) {
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksbyos"
     def jobName = config.jobName ?: "byos-eks-integ-test"
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
     def clusterContextFilePath = "tmp/cluster-context-byos-${currentBuild.number}.json"
     def testIds = config.testIds ?: "0010"
     def sourceVersion = config.sourceVersion ?: ""
@@ -83,7 +84,7 @@ def call(Map config = [:]) {
             )
         }
         options {
-            lock(label: params.STAGE, quantity: 1, variable: 'maStageName')
+            lock(label: lockLabel, quantity: 1)
             timeout(time: 18, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
@@ -107,6 +108,7 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
+                        env.maStageName = "${params.STAGE}-${currentBuild.number}"
                         echo """
                             ================================================================
                             BYOS Migration Pipeline Configuration
@@ -432,7 +434,7 @@ ENVEOF
             always {
                 timeout(time: 3, unit: 'HOURS') {
                     script {
-                        def region = params.REGION
+                        def region = params.REGION ?: 'us-east-1'
                         def clusterStackName = "OpenSearch-${maStageName}-${region}"
                         def maStackName = "Migration-Assistant-Infra-Import-VPC-eks-${maStageName}-${region}"
                         def eksClusterName = env.eksClusterName ?: "migration-eks-cluster-${maStageName}-${region}"

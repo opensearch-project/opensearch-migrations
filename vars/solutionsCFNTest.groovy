@@ -9,6 +9,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "sol-integ", description: 'Stage name for deployment environment')
+            string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
         }
 
         options {
@@ -46,10 +47,10 @@ def call(Map config = [:]) {
                     timeout(time: 15, unit: 'MINUTES') {
                         dir('deployment/migration-assistant-solution') {
                             script {
-                                env.STACK_NAME_SUFFIX = "${stage}-us-east-1"
+                                env.STACK_NAME_SUFFIX = "${stage}-${params.REGION}"
                                 sh "npm install"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "cdk deploy Migration-Assistant-Infra-Create-VPC-${env.STACK_NAME_SUFFIX} --parameters Stage=${stage} --require-approval never --concurrency 3"
                                     }
                                 }
@@ -67,7 +68,7 @@ def call(Map config = [:]) {
                         dir('test') {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "./awsRunInitBootstrap.sh --stage ${stage} --log-group-name solutions-deployment-jenkins-pipeline-${stage} --workflow INIT_BOOTSTRAP"
                                     }
                                 }
@@ -83,7 +84,7 @@ def call(Map config = [:]) {
                         dir('test') {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "./awsRunInitBootstrap.sh --stage ${stage} --log-group-name solutions-deployment-jenkins-pipeline-${stage} --workflow VERIFY_INIT_BOOTSTRAP"
                                     }
                                 }
@@ -99,7 +100,7 @@ def call(Map config = [:]) {
                     dir('deployment/migration-assistant-solution') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                     sh "cdk destroy Migration-Assistant-Infra-Create-VPC-${env.STACK_NAME_SUFFIX} --force"
                                 }
                             }
