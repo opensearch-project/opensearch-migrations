@@ -18,10 +18,6 @@ set -x
 # Write error details to /dev/termination-log so Argo surfaces the reason, not just the exit code
 fail() { echo "$1" | tee /dev/termination-log >&2; exit 1; }
 
-# Activate the Python virtual environment to get access to workflow CLI
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
 echo "Building and submitting migration workflow..."
 
 # Decode base64 migration config from environment variable and write to file

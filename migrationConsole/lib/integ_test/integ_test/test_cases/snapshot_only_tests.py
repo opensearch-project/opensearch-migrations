@@ -88,9 +88,8 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         self.workflow_snapshot_and_migration_config = [{
             "snapshotConfig": {
                 "snapshotNameConfig": {
-                    "externallyManagedSnapshot": self.snapshot_name
-                },
-                "repoName": "default"
+                    "externallyManagedSnapshotName": self.snapshot_name
+                }
             },
             "migrations": [{
                 "metadataMigrationConfig": {},
@@ -98,7 +97,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             }]
         }]
 
-    def prepare_workflow_parameters(self):
+    def prepare_workflow_parameters(self, keep_workflows: bool = False):
         """Build workflow parameters for snapshot-only migration."""
         snapshot_repo = {"awsRegion": self.s3_region, "s3RepoPathUri": self.s3_repo_uri}
         if self.s3_endpoint:
@@ -108,7 +107,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             "endpoint": "",
             "version": f"{self.source_version.cluster_type} "
                        f"{self.source_version.major_version}.{self.source_version.minor_version}",
-            "snapshotRepos": {"default": snapshot_repo}
+            "snapshotRepo": snapshot_repo
         }
 
         self.workflow_template = "full-migration-imported-clusters"

@@ -281,7 +281,7 @@ public class LeaseExpirationTest extends SourceTestBase {
                 .withAccessToHost(true);
             var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
                 .withAccessToHost(true).withNetwork(network).withNetworkAliases(TARGET_DOCKER_HOSTNAME);
-            var osCoordinatorContainer = new SearchClusterContainer(SearchClusterContainer.OS_V3_0_0)
+            var osCoordinatorContainer = new SearchClusterContainer(SearchClusterContainer.OS_LATEST)
                 .withAccessToHost(true).withNetwork(network).withNetworkAliases(COORDINATOR_DOCKER_HOSTNAME);
             var targetProxy = new ToxiProxyWrapper(network);
             var coordinatorProxy = new ToxiProxyWrapper(network)

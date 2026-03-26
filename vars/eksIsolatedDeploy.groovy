@@ -75,7 +75,6 @@ def call(Map config = [:]) {
                                   --deploy-import-vpc-cfn \
                                   --build-cfn \
                                   --build-chart-and-dashboards \
-                                  --push-all-images-to-private-ecr \
                                   --create-vpc-endpoints \
                                   --ma-images-source "${env.BUILD_ECR}" \
                                   --stack-name "${isolatedStackName}" \

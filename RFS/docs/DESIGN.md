@@ -62,6 +62,8 @@ RFS Workers perform the work of migrating the data from a source cluster to a ta
 
 ### Coordinating Metadata Store (CMS)
 
+> **Note:** The original design below used the target cluster as the CMS. The current implementation defaults to a dedicated single-node OpenSearch coordinator cluster, which isolates coordination traffic from the target. The target cluster can still be used via `useTargetClusterForWorkCoordination: true`. The dedicated coordinator also enables migration to targets that don't support coordination workloads, such as Amazon OpenSearch Serverless.
+
 The Coordinating Metadata Store (CMS) is the source of truth for the status of the overall Reindex-from-Snapshot operation.  For the first iteration, the target Elasticsearch/Opensearch cluster is used for this purpose (see A1 in [Appendix: Assumptions](#appendix-assumptions)), but it could just as easily be a PostgreSQL instance, Dynamo DB, etc.  The schema for this metadata can be found in [Appendix: CMS Schema](#appendix-cms-schema).
 
 RFS Workers query the CMS to infer what work they should next attempt, and update the CMS with any progress they have made.  RFS Workers interact with the CMS without making assumptions about how many other RFS Workers are doing the same thing.
@@ -295,6 +297,7 @@ Exit code 4 prevents Kubernetes from rapid-cycling pods when all work is leased 
 We start with the following high-level assumptions about the structure of the solution.  Changes to these assumptions would likely have a substantial impact on the design.  
 
 * (A1) - The RFS Workers cannot assume access to a data store other than the migration’s target cluster as a state-store for coordinating their work.
+  *(Note: The current implementation relaxes this assumption - a dedicated single-node OpenSearch coordinator cluster is now deployed by default, separate from the target.)*
 * (A2) - The RFS Worker will perform all the work required to complete a historical migration.
 
 We have the following, additional assumptions about the process of performing a Reindex-from-Snapshot operation:
