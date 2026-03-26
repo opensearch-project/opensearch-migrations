@@ -46,7 +46,7 @@ class JenkinsPipelineTestRunner extends BasePipelineTest {
             println "Pipeline called with config: ${config}"
             Assertions.assertEquals('source-single-node-ec2', config.sourceContextId)
             Assertions.assertEquals('migration-default', config.migrationContextId)
-            Assertions.assertEquals('aws-integ', config.defaultStageId)
+            Assertions.assertEquals('awsintg', config.defaultStageId)
             Assertions.assertEquals('traffic-replay-default-e2e-test', config.jobName)
             return true
         })
