@@ -115,7 +115,8 @@ while IFS= read -r image; do
   copy_image "$image" &
 done < "$_imglist"
 rm -f "$_imglist"
-wait || { echo "⚠️  Some image copies failed" >&2; }
+_img_fail=0
+wait || _img_fail=1
 
 # --- mirror helm charts as OCI artifacts ---
 echo ""
@@ -154,3 +155,8 @@ rm -f "$_chartlist"
 
 echo ""
 echo "=== Mirroring complete ==="
+
+if [ "$_img_fail" -ne 0 ] || [ "$_chart_fail" -ne 0 ]; then
+  echo "ERROR: Some images or charts failed to mirror. See ❌ entries above." >&2
+  exit 1
+fi

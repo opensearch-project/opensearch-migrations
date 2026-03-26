@@ -47,6 +47,7 @@ function convertSingleAgg(aggResult: any): JavaMap {
 
   const buckets: any[] = aggResult.get('buckets');
   if (Array.isArray(buckets)) {
+    // Terms / range / histogram aggregations — convert each bucket
     const solrBuckets: JavaMap[] = [];
     for (const bucket of buckets) {
       if (!isMapLike(bucket)) {
@@ -55,6 +56,9 @@ function convertSingleAgg(aggResult: any): JavaMap {
       solrBuckets.push(convertBucket(bucket));
     }
     facetResult.set('buckets', solrBuckets);
+  } else if (aggResult.has('doc_count')) {
+    // Filter aggregation (from query facet) — just has doc_count, no buckets
+    facetResult.set('count', aggResult.get('doc_count'));
   }
 
   return facetResult;
