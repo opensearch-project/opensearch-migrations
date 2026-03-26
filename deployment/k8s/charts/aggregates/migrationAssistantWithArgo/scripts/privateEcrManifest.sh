@@ -4,7 +4,7 @@
 #
 # Version-locked list of ALL container images and helm charts required by the
 # Migration Assistant. Includes production AND development/optional charts.
-# Used by mirror-to-ecr.sh and generate-private-ecr-values.sh.
+# Used by mirrorToEcr.sh and generatePrivateEcrValues.sh.
 #
 # Discovered via: helm template on each chart + runtime image analysis.
 # Update this file when chart versions change.

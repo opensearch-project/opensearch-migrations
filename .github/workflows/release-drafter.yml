@@ -204,6 +204,9 @@ jobs:
           solutionid=SO0290,\
           solutionname="migration-assistant-for-amazon-opensearch-service",\
           solutionversion=${{ steps.get_data.outputs.version }}
+      - name: Assemble self-contained aws-bootstrap.sh
+        run: |
+          deployment/k8s/aws/assemble-bootstrap.sh
       - name: Draft a release
         if: ${{ !github.event.act }}
         uses: softprops/action-gh-release@v2
@@ -216,6 +219,6 @@ jobs:
             opensearch-migrations-build.tar.gz
             kiro-cli/build/kiro-assistant.tar.gz
             migration-assistant-${{ steps.get_data.outputs.version }}.tgz
-            deployment/k8s/aws/aws-bootstrap.sh
+            deployment/k8s/aws/dist/aws-bootstrap.sh
             deployment/k8s/dashboards/*.json
             **/*.spdx.json

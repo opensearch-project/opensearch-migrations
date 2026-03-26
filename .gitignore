@@ -52,3 +52,4 @@ reindex-from-snapshot-dashboard.json
 # IDE / Java tooling
 .settings/
 .factorypath
+deployment/k8s/aws/dist/

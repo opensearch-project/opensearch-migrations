@@ -914,18 +914,35 @@ fi
 
 
 
+# --- source helper scripts (inlined by assemble-bootstrap.sh for release) ---
+# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh
+# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcr.sh
+# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/generatePrivateEcrValues.sh
+_bootstrap_source_helpers() {
+  local scripts_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
+  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh
+  . "$scripts_dir/privateEcrManifest.sh"
+  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcr.sh
+  . "$scripts_dir/mirrorToEcr.sh"
+  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/generatePrivateEcrValues.sh
+  . "$scripts_dir/generatePrivateEcrValues.sh"
+}
+# Only source if functions aren't already defined (i.e., not assembled)
+if ! type mirror_images_to_ecr &>/dev/null; then
+  _bootstrap_source_helpers
+fi
+
 # --- mirror public images to private ECR (optional) ---
 # Run before build so that buildkit image is available in ECR for isolated clusters.
 if [[ "$push_images_to_ecr" == "true" ]]; then
   echo "Mirroring public images and helm charts to private ECR..."
   ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
-  SCRIPTS_DIR="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
-  MIRROR_FLAGS="--region ${AWS_CFN_REGION}"
-  "$SCRIPTS_DIR/mirrorToEcr.sh" "$ECR_HOST" $MIRROR_FLAGS
+  mirror_images_to_ecr "$ECR_HOST" "${AWS_CFN_REGION}" "$IMAGES"
+  mirror_charts_to_ecr "$ECR_HOST" "${AWS_CFN_REGION}" "$CHARTS"
 
   echo "Generating private ECR helm values override..."
   ecr_values_file=$(mktemp)
-  "$SCRIPTS_DIR/generatePrivateEcrValues.sh" "$ECR_HOST" > "$ecr_values_file"
+  generate_private_ecr_values "$ECR_HOST" > "$ecr_values_file"
   if [[ -n "$extra_helm_values" ]]; then
     extra_helm_values="$extra_helm_values,$ecr_values_file"
   else
