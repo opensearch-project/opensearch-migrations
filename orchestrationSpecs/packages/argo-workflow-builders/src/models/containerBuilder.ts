@@ -140,6 +140,7 @@ type HasHostAliases = { __hasHostAliases: true };
 type HasPodSpecPatch = { __hasPodSpecPatch: true };
 type HasRetryStrategy = { __hasRetryStrategy: true };
 type HasSynchronization = { __hasSynchronization: true };
+type HasAllowDisruption = { __hasAllowDisruption: true };
 
 // Runtime storage for pod config (not tracked in type system individually)
 type PodConfigData = {
@@ -155,6 +156,7 @@ type PodConfigData = {
     securityContext?: PodSecurityContext;
     hostAliases?: HostAlias[];
     podSpecPatch?: AllowLiteralOrExpression<string>;
+    disruptable?: boolean;
 };
 
 export class ContainerBuilder<
@@ -235,8 +237,17 @@ export class ContainerBuilder<
             mountPath: config.mountPath,
             readOnly: config.readOnly
         }));
+        const shortLivedAnnotations = this.podConfig.disruptable
+            ? undefined : { 'karpenter.sh/do-not-disrupt': 'true' };
+        const mergedMetadata = (this.podConfig.metadata || shortLivedAnnotations) ? {
+            ...this.podConfig.metadata,
+            annotations: {
+                ...this.podConfig.metadata?.annotations,
+                ...shortLivedAnnotations
+            }
+        } : undefined;
         return {
-            ...(this.podConfig.metadata && { metadata: this.podConfig.metadata }),
+            ...(mergedMetadata && { metadata: mergedMetadata }),
             ...(this.podConfig.tolerations && { tolerations: this.podConfig.tolerations }),
             ...(this.podConfig.nodeSelector && { nodeSelector: this.podConfig.nodeSelector }),
             ...(this.podConfig.activeDeadlineSeconds !== undefined && { activeDeadlineSeconds: this.podConfig.activeDeadlineSeconds }),
@@ -576,6 +587,17 @@ export class ContainerBuilder<
         builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => PodMetadata
     ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasMetadata> {
         return this.withUpdates({ podConfig: { ...this.podConfig, metadata: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    /**
+     * Allow Karpenter to disrupt the node running this pod. By default, all container
+     * pods are annotated with karpenter.sh/do-not-disrupt to prevent eviction during
+     * execution. Call this to opt out for pods that can tolerate disruption.
+     */
+    allowDisruption(
+        this: PodConfigBrands extends HasAllowDisruption ? never : this,
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasAllowDisruption> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, disruptable: true } });
     }
 
     addTolerations(
