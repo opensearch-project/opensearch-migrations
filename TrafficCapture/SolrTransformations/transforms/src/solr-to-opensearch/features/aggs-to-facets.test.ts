@@ -180,6 +180,36 @@ describe('aggs-to-facets MicroTransform', () => {
     });
   });
 
+  describe('filter aggregation (query facet) conversion', () => {
+    it('should convert doc_count to count for a filter aggregation (no buckets)', () => {
+      const filterAgg = new Map<string, any>([['doc_count', 17]]);
+      const aggs = new Map([['expensive', filterAgg]]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 100 });
+      response.apply(ctx);
+
+      const facets: JavaMap = ctx.responseBody.get('facets');
+      const expensive: JavaMap = facets.get('expensive');
+      expect(expensive.get('count')).toBe(17);
+      expect(expensive.has('buckets')).toBe(false);
+    });
+
+    it('should handle filter aggregations alongside terms aggregations', () => {
+      const filterAgg = new Map<string, any>([['doc_count', 5]]);
+      const aggs = new Map<string, any>([
+        ['cheap', filterAgg],
+        ['categories', osTermsAgg([{ key: 'food', doc_count: 3 }])],
+      ]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 50 });
+      response.apply(ctx);
+
+      const facets: JavaMap = ctx.responseBody.get('facets');
+      expect(facets.get('cheap').get('count')).toBe(5);
+      expect(facets.get('categories').get('buckets')).toHaveLength(1);
+    });
+  });
+
   describe('error handling', () => {
     it('should throw when an aggregation result is not a Map', () => {
       const aggs = new Map([['myFacet', 'not-a-map']]);

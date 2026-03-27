@@ -23,6 +23,8 @@ localstack|0.6.23|https://localstack.github.io/helm-charts
 grafana|8.15.0|https://grafana.github.io/helm-charts
 jaeger|3.2.0|https://jaegertracing.github.io/helm-charts
 kyverno|3.7.1|https://kyverno.github.io/kyverno/
+aws-privateca-issuer|v1.4.0|https://cert-manager.github.io/aws-privateca-issuer
+acmpca-chart|1.2.2|oci://public.ecr.aws/aws-controllers-k8s
 "
 
 # ALL container images required for deployment.
@@ -34,10 +36,10 @@ quay.io/jetstack/cert-manager-cainjector:v1.17.2
 quay.io/jetstack/cert-manager-startupapicheck:v1.17.2
 
 # --- aws-privateca-issuer ---
-public.ecr.aws/cert-manager/aws-privateca-issuer:v1.4.0
+public.ecr.aws/k1n1h4h4/cert-manager-aws-privateca-issuer:v1.4.0
 
 # --- ack-acmpca-controller ---
-public.ecr.aws/aws-controllers-k8s/acmpca-controller:1.0.16
+public.ecr.aws/aws-controllers-k8s/acmpca-controller:1.2.2
 
 # --- strimzi (operator + runtime images) ---
 quay.io/strimzi/operator:0.50.0

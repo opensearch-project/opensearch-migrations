@@ -1,0 +1,1053 @@
+definitions:
+  cache.ProvisionedPrice:
+    properties:
+      regions:
+        additionalProperties:
+          $ref: '#/definitions/price.ProvisionedRegion'
+        type: object
+    type: object
+  cache.ServerlessPrice:
+    properties:
+      regions:
+        additionalProperties:
+          $ref: '#/definitions/price.ServerlessRegion'
+        type: object
+    type: object
+  main.ErrorResponse:
+    properties:
+      code:
+        type: string
+      error:
+        type: string
+      fields:
+        additionalProperties:
+          type: string
+        type: object
+      message:
+        type: string
+    type: object
+  price.Estimate:
+    properties:
+      day:
+        $ref: '#/definitions/price.Serverless'
+      edp:
+        type: number
+      month:
+        $ref: '#/definitions/price.Serverless'
+      year:
+        $ref: '#/definitions/price.Serverless'
+    type: object
+  price.InstanceStorage:
+    properties:
+      internalStorage:
+        type: integer
+      maxGP2:
+        type: integer
+      maxGP3:
+        type: integer
+      minEBS:
+        type: integer
+    type: object
+  price.InstanceUnit:
+    properties:
+      JVMMemory:
+        type: number
+      family:
+        type: string
+      instanceStorage:
+        $ref: '#/definitions/price.InstanceStorage'
+      instanceType:
+        type: string
+      memory:
+        type: number
+      price:
+        additionalProperties:
+          $ref: '#/definitions/price.Unit'
+        type: object
+      vCPU:
+        type: integer
+      vectorStoreMemory:
+        type: number
+    type: object
+  price.ProvisionedRegion:
+    properties:
+      hotInstances:
+        additionalProperties:
+          $ref: '#/definitions/price.InstanceUnit'
+        type: object
+      storage:
+        $ref: '#/definitions/price.Storage'
+      warmInstances:
+        additionalProperties:
+          $ref: '#/definitions/price.InstanceUnit'
+        type: object
+    type: object
+  price.Serverless:
+    properties:
+      discount:
+        type: number
+      discountedTotal:
+        type: number
+      edp:
+        type: number
+      indexOcu:
+        type: number
+      s3Storage:
+        type: number
+      searchOcu:
+        type: number
+      total:
+        type: number
+    type: object
+  price.ServerlessRegion:
+    properties:
+      indexingOCU:
+        $ref: '#/definitions/price.Unit'
+      s3GBHour:
+        $ref: '#/definitions/price.Unit'
+      searchOCU:
+        $ref: '#/definitions/price.Unit'
+    type: object
+  price.Storage:
+    properties:
+      gp2:
+        $ref: '#/definitions/price.Unit'
+      gp2Provisioned:
+        $ref: '#/definitions/price.Unit'
+      gp2ProvisionedIOPS:
+        $ref: '#/definitions/price.Unit'
+      gp3:
+        $ref: '#/definitions/price.Unit'
+      gp3Provisioned:
+        $ref: '#/definitions/price.Unit'
+      gp3ProvisionedIOPS:
+        $ref: '#/definitions/price.Unit'
+      magnetic:
+        $ref: '#/definitions/price.Unit'
+      managedStorage:
+        $ref: '#/definitions/price.Unit'
+    type: object
+  price.Unit:
+    properties:
+      price:
+        type: number
+      rateCode:
+        type: string
+    type: object
+  provisioned.ClusterConfig:
+    properties:
+      coldStorage:
+        $ref: '#/definitions/provisioned.ColdStorage'
+      coldStorageRampUp:
+        $ref: '#/definitions/provisioned.ColdStorageRampUp'
+      discount:
+        type: number
+      discountedTotal:
+        type: number
+      edp:
+        type: number
+      hotNodes:
+        $ref: '#/definitions/provisioned.HotNodes'
+      infrastructureCost:
+        type: number
+      leaderNodes:
+        $ref: '#/definitions/provisioned.HotNodes'
+      totalCost:
+        type: number
+      warmNodes:
+        $ref: '#/definitions/provisioned.WarmNodes'
+    type: object
+  provisioned.ColdStorage:
+    properties:
+      managedStorageCost:
+        type: number
+      storageRequired:
+        type: number
+    type: object
+  provisioned.ColdStorageRampUp:
+    properties:
+      coldRetentionDays:
+        type: integer
+      dailyColdDataGB:
+        type: number
+      monthlyCosts:
+        items:
+          type: number
+        type: array
+      pricePerGBMonth:
+        type: number
+      steadyStateMonth:
+        type: integer
+      warmUpDays:
+        type: integer
+    type: object
+  provisioned.EstimateRequest:
+    properties:
+      search:
+        $ref: '#/definitions/provisioned.SearchEstimateRequest'
+      timeSeries:
+        $ref: '#/definitions/provisioned.TimeSeriesEstimateRequest'
+      vector:
+        $ref: '#/definitions/provisioned.VectorEstimateRequest'
+    type: object
+  provisioned.EstimateResponse:
+    properties:
+      clusterConfigs:
+        items:
+          $ref: '#/definitions/provisioned.ClusterConfig'
+        type: array
+      searchRequest:
+        $ref: '#/definitions/provisioned.SearchEstimateRequest'
+      timeSeriesRequest:
+        $ref: '#/definitions/provisioned.TimeSeriesEstimateRequest'
+      totalActiveShards:
+        type: integer
+      totalColdStorage:
+        type: number
+      totalColdStorageCalc:
+        type: string
+      totalHotShards:
+        type: integer
+      totalHotStorage:
+        type: number
+      totalHotStorageCalc:
+        type: string
+      totalMemoryRequiredForVectors:
+        type: number
+      totalMemoryRequiredForVectorsCalc:
+        type: string
+      totalOptimizedHotStorage:
+        type: number
+      totalOptimizedHotStorageCalc:
+        type: string
+      totalWarmStorage:
+        type: number
+      totalWarmStorageCalc:
+        type: string
+      vectorRequest:
+        $ref: '#/definitions/provisioned.VectorEstimateRequest'
+    type: object
+  provisioned.HotNodes:
+    properties:
+      JVMMemory:
+        type: number
+      JVMMemoryPerNode:
+        type: number
+      availableCPUs:
+        type: integer
+      count:
+        type: integer
+      estimatedActiveShards:
+        type: integer
+      family:
+        type: string
+      hasInternalStorage:
+        type: boolean
+      maxNumberOfSearchThreads:
+        type: integer
+      maxNumberOfWriteThreads:
+        type: integer
+      memory:
+        type: number
+      price:
+        additionalProperties:
+          $ref: '#/definitions/provisioned.InstancePrice'
+        type: object
+      remoteStorageRequired:
+        type: number
+      requiredCPUs:
+        type: integer
+      storageRequired:
+        type: integer
+      type:
+        type: string
+      vectorMemory:
+        type: number
+      vectorMemoryPerNode:
+        type: number
+    type: object
+  provisioned.InstanceFamilyOptionsResponse:
+    properties:
+      instanceFamilies:
+        items:
+          type: string
+        type: array
+    type: object
+  provisioned.InstancePrice:
+    properties:
+      remoteStorageCost:
+        type: number
+      singleInstance:
+        type: number
+      storageCostPerInstance:
+        type: number
+      totalCost:
+        type: number
+    type: object
+  provisioned.InstanceTypeFamily:
+    properties:
+      family:
+        type: string
+      instanceTypes:
+        items:
+          type: string
+        type: array
+    type: object
+  provisioned.InstanceTypesByFamilyResponse:
+    properties:
+      instanceTypes:
+        items:
+          $ref: '#/definitions/provisioned.InstanceTypeFamily'
+        type: array
+    type: object
+  provisioned.NamedValues:
+    properties:
+      name:
+        type: string
+      value:
+        type: string
+    type: object
+  provisioned.PricingOptionsResponse:
+    properties:
+      namedPricingOptions:
+        items:
+          $ref: '#/definitions/provisioned.NamedValues'
+        type: array
+      pricingOptions:
+        items:
+          type: string
+        type: array
+    type: object
+  provisioned.RegionsResponse:
+    properties:
+      regions:
+        items:
+          $ref: '#/definitions/regions.RegionInfo'
+        type: array
+    type: object
+  provisioned.RemoteStorageOptions:
+    properties:
+      type:
+        type: string
+    type: object
+  provisioned.SearchEstimateRequest:
+    properties:
+      CPUsPerShard:
+        type: number
+      activePrimaryShards:
+        type: integer
+      autoSelectWarmInstance:
+        description: 'Enable automatic warm instance selection based on storage (default:
+          true)'
+        type: boolean
+      azs:
+        type: integer
+      coldPercentage:
+        description: Percentage of data to store in cold tier (0-100)
+        type: integer
+      config:
+        type: string
+      dedicatedManager:
+        type: boolean
+      derivedSource:
+        description: Storage compression options
+        type: boolean
+      edp:
+        type: number
+      freeStorageRequired:
+        type: integer
+      indexExpansionRate:
+        type: integer
+      instanceTypes:
+        items:
+          type: string
+        type: array
+      minimumJVM:
+        type: number
+      multiAzWithStandby:
+        description: |-
+          Multi-AZ with Standby option - when enabled, 1/3 of instances are standby and don't take traffic
+          Thread calculations use only 2/3 of instance count, and minimum 2 replicas are enforced
+        type: boolean
+      preferInternalStorage:
+        type: boolean
+      pricingType:
+        type: string
+      region:
+        type: string
+      replicas:
+        type: integer
+      size:
+        type: number
+      storageClass:
+        type: string
+      targetShardSize:
+        type: integer
+      warmInstanceType:
+        description: 'Override UltraWarm instance type: "ultrawarm1.medium.search"
+          or "ultrawarm1.large.search"'
+        type: string
+      warmPercentage:
+        description: |-
+          Warm and Cold storage tier support (percentage-based)
+          Allows distributing data across hot, warm (UltraWarm), and cold (S3) storage tiers
+        type: integer
+      zstdCompression:
+        description: Enable ZSTD compression (~15% storage reduction)
+        type: boolean
+    type: object
+  provisioned.TimeSeriesEstimateRequest:
+    properties:
+      CPUsPerShard:
+        type: number
+      activePrimaryShards:
+        type: integer
+      autoSelectWarmInstance:
+        description: Default true - auto-select warm instance type
+        type: boolean
+      azs:
+        type: integer
+      coldRetentionPeriod:
+        type: integer
+      config:
+        type: string
+      dedicatedManager:
+        type: boolean
+      derivedSource:
+        description: Storage compression options
+        type: boolean
+      edp:
+        type: number
+      freeStorageRequired:
+        type: integer
+      hotRetentionPeriod:
+        type: integer
+      indexExpansionRate:
+        type: integer
+      instanceTypes:
+        items:
+          type: string
+        type: array
+      minimumJVM:
+        type: number
+      multiAzWithStandby:
+        description: |-
+          Multi-AZ with Standby option - when enabled, 1/3 of instances are standby and don't take traffic
+          Thread calculations use only 2/3 of instance count, and minimum 2 replicas are enforced
+        type: boolean
+      preferInternalStorage:
+        type: boolean
+      pricingType:
+        type: string
+      region:
+        type: string
+      remoteStorage:
+        $ref: '#/definitions/provisioned.RemoteStorageOptions'
+      replicas:
+        type: integer
+      size:
+        type: number
+      storageClass:
+        type: string
+      targetShardSize:
+        type: integer
+      warmInstanceType:
+        description: Warm instance type selection (optional - if not specified, auto-select
+          based on storage size)
+        type: string
+      warmRetentionPeriod:
+        type: integer
+      zstdCompression:
+        description: Enable ZSTD compression (~20% storage reduction)
+        type: boolean
+    type: object
+  provisioned.VectorEstimateRequest:
+    properties:
+      CPUsPerShard:
+        type: number
+      PQEdges:
+        type: integer
+      activePrimaryShards:
+        type: integer
+      autoSelectWarmInstance:
+        description: 'Enable automatic warm instance selection based on storage (default:
+          true)'
+        type: boolean
+      azs:
+        type: integer
+      codeSize:
+        type: integer
+      coldPercentage:
+        description: Percentage of vectors to store in cold tier (0-100)
+        type: integer
+      compressionLevel:
+        description: 'Compression level for on-disk mode: 2, 4, 8, 16, 32 (default:
+          32)'
+        type: integer
+      config:
+        type: string
+      dedicatedManager:
+        type: boolean
+      derivedSource:
+        description: Storage compression options (applies to non-vector data storage)
+        type: boolean
+      dimensionsCount:
+        type: integer
+      edp:
+        type: number
+      exactKNN:
+        description: When true, vector memory is 0 but storage remains same
+        type: boolean
+      excludeVectorSource:
+        type: boolean
+      freeStorageRequired:
+        type: integer
+      indexExpansionRate:
+        type: integer
+      instanceTypes:
+        items:
+          type: string
+        type: array
+      maxEdges:
+        type: integer
+      minimumJVM:
+        type: number
+      multiAzWithStandby:
+        description: |-
+          Multi-AZ with Standby option - when enabled, 1/3 of instances are standby and don't take traffic
+          Thread calculations use only 2/3 of instance count, and minimum 2 replicas are enforced
+        type: boolean
+      nlist:
+        type: integer
+      onDisk:
+        description: On-disk mode parameters
+        type: boolean
+      preferInternalStorage:
+        type: boolean
+      pricingType:
+        type: string
+      region:
+        type: string
+      replicas:
+        type: integer
+      segments:
+        type: integer
+      size:
+        type: number
+      storageClass:
+        type: string
+      subVectors:
+        type: integer
+      targetShardSize:
+        type: integer
+      vectorCount:
+        type: integer
+      vectorEngineType:
+        description: vector related
+        type: string
+      vectorMemoryCircuitBreaker:
+        type: integer
+      warmInstanceType:
+        description: 'Override UltraWarm instance type: "ultrawarm1.medium.search"
+          or "ultrawarm1.large.search"'
+        type: string
+      warmPercentage:
+        description: |-
+          Warm and Cold storage tier support (percentage-based)
+          Allows distributing vectors across hot, warm (UltraWarm), and cold (S3) storage tiers
+        type: integer
+      zstdCompression:
+        description: Enable ZSTD compression (~20% storage reduction for non-vector
+          data)
+        type: boolean
+    type: object
+  provisioned.WarmInstanceType:
+    properties:
+      description:
+        type: string
+      label:
+        type: string
+      requiresOpenSearchOptimized:
+        type: boolean
+      value:
+        type: string
+    type: object
+  provisioned.WarmInstanceTypeGroup:
+    properties:
+      description:
+        type: string
+      label:
+        type: string
+      options:
+        items:
+          $ref: '#/definitions/provisioned.WarmInstanceType'
+        type: array
+    type: object
+  provisioned.WarmInstanceTypesResponse:
+    properties:
+      warmInstanceTypes:
+        items:
+          $ref: '#/definitions/provisioned.WarmInstanceTypeGroup'
+        type: array
+    type: object
+  provisioned.WarmNodes:
+    properties:
+      availableCPUs:
+        type: integer
+      count:
+        type: integer
+      managedStorageCost:
+        type: number
+      maxNumberOfSearchThreads:
+        type: integer
+      maxNumberOfWriteThreads:
+        type: integer
+      price:
+        additionalProperties:
+          $ref: '#/definitions/provisioned.InstancePrice'
+        type: object
+      storageRequired:
+        type: integer
+      type:
+        type: string
+    type: object
+  regions.RegionInfo:
+    properties:
+      continent:
+        description: Continent name (e.g., "North America")
+        type: string
+      displayName:
+        description: Full region name (e.g., "US East (N. Virginia)")
+        type: string
+      id:
+        description: AWS region code (e.g., "us-east-1")
+        type: string
+    type: object
+  serverless.EstimateRequest:
+    properties:
+      edp:
+        type: number
+      ingest:
+        $ref: '#/definitions/serverless.Ingest'
+      redundancy:
+        description: 'Default: true (redundancy on)'
+        type: boolean
+      region:
+        type: string
+      search:
+        $ref: '#/definitions/serverless.Search'
+      timeSeries:
+        $ref: '#/definitions/serverless.TimeSeries'
+      vector:
+        $ref: '#/definitions/serverless.Vector'
+    type: object
+  serverless.EstimationResponse:
+    properties:
+      edp:
+        type: number
+      ingest:
+        $ref: '#/definitions/serverless.Ingest'
+      price:
+        $ref: '#/definitions/price.Estimate'
+      redundancy:
+        description: Redundancy setting used in calculations
+        type: boolean
+      region:
+        type: string
+      search:
+        $ref: '#/definitions/serverless.Search'
+      timeSeries:
+        $ref: '#/definitions/serverless.TimeSeries'
+      vector:
+        $ref: '#/definitions/serverless.Vector'
+    type: object
+  serverless.Ingest:
+    properties:
+      OCUHoursADay:
+        description: =MinOCU*(24-TimePerDayAtMax)+MaxOCU*TimePerDayAtMax
+        type: number
+      OCUHoursADayCalc:
+        type: string
+      maxIndexingRate:
+        description: GB/hour
+        type: number
+      maxOCU:
+        description: =MAX(2,CEILING(MaxIndexingRate/IndexingGbHourOcu,1))
+        type: number
+      maxOCUCalc:
+        type: string
+      minIndexingRate:
+        description: GB/hour
+        type: number
+      minOCU:
+        description: =MAX(2,CEILING(MinIndexingRate/IndexingGbHourOcu,1))
+        type: number
+      minOCUCalc:
+        type: string
+      replicas:
+        type: integer
+      timePerDayAtMax:
+        description: hours per day at maximum rate
+        type: number
+    type: object
+  serverless.RegionsResponse:
+    properties:
+      regions:
+        items:
+          $ref: '#/definitions/regions.RegionInfo'
+        type: array
+    type: object
+  serverless.Search:
+    properties:
+      OCUHoursADay:
+        description: =MinOCU*(24-HoursAtMaxRate)+MaxOCU*HoursAtMaxRate
+        type: number
+      OCUHoursADayCalc:
+        type: string
+      collectionSize:
+        type: number
+      derivedSource:
+        description: Storage compression options
+        type: boolean
+      hoursAtMaxRate:
+        type: number
+      maxOCU:
+        description: =MAX(2,CEILING(CollectionSize/HotGbPerOcu,1)*MAX(2,CEILING(MaxQueryRate/(QueriesPerSecondPerReplica*3600))))
+        type: number
+      maxOCUCalc:
+        type: string
+      maxQueryRate:
+        description: queries per hour
+        type: integer
+      minOCU:
+        description: =MAX(2,CEILING(CollectionSize/HotGbPerOcu,1)*MAX(2,CEILING(MinQueryRate/(QueriesPerSecondPerReplica*3600))))
+        type: number
+      minOCUCalc:
+        type: string
+      minQueryRate:
+        description: queries per hour
+        type: integer
+      replicas:
+        type: integer
+      zstdCompression:
+        description: Enable ZSTD compression (~15% storage reduction)
+        type: boolean
+    type: object
+  serverless.TimeSeries:
+    properties:
+      OCUHoursADay:
+        description: =MinOCU*(24-HoursAtMaxRate)+MaxOCU*HoursAtMaxRate
+        type: number
+      OCUHoursADayCalc:
+        type: string
+      dailyIndexSize:
+        description: in GBs
+        type: number
+      daysInHot:
+        type: integer
+      daysInWarm:
+        type: integer
+      derivedSource:
+        description: Storage compression options
+        type: boolean
+      hotIndexSize:
+        type: number
+      hoursAtMaxRate:
+        type: number
+      maxOCU:
+        description: =MAX(2,CEILING(HotIndexSize/HotGbPerOcu+WarmIndexSize/WarmGbPerOcu,1)*MAX(2,CEILING(maxQueryRate/(ReadsPerSecondPerReplica*3600))))
+        type: number
+      maxOCUCalc:
+        type: string
+      maxQueryRate:
+        description: queries per hour
+        type: integer
+      minOCU:
+        description: =MAX(2,CEILING(HotIndexSize/HotGbPerOcu+WarmIndexSize/WarmGbPerOcu,1)*MAX(2,CEILING(minQueryRate/(ReadsPerSecondPerReplica*3600))))
+        type: number
+      minOCUCalc:
+        type: string
+      minQueryRate:
+        description: queries per hour
+        type: integer
+      replicas:
+        type: integer
+      warmIndexSize:
+        type: number
+      zstdCompression:
+        description: Enable ZSTD compression (~20% storage reduction)
+        type: boolean
+    type: object
+  serverless.Vector:
+    properties:
+      PQEdges:
+        description: vector related
+        type: integer
+      codeSize:
+        type: integer
+      collectionSize:
+        type: number
+      compressionLevel:
+        type: integer
+      config:
+        type: string
+      derivedSource:
+        description: Storage compression options (applies to non-vector data storage)
+        type: boolean
+      dimensionsCount:
+        type: integer
+      documentSize:
+        type: integer
+      incrementHint:
+        type: integer
+      indexOCU:
+        type: number
+      indexOCUCalc:
+        type: string
+      maxEdges:
+        type: integer
+      nlist:
+        type: integer
+      onDisk:
+        description: On-disk compression support (same as provisioned)
+        type: boolean
+      region:
+        type: string
+      replica:
+        type: integer
+      replicas:
+        type: integer
+      searchOCU:
+        type: number
+      searchOCUCalc:
+        type: string
+      segments:
+        type: integer
+      size:
+        type: number
+      subVectors:
+        type: integer
+      vectorCount:
+        type: integer
+      vectorEngineType:
+        type: string
+      vectorGraphInMemory:
+        type: number
+      vectorMemoryCalc:
+        type: string
+      vectorMemoryCircuitBreaker:
+        type: integer
+      zstdCompression:
+        description: Enable ZSTD compression (~20% storage reduction for non-vector
+          data)
+        type: boolean
+    type: object
+info:
+  contact:
+    name: OpenSearch Contributors
+    url: https://github.com/opensearch-project/opensearch-pricing-calculator
+  description: Cost estimation APIs for OpenSearch Managed Clusters and Serverless
+    Collections.
+  title: OpenSearch Pricing Calculator API
+  version: "1.0"
+paths:
+  /:
+    get:
+      responses: {}
+      tags:
+      - Health
+  /health:
+    get:
+      responses: {}
+      tags:
+      - Health
+  /provisioned/cache/invalidate:
+    post:
+      responses:
+        "200":
+          description: OK
+      tags:
+      - Provisioned
+  /provisioned/estimate:
+    post:
+      parameters:
+      - description: Estimation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/provisioned.EstimateRequest'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/provisioned.EstimateResponse'
+      tags:
+      - Provisioned
+  /provisioned/instanceFamilyOptions:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/provisioned.InstanceFamilyOptionsResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      tags:
+      - Provisioned
+  /provisioned/instanceFamilyOptions/{region}:
+    get:
+      parameters:
+      - description: Region name
+        in: path
+        name: region
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/provisioned.InstanceFamilyOptionsResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      tags:
+      - Provisioned
+  /provisioned/instanceTypesByFamily:
+    get:
+      parameters:
+      - description: Comma-separated list of instance families
+        in: query
+        name: families
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/provisioned.InstanceTypesByFamilyResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      tags:
+      - Provisioned
+  /provisioned/instanceTypesByFamily/{region}:
+    get:
+      parameters:
+      - description: Region name
+        in: path
+        name: region
+        type: string
+      - description: Comma-separated list of instance families
+        in: query
+        name: families
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/provisioned.InstanceTypesByFamilyResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      tags:
+      - Provisioned
+  /provisioned/price:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cache.ProvisionedPrice'
+      tags:
+      - Provisioned
+  /provisioned/pricingOptions:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/provisioned.PricingOptionsResponse'
+      tags:
+      - Provisioned
+  /provisioned/regions:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/provisioned.RegionsResponse'
+      tags:
+      - Provisioned
+  /provisioned/warmInstanceTypes:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/provisioned.WarmInstanceTypesResponse'
+      tags:
+      - Provisioned
+  /provisioned/warmInstanceTypes/{region}:
+    get:
+      parameters:
+      - description: AWS region (e.g., 'US East (N. Virginia)' or 'us-east-1')
+        in: path
+        name: region
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/provisioned.WarmInstanceTypesResponse'
+      tags:
+      - Provisioned
+  /serverless/cache/invalidate:
+    post:
+      responses:
+        "200":
+          description: OK
+      tags:
+      - Serverless
+  /serverless/price:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/cache.ServerlessPrice'
+      tags:
+      - Serverless
+  /serverless/regions:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/serverless.RegionsResponse'
+      tags:
+      - Serverless
+  /serverless/v2/estimate:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Estimation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/serverless.EstimateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/serverless.EstimationResponse'
+      tags:
+      - Serverless
+swagger: "2.0"
