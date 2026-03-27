@@ -1,5 +1,6 @@
 from enum import Enum
 import logging
+import subprocess
 
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
@@ -177,7 +178,6 @@ class MATestBase:
     def _ensure_approval_configmap(self):
         """Ensure the approval configmap exists for Argo v4.0+ (requires configmap-type label).
         In production, the config-processor creates this. In tests, we create a default."""
-        import subprocess
         kubectl_cmd = [
             "kubectl", "apply", "-n", self.argo_service.namespace, "-f", "-"
         ]
