@@ -32,9 +32,6 @@ spec:
               OWNER="{{ .Release.Name }}"
               VERSION="0.0.1"
 
-              . /etc/profile.d/venv.sh
-              source /.venv/bin/activate
-
               apply_workflows() {
                 local dir="$1"
                 echo "Installing workflow templates from $dir"

@@ -9,6 +9,8 @@ import org.opensearch.migrations.tracing.BaseSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
+import io.opentelemetry.api.metrics.DoubleHistogram;
+import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 
@@ -137,8 +139,17 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
         }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
+            public final DoubleHistogram shardDuration;
+            public final LongCounter docsMigrated;
+            public final LongCounter bytesMigrated;
+            public final LongCounter pipelineErrors;
+
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, fromActivityName(activityName));
+                shardDuration = meter.histogramBuilder(MetricNames.SHARD_DURATION).setUnit("ms").build();
+                docsMigrated = meter.counterBuilder(MetricNames.DOCS_MIGRATED).setUnit("count").build();
+                bytesMigrated = meter.counterBuilder(MetricNames.BYTES_MIGRATED).setUnit("bytes").build();
+                pipelineErrors = meter.counterBuilder(MetricNames.PIPELINE_ERRORS).setUnit("count").build();
             }
         }
 
@@ -151,6 +162,26 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
         @Override
         public MetricInstruments getMetrics() {
             return getRootInstrumentationScope().documentReindexInstruments;
+        }
+
+        @Override
+        public void recordShardDuration(long durationMs) {
+            meterHistogram(getMetrics().shardDuration, (double) durationMs);
+        }
+
+        @Override
+        public void recordDocsMigrated(long count) {
+            meterIncrementEvent(getMetrics().docsMigrated, count);
+        }
+
+        @Override
+        public void recordBytesMigrated(long count) {
+            meterIncrementEvent(getMetrics().bytesMigrated, count);
+        }
+
+        @Override
+        public void recordPipelineError() {
+            meterIncrementEvent(getMetrics().pipelineErrors);
         }
 
         @Override
@@ -177,7 +208,7 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
         }
 
         @Override
-        public IWorkCoordinationContexts.ICompleteWorkItemContext createCloseContet() {
+        public IWorkCoordinationContexts.ICompleteWorkItemContext createCloseContext() {
             return getWorkCoordinationRootContext().createCompleteWorkContext();
         }
 

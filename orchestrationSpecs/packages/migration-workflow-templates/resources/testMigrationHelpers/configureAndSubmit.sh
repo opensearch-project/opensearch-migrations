@@ -13,11 +13,10 @@
 # migration-workflow-templates-test) to break this dependency cycle.
 # ============================================================================
 
-set -e -x
+set -x
 
-# Activate the Python virtual environment to get access to workflow CLI
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
+# Write error details to /dev/termination-log so Argo surfaces the reason, not just the exit code
+fail() { echo "$1" | tee /dev/termination-log >&2; exit 1; }
 
 echo "Building and submitting migration workflow..."
 
@@ -28,11 +27,10 @@ echo "Migration config contents:"
 cat /tmp/migration_config.json
 
 echo "Loading configuration from JSON..."
-cat /tmp/migration_config.json | workflow configure edit --stdin
+CONFIG_OUTPUT=$(cat /tmp/migration_config.json | workflow configure edit --stdin 2>&1) || fail "Configure failed: $CONFIG_OUTPUT"
+echo "$CONFIG_OUTPUT"
 
 # Submit workflow
 echo "Submitting workflow..."
-WORKFLOW_OUTPUT=$(workflow submit 2>&1)
-EXIT_CODE=$?
+WORKFLOW_OUTPUT=$(workflow submit 2>&1) || fail "Submit failed: $WORKFLOW_OUTPUT"
 echo "Workflow submit output: $WORKFLOW_OUTPUT"
-[ $EXIT_CODE -eq 0 ] || exit $EXIT_CODE

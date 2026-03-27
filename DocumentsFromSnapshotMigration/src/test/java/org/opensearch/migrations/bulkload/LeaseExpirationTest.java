@@ -33,6 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -41,6 +42,7 @@ import org.testcontainers.containers.Network;
 import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
 
 @Tag("isolatedTest")
+@Timeout(value = 10, unit = TimeUnit.MINUTES)
 @Slf4j
 public class LeaseExpirationTest extends SourceTestBase {
 
@@ -49,16 +51,15 @@ public class LeaseExpirationTest extends SourceTestBase {
     private static final String DEFAULT_COORDINATOR_INDEX_SUFFIX = "";
 
     private static Stream<Arguments> testParameters() {
+        // Lease expiration tests target-side work coordination behavior.
+        // Source version is fixed (ES 7.10 is the most common migration path).
+        // Parameterize on target versions for O(N) coverage.
+        var source = SearchClusterContainer.ES_V7_10_2;
         return Stream.concat(
-                // Test with all pairs with forceMoreSegments=false
-                SupportedClusters.supportedPairs(true).stream()
-                        // Skiping ES 2 as it requires the javascript transformer to convert "string"
-                        .filter(migrationPair -> !VersionMatchers.isES_2_X.test(migrationPair.source().getVersion()))
-                        .filter(migrationPair -> !VersionMatchers.isES_1_X.test(migrationPair.source().getVersion()))
-                        .map(migrationPair ->
-                                Arguments.of(false, migrationPair.source(), migrationPair.target())),
-                // Add test for ES 7 -> OS 2 with forceMoreSegments=true
-                Stream.of(Arguments.of(true, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_4))
+                SupportedClusters.targets().stream()
+                        .map(target -> Arguments.of(false, source, target)),
+                // Add test with forceMoreSegments=true to exercise segment ordering logic
+                Stream.of(Arguments.of(true, source, SearchClusterContainer.OS_V2_19_4))
         );
     }
 
@@ -158,6 +159,7 @@ public class LeaseExpirationTest extends SourceTestBase {
             // Create the snapshot from the source cluster
             var args = new CreateSnapshot.Args();
             args.snapshotName = SNAPSHOT_NAME;
+            args.snapshotRepoName = SNAPSHOT_NAME + "_repo";
             args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
             args.sourceArgs.host = esSourceContainer.getUrl();
 
@@ -280,7 +282,7 @@ public class LeaseExpirationTest extends SourceTestBase {
                 .withAccessToHost(true);
             var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
                 .withAccessToHost(true).withNetwork(network).withNetworkAliases(TARGET_DOCKER_HOSTNAME);
-            var osCoordinatorContainer = new SearchClusterContainer(SearchClusterContainer.OS_V3_0_0)
+            var osCoordinatorContainer = new SearchClusterContainer(SearchClusterContainer.OS_LATEST)
                 .withAccessToHost(true).withNetwork(network).withNetworkAliases(COORDINATOR_DOCKER_HOSTNAME);
             var targetProxy = new ToxiProxyWrapper(network);
             var coordinatorProxy = new ToxiProxyWrapper(network)
@@ -346,7 +348,7 @@ public class LeaseExpirationTest extends SourceTestBase {
 
                 // ASSERT: parent work item contains successor handoff metadata
                 var parentWorkItemId = new IWorkCoordinator.WorkItemAndDuration
-                    .WorkItem("geonames", 0, Integer.MIN_VALUE).toString();
+                    .WorkItem("geonames", 0, 0L).toString();
                 coordinatorOps.refresh(coordinatorIndexName);
                 var parentQuery = "{\"query\":{\"ids\":{\"values\":[\"" + parentWorkItemId + "\"]}}}";
                 var searchResponse = coordinatorOps.post("/" + coordinatorIndexName + "/_search", parentQuery);

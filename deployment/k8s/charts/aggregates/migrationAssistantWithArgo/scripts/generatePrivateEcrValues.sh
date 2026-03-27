@@ -196,6 +196,21 @@ charts:
         image:
           registry: "${M}/ghcr.io"
 
+  aws-privateca-issuer:
+    repository: "oci://${ECR}/charts/aws-privateca-issuer"
+    version: "v1.4.0"
+    values:
+      image:
+        repository: "${M}/public.ecr.aws/k1n1h4h4/cert-manager-aws-privateca-issuer"
+
+  ack-acmpca-controller:
+    repository: "oci://${ECR}/charts/acmpca-chart"
+    version: "1.2.2"
+    values:
+      image:
+        repository: "${M}/public.ecr.aws/aws-controllers-k8s/acmpca-controller"
+        tag: "1.2.2"
+
 # --- Direct template image overrides ---
 defaultBucketConfiguration:
   bucketOperationImage: "${M}/mirror.gcr.io/amazon/aws-cli:2.25.11"
