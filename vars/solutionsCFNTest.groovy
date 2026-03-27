@@ -51,7 +51,7 @@ def call(Map config = [:]) {
                                 sh "npm install"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "cdk deploy Migration-Assistant-Infra-Create-VPC-${env.STACK_NAME_SUFFIX} --parameters Stage=${stage} --require-approval never --concurrency 3"
+                                        sh "npx cdk deploy Migration-Assistant-Infra-Create-VPC-${env.STACK_NAME_SUFFIX} --parameters Stage=${stage} --require-approval never --concurrency 3"
                                     }
                                 }
                                 // Wait for instance to be ready to accept SSM commands
@@ -101,7 +101,7 @@ def call(Map config = [:]) {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    sh "cdk destroy Migration-Assistant-Infra-Create-VPC-${env.STACK_NAME_SUFFIX} --force"
+                                    sh "npx cdk destroy Migration-Assistant-Infra-Create-VPC-${env.STACK_NAME_SUFFIX} --force"
                                 }
                             }
                         }
