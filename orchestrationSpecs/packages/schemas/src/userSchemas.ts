@@ -641,6 +641,15 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         path: ['traffic', 'proxies', proxyName, 'source']
                     });
                 }
+                const kafkaRef = proxyConfig.kafka;
+                const kafkaClusters = data.kafkaClusterConfiguration ?? {};
+                if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Proxy '${proxyName}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}`,
+                        path: ['traffic', 'proxies', proxyName, 'kafka']
+                    });
+                }
             }
 
             for (const [replayerName, rc] of Object.entries(data.traffic.replayers)) {

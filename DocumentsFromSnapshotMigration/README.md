@@ -2,7 +2,7 @@
 
 ## What is this tool?
 
-This tool exposes the underlying Reindex-From-Snapshot (RFS) core library in a executable that will migrate the documents from a specified snapshot to a target cluster.  Very briefly, the application will parse the contents of the specified snapshot, pick a shard from the snapshot, then extract the documents from the shard and move them to the target cluster.  After moving the contents of the shard, the application exits.  It is intended to be run iteratively until there are no more shards left to migrate.  The application keeps track of which shards have been moved by storing metadata in a special index on the target cluster.  The metadata serves as a point of coordination when many instances of this application are running simultaneously to do things like determining which instance migrates which shard, reducing the amount of duplicated work, retrying failures, etc.  You can read a lot more about this in [the RFS Design Doc](../RFS/docs/DESIGN.md).
+This tool exposes the underlying Reindex-From-Snapshot (RFS) core library in an executable that will migrate the documents from a specified snapshot to a target cluster.  Very briefly, the application will parse the contents of the specified snapshot, pick a shard from the snapshot, then extract the documents from the shard and move them to the target cluster.  After moving the contents of the shard, the application exits.  It is intended to be run iteratively until there are no more shards left to migrate.  The application keeps track of which shards have been moved by storing metadata in a special index on a coordinator cluster.  By default (when `--coordinator-host` is not provided), the target cluster is used for coordination.  When `--coordinator-host` is specified, a separate cluster handles coordination, isolating that traffic from the target.  This metadata enables many instances of the application to run simultaneously, determining which instance migrates which shard, reducing duplicated work, and retrying failures.  You can read a lot more about this in [the RFS Design Doc](../RFS/docs/DESIGN.md).
 
 The snapshot the application extracts the documents from can be local or in S3.  You'll need network access to the target cluster because the application uses the standard REST API on the cluster to ingest the extracted documents.
 
@@ -102,6 +102,12 @@ These arguments should be carefully considered before setting, can include exper
 | --documents-per-bulk-request | The number of documents to be included within each bulk request sent. Default: no max (controlled by documents size) |
 | --max-connections           | The maximum number of connections to simultaneously used to communicate to the target. Default: 10                   |
 | --target-insecure           | Flag to allow untrusted SSL certificates for target cluster. Default: false                                          |
+| --coordinator-host          | The coordinator cluster host and port (e.g. http://localhost:9200). When provided, work coordination uses this cluster instead of the target cluster |
+| --coordinator-username      | Username for coordinator cluster basic authentication                                                                |
+| --coordinator-password      | Password for coordinator cluster basic authentication                                                                |
+| --coordinator-insecure      | Flag to allow untrusted SSL certificates for coordinator cluster. Default: false                                     |
+| --coordinator-aws-region    | AWS region for coordinator cluster. Required if using SigV4 authentication for coordinator                           |
+| --coordinator-aws-service-signing-name | AWS service signing name for coordinator (e.g. 'es' for Amazon OpenSearch Service). Required if using SigV4 for coordinator |
 | --coordinator-retry-max-retries | Maximum number of retries when marking work items as completed on the coordinator. Default: 7                      |
 | --coordinator-retry-initial-delay-ms | Initial delay in milliseconds for coordinator completion retries (doubles each attempt). Default: 1000       |
 | --coordinator-retry-max-delay-ms | Maximum delay in milliseconds for any single coordinator completion retry. Default: 64000                       |
@@ -110,32 +116,24 @@ These arguments should be carefully considered before setting, can include exper
 
 These settings apply to coordinator work-item completion retries only and do not change target bulk indexing retry behavior. They are intended for transient coordinator outages such as pod restarts or evictions.
 
-The coordinator can be:
-- A dedicated single-node OpenSearch cluster deployed and managed for the lifetime of the migration (default, `useTargetClusterForWorkCoordination: false`). The dedicated coordinator is torn down automatically on migration completion. When running RFS outside the workflow, use `--coordinator-host` (plus optional coordinator auth/TLS/SigV4 flags) to point to a separate coordinator.
-- The target cluster (`useTargetClusterForWorkCoordination: true`). Simpler setup with fewer resources, suitable for small migrations where the coordination index overhead on the target is acceptable.
+When `--coordinator-host` is provided, the tool uses that cluster for coordination. When omitted, the target cluster is used.
 
-#### Work Coordination Mode
+When RFS finishes migrating documents for a shard, it marks the work item as completed on the coordinator cluster. If the coordinator is temporarily unavailable during this step, RFS retries with an exponential backoff strategy. The retry parameters (`--coordinator-retry-max-retries`, `--coordinator-retry-initial-delay-ms`, `--coordinator-retry-max-delay-ms`) can be tuned for environments with longer coordinator restart times or for faster failure detection.
 
-The `useTargetClusterForWorkCoordination` option in `documentBackfillConfig` controls where RFS
-stores work coordination state (lease tracking, shard assignments, completion status).
+#### Work Coordination Mode (Orchestration)
+
+When run via the migration workflow, the `useTargetClusterForWorkCoordination` option in `documentBackfillConfig` controls whether the orchestration deploys a dedicated coordinator cluster and passes `--coordinator-host` to this tool automatically.
 
 | Value | Behavior                                                                                                         | Default |
 |-------|------------------------------------------------------------------------------------------------------------------|---------|
-| `false` | Deploys a dedicated single-node OpenSearch coordinator cluster, managed automatically for the migration lifetime | ✔️ |
-| `true` | Uses the user's target OpenSearch cluster for work coordination                                                  | |
+| `false` | Deploys a dedicated single-node OpenSearch coordinator cluster, managed automatically for the migration lifetime. The orchestration passes `--coordinator-host` to this tool and tears down the coordinator on completion. | ✔️ |
+| `true` | Uses the target OpenSearch cluster for work coordination (no `--coordinator-host` is passed).                    | |
 
 The dedicated coordinator (`false`) isolates coordination traffic from the target cluster,
 preventing work-coordination writes from competing with bulk indexing. Set to `true` when
-the overhead is acceptable on the user's target OpenSearch cluster.
+the overhead is acceptable on the target cluster.
 
-
-When RFS finishes migrating documents for a shard, it marks the work item as completed on the coordinator cluster. If the coordinator is temporarily unavailable during this step, RFS retries with exponential backoff (2x multiplier). With defaults (7 retries = 8 total executions, 1000ms initial delay, 64s max delay), the backoff sleep sequence is: 1s, 2s, 4s, 8s, 16s, 32s, 64s (~127s total sleep). Actual elapsed time can be longer due to request timeouts and latency.
-
-- **Happy path**: No retries needed, completion succeeds immediately with zero added latency.
-- **Transient outage**: RFS retries until the coordinator recovers or the retry budget is exhausted.
-- **Non-retryable errors**: Fail immediately without retrying.
-
-**Tuning**: Increase `--coordinator-retry-max-retries` or `--coordinator-retry-initial-delay-ms` for environments with longer coordinator restart times. Decrease for faster failure detection. Longer settings trade off resilience for slower failure detection and Argo retry.
+See the [orchestrationSpecs schema](../orchestrationSpecs/packages/schemas/src/userSchemas.ts) for the full configuration reference.
 
 #### Early Checkpoint Before Lease Expiry
 

@@ -54,3 +54,8 @@ orchestrationSpecs/packages/argo-workflow-builders/k8sSchemas
 libraries/testAutomation/reports/
 capture-replay-dashboard.json
 reindex-from-snapshot-dashboard.json
+frontend/
+
+# IDE / Java tooling
+.settings/
+.factorypath

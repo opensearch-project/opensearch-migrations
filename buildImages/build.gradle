@@ -8,8 +8,8 @@ def intermediateUrl = rootProject.findProperty('intermediateRegistry') ?: publis
 def publishedRegistry = new Registry(publishedUrl.toString())
 def intermediateRegistry = new Registry(intermediateUrl.toString())
 
-// ECR pull-through cache: when set, rewrites upstream base image refs through ECR
-// Usage: ./gradlew buildImagesToRegistry -PpullThroughCacheEndpoint=123456789.dkr.ecr.us-east-1.amazonaws.com
+// ECR pull-through cache: auto-derived from ECR_PULL_THROUGH_ENDPOINT env var in root build.gradle.
+// Can be overridden with: ./gradlew buildImagesToRegistry -PpullThroughCacheEndpoint=123456789.dkr.ecr.us-east-1.amazonaws.com
 def ptcEndpoint = rootProject.findProperty('pullThroughCacheEndpoint')?.toString() ?: ''
 def ptc = new PullThroughCacheHelper(ptcEndpoint)
 
@@ -130,12 +130,6 @@ def buildKitProjects = [
                         "buildKit_migrationConsoleBase" // All buildKit projects are configured at the root
                 ]
         ],
-        // Not required for main MA operations, but has been helpful for creating test scenarios
-        [
-                serviceName: "elasticsearchWithSearchGuard",
-                contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard",
-                imageName:  "elasticsearch_searchguard"
-        ],
         [
                 serviceName: "snapshotFuse",
                 contextDir: "fuse-lucene",
@@ -143,6 +137,15 @@ def buildKitProjects = [
                 imageTag:   "latest"
         ]
 ]
+
+// Test-only images: not required for main MA operations, excluded with -PskipTestImages=true
+if (!rootProject.findProperty('skipTestImages')?.toString()?.toBoolean()) {
+    buildKitProjects << [
+            serviceName: "elasticsearchWithSearchGuard",
+            contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard",
+            imageName:  "elasticsearch_searchguard"
+    ]
+}
 
 buildKitProjects.each { cfg ->
     cfg.repoName = getRepoNameIfPublishing(cfg)

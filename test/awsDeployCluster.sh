@@ -5,62 +5,53 @@
 
 set -euo pipefail
 
-CLUSTER_STACK_TYPE_REGEX="(OpenSearchDomain|OpenSearchServerless|SelfManagedEC2)"
-
+# Parse CDK --outputs-file into cluster-details JSON.
+# CDK outputs use export names: ClusterEndpoint-{stage}-{clusterId}, ClusterSubnets-{stage}-{clusterId},
+# ClusterAccessSecurityGroupId-{stage}-{clusterId}. The outputs file keys have dashes stripped by CFN.
 write_cluster_outputs() {
   local stage="$1"
   local outfile="$2"
+  local cdk_outputs_file="$3"
+  local provided_vpc_id="${4:-}"
 
-  stacks=$(aws cloudformation list-stacks \
-    --query "StackSummaries[?StackStatus!='DELETE_COMPLETE' && StackStatus!='DELETE_IN_PROGRESS'].StackName" \
-    --output text | tr '\t' '\n')
+  # cdk --outputs-file produces: {"StackName": {"OutputKey": "OutputValue", ...}}
+  # Flatten to a single object of all outputs across stacks
+  outputs=$(jq 'to_entries | map(.value) | add // {}' "$cdk_outputs_file")
 
-  if [[ -z "$stacks" ]]; then
-    echo "No stacks found when listing stacks."
-    return 1
-  fi
-
-  network_stack_name=$(echo "$stacks" | grep "NetworkInfra-${stage}" | head -n 1)
-  vpc_id=$(aws cloudformation describe-stacks \
-    --stack-name "$network_stack_name" \
-    --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue | [0]" \
-    --output text)
-
-  cluster_stack_names=$(echo "$stacks" | grep -E "^$CLUSTER_STACK_TYPE_REGEX-.*-${stage}-")
-  if [[ -z "$cluster_stack_names" ]]; then
-    echo "No cluster stacks found for stage: $stage"
-    return 1
-  fi
+  # CDK strips hyphens from stage name in CFN OutputKeys
+  stage_nohyphen=$(echo "$stage" | tr -d '-')
+  vpc_id="${provided_vpc_id:-$(echo "$outputs" | jq -r --arg key "VpcIdExport${stage_nohyphen}" '.[$key] // empty')}"
 
   tmpfile=$(mktemp)
   echo "{}" > "$tmpfile"
 
-  for stack in $cluster_stack_names; do
-    echo "Found cluster stack: $stack"
+  # Process ClusterEndpoint outputs (managed domains)
+  while read -r output_key; do
+    cluster_id=$(echo "$output_key" | sed "s/^ClusterEndpointExport${stage_nohyphen}//")
+    endpoint=$(echo "$outputs" | jq -r --arg k "$output_key" '.[$k]')
+    [[ ! "$endpoint" =~ ^https?:// ]] && endpoint="https://$endpoint"
 
-    outputs=$(aws cloudformation describe-stacks \
-      --stack-name "$stack" \
-      --query "Stacks[0].Outputs" \
-      --output json)
+    sg=$(echo "$outputs" | jq -r --arg k "ClusterAccessSecurityGroupIdExport${stage_nohyphen}${cluster_id}" '.[$k] // empty')
+    subnets=$(echo "$outputs" | jq -r --arg k "ClusterSubnets${stage_nohyphen}${cluster_id}" '.[$k] // empty')
 
-    cluster_id=$(echo "$stack" \
-      | sed -E "s/^($CLUSTER_STACK_TYPE_REGEX)-//" \
-      | sed -E "s/-${stage}-.*$//")
-    cluster_endpoint=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterEndpoint")) | .OutputValue')
-    cluster_endpoint="https://$cluster_endpoint"
-    cluster_sg=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterAccessSecurityGroupId")) | .OutputValue')
-    cluster_subnets=$(echo "$outputs" | jq -r '.[] | select(.OutputKey | test("^ClusterSubnets")) | .OutputValue')
-
-    jq --arg id "$cluster_id" \
-       --arg vpc "$vpc_id" \
-       --arg endpoint "$cluster_endpoint" \
-       --arg security_group "$cluster_sg" \
-       --arg subnets "$cluster_subnets" \
-       '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $security_group, subnetIds: $subnets}}' \
+    jq --arg id "$cluster_id" --arg vpc "${vpc_id:-}" --arg endpoint "$endpoint" \
+       --arg sg "${sg:-}" --arg subnets "${subnets:-}" \
+       '. + {($id): {vpcId: $vpc, endpoint: $endpoint, securityGroupId: $sg, subnetIds: $subnets}}' \
        "$tmpfile" > "$tmpfile.new"
-
     mv "$tmpfile.new" "$tmpfile"
-  done
+  done < <(echo "$outputs" | jq -r 'keys[] | select(test("^ClusterEndpointExport"))')
+
+  # Process CollectionEndpoint outputs (serverless)
+  while read -r output_key; do
+    cluster_id=$(echo "$output_key" | sed "s/^CollectionEndpointExport${stage_nohyphen}//")
+    endpoint=$(echo "$outputs" | jq -r --arg k "$output_key" '.[$k]')
+    [[ ! "$endpoint" =~ ^https?:// ]] && endpoint="https://$endpoint"
+
+    jq --arg id "$cluster_id" --arg endpoint "$endpoint" \
+       '. + {($id): {vpcId: "", endpoint: $endpoint, securityGroupId: "", subnetIds: ""}}' \
+       "$tmpfile" > "$tmpfile.new"
+    mv "$tmpfile.new" "$tmpfile"
+  done < <(echo "$outputs" | jq -r 'keys[] | select(test("^CollectionEndpointExport"))')
 
   mv "$tmpfile" "$outfile"
   echo "Wrote outputs to $outfile"
@@ -75,6 +66,8 @@ CLUSTER_CDK_CONTEXT_FILE_PATH="$CLUSTER_CDK_PATH/cdk.context.json"
 # Defaults
 STAGE="aws-integ"
 PROVIDED_CONTEXT_FILE_PATH=""
+VPC_ID=""
+DESTROY=false
 
 # Argument parser
 while [[ $# -gt 0 ]]; do
@@ -87,11 +80,21 @@ while [[ $# -gt 0 ]]; do
       PROVIDED_CONTEXT_FILE_PATH="$2"
       shift 2
       ;;
+    --vpc-id)
+      VPC_ID="$2"
+      shift 2
+      ;;
+    --destroy)
+      DESTROY=true
+      shift
+      ;;
     -h|--help)
       echo "Usage: $0 [options]"
       echo "Options:"
       echo "  -s, --stage <val>              Stage name (default: $STAGE)"
       echo "  -c, --context-file <path>      Path to context file (REQUIRED)"
+      echo "  --vpc-id <id>                  VPC ID to use in cluster outputs (overrides CDK output)"
+      echo "  --destroy                      Destroy all stacks instead of deploying"
       exit 0
       ;;
     *)
@@ -109,25 +112,31 @@ if [[ -z "$PROVIDED_CONTEXT_FILE_PATH" ]]; then
 fi
 
 SAMPLE_CDK_REPO="https://github.com/aws-samples/amazon-opensearch-service-sample-cdk.git"
-SAMPLE_CDK_VERSION=$(git ls-remote --tags --sort=-v:refname "$SAMPLE_CDK_REPO" "v0.1.*" | head -n1 | sed 's/.*refs\/tags\///')
-if [[ -z "$SAMPLE_CDK_VERSION" ]]; then
-  echo "Error: Could not discover latest v0.1.x tag from $SAMPLE_CDK_REPO"
-  exit 1
-fi
+SAMPLE_CDK_VERSION="v0.3.8"
 echo "Using sample CDK version: $SAMPLE_CDK_VERSION"
 if [ ! -d "amazon-opensearch-service-sample-cdk" ]; then
   git clone "$SAMPLE_CDK_REPO"
 else
   echo "Repo already exists, skipping clone."
 fi
-cd amazon-opensearch-service-sample-cdk && git fetch --tags && git checkout "$SAMPLE_CDK_VERSION"
-npm install
+cd amazon-opensearch-service-sample-cdk && git checkout -- . && git fetch --tags && git checkout "$SAMPLE_CDK_VERSION"
+npm ci
+npm run build
 
 cd ..
 cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 
 cd amazon-opensearch-service-sample-cdk
-cdk deploy "*" --require-approval never --concurrency 3
 
-CLUSTER_DETAILS_OUTPUT_FILE_PATH="$ROOT_REPO_PATH/test/tmp/cluster-details-${STAGE}.json"
-write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH"
+if [[ "$DESTROY" == true ]]; then
+  cdk destroy "*" --force
+else
+  CDK_OUTPUTS_FILE=$(mktemp)
+  cdk deploy "*" --require-approval never --concurrency 3 --outputs-file "$CDK_OUTPUTS_FILE"
+
+  CLUSTER_DETAILS_OUTPUT_FILE_PATH="$ROOT_REPO_PATH/test/tmp/cluster-details-${STAGE}.json"
+  mkdir -p "$(dirname "$CLUSTER_DETAILS_OUTPUT_FILE_PATH")"
+  cd ..
+  write_cluster_outputs "$STAGE" "$CLUSTER_DETAILS_OUTPUT_FILE_PATH" "$CDK_OUTPUTS_FILE" "$VPC_ID"
+  rm -f "$CDK_OUTPUTS_FILE"
+fi

@@ -14,7 +14,8 @@
 #   - CFN templates from GitHub releases
 #   - Helm chart from GitHub releases
 #   - Dashboard JSON files from GitHub releases
-#   - Container images for pods will use images from public.ecr.aws/opensearchproject
+#   - Container images are mirrored from public registries to private ECR
+#     (use --use-public-images to opt out and pull directly from public.ecr.aws)
 #
 # Developers can override any of these with --build-* flags to use locally
 # built artifacts from a repo checkout. When mixing built and downloaded
@@ -60,9 +61,11 @@ build_chart_and_dashboards=false
 version=""
 create_vpc_endpoints=""
 ignore_checks=false
-push_images_to_ecr=false
+push_images_to_ecr=true
 ma_images_source=""
 skip_setting_k8s_context=false
+skip_test_images=false
+image_tag="latest"
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -96,9 +99,11 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     --ignore-checks) ignore_checks=true; shift 1 ;;
-    --push-all-images-to-private-ecr) push_images_to_ecr=true; shift 1 ;;
+    --use-public-images) push_images_to_ecr=false; shift 1 ;;
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
+    --skip-test-images) skip_test_images=true; shift 1 ;;
+    --image-tag) image_tag="$2"; shift 2 ;;
     --tls-mode) tls_mode="$2"; shift 2 ;;
     --pca-arn) pca_arn="$2"; shift 2 ;;
     -h|--help)
@@ -126,12 +131,9 @@ while [[ $# -gt 0 ]]; do
       echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,efs."
       echo "                                            Or specify a comma-separated subset, e.g. 's3,ecr,ecrDocker'."
       echo "  --ignore-checks                           Skip subnet connectivity and VPC endpoint pre-flight checks."
-      echo "  --push-all-images-to-private-ecr          Mirror all required public images and helm charts to the"
-      echo "                                            private ECR registry. Enables deployment on isolated subnets"
-      echo "                                            without internet access. For public networks, this removes"
-      echo "                                            additional dependencies and reduces the risk of a failure due"
-      echo "                                            to images becoming unavailable."
-      echo "                                            Run from a machine with internet."
+      echo "  --use-public-images                       Opt out of mirroring images to private ECR. Use public images"
+      echo "                                            from public.ecr.aws/opensearchproject and public helm chart"
+      echo "                                            registries directly. Requires internet access from the cluster."
       echo "  --ma-images-source <registry>             Copy MA images from another ECR registry instead of"
       echo "                                            public.ecr.aws. Use when images were built on a separate"
       echo "                                            cluster (e.g. one with internet access)."
@@ -157,6 +159,8 @@ while [[ $# -gt 0 ]]; do
       echo "                                            is left unchanged. Use this on hosts that manage multiple K8s"
       echo "                                            deployments. You will need to pass --context=<context-name>"
       echo "                                            to every kubectl/helm command, or set the context yourself."
+      echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
+      echo "  --image-tag <tag>                         Override the image tag (default: git short SHA)"
       echo ""
       echo "Build options:"
       echo "  --base-dir <path>                         opensearch-migrations directory"
@@ -206,7 +210,7 @@ if [[ "$build_images" == "true" ]]; then
   use_public_images=false
 fi
 
-# --ma-images-source implies --push-all-images-to-private-ecr
+# --ma-images-source implies mirroring to private ECR
 if [[ -n "$ma_images_source" ]]; then
   push_images_to_ecr=true
 fi
@@ -348,6 +352,7 @@ validate_args() {
       exit 1 ;;
   esac
 }
+
 validate_args
 
 # --- early subnet isolation check (before any slow operations) ---
@@ -377,9 +382,9 @@ if [[ "$deploy_import_vpc" == "true" && -n "$subnet_ids" && "$ignore_checks" != 
     fi
     if [[ "$push_images_to_ecr" != "true" ]]; then
       echo "" >&2
-      echo "Error: --push-all-images-to-private-ecr is required when using isolated subnets (no NAT/IGW)." >&2
+      echo "Error: --use-public-images cannot be used with isolated subnets (no NAT/IGW)." >&2
       echo "  Images cannot be pulled from public registries (docker.io, quay.io, etc)." >&2
-      echo "  Use --push-all-images-to-private-ecr to mirror public images to private ECR." >&2
+      echo "  Remove --use-public-images to mirror public images to private ECR." >&2
       echo "  Use --ma-images-source to copy MA images from a build cluster's ECR." >&2
       echo "  Use --ignore-checks to skip this check." >&2
       exit 1
@@ -407,6 +412,12 @@ else
 fi
 
 TOOLS_ARCH=$(uname -m)
+
+# --- compute image tag ---
+# Default to "latest" for simple dev workflows (build, delete pod, done).
+# CI passes --image-tag with a git SHA for immutable, reproducible deploys.
+IMAGE_TAG="$image_tag"
+echo "Image tag: $IMAGE_TAG"
 case "$TOOLS_ARCH" in
   x86_64 | amd64) TOOLS_ARCH="amd64" ;;
   aarch64 | arm64) TOOLS_ARCH="arm64" ;;
@@ -589,8 +600,6 @@ fi
 # --- CFN deployment (optional) ---
 if [[ "$deploy_cfn" == "true" ]]; then
   # Determine template source
-  cfn_template_flag=""
-  cfn_template_value=""
   if [[ "$build_cfn" == "true" ]]; then
     echo "Building CloudFormation templates from source..."
     # Clear STACK_NAME_SUFFIX so CDK produces predictable template filenames.
@@ -600,11 +609,10 @@ if [[ "$deploy_cfn" == "true" ]]; then
     # the CDK has safe defaults when they're unset.
     STACK_NAME_SUFFIX="" \
       "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified
-    cfn_template_flag="--template-body"
     if [[ "$deploy_create_vpc" == "true" ]]; then
-      cfn_template_value="file://$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
+      cfn_template_file="$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
     else
-      cfn_template_value="file://$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Import-VPC-eks.template.json"
+      cfn_template_file="$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Import-VPC-eks.template.json"
     fi
   else
     if [[ "$deploy_create_vpc" == "true" ]]; then
@@ -617,22 +625,20 @@ if [[ "$deploy_cfn" == "true" ]]; then
     curl -fL -o "$cfn_template_file" \
       "https://github.com/opensearch-project/opensearch-migrations/releases/download/${RELEASE_VERSION}/${cfn_template_name}" \
       || { echo "Failed to download CFN template for version ${RELEASE_VERSION}"; rm -f "$cfn_template_file"; exit 1; }
-    cfn_template_flag="--template-body"
-    cfn_template_value="file://${cfn_template_file}"
   fi
 
-  # Build parameter overrides (use separate array to handle comma-separated subnet IDs)
-  cfn_params=("ParameterKey=Stage,ParameterValue=${stage_filter}")
+  # Build parameter overrides for `aws cloudformation deploy`
+  cfn_params=("Stage=${stage_filter}")
   if [[ "$deploy_import_vpc" == "true" ]]; then
-    cfn_params+=("ParameterKey=VPCId,ParameterValue=${vpc_id}")
-    cfn_params+=("ParameterKey=VPCSubnetIds,ParameterValue=\"${subnet_ids}\"")
+    cfn_params+=("VPCId=${vpc_id}")
+    cfn_params+=("VPCSubnetIds=${subnet_ids}")
     # Add VPC endpoint creation parameters
     if [[ -n "$create_vpc_endpoints" ]]; then
       IFS=',' read -ra ep_arr <<< "$create_vpc_endpoints"
       for ep in "${ep_arr[@]}"; do
         case "$ep" in
           s3)
-            cfn_params+=("ParameterKey=CreateS3Endpoint,ParameterValue=true")
+            cfn_params+=("CreateS3Endpoint=true")
             # Resolve route tables for the subnets so the S3 gateway endpoint gets associated
             s3_route_table_ids=$(aws ec2 describe-route-tables \
               --filters "Name=association.subnet-id,Values=${subnet_ids}" \
@@ -643,14 +649,14 @@ if [[ "$deploy_cfn" == "true" ]]; then
                 --filters "Name=vpc-id,Values=${vpc_id}" "Name=association.main,Values=true" \
                 --query 'RouteTables[0].RouteTableId' --output text ${region:+--region "$region"})
             fi
-            cfn_params+=("ParameterKey=S3EndpointRouteTableIds,ParameterValue=\"${s3_route_table_ids}\"")
+            cfn_params+=("S3EndpointRouteTableIds=${s3_route_table_ids}")
             ;;
-          ecr)             cfn_params+=("ParameterKey=CreateECREndpoint,ParameterValue=true") ;;
-          ecrDocker)       cfn_params+=("ParameterKey=CreateECRDockerEndpoint,ParameterValue=true") ;;
-          cloudwatchLogs)  cfn_params+=("ParameterKey=CreateCloudWatchLogsEndpoint,ParameterValue=true") ;;
-          efs)             cfn_params+=("ParameterKey=CreateEFSEndpoint,ParameterValue=true") ;;
-          sts)             cfn_params+=("ParameterKey=CreateSTSEndpoint,ParameterValue=true") ;;
-          eksAuth)         cfn_params+=("ParameterKey=CreateEKSAuthEndpoint,ParameterValue=true") ;;
+          ecr)             cfn_params+=("CreateECREndpoint=true") ;;
+          ecrDocker)       cfn_params+=("CreateECRDockerEndpoint=true") ;;
+          cloudwatchLogs)  cfn_params+=("CreateCloudWatchLogsEndpoint=true") ;;
+          efs)             cfn_params+=("CreateEFSEndpoint=true") ;;
+          sts)             cfn_params+=("CreateSTSEndpoint=true") ;;
+          eksAuth)         cfn_params+=("CreateEKSAuthEndpoint=true") ;;
           *) echo "Warning: Unknown VPC endpoint type: $ep (valid: s3,ecr,ecrDocker,cloudwatchLogs,efs)" >&2 ;;
         esac
       done
@@ -658,46 +664,61 @@ if [[ "$deploy_cfn" == "true" ]]; then
   fi
 
   echo "Deploying CloudFormation stack: $cfn_stack_name"
-  # Clean up DELETE_FAILED stacks so they can be recreated
-  if stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} --query 'Stacks[0].StackStatus' --output text 2>/dev/null) \
-      && [[ "$stack_status" == "DELETE_FAILED" ]]; then
-    echo "Stack $cfn_stack_name is in DELETE_FAILED state. Deleting before recreating..."
-    aws cloudformation delete-stack --stack-name "$cfn_stack_name" ${region:+--region "$region"}
-    aws cloudformation wait stack-delete-complete --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-      || { echo "Failed to delete DELETE_FAILED stack: $cfn_stack_name"; exit 1; }
-  fi
-  # create-stack/update-stack to support both --template-file and --template-url
+
+  # Check for stack states that prevent deployment
   if aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} >/dev/null 2>&1; then
-    update_output=$(aws cloudformation update-stack \
-      "$cfn_template_flag" "$cfn_template_value" \
-      --stack-name "$cfn_stack_name" \
-      --parameters "${cfn_params[@]}" \
-      --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-      ${region:+--region "$region"} 2>&1) && update_started=true || update_started=false
-    if [[ "$update_started" == "true" ]]; then
-      echo "Waiting for stack update to complete..."
-      aws cloudformation wait stack-update-complete \
-        --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-        || { echo "CloudFormation stack update failed for: $cfn_stack_name"; exit 1; }
-    elif echo "$update_output" | grep -q "No updates are to be performed"; then
-      echo "No updates needed for stack: $cfn_stack_name"
-    else
-      echo "CloudFormation update-stack failed: $update_output" >&2
+    _stack_status=$(aws cloudformation describe-stacks --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+      --query 'Stacks[0].StackStatus' --output text 2>/dev/null)
+    if [[ "$_stack_status" == *_IN_PROGRESS ]]; then
+      echo "Error: Stack $cfn_stack_name is in $_stack_status state." >&2
+      echo "Wait for the current operation to complete before re-running." >&2
       exit 1
     fi
-  else
-    aws cloudformation create-stack \
-      "$cfn_template_flag" "$cfn_template_value" \
-      --stack-name "$cfn_stack_name" \
-      --parameters "${cfn_params[@]}" \
-      --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-      ${region:+--region "$region"} \
-      || { echo "CloudFormation deployment failed for stack: $cfn_stack_name"; exit 1; }
-    echo "Waiting for stack creation to complete..."
-    aws cloudformation wait stack-create-complete \
-      --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
-      || { echo "CloudFormation stack creation failed for: $cfn_stack_name"; exit 1; }
+    if [[ "$_stack_status" == "DELETE_FAILED" || "$_stack_status" == "UPDATE_ROLLBACK_FAILED" ]]; then
+      echo "Error: Stack $cfn_stack_name is in $_stack_status state." >&2
+      echo "Manual intervention required before re-running." >&2
+      exit 1
+    fi
   fi
+
+  # Stream CloudFormation stack events in the background while deploy runs.
+  # Polls describe-stack-events every 10s, prints new resource status changes.
+  stream_cfn_events() {
+    local seen_file
+    seen_file=$(mktemp)
+    trap "rm -f '$seen_file'" RETURN
+    while true; do
+      aws cloudformation describe-stack-events --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
+        --query 'StackEvents[].[EventId,Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
+        --output text 2>/dev/null | tac | while IFS=$'\t' read -r eid ts status rtype logical reason; do
+          grep -qxF "$eid" "$seen_file" 2>/dev/null && continue
+          echo "$eid" >> "$seen_file"
+          [[ "$reason" == "None" ]] && reason=""
+          printf "  %-26s %-30s %-40s %s%s\n" "$ts" "$status" "$rtype" "$logical" "${reason:+  ($reason)}"
+        done
+      sleep 10
+    done
+  }
+
+  run_cfn_deploy() {
+    stream_cfn_events &
+    local stream_pid=$!
+
+    aws cloudformation deploy \
+      --template-file "$cfn_template_file" \
+      --stack-name "$cfn_stack_name" \
+      --parameter-overrides "${cfn_params[@]}" \
+      --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+      --no-fail-on-empty-changeset \
+      ${region:+--region "$region"}
+    local rc=$?
+
+    kill $stream_pid 2>/dev/null; wait $stream_pid 2>/dev/null
+    return $rc
+  }
+
+  run_cfn_deploy \
+    || { echo "CloudFormation deployment failed for: $cfn_stack_name"; exit 1; }
 
   echo "CloudFormation stack deployed successfully: $cfn_stack_name"
 fi
@@ -857,9 +878,9 @@ if [[ "$ignore_checks" != "true" && -n "${VPC_ID:-}" ]]; then
       # Isolated subnets require mirroring — public registries are unreachable.
       if [[ "$push_images_to_ecr" != "true" ]]; then
         echo "" >&2
-        echo "Error: --build-images or --push-all-images-to-private-ecr is required when using isolated subnets (no NAT/IGW)." >&2
+        echo "Error: --use-public-images cannot be used with isolated subnets (no NAT/IGW)." >&2
         echo "  public.ecr.aws has no VPC endpoint — public images cannot be pulled." >&2
-        echo "  Use --push-all-images-to-private-ecr to mirror public images to private ECR," >&2
+        echo "  Remove --use-public-images to mirror public images to private ECR," >&2
         echo "  or --build-images to build from source and push to private ECR." >&2
         echo "  Or use --ignore-checks to skip this check." >&2
         exit 1
@@ -934,35 +955,56 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
     extra_helm_values="$ecr_values_file"
   fi
   echo "Private ECR values written to $ecr_values_file"
+fi
 
+# Mirror MA images — runs regardless of whether base mirror was parallel or sequential
+if [[ "$push_images_to_ecr" == "true" ]]; then
   # Mirror MA images to the private ECR repo with expected tags
   # Skip if --build-images is set — locally-built images take precedence
   if [[ "$build_images" != "true" ]]; then
     echo "Mirroring MA images to private ECR..."
     export PATH="${HOME}/bin:${PATH}"
+
+    # crane copy with single retry
+    crane_copy_retry() {
+      local src="$1" dst="$2"
+      crane copy "$src" "$dst" 2>&1 | tail -1 || { sleep 5; crane copy "$src" "$dst" 2>&1 | tail -1; } \
+        || echo "  ❌ FAILED: $src → $dst" >&2
+    }
+
+    # MA image mapping: build_tag_name|public_ecr_suffix
+    # build_tag_name: what the build system produces (migrations_<name>_latest)
+    # public_ecr_suffix: the public.ecr.aws image name suffix (opensearch-migrations-<suffix>)
+    MA_IMAGES="capture_proxy|traffic-capture-proxy
+traffic_replayer|traffic-replayer
+reindex_from_snapshot|reindex-from-snapshot
+migration_console|console"
+
     if [[ -n "${ma_images_source:-}" ]]; then
       # Copy from another ECR registry using build tag names
-      for tag in migrations_capture_proxy_latest migrations_traffic_replayer_latest migrations_reindex_from_snapshot_latest migrations_migration_console_latest; do
-        src="${ma_images_source}:${tag}"
-        dst="${MIGRATIONS_ECR_REGISTRY}:${tag}"
-        echo "  $tag → $dst"
-        crane copy "$src" "$dst" 2>&1 | tail -1 || { sleep 5; crane copy "$src" "$dst" 2>&1 | tail -1; } || echo "  ❌ FAILED: $tag" >&2
+      echo "$MA_IMAGES" | while IFS='|' read -r build_name _; do
+        src="${ma_images_source}:migrations_${build_name}_latest"
+        dst="${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest"
+        echo "  $build_name → $dst"
+        crane_copy_retry "$src" "$dst"
       done
     else
       # Copy from public ECR using release image names
       aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
         crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
-      for img in traffic-capture-proxy traffic-replayer reindex-from-snapshot console; do
-        src="public.ecr.aws/opensearchproject/opensearch-migrations-${img}:${RELEASE_VERSION}"
-        tag="migrations_${img//-/_}_latest"
-        dst="${MIGRATIONS_ECR_REGISTRY}:${tag}"
-        echo "  $img → $dst"
-        crane copy "$src" "$dst" 2>&1 | tail -1 || { sleep 5; crane copy "$src" "$dst" 2>&1 | tail -1; } || echo "  ❌ FAILED: $img" >&2
+      echo "$MA_IMAGES" | while IFS='|' read -r build_name public_suffix; do
+        src="public.ecr.aws/opensearchproject/opensearch-migrations-${public_suffix}:${RELEASE_VERSION}"
+        dst="${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest"
+        echo "  $public_suffix → $dst"
+        crane_copy_retry "$src" "$dst"
       done
-      # installer uses migration_console image
-      crane copy "${MIGRATIONS_ECR_REGISTRY}:migrations_console_latest" \
-        "${MIGRATIONS_ECR_REGISTRY}:migrations_migration_console_latest" 2>&1 | tail -1 || true
     fi
+    # Tag mirrored images with the immutable IMAGE_TAG
+    echo "Tagging MA images with $IMAGE_TAG..."
+    echo "$MA_IMAGES" | while IFS='|' read -r build_name _; do
+      crane_copy_retry "${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest" \
+        "${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_${IMAGE_TAG}"
+    done
   else
     echo "Skipping MA image mirroring — --build-images will push locally-built images."
   fi
@@ -985,6 +1027,9 @@ if [[ "$build_images" == "true" ]]; then
     echo "Buildkit already configured and healthy, skipping setup"
   else
     echo "Setting up buildkit for local builds..."
+    # Remove stale builder if it exists but failed health check above (e.g. orphaned
+    # from a previous interrupted run). This is safe — the builder is recreated below.
+    docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
     "${base_dir}/buildImages/setUpK8sImageBuildServices.sh"
   fi
 
@@ -995,7 +1040,13 @@ if [[ "$build_images" == "true" ]]; then
     | docker login --username AWS --password-stdin "$ecr_domain" \
     || { echo "ECR login failed"; exit 1; }
 
-  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -x test || exit
+  skip_test_arg=""
+  [[ "$skip_test_images" == "true" ]] && skip_test_arg="-PskipTestImages=true"
+
+  "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test \
+    || { echo "Image build failed, retrying in 10s..."; sleep 10; \
+         "$base_dir/gradlew" -p "$base_dir" :buildImages:${BUILD_TARGET} -PregistryEndpoint="$MIGRATIONS_ECR_REGISTRY" -Pbuilder="$BUILDER_NAME" -PimageVersion="$IMAGE_TAG" $skip_test_arg -x test; } \
+    || { echo "Image build failed on retry, giving up."; exit 1; }
 
   echo "Cleaning up docker buildx builder to free buildkit pods..."
   docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
@@ -1010,17 +1061,17 @@ fi
 if [[ "$use_public_images" == "false" ]]; then
   IMAGE_FLAGS="\
     --set images.captureProxy.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.captureProxy.tag=migrations_capture_proxy_latest \
+    --set images.captureProxy.tag=migrations_capture_proxy_${IMAGE_TAG} \
     --set images.trafficReplayer.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.trafficReplayer.tag=migrations_traffic_replayer_latest \
+    --set images.trafficReplayer.tag=migrations_traffic_replayer_${IMAGE_TAG} \
     --set images.reindexFromSnapshot.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_latest \
+    --set images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_${IMAGE_TAG} \
     --set images.migrationConsole.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.migrationConsole.tag=migrations_migration_console_latest \
+    --set images.migrationConsole.tag=migrations_migration_console_${IMAGE_TAG} \
     --set images.installer.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.installer.tag=migrations_migration_console_latest \
+    --set images.installer.tag=migrations_migration_console_${IMAGE_TAG} \
     --set images.snapshotFuse.repository=${MIGRATIONS_ECR_REGISTRY} \
-    --set images.snapshotFuse.tag=migrations_snapshot_fuse_latest"
+    --set images.snapshotFuse.tag=migrations_snapshot_fuse_${IMAGE_TAG}"
 # Use latest public images
 else
   echo "Using public images tagged '$RELEASE_VERSION'"
@@ -1170,14 +1221,48 @@ case "$tls_mode" in
     ;;
 esac
 
+echo "=== Helm install configuration ==="
+echo "Chart: ${ma_chart_dir}"
+echo "Namespace: ${namespace}"
+echo "Values flags: ${HELM_VALUES_FLAGS}"
+if [[ -n "$extra_helm_values" ]]; then
+  echo "Extra values files: ${extra_helm_values}"
+  IFS=',' read -ra EXTRA_FILES <<< "$extra_helm_values"
+  for f in "${EXTRA_FILES[@]}"; do
+    echo "--- Contents of $f ---"
+    cat "$f"
+    echo "--- End $f ---"
+  done
+fi
+echo "Set flags:"
+echo "  stageName=${STAGE}"
+echo "  aws.region=${AWS_CFN_REGION}"
+echo "  aws.account=${AWS_ACCOUNT}"
+echo "  defaultBucketConfiguration.snapshotRoleArn=${SNAPSHOT_ROLE}"
+echo "Image flags:"
+echo "  ${IMAGE_FLAGS}"
+echo "TLS flags:"
+echo "  ${TLS_HELM_FLAGS}"
+echo "=== End helm install configuration ==="
+
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
+# Build extra values flags — split comma-separated list into individual -f args
+EXTRA_VALUES_FLAGS=""
+if [[ -n "$extra_helm_values" ]]; then
+  IFS=',' read -ra _evf <<< "$extra_helm_values"
+  for f in "${_evf[@]}"; do
+    EXTRA_VALUES_FLAGS="$EXTRA_VALUES_FLAGS -f $f"
+  done
+fi
+# Suppress trace to avoid leaking helm values in logs
+set +x
 helm install "$namespace" "${ma_chart_dir}" \
   --kube-context="${KUBE_CONTEXT}" \
   --namespace $namespace \
   --create-namespace \
   --timeout 20m \
   $HELM_VALUES_FLAGS \
-  ${extra_helm_values:+-f "$extra_helm_values"} \
+  $EXTRA_VALUES_FLAGS \
   --set stageName="${STAGE}" \
   --set aws.region="${AWS_CFN_REGION}" \
   --set aws.account="${AWS_ACCOUNT}" \
@@ -1185,6 +1270,7 @@ helm install "$namespace" "${ma_chart_dir}" \
   $IMAGE_FLAGS \
   $TLS_HELM_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
+set -x
 
 kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null 2>&1
 
