@@ -129,7 +129,7 @@ cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 cd amazon-opensearch-service-sample-cdk
 
 if [[ "$DESTROY" == true ]]; then
-  cdk destroy "*" --force
+  npx cdk destroy "*" --force
 else
   CDK_OUTPUTS_FILE=$(mktemp)
   npx cdk deploy "*" --require-approval never --concurrency 3 --outputs-file "$CDK_OUTPUTS_FILE"
