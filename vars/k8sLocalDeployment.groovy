@@ -107,7 +107,8 @@ def call(Map config = [:]) {
                             sh "kubectl config unset current-context || true"
                             sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
                             sh "USE_LOCAL_REGISTRY=true KUBE_CONTEXT=minikube BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16 --set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0' ./buildImages/setUpK8sImageBuildServices.sh"
-                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 -Pbuilder=builder-minikube -x test --info --stacktrace --profile --scan"
+                            def pullThroughCacheEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
+                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-minikube -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
                             sh "docker buildx rm builder-minikube 2>/dev/null || true"
                             sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
                         }
