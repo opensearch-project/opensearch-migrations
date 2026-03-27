@@ -135,8 +135,7 @@ def run_aoss_test_benchmarks(cluster: Cluster):
     """Run all OSB workloads for AOSS integration tests (search, timeseries, and vector).
 
     Intended for manually pre-staging snapshot data on a source cluster before
-    creating a BYOS snapshot for AOSS integration tests. The source cluster must
-    use basic auth (not SigV4) since execute_benchmark_workload does not support SigV4.
+    creating a BYOS snapshot for AOSS integration tests.
     """
     # Search workloads
     cluster.execute_benchmark_workload(workload="geonames")
