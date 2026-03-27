@@ -168,6 +168,9 @@ export const MetadataMigration = WorkflowBuilder.create({
                     'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
                     'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
                     'migrations.opensearch.org/task': inputs.taskK8sLabel
+                },
+                annotations: {
+                    'karpenter.sh/do-not-disrupt': 'true'
                 }
             }))
         )
