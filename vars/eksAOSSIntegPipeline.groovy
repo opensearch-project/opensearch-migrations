@@ -6,6 +6,7 @@ def call(Map config = [:]) {
     def endpointEnvVar = envVarMap[collectionType]
     def defaultStageId = config.defaultStageId ?: "aosssrch"
     def jobName = config.jobName ?: "eks-aoss-${collectionType.toLowerCase()}-integ-test"
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
     def clusterContextFilePath = "tmp/cluster-context-aoss-${currentBuild.number}.json"
 
     pipeline {
@@ -25,7 +26,7 @@ def call(Map config = [:]) {
         }
 
         options {
-            lock(label: params.STAGE ?: defaultStageId, quantity: 1, variable: 'maStageName')
+            lock(label: lockLabel, quantity: 1)
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
@@ -50,6 +51,7 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
                     script {
+                        env.maStageName = "${params.STAGE ?: defaultStageId}-${currentBuild.number}"
                         env.STACK_NAME = "MA-Serverless-${maStageName}-${params.REGION}"
                         env.eksClusterName = "migration-eks-cluster-${maStageName}-${params.REGION}"
                         env.eksKubeContext = env.eksClusterName
