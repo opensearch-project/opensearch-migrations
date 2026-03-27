@@ -11,8 +11,8 @@ import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.cluster.ClusterReader;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 
 import com.beust.jcommander.ParameterException;
 import lombok.AllArgsConstructor;
@@ -38,7 +38,7 @@ public class ClusterReaderExtractor {
         }
 
         // Get file finder
-        var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(arguments.sourceVersion, true);
+        var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(arguments.sourceVersion, true);
 
         SourceRepo repo = null;
         if (arguments.fileSystemRepoPath != null) {
@@ -62,10 +62,10 @@ public class ClusterReaderExtractor {
     }
 
     ClusterReader getRemoteReader(ConnectionContext connection) {
-        return ClusterProviderRegistry.getRemoteReader(connection, arguments.versionStrictness.allowLooseVersionMatches);
+        return SnapshotReaderRegistry.getRemoteReader(connection, arguments.versionStrictness.allowLooseVersionMatches);
     }
 
     ClusterReader getSnapshotReader(Version sourceVersion, SourceRepo repo) {
-        return ClusterProviderRegistry.getSnapshotReader(sourceVersion, repo, arguments.versionStrictness.allowLooseVersionMatches);
+        return SnapshotReaderRegistry.getSnapshotReader(sourceVersion, repo, arguments.versionStrictness.allowLooseVersionMatches);
     }
 }

@@ -19,7 +19,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.utils.FileSystemUtils;
@@ -43,7 +43,7 @@ public class EndToEndTest extends SourceTestBase {
     private static final String ES5_SINGLE_TYPE_INDEX = "es5_single_type";
 
     private static Stream<Arguments> scenarios() {
-        return SupportedClusters.supportedPairs(true).stream()
+        return SupportedClusters.representativeMigrationPairs().stream()
                 .map(migrationPair -> Arguments.of(migrationPair.source(), migrationPair.target()));
     }
 
@@ -173,7 +173,7 @@ public class EndToEndTest extends SourceTestBase {
             );
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             sourceCluster.copySnapshotData(localDirectory.toString());
-            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
                     sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 

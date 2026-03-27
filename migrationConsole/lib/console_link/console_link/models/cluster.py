@@ -329,8 +329,10 @@ class Cluster:
             client_options += (f",basic_auth_user:{username},"
                                f"basic_auth_password:{password_to_censor}")
         elif self.auth_type == AuthMethod.SIGV4:
-            raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
-                                      f"benchmark workloads")
+            service, region = self._get_sigv4_details(force_region=True)
+            client_options += (f",amazon_aws_log_in:session,"
+                               f"service:{service},"
+                               f"region:{region}")
         logger.info(f"Running opensearch-benchmark with '{workload}' workload")
         command = (f"opensearch-benchmark run "
                    f"--exclude-tasks=check-cluster-health "
