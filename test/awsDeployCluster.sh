@@ -121,6 +121,7 @@ else
 fi
 cd amazon-opensearch-service-sample-cdk && git checkout -- . && git fetch --tags && git checkout "$SAMPLE_CDK_VERSION"
 npm ci
+npm run build
 
 cd ..
 cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
