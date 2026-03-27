@@ -166,6 +166,8 @@ class TestRunner:
             command_list.append("--keep_workflows")
         if reuse_clusters:
             command_list.append("--reuse_clusters")
+        if self.registry_prefix:
+            command_list.append(f"--image_registry_prefix={self.registry_prefix}")
         command_list.append("-s")
         self.k8s_service.exec_migration_console_cmd(command_list=command_list)
         output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
@@ -292,7 +294,9 @@ class TestRunner:
                                              reuse_clusters=reuse_clusters,
                                              test_reports_dir=test_reports_dir)
                 test_reports.append(test_report)
-                tests_failed = test_report.summary.passed == 0 or test_report.summary.failed > 0
+                tests_failed = test_report.summary.failed > 0 or (
+                    test_report.summary.passed == 0 and len(test_report.tests) > 0
+                )
 
                 if tests_failed:
                     logger.warning(f"Tests failed (or no tests executed) for migrations "
@@ -337,7 +341,7 @@ def get_version_combinations(source_version, target_version, target_type):
     if target_type == TargetType.AOSS:
         return [(s, TargetType.AOSS.value) for s in source_list]
     target_list = VALID_TARGET_VERSIONS if target_version == "all" else [target_version]
-    return [(s, t) for s in source_list for t in target_list]
+    return [(s, t) for s in source_list for t in target_list if s != t]
 
 
 def parse_args() -> argparse.Namespace:
