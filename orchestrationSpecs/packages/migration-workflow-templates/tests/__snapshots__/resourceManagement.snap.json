@@ -55,7 +55,7 @@
           "resources": {
             "limits": {
               "cpu": "50m",
-              "memory": "32Mi"
+              "memory": "64Mi"
             },
             "requests": {
               "cpu": "50m",
@@ -242,7 +242,7 @@
           "resources": {
             "limits": {
               "cpu": "50m",
-              "memory": "32Mi"
+              "memory": "64Mi"
             },
             "requests": {
               "cpu": "50m",

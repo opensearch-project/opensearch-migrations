@@ -296,8 +296,7 @@ export const Replayer = WorkflowBuilder.create({
         b.setDefinition({
           action: "apply",
           setOwnerReference: false,
-          manifest: makeKafkaClientPropertiesConfigMap(b.inputs.name),
-          successCondition: 'metadata.name != ""'
+          manifest: makeKafkaClientPropertiesConfigMap(b.inputs.name)
         }),
       )
       .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY),

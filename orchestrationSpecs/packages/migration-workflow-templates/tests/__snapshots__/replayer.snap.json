@@ -97,8 +97,7 @@
         "resource": {
           "manifest": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: \"{{inputs.parameters.name}}\"\ndata:\n  client.properties: |-\n    ssl.truststore.type=PEM\n    ssl.truststore.location=/config/kafka-ca/ca.crt\n",
           "action": "apply",
-          "setOwnerReference": false,
-          "successCondition": "metadata.name != \"\""
+          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
