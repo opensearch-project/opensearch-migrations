@@ -70,7 +70,6 @@ class RestClientTest {
             }
         }
 
-        Thread.sleep(200);
         var allMetricData = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
 
         for (var kvp : Map.of(

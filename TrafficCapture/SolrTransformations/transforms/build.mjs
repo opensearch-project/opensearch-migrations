@@ -92,6 +92,7 @@ for (const entry of transforms) {
     format: 'esm',
     target: 'es2020',
     treeShaking: true,
+    loader: { '.pegjs': 'text' },
     outfile: outPath,
     plugins: [graalvmWrapPlugin()],
   };
@@ -121,6 +122,7 @@ for (const entry of testCaseFiles) {
     format: 'esm',
     target: 'es2020',
     treeShaking: true,
+    loader: { '.pegjs': 'text' },
     outfile: outPath,
     plugins: [testCaseExtractPlugin()],
   };
@@ -150,6 +152,7 @@ for (const entry of configFiles) {
     format: 'esm',
     target: 'es2020',
     treeShaking: true,
+    loader: { '.pegjs': 'text' },
     outfile: outPath,
     plugins: [{
       name: 'config-extract',

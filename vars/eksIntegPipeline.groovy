@@ -15,6 +15,7 @@ static def expandVersionString(String input) {
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eks-integ"
     def jobName = config.jobName ?: "eks-integ-test"
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
     def sourceVersion = config.sourceVersion ?: ""
     def targetVersion = config.targetVersion ?: ""
     def sourceClusterType = config.sourceClusterType ?: ""
@@ -50,11 +51,11 @@ def call(Map config = [:]) {
                     description: 'Pick a target cluster type'
             )
             string(name: 'TEST_IDS', defaultValue: 'all', description: 'Test IDs to execute. Use comma separated list e.g. "0001,0004" or "all" for all tests')
+            string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
         }
 
         options {
-            // Acquire lock on a given deployment stage
-            lock(label: params.STAGE, quantity: 1, variable: 'maStageName')
+            lock(label: lockLabel, quantity: 1)
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
@@ -78,6 +79,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
+                    script { env.maStageName = "${params.STAGE}-${currentBuild.number}" }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }
@@ -94,7 +96,7 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
-                            sh './gradlew clean build --no-daemon --stacktrace'
+                            sh './gradlew clean build -x test --no-daemon --stacktrace'
                         }
                     }
                 }
@@ -127,14 +129,19 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 150, unit: 'MINUTES') {
                         script {
-                            env.STACK_NAME_SUFFIX = "${maStageName}-us-east-1"
+                            env.STACK_NAME_SUFFIX = "${maStageName}-${params.REGION}"
                             def clusterDetails = readJSON text: env.clusterDetailsJson
                             def targetCluster = clusterDetails.target
-                            def vpcId = targetCluster.vpcId
+                            def vpcId = targetCluster.vpcId ?: ''
                             def subnetIds = "${targetCluster.subnetIds}"
 
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                    if (!vpcId) {
+                                        def firstSubnet = subnetIds.split(',')[0]
+                                        vpcId = sh(script: "aws ec2 describe-subnets --subnet-ids ${firstSubnet} --region ${params.REGION} --query 'Subnets[0].VpcId' --output text", returnStdout: true).trim()
+                                        echo "Resolved VPC ID from subnet: ${vpcId}"
+                                    }
                                     sh """
                                         ./deployment/k8s/aws/aws-bootstrap.sh \
                                           --deploy-import-vpc-cfn \
@@ -149,8 +156,8 @@ def call(Map config = [:]) {
                                           --base-dir "\$(pwd)" \
                                           --skip-console-exec \
                                           --skip-setting-k8s-context \
-                                          --region us-east-1 \
-                                          2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
+                                          --region ${params.REGION} \
+                                          2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
                                     """
 
                                     // Capture env vars for later stages and cleanup
@@ -173,7 +180,7 @@ def call(Map config = [:]) {
                                     env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
                                     env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']
                                     env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
-                                    env.eksKubeContext = "migration-eks-cluster-${maStageName}-us-east-1"
+                                    env.eksKubeContext = "migration-eks-cluster-${maStageName}-${params.REGION}"
                                 }
                             }
                         }
@@ -186,7 +193,7 @@ def call(Map config = [:]) {
                     timeout(time: 15, unit: 'MINUTES') {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 1200, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 1200, roleSessionName: 'jenkins-session') {
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def sourceCluster = clusterDetails.source
                                     def targetCluster = clusterDetails.target
@@ -198,7 +205,7 @@ def call(Map config = [:]) {
                                             endpoint: sourceCluster.endpoint,
                                             allow_insecure: true,
                                             sigv4: [
-                                                    region: "us-east-1",
+                                                    region: params.REGION,
                                                     service: "es"
                                             ],
                                             version: env.sourceVer
@@ -216,10 +223,9 @@ def call(Map config = [:]) {
                                             endpoint: targetCluster.endpoint,
                                             allow_insecure: true,
                                             sigv4: [
-                                                    region: "us-east-1",
+                                                    region: params.REGION,
                                                     service: "es"
-                                            ],
-                                            version: env.targetVer
+                                            ]
                                     ]
                                     sh """
                                       kubectl --context=${env.eksKubeContext} create configmap target-${targetVersionExpanded}-migration-config \
@@ -266,7 +272,7 @@ def call(Map config = [:]) {
                                 }
                                 sh "pipenv install --deploy"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
                                     }
                                 }
@@ -280,11 +286,9 @@ def call(Map config = [:]) {
             always {
                 timeout(time: 75, unit: 'MINUTES') {
                     script {
-                        def region = "us-east-1"
+                        def region = params.REGION ?: 'us-east-1'
+                        def clusterStackName = "OpenSearch-${maStageName}-${region}"
                         def maStackName = "Migration-Assistant-Infra-Import-VPC-eks-${maStageName}-${region}"
-                        def sourceDomainStackName = "OpenSearchDomain-source-${maStageName}-${region}"
-                        def targetDomainStackName = "OpenSearchDomain-target-${maStageName}-${region}"
-                        def networkStackName = "NetworkInfra-${maStageName}-${region}"
 
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: region, duration: 4500, roleSessionName: 'jenkins-session') {
@@ -331,15 +335,9 @@ def call(Map config = [:]) {
                                 sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
                                 sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
 
-                                echo "CLEANUP: Deleting domain stacks"
-                                sh "aws cloudformation delete-stack --stack-name ${sourceDomainStackName} --region ${region} || true"
-                                sh "aws cloudformation delete-stack --stack-name ${targetDomainStackName} --region ${region} || true"
-                                sh "aws cloudformation wait stack-delete-complete --stack-name ${sourceDomainStackName} --region ${region} || true"
-                                sh "aws cloudformation wait stack-delete-complete --stack-name ${targetDomainStackName} --region ${region} || true"
-
-                                echo "CLEANUP: Deleting network stack ${networkStackName}"
-                                sh "aws cloudformation delete-stack --stack-name ${networkStackName} --region ${region} || true"
-                                sh "aws cloudformation wait stack-delete-complete --stack-name ${networkStackName} --region ${region} || true"
+                                echo "CLEANUP: Deleting cluster stack ${clusterStackName}"
+                                sh "aws cloudformation delete-stack --stack-name ${clusterStackName} --region ${region} || true"
+                                sh "aws cloudformation wait stack-delete-complete --stack-name ${clusterStackName} --region ${region} || true"
                             }
                         }
                     }

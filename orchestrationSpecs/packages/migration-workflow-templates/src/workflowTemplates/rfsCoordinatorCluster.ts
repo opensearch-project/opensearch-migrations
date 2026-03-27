@@ -96,6 +96,18 @@ function createRfsCoordinatorStatefulSetManifest(clusterName: BaseExpression<str
                         {
                             name: "opensearch",
                             image: coordinatorImage,
+                            // Remove all plugins except opensearch-security before starting.
+                            // The coordinator only needs core indexing for work coordination
+                            // state tracking — the 25+ bundled plugins are unnecessary and
+                            // dramatically slow startup under CPU contention.
+                            command: ["bash", "-c",
+                                "for dir in /usr/share/opensearch/plugins/*/; do " +
+                                "p=$(basename \"$dir\"); " +
+                                "[ \"$p\" = \"opensearch-security\" ] && continue; " +
+                                "rm -rf \"$dir\"; " +
+                                "done; " +
+                                "exec /usr/share/opensearch/opensearch-docker-entrypoint.sh opensearch"
+                            ],
                             ports: [
                                 {
                                     name: "https",
@@ -110,6 +122,10 @@ function createRfsCoordinatorStatefulSetManifest(clusterName: BaseExpression<str
                                 {
                                     name: "discovery.type",
                                     value: "single-node"
+                                },
+                                {
+                                    name: "DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI",
+                                    value: "true"
                                 },
                                 {
                                     name: "OPENSEARCH_INITIAL_ADMIN_USERNAME",

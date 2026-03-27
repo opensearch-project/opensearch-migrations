@@ -16,6 +16,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
+import org.opensearch.migrations.transform.shim.tracing.ShimRequestContext;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.migrations.transform.shim.validation.TargetResponse;
 import org.opensearch.migrations.transform.shim.validation.ValidationResult;
@@ -78,6 +80,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     private final int maxContentLength;
     private final AtomicInteger activeRequests;
     private final AtomicLong requestCounter = new AtomicLong(0);
+    private final RootShimProxyContext rootContext;
 
     /** Connection pools keyed by target name. Lazily initialized on first use. */
     private volatile AbstractChannelPoolMap<String, FixedChannelPool> poolMap;
@@ -90,7 +93,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         Duration secondaryTimeout,
         SslContext backendSslContext,
         int maxContentLength,
-        AtomicInteger activeRequests
+        AtomicInteger activeRequests,
+        RootShimProxyContext rootContext
     ) {
         super(false);
         this.targets = targets;
@@ -101,6 +105,22 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         this.backendSslContext = backendSslContext;
         this.maxContentLength = maxContentLength;
         this.activeRequests = activeRequests;
+        this.rootContext = rootContext;
+    }
+
+    /** Backward-compatible constructor without RootShimProxyContext. */
+    public MultiTargetRoutingHandler(
+        Map<String, Target> targets,
+        String primaryTarget,
+        Set<String> activeTargets,
+        List<ValidationRule> validators,
+        Duration secondaryTimeout,
+        SslContext backendSslContext,
+        int maxContentLength,
+        AtomicInteger activeRequests
+    ) {
+        this(targets, primaryTarget, activeTargets, validators, secondaryTimeout,
+            backendSslContext, maxContentLength, activeRequests, null);
     }
 
     @Override
@@ -138,8 +158,13 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) {
-        // TODO: enable if latency headers matter
-        // long shimStartNanos = System.nanoTime();
+        String httpMethod = request.method().name();
+        String httpUri = request.uri();
+
+        ShimRequestContext requestCtx = rootContext != null
+            ? new ShimRequestContext(rootContext, httpMethod, httpUri)
+            : null;
+
         activeRequests.incrementAndGet();
         boolean keepAlive = Boolean.TRUE.equals(
             ctx.channel().attr(ShimChannelAttributes.KEEP_ALIVE).get());
@@ -149,7 +174,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
         long requestId = requestCounter.getAndIncrement();
         var futures = dispatchAll(requestMap);
-        handlePrimaryCompletion(ctx, futures, keepAlive, requestMap, requestId);
+        handlePrimaryCompletion(ctx, futures, keepAlive, requestMap, requestId, requestCtx);
     }
 
     private Map<String, CompletableFuture<TargetResponse>> dispatchAll(
@@ -170,7 +195,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         Map<String, CompletableFuture<TargetResponse>> futures,
         boolean keepAlive,
         Map<String, Object> requestMap,
-        long requestId
+        long requestId,
+        ShimRequestContext requestCtx
     ) {
         futures.get(primaryTarget).whenComplete((primaryResp, primaryEx) ->
             ctx.channel().eventLoop().execute(() -> {
@@ -181,18 +207,21 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                     Map<String, TargetResponse> allResponses = collectResponses(futures);
                     List<ValidationResult> results = runValidators(allResponses);
                     FullHttpResponse response = buildFinalResponse(primary, allResponses, results);
-                    // TODO: enable if latency headers matter
-                    // response.headers().set("X-Shim-Latency",
-                    //     Duration.ofNanos(System.nanoTime() - shimStartNanos).toMillis());
                     HttpMessageUtil.writeResponse(ctx, response, keepAlive);
 
                     logTuple(requestId, requestMap, allResponses, results);
                 } catch (Exception e) {
                     log.error("Error building validation response", e);
+                    if (requestCtx != null) {
+                        requestCtx.addTraceException(e, true);
+                    }
                     HttpMessageUtil.writeResponse(ctx, HttpMessageUtil.errorResponse(
                         HttpResponseStatus.INTERNAL_SERVER_ERROR, "Validation shim error"), keepAlive);
                 } finally {
                     activeRequests.decrementAndGet();
+                    if (requestCtx != null) {
+                        requestCtx.close();
+                    }
                 }
             })
         );

@@ -72,6 +72,7 @@ abstract class BaseMigrationTest {
     ) {
         var args = new CreateSnapshot.Args();
         args.snapshotName = snapshotName;
+        args.snapshotRepoName = snapshotName + "_repo";
         args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
         args.sourceArgs.host = sourceContainer.getUrl();
         args.compressionEnabled = compressionEnabled;

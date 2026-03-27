@@ -11,8 +11,10 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [ sh, -c ]
         args:
           - |
@@ -82,7 +84,7 @@ spec:
                     fsGroup: 1000
                   initContainers:
                     - name: install-s3-plugin
-                      image: mirror.gcr.io/library/elasticsearch:1.5.2
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:1.5.2
                       command: ["sh","-c"]
                       args:
                         - |
@@ -113,7 +115,7 @@ spec:
                         runAsNonRoot: true
                   containers:
                     - name: elasticsearch
-                      image: mirror.gcr.io/library/elasticsearch:1.5.2
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:1.5.2
                       imagePullPolicy: IfNotPresent
                       env:
                         - name: ES_HEAP_SIZE
@@ -228,8 +230,10 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |
@@ -298,7 +302,7 @@ spec:
                     fsGroup: 1000
                   initContainers:
                     - name: install-s3-plugin
-                      image: mirror.gcr.io/library/elasticsearch:2.4.6
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:2.4.6
                       command: ["sh","-c"]
                       args:
                         - /usr/share/elasticsearch/bin/plugin install cloud-aws
@@ -311,7 +315,7 @@ spec:
                         runAsNonRoot: true
                   containers:
                     - name: elasticsearch
-                      image: mirror.gcr.io/library/elasticsearch:2.4.6
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:2.4.6
                       imagePullPolicy: IfNotPresent
                       env:
                         - name: ES_HEAP_SIZE
@@ -423,8 +427,10 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |
@@ -444,7 +450,7 @@ spec:
             # Create Helm values file for ES 5.6.16
             cat > /tmp/es-values.yaml << 'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
-            image: "docker.elastic.co/elasticsearch/elasticsearch"
+            image: "{{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch"
             imageTag: "5.6.16"
             antiAffinity: "soft"
             esJavaOpts: "-Xms2g -Xmx2g"
@@ -473,7 +479,7 @@ spec:
             
             extraInitContainers:
               - name: install-s3-plugin
-                image: docker.elastic.co/elasticsearch/elasticsearch:5.6.16
+                image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:5.6.16
                 command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
                 volumeMounts:
                   - name: plugins
@@ -523,8 +529,10 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |
@@ -543,7 +551,7 @@ spec:
             # Create Helm values file for ES 6.8.23 with OSS image and disabled readiness probe
             cat > /tmp/es-values.yaml << 'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
-            image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
+            image: "{{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch"
             imageTag: "6.8.23"
             antiAffinity: "soft"
             esJavaOpts: "-Xms2g -Xmx2g -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
@@ -585,13 +593,13 @@ spec:
             
             extraInitContainers:
               - name: install-s3-plugin
-                image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23
+                image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:6.8.23
                 command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
                 volumeMounts:
                   - name: plugins
                     mountPath: /usr/share/elasticsearch/plugins
               - name: inject-aws-creds
-                image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23
+                image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:6.8.23
                 command:
                   - sh
                   - -c
@@ -660,8 +668,10 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |
@@ -675,7 +685,7 @@ spec:
             
             cat > /tmp/es-values.yaml << 'EOF'
             fullnameOverride: {{inputs.parameters.cluster-name}}
-            image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
+            image: "{{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch"
             imageTag: "7.10.2"
             antiAffinity: "soft"
             esJavaOpts: "-Xms2g -Xmx2g"
@@ -708,13 +718,13 @@ spec:
             
             extraInitContainers:
               - name: install-s3-plugin
-                image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+                image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:7.10.2
                 command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
                 volumeMounts:
                   - name: plugins
                     mountPath: /usr/share/elasticsearch/plugins
               - name: inject-aws-creds
-                image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
+                image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:7.10.2
                 command:
                   - sh
                   - -c
@@ -781,7 +791,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |
@@ -873,7 +883,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |
@@ -1096,7 +1106,7 @@ spec:
                 serviceAccountName: migration-console-access-role
                 initContainers:
                   - name: install-plugins
-                    image: mirror.gcr.io/opensearchproject/opensearch:3.1.0
+                    image: opensearchproject/opensearch:3.1.0
                     command:
                       - sh
                       - -c
@@ -1111,7 +1121,7 @@ spec:
                         mountPath: /plugins
                 containers:
                   - name: opensearch
-                    image: mirror.gcr.io/opensearchproject/opensearch:3.1.0
+                    image: opensearchproject/opensearch:3.1.0
                     ports:
                       - name: https
                         containerPort: 9200

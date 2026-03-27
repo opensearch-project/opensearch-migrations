@@ -77,9 +77,6 @@ EOF
 cat /config/migration_services.yaml_ |
 jq -f workflowConfigToServicesConfig.jq > /config/migration_services.yaml
 
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
 echo file dump
 echo ---
 export MIGRATION_USE_SERVICES_YAML_CONFIG=true

@@ -40,3 +40,5 @@ ignore:
   - "**/coverage/**/*"
   - "**/generated/**"
   - "**/orchestrationSpecs/**"
+  - "**/Dockerfile*"
+  - "**/*.sh"

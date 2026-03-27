@@ -58,7 +58,7 @@ The global S3 endpoint (`s3.amazonaws.com`) resolves to IPs outside the regional
 ### Setup
 - testClusters upgraded with `valuesEks.yaml` + `source.extraEnvs[0].value=s3.us-east-2.amazonaws.com`
 - ES image: `<ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/migration-ecr-isolated-us-east-2:migrations_elasticsearch_searchguard_latest`
-- OS image: `<ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/mirrored/docker.io/opensearchproject/opensearch:2.19.1` (mirrored ECR, no internet needed)
+- OS image: `<ACCOUNT_ID>.dkr.ecr.us-east-2.amazonaws.com/mirrored/mirror.gcr.io/opensearchproject/opensearch:2.19.1` (mirrored ECR, no internet needed)
 
 ### Data Generation
 ```
