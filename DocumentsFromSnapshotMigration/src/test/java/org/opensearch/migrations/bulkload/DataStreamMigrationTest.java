@@ -129,6 +129,7 @@ public class DataStreamMigrationTest extends SourceTestBase {
             log.info("Creating snapshot of source cluster");
             var args = new CreateSnapshot.Args();
             args.snapshotName = SNAPSHOT_NAME;
+            args.snapshotRepoName = SNAPSHOT_NAME + "_repo";
             args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
             args.sourceArgs.host = osSourceContainer.getUrl();
 
