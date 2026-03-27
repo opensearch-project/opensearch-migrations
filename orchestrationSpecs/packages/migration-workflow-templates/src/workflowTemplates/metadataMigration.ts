@@ -170,7 +170,6 @@ export const MetadataMigration = WorkflowBuilder.create({
                     'migrations.opensearch.org/task': inputs.taskK8sLabel
                 }
             }))
-            .markAsShortLived()
         )
     )
 

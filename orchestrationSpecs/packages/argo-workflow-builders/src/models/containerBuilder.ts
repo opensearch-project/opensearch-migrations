@@ -140,7 +140,7 @@ type HasHostAliases = { __hasHostAliases: true };
 type HasPodSpecPatch = { __hasPodSpecPatch: true };
 type HasRetryStrategy = { __hasRetryStrategy: true };
 type HasSynchronization = { __hasSynchronization: true };
-type HasShortLived = { __hasShortLived: true };
+type HasAllowDisruption = { __hasAllowDisruption: true };
 
 // Runtime storage for pod config (not tracked in type system individually)
 type PodConfigData = {
@@ -156,7 +156,7 @@ type PodConfigData = {
     securityContext?: PodSecurityContext;
     hostAliases?: HostAlias[];
     podSpecPatch?: AllowLiteralOrExpression<string>;
-    shortLived?: boolean;
+    disruptable?: boolean;
 };
 
 export class ContainerBuilder<
@@ -237,8 +237,8 @@ export class ContainerBuilder<
             mountPath: config.mountPath,
             readOnly: config.readOnly
         }));
-        const shortLivedAnnotations = this.podConfig.shortLived
-            ? { 'karpenter.sh/do-not-disrupt': 'true' } : undefined;
+        const shortLivedAnnotations = this.podConfig.disruptable
+            ? undefined : { 'karpenter.sh/do-not-disrupt': 'true' };
         const mergedMetadata = (this.podConfig.metadata || shortLivedAnnotations) ? {
             ...this.podConfig.metadata,
             annotations: {
@@ -590,14 +590,14 @@ export class ContainerBuilder<
     }
 
     /**
-     * Mark this pod as short-lived, adding karpenter.sh/do-not-disrupt annotation
-     * to prevent Karpenter from evicting the node while this pod is running.
-     * Can be combined with addPodMetadata - annotations are merged at render time.
+     * Allow Karpenter to disrupt the node running this pod. By default, all container
+     * pods are annotated with karpenter.sh/do-not-disrupt to prevent eviction during
+     * execution. Call this to opt out for pods that can tolerate disruption.
      */
-    markAsShortLived(
-        this: PodConfigBrands extends HasShortLived ? never : this,
-    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasShortLived> {
-        return this.withUpdates({ podConfig: { ...this.podConfig, shortLived: true } });
+    allowDisruption(
+        this: PodConfigBrands extends HasAllowDisruption ? never : this,
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasAllowDisruption> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, disruptable: true } });
     }
 
     addTolerations(

@@ -146,7 +146,6 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     'migrations.opensearch.org/task': inputs.taskK8sLabel
                 }
             }))
-            .markAsShortLived()
         )
     )
 

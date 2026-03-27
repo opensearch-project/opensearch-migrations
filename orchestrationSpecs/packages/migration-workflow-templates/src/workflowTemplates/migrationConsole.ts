@@ -168,7 +168,6 @@ export const MigrationConsole = WorkflowBuilder.create({
                     'migrations.opensearch.org/task': inputs.taskK8sLabel
                 }
             }))
-            .markAsShortLived()
         )
         .addPathOutput("statusOutput", "/tmp/status-output.txt", typeToken<string>())
         .addPathOutput("overriddenPhase", "/tmp/phase-output.txt", typeToken<string>())
