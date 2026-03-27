@@ -145,8 +145,9 @@ spec:
             }
             
             # Build sourceClusters map from source-configs array with schema transformation
+            # Supports both standard (configmap S3 repo) and BYOS (source-provided snapshotRepo)
             SOURCE_CLUSTERS=$(echo "$SOURCE_CONFIGS" | jq --argjson repo "$SNAPSHOT_REPO" '
-              reduce to_entries[] as $e ({}; 
+              reduce to_entries[] as $e ({};
                 .["source\($e.key + 1)"] = (
                   $e.value as $entry |
                   $entry.source
@@ -156,6 +157,8 @@ spec:
                   | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
                   # Move sigv4 under authConfig
                   | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+                  # Move basic_auth under authConfig.basic with secretName
+                  | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
                   # Remove unrecognized fields
                   | del(.no_auth) | del(.snapshotRepo)
                   # Build snapshotInfo based on whether snapshot is externally managed (BYOS) or not

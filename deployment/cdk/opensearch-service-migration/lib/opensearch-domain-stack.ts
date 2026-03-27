@@ -42,6 +42,7 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
   readonly ebsIops?: number,
   readonly ebsVolumeSize?: number,
   readonly ebsVolumeTypeName?: string,
+  readonly ebsThroughput?: number,
   readonly encryptionAtRestEnabled?: boolean,
   readonly encryptionAtRestKmsKeyARN?: string,
   readonly appLogEnabled?: boolean,
@@ -193,7 +194,8 @@ export class OpenSearchDomainStack extends Stack {
         enabled: props.ebsEnabled,
         iops: props.ebsIops,
         volumeSize: props.ebsVolumeSize,
-        volumeType: ebsVolumeType
+        volumeType: ebsVolumeType,
+        throughput: props.ebsThroughput
       },
       logging: {
         appLogEnabled: props.appLogEnabled,

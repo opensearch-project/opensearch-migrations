@@ -1,0 +1,64 @@
+{
+  "mappings": {
+    "properties": {
+      "id": {
+        "type": "keyword"
+      },
+      "product_title": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 512
+          }
+        }
+      },
+      "review_body": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 512
+          }
+        }
+      },
+      "review_headline": {
+        "type": "text",
+        "fields": {
+          "keyword": {
+            "type": "keyword",
+            "ignore_above": 256
+          }
+        }
+      },
+      "product_category": {
+        "type": "keyword"
+      },
+      "marketplace": {
+        "type": "keyword"
+      },
+      "product_id": {
+        "type": "keyword"
+      },
+      "star_rating": {
+        "type": "integer"
+      },
+      "helpful_votes": {
+        "type": "integer"
+      },
+      "total_votes": {
+        "type": "integer"
+      },
+      "review_date": {
+        "type": "date",
+        "format": "yyyy-MM-dd||strict_date_optional_time||epoch_millis"
+      },
+      "verified_purchase": {
+        "type": "boolean"
+      },
+      "vine": {
+        "type": "boolean"
+      }
+    }
+  }
+}

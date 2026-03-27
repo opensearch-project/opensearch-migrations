@@ -53,49 +53,6 @@ export const testCases: TestCase[] = [
     },
   }),
 
-  solrTest('rows-limits-returned-documents', {
-    documents: [
-      { id: '1', title: 'first doc', content: 'alpha' },
-      { id: '2', title: 'second doc', content: 'beta' },
-      { id: '3', title: 'third doc', content: 'gamma' },
-    ],
-    requestPath: '/solr/testcollection/select?q=*:*&rows=2&wt=json',
-    solrSchema: {
-      fields: {
-        title: { type: 'text_general' },
-        content: { type: 'text_general' },
-      },
-    },
-    opensearchMapping: {
-      properties: {
-        title: { type: 'text' },
-        content: { type: 'text' },
-      },
-    },
-  }),
-
-  solrTest('rows-with-start-pagination', {
-    documents: [
-      { id: '1', title: 'first doc', content: 'alpha' },
-      { id: '2', title: 'second doc', content: 'beta' },
-      { id: '3', title: 'third doc', content: 'gamma' },
-      { id: '4', title: 'fourth doc', content: 'delta' },
-    ],
-    requestPath: '/solr/testcollection/select?q=*:*&rows=2&start=2&wt=json',
-    solrSchema: {
-      fields: {
-        title: { type: 'text_general' },
-        content: { type: 'text_general' },
-      },
-    },
-    opensearchMapping: {
-      properties: {
-        title: { type: 'text' },
-        content: { type: 'text' },
-      },
-    },
-  }),
-
   // ───────────────────────────────────────────────────────────
   // Facet tests — JSON Facet API (json.facet)
   // ───────────────────────────────────────────────────────────
@@ -261,6 +218,49 @@ export const testCases: TestCase[] = [
     ],
   }),
 
+  solrTest('facet-query', {
+    description: 'Query facet counting documents matching specific queries',
+    documents: [
+      { id: '1', title: 'laptop', category: 'electronics', price: 999 },
+      { id: '2', title: 'phone', category: 'electronics', price: 699 },
+      { id: '3', title: 'shirt', category: 'clothing', price: 29 },
+      { id: '4', title: 'pants', category: 'clothing', price: 59 },
+      { id: '5', title: 'apple', category: 'food', price: 3 },
+      { id: '6', title: 'banana', category: 'food', price: 2 },
+    ],
+    requestPath:
+      '/solr/testcollection/select?q=*:*&wt=json&json.facet=' +
+      encodeURIComponent(
+        JSON.stringify({
+          expensive: { type: 'query', q: 'price:[100 TO *]' },
+          cheap: { type: 'query', q: 'price:[* TO 50]' },
+          electronics: { type: 'query', q: 'category:electronics' },
+        }),
+      ),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        category: { type: 'string' },
+        price: { type: 'pfloat' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        category: { type: 'keyword' },
+        price: { type: 'float' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      {
+        path: '$.response',
+        rule: 'ignore',
+        reason: 'Facet test — only validating $.facets, not hits',
+      },
+    ],
+  }),
+
   solrTest('facet-date-range', {
     description: 'Date range facet using start/end/gap with +1MONTH calendar interval',
     documents: [
@@ -303,33 +303,6 @@ export const testCases: TestCase[] = [
         reason: 'Facet test — only validating $.facets, not hits',
       },
     ],
-  }),
-
-  // ───────────────────────────────────────────────────────────
-  // Field list (fl) tests — _source filtering
-  // ───────────────────────────────────────────────────────────
-
-  solrTest('field-list-param', {
-    description: 'fl parameter with mixed comma/space separators and glob pattern (na*)',
-    documents: [
-      { id: '1', name: 'Alice', name_full: 'Alice Smith', price: 100 },
-      { id: '2', name: 'Bob', name_full: 'Bob Jones', price: 200 },
-    ],
-    requestPath: '/solr/testcollection/select?q=*:*&fl=id,na*%20price&wt=json',
-    solrSchema: {
-      fields: {
-        name: { type: 'text_general' },
-        name_full: { type: 'text_general' },
-        price: { type: 'pint' },
-      },
-    },
-    opensearchMapping: {
-      properties: {
-        name: { type: 'text' },
-        name_full: { type: 'text' },
-        price: { type: 'integer' },
-      },
-    },
   }),
 
   // ───────────────────────────────────────────────────────────

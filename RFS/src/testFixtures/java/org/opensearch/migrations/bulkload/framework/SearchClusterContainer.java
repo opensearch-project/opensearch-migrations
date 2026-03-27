@@ -16,10 +16,13 @@ import java.util.concurrent.TimeUnit;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 
+import com.github.dockerjava.api.command.PullImageResultCallback;
+import com.github.dockerjava.api.exception.NotFoundException;
 import com.google.common.collect.ImmutableMap;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.ExecConfig;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -38,7 +41,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
      * Verified via test: removing these lines causes container startup or snapshot repo registration to fail.
      */
     private static final List<String> ES_5_COMMON_CONFIG_LINES = List.of(
-        "network.host: 0.0.0.0",
+        "http.host: 0.0.0.0",
         "http.port: 9200",
         "transport.tcp.port: 9300",
         "discovery.zen.ping.unicast.hosts: []",
@@ -212,7 +215,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         ELASTICSEARCH_5(
             overrideAndRemoveEnv(
                 BASE.getEnvVariables(),
-                Map.of("ES_JAVA_OPTS", "-Xms1g -Xmx1g"),
+                Map.of("ES_JAVA_OPTS", "-Xms1g -Xmx1g -Des.cgroups.hierarchy.override=/"),
                 Set.of(
                     "discovery.type",
                     "ES_JAVA_OPTS",
@@ -443,9 +446,39 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     }
 
 
+    private static final int IMAGE_PULL_TIMEOUT_MINUTES = 10;
+
     public void start() {
         log.info("Starting container version:" + containerVersion.version);
+        ensureImagePulled(containerVersion.getImageName());
         super.start();
+    }
+
+    /**
+     * Pre-pull the Docker image with a generous timeout to avoid testcontainers'
+     * default 2-minute pull timeout, which is too short for large ES images (~1.3GB)
+     * on CI runners without a Docker cache.
+     */
+    private static void ensureImagePulled(String fullImageName) {
+        try {
+            var dockerClient = DockerClientFactory.instance().client();
+            try {
+                dockerClient.inspectImageCmd(fullImageName).exec();
+                log.info("Image already available locally: {}", fullImageName);
+                return;
+            } catch (NotFoundException e) {
+                // Image not found locally, need to pull
+            }
+            log.info("Pulling image (up to {} min): {}", IMAGE_PULL_TIMEOUT_MINUTES, fullImageName);
+            var parts = fullImageName.split(":");
+            dockerClient.pullImageCmd(parts[0])
+                .withTag(parts.length > 1 ? parts[1] : "latest")
+                .exec(new PullImageResultCallback())
+                .awaitCompletion(IMAGE_PULL_TIMEOUT_MINUTES, TimeUnit.MINUTES);
+            log.info("Image pulled successfully: {}", fullImageName);
+        } catch (Exception e) {
+            log.warn("Pre-pull failed for {}, falling back to testcontainers default pull", fullImageName, e);
+        }
     }
 
     public String getUrl() {

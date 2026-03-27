@@ -354,6 +354,36 @@ function warnUnknownRangeKeys(def: JavaMap): void {
 
 // endregion
 
+// region Query facet
+
+/**
+ * Convert a Solr query facet to an OpenSearch `filter` aggregation.
+ *
+ * Solr query facet:
+ *   { "type": "query", "q": "popularity:[100 TO *]" }
+ *
+ * OpenSearch filter aggregation:
+ *   { "filter": { "query_string": { "query": "popularity:[100 TO *]" } } }
+ *
+ * The `q` parameter is converted as follows:
+ *   - `*:*` (or absent) → `match_all`
+ *   - Everything else → `query_string` passthrough, which lets OpenSearch
+ *     parse the full Lucene query syntax (ranges, booleans, wildcards, etc.)
+ */
+function convertQueryFacet(def: JavaMap): JavaMap {
+  const q = (def.get('q') || '*:*').toString();
+  const query: JavaMap = (!q || q === '*:*')
+    ? new Map([['match_all', new Map()]])
+    : new Map([['query_string', new Map([['query', q]])]]);
+
+  const knownKeys = new Set(['type', 'q']);
+  warnUnknownKeys(def, knownKeys, 'query');
+
+  return new Map<string, any>([['filter', query]]);
+}
+
+// endregion
+
 /** Log a warning for any keys in a facet definition that are not in the known set. */
 function warnUnknownKeys(def: JavaMap, knownKeys: Set<string>, facetType: string): void {
   const unknownKeys: string[] = [];
@@ -384,6 +414,8 @@ function convertSingleFacet(facetDef: any): JavaMap {
       return convertTermsFacet(facetDef);
     case 'range':
       return convertRangeFacet(facetDef);
+    case 'query':
+      return convertQueryFacet(facetDef);
     default:
       throw new Error(`Facet type '${type}' is not implemented`);
   }
