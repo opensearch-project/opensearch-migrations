@@ -38,23 +38,36 @@ def call(Map config = [:]) {
     def targetClusterSize = config.targetClusterSize ?: ""
     def targetClusterSizes = [
         'default': [
-            dataNodeType: "r6g.large.search",
+            dataNodeType: "r8g.large.search",
             dedicatedManagerNodeType: "m6g.large.search",
             dataNodeCount: 2,
             dedicatedManagerNodeCount: 0,
             ebsVolumeSize: 100
         ],
         'large': [
-            dataNodeType: "r6g.8xlarge.search",
+            dataNodeType: "r8g.8xlarge.search",
             dedicatedManagerNodeType: "m6g.2xlarge.search",
             dataNodeCount: 24,
-            dedicatedManagerNodeCount: 4,
-            ebsVolumeSize: 2048
+            dedicatedManagerNodeCount: 3,
+            ebsVolumeSize: 2048,
+            ebsThroughput: 1000,  // gp3 max: 1000 MB/s (CDK validation limit)
+            ebsIops: 10000
         ]
     ]
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
         parameters {
+            choice(
+                name: 'TEST_PRESET',
+                choices: ['custom', 'large-es7x-24B', 'large-es6x-20B', 'large-es5x', 'small-es5x-300k', 'small-es7x-osb'],
+                description: '''<b>Presets</b> (overrides S3_REPO_URI, SNAPSHOT_NAME, SOURCE_VERSION, RFS_WORKERS, TARGET_CLUSTER_SIZE):<br/>
+<b>large-es7x-24B</b> — ES 7.10, 24B docs / 5.8TB, 90 workers, large cluster<br/>
+<b>large-es6x-20B</b> — ES 6.8, 20B docs / 5.2TB, 90 workers, large cluster<br/>
+<b>large-es5x</b> — ES 5.6, 90 workers, large cluster<br/>
+<b>small-es5x-300k</b> — ES 5.6, 300K docs, 1 worker, default cluster<br/>
+<b>small-es7x-osb</b> — ES 7.10, OSB data, 1 worker, default cluster<br/>
+<b>custom</b> — uses the parameter fields below as-is'''
+            )
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
@@ -65,7 +78,7 @@ def call(Map config = [:]) {
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment and snapshot bucket')
             string(name: 'SNAPSHOT_NAME', defaultValue: 'es7x-osb-data', description: 'Name of the snapshot')
             string(name: 'TEST_IDS', defaultValue: '0010', description: 'Test IDs to execute (comma separated, e.g., "0010" or "0010,0011")')
-            string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '900', description: 'Max retries for workflow monitoring (~1/min). 33=~30min, 900=~15hrs')
+            string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '1000000', description: 'Max retries for workflow monitoring (~1/min). Default effectively infinite — Argo handles retries.')
             choice(
                 name: 'SOURCE_VERSION',
                 choices: ['ES_7.10', 'ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_8.19', 'OS_1.3', 'OS_2.19'],
@@ -80,7 +93,7 @@ def call(Map config = [:]) {
             choice(
                 name: 'TARGET_CLUSTER_SIZE',
                 choices: ['default', 'large'],
-                description: 'Target cluster size (default: 2x r6g.large, large: 6x r6g.4xlarge with dedicated masters)'
+                description: 'Target cluster size (default: 2x r8g.large, large: 24x r8g.8xlarge with dedicated masters)'
             )
         }
         options {
@@ -109,27 +122,52 @@ def call(Map config = [:]) {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
                         env.maStageName = "${params.STAGE}-${currentBuild.number}"
+                        // Resolve TEST_PRESET → effective parameter values
+                        def testPresets = [
+                            'large-es7x-24B': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es7x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_7.10', rfsWorkers: '90', targetClusterSize: 'large'],
+                            'large-es6x-20B': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es6x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_6.8', rfsWorkers: '90', targetClusterSize: 'large'],
+                            'large-es5x':     [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es5x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_5.6', rfsWorkers: '90', targetClusterSize: 'large'],
+                            'small-es5x-300k': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/another_set/large-snapshot-es5x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_5.6', rfsWorkers: '1', targetClusterSize: 'default'],
+                            'small-es7x-osb': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/ma_osb_data/es7x-osb-data/', snapshotName: 'es7x-osb-data', sourceVersion: 'ES_7.10', rfsWorkers: '1', targetClusterSize: 'default']
+                        ]
+                        def preset = testPresets[params.TEST_PRESET]
+                        if (preset) {
+                            env.resolvedS3RepoUri         = preset.s3RepoUri
+                            env.resolvedSnapshotName      = preset.snapshotName
+                            env.resolvedSourceVersion     = preset.sourceVersion
+                            env.resolvedRfsWorkers        = preset.rfsWorkers
+                            env.resolvedTargetClusterSize = preset.targetClusterSize
+                        } else {
+                            env.resolvedS3RepoUri         = params.S3_REPO_URI
+                            env.resolvedSnapshotName      = params.SNAPSHOT_NAME
+                            env.resolvedSourceVersion     = params.SOURCE_VERSION
+                            env.resolvedRfsWorkers        = params.RFS_WORKERS
+                            env.resolvedTargetClusterSize = params.TARGET_CLUSTER_SIZE
+                        }
+
                         echo """
                             ================================================================
                             BYOS Migration Pipeline Configuration
                             ================================================================
+                            Test Preset:         ${params.TEST_PRESET}
+
                             Git Configuration:
                               Repository:        ${params.GIT_REPO_URL}
                               Branch:            ${params.GIT_BRANCH}
                               Stage:             ${maStageName}
                             
                             Snapshot Configuration:
-                              S3 URI:            ${params.S3_REPO_URI}
+                              S3 URI:            ${env.resolvedS3RepoUri}
                               Region:            ${params.REGION}
-                              Snapshot Name:     ${params.SNAPSHOT_NAME}
-                              Source Version:    ${params.SOURCE_VERSION}
+                              Snapshot Name:     ${env.resolvedSnapshotName}
+                              Source Version:    ${env.resolvedSourceVersion}
                             
                             Target Cluster Configuration:
                               Target Version:    ${params.TARGET_VERSION}
-                              Cluster Size:      ${params.TARGET_CLUSTER_SIZE}
+                              Cluster Size:      ${env.resolvedTargetClusterSize}
                             
                             Migration Configuration:
-                              RFS Workers:       ${params.RFS_WORKERS}
+                              RFS Workers:       ${env.resolvedRfsWorkers}
                               Test IDs:          ${params.TEST_IDS}
                             ================================================================
                         """
@@ -149,99 +187,43 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
-                            sh './gradlew clean build --no-daemon --stacktrace'
+                            sh './gradlew clean build -x test --no-daemon --stacktrace'
                         }
                     }
                 }
             }
 
-            stage('Deploy AOS Target Cluster') {
+            stage('Deploy & Bootstrap MA') {
                 steps {
-                    timeout(time: 45, unit: 'MINUTES') {
-                        dir('test') {
-                            script {
-                                env.sourceVer = sourceVersion ?: params.SOURCE_VERSION
-                                env.targetVer = targetVersion ?: params.TARGET_VERSION
-                                env.targetClusterSize = targetClusterSize ?: params.TARGET_CLUSTER_SIZE
-                                
-                                def sizeConfig = targetClusterSizes[env.targetClusterSize]
-                                deployTargetClusterOnly(
-                                    stage: "${maStageName}",
-                                    clusterContextFilePath: "${clusterContextFilePath}",
-                                    targetVer: env.targetVer,
-                                    sizeConfig: sizeConfig
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Synth MA Stack') {
-                steps {
-                    timeout(time: 20, unit: 'MINUTES') {
-                        dir('deployment/migration-assistant-solution') {
-                            script {
-                                echo "Synthesizing CloudFormation templates via CDK"
-                                sh "npm install --dev"
-                                sh "npx cdk synth '*'"
-                                echo "CDK synthesis completed"
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Deploy EKS CFN Stack') {
-                steps {
-                    timeout(time: 30, unit: 'MINUTES') {
-                        dir('deployment/migration-assistant-solution') {
-                            script {
-                                env.STACK_NAME_SUFFIX = "${maStageName}-${params.REGION}"
-                                env.MA_STACK_NAME = "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}"
-                                def clusterDetails = readJSON text: env.clusterDetailsJson
-                                def targetCluster = clusterDetails.target
-                                def vpcId = targetCluster.vpcId
-                                def subnetIds = "${targetCluster.subnetIds}"
-
-                                echo "Deploying CloudFormation stack ${env.MA_STACK_NAME} in region ${params.REGION}"
-                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh """
-                                            set -euo pipefail
-                                            aws cloudformation create-stack \
-                                                --stack-name "${env.MA_STACK_NAME}" \
-                                                --template-body file://cdk.out/Migration-Assistant-Infra-Import-VPC-eks.template.json \
-                                                --parameters ParameterKey=Stage,ParameterValue=${maStageName} \
-                                                    ParameterKey=VPCId,ParameterValue=${vpcId} \
-                                                    ParameterKey=VPCSubnetIds,ParameterValue=\\"${subnetIds}\\" \
-                                                --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-                                                --region "${params.REGION}"
-
-                                            echo "Waiting for stack ${env.MA_STACK_NAME} to reach CREATE_COMPLETE status"
-                                            aws cloudformation wait stack-create-complete \
-                                                --stack-name "${env.MA_STACK_NAME}" \
-                                                --region "${params.REGION}"
-                                            echo "Stack ${env.MA_STACK_NAME} creation completed successfully"
-                                        """
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Configure EKS') {
-                steps {
-                    timeout(time: 10, unit: 'MINUTES') {
+                    timeout(time: 150, unit: 'MINUTES') {
                         script {
+                            env.STACK_NAME_SUFFIX = "${maStageName}-${params.REGION}"
+                            env.MA_STACK_NAME = "Migration-Assistant-Infra-Create-VPC-eks-${env.STACK_NAME_SUFFIX}"
+
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 1200, roleSessionName: 'jenkins-session') {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                    sh """
+                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                          --deploy-create-vpc-cfn \
+                                          --build-cfn \
+                                          --stack-name "${env.MA_STACK_NAME}" \
+                                          --stage "${maStageName}" \
+                                          --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
+                                          --build-images \
+                                          --skip-test-images \
+                                          --build-chart-and-dashboards \
+                                          --base-dir "\$(pwd)" \
+                                          --skip-console-exec \
+                                          --skip-setting-k8s-context \
+                                          --region ${params.REGION} \
+                                          2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
+                                    """
+
+                                    // Capture env vars for later stages and cleanup
                                     def rawOutput = sh(
                                         script: """
                                             aws cloudformation describe-stacks \
-                                                --stack-name Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX} \
+                                                --stack-name ${env.MA_STACK_NAME} \
                                                 --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
                                                 --output text
                                         """,
@@ -260,69 +242,84 @@ def call(Map config = [:]) {
                                     env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
                                     env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']
                                     env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
-                                    def principalArn = 'arn:aws:iam::$MIGRATIONS_TEST_ACCOUNT_ID:role/JenkinsDeploymentRole'
-                                    sh """
-                                        if aws eks describe-access-entry --cluster-name $env.eksClusterName --principal-arn $principalArn >/dev/null 2>&1; then
-                                            echo "EKS access entry already exists, skipping creation"
-                                        else
-                                            aws eks create-access-entry --cluster-name $env.eksClusterName --principal-arn $principalArn --type STANDARD
-                                        fi
-                                        
-                                        aws eks associate-access-policy \
-                                            --cluster-name $env.eksClusterName \
-                                            --principal-arn $principalArn \
-                                            --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
-                                            --access-scope type=cluster
+                                    env.maVpcId = exportsMap['VPC_ID']
+                                    env.eksKubeContext = "migration-eks-cluster-${maStageName}-${params.REGION}"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
-                                        aws eks update-kubeconfig --region ${params.REGION} --name $env.eksClusterName --alias $env.eksClusterName
+            stage('Deploy AOS Target Cluster') {
+                steps {
+                    timeout(time: 45, unit: 'MINUTES') {
+                        dir('test') {
+                            script {
+                                env.sourceVer = sourceVersion ?: env.resolvedSourceVersion
+                                env.targetVer = targetVersion ?: params.TARGET_VERSION
+                                env.targetClusterSize = targetClusterSize ?: env.resolvedTargetClusterSize
+                                
+                                def sizeConfig = targetClusterSizes[env.targetClusterSize]
+                                deployTargetClusterOnly(
+                                    stage: "${maStageName}",
+                                    clusterContextFilePath: "${clusterContextFilePath}",
+                                    targetVer: env.targetVer,
+                                    sizeConfig: sizeConfig,
+                                    vpcId: env.maVpcId
+                                )
+                            }
+                        }
+                    }
+                }
+            }
 
-                                        for i in {1..10}; do
-                                            if kubectl --context=$env.eksClusterName get namespace default >/dev/null 2>&1; then
-                                                echo "kubectl configured and ready"
-                                                break
-                                            fi
-                                            echo "Waiting for kubectl to be ready (attempt \$i of 10)"
-                                            sleep 5
-                                        done
-                                    """
-                                    sh "kubectl --context=${env.eksClusterName} create namespace ma --dry-run=client -o yaml | kubectl --context=${env.eksClusterName} apply -f -"
+            stage('Post-Cluster Setup') {
+                steps {
+                    timeout(time: 15, unit: 'MINUTES') {
+                        script {
+                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 1200, roleSessionName: 'jenkins-session') {
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def targetCluster = clusterDetails.target
-                                    def targetVersionExpanded = expandVersionString("${params.TARGET_VERSION}")
-                                    // Target configmap only (no source cluster)
+                                    def targetVersionExpanded = expandVersionString("${env.targetVer}")
+
+                                    // Target configmap (no source cluster for BYOS)
                                     writeJSON file: '/tmp/target-cluster-config.json', json: [
                                             endpoint: targetCluster.endpoint,
                                             allow_insecure: true,
                                             sigv4: [
                                                 region: params.REGION,
                                                 service: "es"
-                                            ],
-                                            version: params.TARGET_VERSION
+                                            ]
                                     ]
                                     sh """
-                                        kubectl --context=${env.eksClusterName} create configmap target-${targetVersionExpanded}-migration-config \
+                                        kubectl --context=${env.eksKubeContext} create configmap target-${targetVersionExpanded}-migration-config \
                                             --from-file=cluster-config=/tmp/target-cluster-config.json \
-                                            --namespace ma --dry-run=client -o yaml | kubectl --context=${env.eksClusterName} apply -f -
+                                            --namespace ma --dry-run=client -o yaml | kubectl --context=${env.eksKubeContext} apply -f -
                                     """
 
-                                    // Modify target security group to allow EKS cluster security group
-                                    sh """
-                                        exists=\$(aws ec2 describe-security-groups \
+                                    // Add SG rule to allow EKS cluster traffic to reach the target OpenSearch domain
+                                    if (targetCluster.securityGroupId) {
+                                        sh """
+                                          exists=\$(aws ec2 describe-security-groups \
                                             --group-ids $targetCluster.securityGroupId \
                                             --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
                                             --output text)
 
-                                        if [ -z "\$exists" ]; then
-                                            echo "Adding security group ingress rule"
+                                          if [ -z "\$exists" ]; then
+                                            echo "Ingress rule not found. Adding EKS cluster SG to target OpenSearch SG..."
                                             aws ec2 authorize-security-group-ingress \
-                                                --group-id $targetCluster.securityGroupId \
-                                                --protocol -1 \
-                                                --port -1 \
-                                                --source-group $env.clusterSecurityGroup
-                                        else
-                                            echo "Security group ingress rule already exists"
-                                        fi
-                                    """
+                                              --group-id $targetCluster.securityGroupId \
+                                              --protocol -1 \
+                                              --port -1 \
+                                              --source-group $env.clusterSecurityGroup
+                                          else
+                                            echo "Ingress rule already exists. Skipping."
+                                          fi
+                                        """
+                                    }
+
                                 }
                             }
                         }
@@ -357,22 +354,6 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Install Helm Chart') {
-                steps {
-                    timeout(time: 10, unit: 'MINUTES') {
-                        dir('deployment/k8s/aws') {
-                            script {
-                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "./aws-bootstrap.sh --skip-git-pull --base-dir ${WORKSPACE} --use-public-images false --skip-console-exec --skip-setting-k8s-context --stage ${maStageName}"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             stage('Run BYOS Migration Test') {
                 steps {
                     timeout(time: 12, unit: 'HOURS') {
@@ -382,17 +363,17 @@ def call(Map config = [:]) {
                                     // Wait for migration-console pod to be ready
                                     sh """
                                         echo "Waiting for migration-console pod to be ready"
-                                        kubectl --context=${env.eksClusterName} wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=600s
+                                        kubectl --context=${env.eksKubeContext} wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=600s
                                         echo "Migration console pod is ready"
                                     """
                                     sh """
                                         echo "Applying workflow template"
-                                        kubectl --context=${env.eksClusterName} apply -f ${WORKSPACE}/migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml -n ma
+                                        kubectl --context=${env.eksKubeContext} apply -f ${WORKSPACE}/migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml -n ma
                                         echo "Workflow template applied successfully"
                                     """
 
                                     // Normalize S3 URI - ensure it ends with /
-                                    def s3RepoUri = params.S3_REPO_URI
+                                    def s3RepoUri = env.resolvedS3RepoUri
                                     if (!s3RepoUri.endsWith('/')) {
                                         s3RepoUri = s3RepoUri + '/'
                                     }
@@ -403,15 +384,15 @@ def call(Map config = [:]) {
                                     // Run the BYOS test with env vars passed via file to avoid logging
                                     sh """
                                         cat > /tmp/byos-env.sh << 'ENVEOF'
-export BYOS_SNAPSHOT_NAME='${params.SNAPSHOT_NAME}'
+export BYOS_SNAPSHOT_NAME='${env.resolvedSnapshotName}'
 export BYOS_S3_REPO_URI='${s3RepoUri}'
 export BYOS_S3_REGION='${params.REGION}'
-export BYOS_POD_REPLICAS='${params.RFS_WORKERS}'
+export BYOS_POD_REPLICAS='${env.resolvedRfsWorkers}'
 export BYOS_MONITOR_RETRY_LIMIT='${params.MONITOR_RETRY_LIMIT}'
 ENVEOF
 
-                                        kubectl --context=${env.eksClusterName} cp /tmp/byos-env.sh ma/migration-console-0:/tmp/byos-env.sh
-                                        kubectl --context=${env.eksClusterName} exec migration-console-0 -n ma -- bash -c '
+                                        kubectl --context=${env.eksKubeContext} cp /tmp/byos-env.sh ma/migration-console-0:/tmp/byos-env.sh
+                                        kubectl --context=${env.eksKubeContext} exec migration-console-0 -n ma -- bash -c '
                                             source /tmp/byos-env.sh && \
                                             cd /root/lib/integ_test && \
                                             pipenv run pytest integ_test/ma_workflow_test.py \
@@ -432,262 +413,55 @@ ENVEOF
 
         post {
             always {
-                timeout(time: 3, unit: 'HOURS') {
+                timeout(time: 75, unit: 'MINUTES') {
                     script {
                         def region = params.REGION ?: 'us-east-1'
-                        def clusterStackName = "OpenSearch-${maStageName}-${region}"
-                        def maStackName = "Migration-Assistant-Infra-Import-VPC-eks-${maStageName}-${region}"
-                        def eksClusterName = env.eksClusterName ?: "migration-eks-cluster-${maStageName}-${region}"
+                        def maStackName = env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
+
+
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: region, duration: 4500, roleSessionName: 'jenkins-session') {
-                                // Stage 1: Delete MA stack (EKS cluster) and cleanup orphaned EKS security groups
-                                stage('Destroy EKS CFN & EKS Resources') {
-                                    sh "echo 'CLEANUP: Listing pods in ma namespace' && kubectl --context=${eksClusterName} -n ma get pods || true"
-                                    
-                                    // Revoke SG ingress rule added during setup (skip helm/namespace deletion - CFN handles EKS cleanup)
+                                // EKS/k8s cleanup (only if EKS was deployed)
+                                if (env.eksClusterName) {
+                                    dir('libraries/testAutomation') {
+                                        sh "pipenv install --deploy"
+                                        sh "kubectl --context=${env.eksKubeContext} -n ma get pods || true"
+                                        sh "pipenv run app --delete-only --kube-context=${env.eksKubeContext}"
+                                        sh "kubectl --context=${env.eksKubeContext} delete namespace ma --ignore-not-found --timeout=60s || true"
+                                    }
+
+                                    // Revoke security group rule added during setup
                                     if (env.clusterDetailsJson && env.clusterSecurityGroup) {
                                         def clusterDetails = readJSON text: env.clusterDetailsJson
                                         def targetCluster = clusterDetails.target
                                         sh """
-                                            echo "CLEANUP: Checking for EKS SG ingress rule on target cluster SG"
-                                            if aws ec2 describe-security-groups --group-ids ${targetCluster.securityGroupId} >/dev/null 2>&1; then
-                                                exists=\$(aws ec2 describe-security-groups --group-ids ${targetCluster.securityGroupId} \
-                                                    --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='${env.clusterSecurityGroup}']]" --output json)
-                                                if [ "\$exists" != "[]" ]; then
-                                                    echo "CLEANUP: Revoking EKS SG ingress rule from target cluster SG"
-                                                    aws ec2 revoke-security-group-ingress --group-id ${targetCluster.securityGroupId} \
-                                                        --protocol -1 --port -1 --source-group ${env.clusterSecurityGroup} || true
-                                                else
-                                                    echo "CLEANUP: No EKS SG ingress rule found on target cluster SG"
-                                                fi
-                                            else
-                                                echo "CLEANUP: Target cluster SG ${targetCluster.securityGroupId} not found, skipping"
+                                          if aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
+                                            exists=\$(aws ec2 describe-security-groups \
+                                              --group-ids $targetCluster.securityGroupId \
+                                              --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
+                                              --output json)
+                                            if [ "\$exists" != "[]" ]; then
+                                              echo "CLEANUP: Revoking EKS SG ingress rule"
+                                              aws ec2 revoke-security-group-ingress \
+                                                --group-id $targetCluster.securityGroupId \
+                                                --protocol -1 --port -1 \
+                                                --source-group $env.clusterSecurityGroup || true
                                             fi
+                                          fi
                                         """
                                     }
-
-                                    // Delete MA stack with retries
-                                    // We skip helm uninstall and 'ma' namespace deletion because namespace deletion triggers EKS internal updates (restarts) that can block cluster deletion.
-                                    sh """
-                                        set -euo pipefail
-                                        
-                                        stack_status() {
-                                            local stack="\$1"
-                                            local out rc
-                                            out=\$(aws cloudformation describe-stacks --stack-name "\$stack" --query 'Stacks[0].StackStatus' --output text 2>&1) || rc=\$?
-                                            if [ "\${rc:-0}" -ne 0 ]; then
-                                                # Only treat as deleted if CFN says stack doesn't exist
-                                                if echo "\$out" | grep -qiE 'does not exist|ValidationError'; then
-                                                    echo "DELETED"
-                                                    return 0
-                                                fi
-                                                echo "ERROR: \$out" >&2
-                                                return 2
-                                            fi
-                                            echo "\$out"
-                                        }
-                                        
-                                        MAX_ATTEMPTS=3
-                                        ATTEMPT=1
-                                        while [ \$ATTEMPT -le \$MAX_ATTEMPTS ]; do
-                                            echo "CLEANUP: Attempt \$ATTEMPT/\$MAX_ATTEMPTS - Deleting MA stack ${maStackName}"
-                                            aws cloudformation delete-stack --stack-name ${maStackName} || true
-                                            deadline=\$((SECONDS + 1800))
-                                            while [ \$SECONDS -lt \$deadline ]; do
-                                                rc=0
-                                                status=\$(stack_status "${maStackName}") || rc=\$?
-                                                if [ "\${rc:-0}" -eq 2 ]; then
-                                                    echo "CLEANUP: describe-stacks transient failure; retrying in 20s"
-                                                    sleep 20
-                                                    continue
-                                                fi
-                                                echo "CLEANUP: MA stack status: \$status"
-                                                if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
-                                                    echo "CLEANUP: MA stack deleted"
-                                                    break
-                                                fi
-                                                if [ "\$status" = "DELETE_FAILED" ]; then
-                                                    echo "CLEANUP: MA stack DELETE_FAILED; recent events:"
-                                                    aws cloudformation describe-stack-events --stack-name ${maStackName} \
-                                                        --query 'StackEvents[0:10].[Timestamp,ResourceStatus,LogicalResourceId,ResourceStatusReason]' --output table || true
-                                                    break
-                                                fi
-                                                sleep 60
-                                            done
-                                            # If deleted, stop retry loop (don’t treat transient errors as “ERROR”)
-                                            rc=0
-                                            status=\$(stack_status "${maStackName}") || rc=\$?
-                                            if [ "\${rc:-0}" -eq 2 ]; then
-                                                echo "CLEANUP: transient describe-stacks failure after poll loop; retrying in 20s"
-                                                sleep 20
-                                                continue
-                                            fi
-                                            if [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ]; then
-                                                break
-                                            fi
-                                            [ \$ATTEMPT -lt \$MAX_ATTEMPTS ] && sleep 120
-                                            ATTEMPT=\$((ATTEMPT + 1))
-                                        done
-                                        
-                                        # Final check
-                                        final=""
-                                        for i in 1 2 3 4 5; do
-                                            rc=0
-                                            final=\$(stack_status "${maStackName}") || rc=\$?
-                                            if [ "\${rc:-0}" -eq 2 ]; then
-                                                echo "CLEANUP: transient describe-stacks failure during final check; retrying..."
-                                                sleep 10
-                                                continue
-                                            fi
-                                            break
-                                        done
-                                        if [ "\${rc:-0}" -eq 2 ]; then
-                                            echo "CLEANUP: FAILED - unable to determine MA stack status after retries"
-                                            exit 1
-                                        fi
-                                        if [ "\$final" != "DELETED" ] && [ "\$final" != "DELETE_COMPLETE" ]; then
-                                            echo "CLEANUP: FAILED - MA stack deletion did not complete (status=\$final)"
-                                            echo "CLEANUP: Dumping remaining stack resources:"
-                                            aws cloudformation describe-stack-resources --stack-name "${maStackName}" --output table || true
-                                            exit 1
-                                        fi
-                                    """
-
-                                    // Wait for EKS cluster to be truly gone
-                                    sh """
-                                        set -euo pipefail
-                                        echo "CLEANUP: Waiting for EKS cluster to disappear (best-effort): ${eksClusterName}"
-                                        deadline=\$((SECONDS + 900)) # 15 min best effort gate
-                                        while [ \$SECONDS -lt \$deadline ]; do
-                                            if aws eks describe-cluster --name "${eksClusterName}" >/dev/null 2>&1; then
-                                                echo "CLEANUP: EKS cluster still exists; waiting..."
-                                                sleep 30
-                                            else
-                                                echo "CLEANUP: EKS cluster not found (or access denied). Proceeding."
-                                                break
-                                            fi
-                                        done
-                                    """
-                                    
-                                    // Delete orphaned EKS security groups by tag (EKS creates SGs that may not be cleaned up and often throw DependencyViolation until ENIs drain)
-                                    sh """
-                                        set -euo pipefail
-                                        echo "CLEANUP: Finding EKS security groups by tag aws:eks:cluster-name=${eksClusterName}"
-                                        eks_sgs=\$(aws ec2 describe-security-groups \
-                                            --filters "Name=tag:aws:eks:cluster-name,Values=${eksClusterName}" \
-                                            --query 'SecurityGroups[*].GroupId' --output text 2>/dev/null || echo "")
-                                        
-                                        if [ -z "\$eks_sgs" ]; then
-                                            echo "CLEANUP: No orphaned EKS security groups found"
-                                            exit 0
-                                        fi
-                                        
-                                        for sg in \$eks_sgs; do
-                                            echo "CLEANUP: Attempting to delete EKS security group \$sg"
-                                            for i in 1 2 3 4 5; do
-                                                if aws ec2 delete-security-group --group-id "\$sg" >/dev/null 2>&1; then
-                                                    echo "CLEANUP: Deleted SG \$sg"
-                                                    break
-                                                fi
-                                                echo "CLEANUP: SG \$sg delete failed (attempt \$i). Dumping dependent ENIs:"
-                                                aws ec2 describe-network-interfaces --filters Name=group-id,Values="\$sg" \
-                                                    --query 'NetworkInterfaces[*].{Id:NetworkInterfaceId,Status:Status,Subnet:SubnetId,Desc:Description,Type:InterfaceType}' \
-                                                    --output table || true
-                                                sleep 30
-                                            done
-                                        done
-                                    """
                                 }
 
-                                // Stage 2: Destroy cluster stack (domain + VPC in single stack with v0.3.x CDK)
-                                stage('Destroy Cluster Stack') {
-                                    sh """
-                                        set -euo pipefail
-
-                                        stack_status() {
-                                            local stack="\$1"
-                                            local out rc
-                                            out=\$(aws cloudformation describe-stacks --stack-name "\$stack" --query 'Stacks[0].StackStatus' --output text 2>&1) || rc=\$?
-                                            if [ "\${rc:-0}" -ne 0 ]; then
-                                                if echo "\$out" | grep -qiE 'does not exist|ValidationError'; then
-                                                    echo "DELETED"
-                                                    return 0
-                                                fi
-                                                echo "ERROR: \$out" >&2
-                                                return 2
-                                            fi
-                                            echo "\$out"
-                                        }
-
-                                        delete_available_enis_in_subnet() {
-                                            local subnet_id="\$1"
-                                            [ -z "\$subnet_id" ] && return 0
-                                            enis=\$(aws ec2 describe-network-interfaces --filters Name=subnet-id,Values="\$subnet_id" \
-                                                --query 'NetworkInterfaces[?Status==`available` && InterfaceType==`interface`].NetworkInterfaceId' \
-                                                --output text 2>/dev/null || true)
-                                            for eni in \$enis; do
-                                                echo "CLEANUP: delete ENI \$eni (subnet \$subnet_id)" >&2
-                                                aws ec2 delete-network-interface --network-interface-id "\$eni" 2>&1 || true
-                                            done
-                                        }
-
-                                        # Drain ENIs from stack subnets before deletion
-                                        subnets=\$(aws cloudformation describe-stack-resources --stack-name "${clusterStackName}" \
-                                            --query 'StackResources[?ResourceType==`AWS::EC2::Subnet`].PhysicalResourceId' \
-                                            --output text 2>/dev/null || true)
-                                        if [ -n "\$subnets" ]; then
-                                            echo "CLEANUP: Drain gate: waiting for ENIs to clear"
-                                            deadline=\$((SECONDS + 1800))
-                                            while [ \$SECONDS -lt \$deadline ]; do
-                                                remaining=0
-                                                for s in \$subnets; do
-                                                    count=\$(aws ec2 describe-network-interfaces --filters Name=subnet-id,Values="\$s" \
-                                                        --query 'length(NetworkInterfaces)' --output text 2>/dev/null || echo 0)
-                                                    if [ "\$count" != "0" ]; then
-                                                        remaining=1
-                                                        delete_available_enis_in_subnet "\$s"
-                                                    fi
-                                                done
-                                                [ "\$remaining" = "0" ] && { echo "CLEANUP: Drain gate satisfied"; break; }
-                                                echo "CLEANUP: Drain gate waiting..."
-                                                sleep 30
-                                            done
-                                        fi
-
-                                        MAX_ATTEMPTS=3
-                                        ATTEMPT=1
-                                        while [ \$ATTEMPT -le \$MAX_ATTEMPTS ]; do
-                                            echo "CLEANUP: Attempt \$ATTEMPT/\$MAX_ATTEMPTS - Deleting cluster stack ${clusterStackName}"
-                                            aws cloudformation delete-stack --stack-name ${clusterStackName} || true
-                                            deadline=\$((SECONDS + 3600))
-                                            while [ \$SECONDS -lt \$deadline ]; do
-                                                rc=0
-                                                status=\$(stack_status "${clusterStackName}") || rc=\$?
-                                                [ "\${rc:-0}" -eq 2 ] && { sleep 20; continue; }
-                                                echo "CLEANUP: Stack status: \$status"
-                                                [ "\$status" = "DELETED" ] || [ "\$status" = "DELETE_COMPLETE" ] && break 2
-                                                [ "\$status" = "DELETE_FAILED" ] && {
-                                                    aws cloudformation describe-stack-events --stack-name ${clusterStackName} \
-                                                        --query 'StackEvents[0:10].[Timestamp,ResourceStatus,LogicalResourceId,ResourceStatusReason]' --output table || true
-                                                    # Clean ENIs on failure and retry
-                                                    for s in \$subnets; do delete_available_enis_in_subnet "\$s"; done
-                                                    break
-                                                }
-                                                sleep 60
-                                            done
-                                            [ \$ATTEMPT -lt \$MAX_ATTEMPTS ] && sleep 60
-                                            ATTEMPT=\$((ATTEMPT + 1))
-                                        done
-
-                                        final=\$(stack_status "${clusterStackName}" 2>/dev/null || echo "UNKNOWN")
-                                        if [ "\$final" != "DELETED" ] && [ "\$final" != "DELETE_COMPLETE" ]; then
-                                            echo "CLEANUP: FAILED - Cluster stack deletion did not complete (status=\$final)"
-                                            aws cloudformation describe-stack-resources --stack-name "${clusterStackName}" --output table || true
-                                            exit 1
-                                        fi
-                                        echo "CLEANUP: Cluster stack removed"
-                                    """
+                                // Destroy domain stacks via CDK (uses same context file from deploy)
+                                dir('test') {
+                                    echo "CLEANUP: Destroying domain stacks via CDK"
+                                    sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath} --destroy || true"
                                 }
+
+                                // Delete MA CloudFormation stack directly
+                                echo "CLEANUP: Deleting MA stack ${maStackName}"
+                                sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
+                                sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
                             }
                         }
                     }
@@ -703,7 +477,7 @@ ENVEOF
 def deployTargetClusterOnly(Map config) {
     def clusterContextValues = [
         stage: "${config.stage}",
-        vpcAZCount: 2,
+        vpcId: "${config.vpcId}",
         clusters: [[
             clusterId: "target",
             clusterVersion: "${config.targetVer}",
@@ -716,7 +490,10 @@ def deployTargetClusterOnly(Map config) {
             dedicatedManagerNodeCount: config.sizeConfig.dedicatedManagerNodeCount,
             ebsEnabled: true,
             ebsVolumeSize: config.sizeConfig.ebsVolumeSize,
-            nodeToNodeEncryption: true
+            ebsThroughput: config.sizeConfig.ebsThroughput,
+            ebsIops: config.sizeConfig.ebsIops,
+            nodeToNodeEncryption: true,
+            allowAllVpcTraffic: true
         ]]
     ]
 
@@ -725,7 +502,7 @@ def deployTargetClusterOnly(Map config) {
     sh "echo 'Using cluster context file options:' && cat ${config.clusterContextFilePath}"
     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
         withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-            sh "./awsDeployCluster.sh --stage ${config.stage} --context-file ${config.clusterContextFilePath}"
+            sh "./awsDeployCluster.sh --stage ${config.stage} --context-file ${config.clusterContextFilePath} --vpc-id ${config.vpcId}"
         }
     }
 

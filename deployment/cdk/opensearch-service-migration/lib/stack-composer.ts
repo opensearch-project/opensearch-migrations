@@ -169,6 +169,7 @@ export class StackComposer {
         const ebsIops = this.getContextForType('ebsIops', 'number', defaultValues, contextJSON)
         const ebsVolumeTypeName = this.getContextForType('ebsVolumeType', 'string', defaultValues, contextJSON)
         const ebsVolumeSize = this.getContextForType('ebsVolumeSize', 'number', defaultValues, contextJSON)
+        const ebsThroughput = this.getContextForType('ebsThroughput', 'number', defaultValues, contextJSON)
         const encryptionAtRestEnabled = this.getContextForType('encryptionAtRestEnabled', 'boolean', defaultValues, contextJSON)
         const encryptionAtRestKmsKeyARN = this.getContextForType("encryptionAtRestKmsKeyARN", 'string', defaultValues, contextJSON)
         const loggingAppLogEnabled = this.getContextForType('loggingAppLogEnabled', 'boolean', defaultValues, contextJSON)
@@ -403,6 +404,7 @@ export class StackComposer {
                 ebsIops: ebsIops,
                 ebsVolumeSize: ebsVolumeSize,
                 ebsVolumeTypeName: ebsVolumeTypeName,
+                ebsThroughput: ebsThroughput,
                 encryptionAtRestEnabled: encryptionAtRestEnabled,
                 encryptionAtRestKmsKeyARN: encryptionAtRestKmsKeyARN,
                 appLogEnabled: loggingAppLogEnabled,
