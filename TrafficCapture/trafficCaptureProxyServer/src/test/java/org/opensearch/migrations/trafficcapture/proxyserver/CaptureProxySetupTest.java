@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
@@ -161,6 +162,33 @@ public class CaptureProxySetupTest {
         {
             testTlsParametersAreProperlyRead(TLS_PROTOCOLS_KEY + ": " + kvp.getKey(), kvp.getValue());
         }
+    }
+
+    @Test
+    public void testConvertStringToUriWithExplicitPort() {
+        URI uri = CaptureProxy.convertStringToUri("https://search-my-domain.us-east-1.es.amazonaws.com:9200");
+        Assertions.assertEquals(9200, uri.getPort());
+        Assertions.assertEquals("https", uri.getScheme());
+    }
+
+    @Test
+    public void testConvertStringToUriHttpsDefaultPort() {
+        URI uri = CaptureProxy.convertStringToUri("https://search-my-domain.us-east-1.es.amazonaws.com");
+        Assertions.assertEquals(443, uri.getPort());
+        Assertions.assertEquals("https", uri.getScheme());
+    }
+
+    @Test
+    public void testConvertStringToUriHttpDefaultPort() {
+        URI uri = CaptureProxy.convertStringToUri("http://search-my-domain.us-east-1.es.amazonaws.com");
+        Assertions.assertEquals(80, uri.getPort());
+        Assertions.assertEquals("http", uri.getScheme());
+    }
+
+    @Test
+    public void testConvertStringToUriExplicit443() {
+        URI uri = CaptureProxy.convertStringToUri("https://search-my-domain.us-east-1.es.amazonaws.com:443");
+        Assertions.assertEquals(443, uri.getPort());
     }
 
     @Test

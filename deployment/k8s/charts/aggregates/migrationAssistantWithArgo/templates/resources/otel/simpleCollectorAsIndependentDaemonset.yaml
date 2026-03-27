@@ -96,26 +96,54 @@ spec:
       port: 8889
       targetPort: prometheus
 ---
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
+# ServiceMonitor CRD comes from kube-prometheus-stack, which is installed by the
+# pre-install chart installer job. Helm caches API discovery before running hooks,
+# so it can't validate ServiceMonitor resources directly. We apply it via kubectl
+# in a post-install Job instead.
+apiVersion: batch/v1
+kind: Job
 metadata:
-  name: otel-collector-monitor
-  namespace: {{ .Release.Namespace }}
+  name: create-otel-service-monitor
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "1"
-  labels:
-    app: otel-collector
-    release: kube-prometheus-stack
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  selector:
-    matchLabels:
-      app: otel-collector
-  namespaceSelector:
-    matchNames:
-      - {{ .Release.Namespace }}
-  endpoints:
-    - port: prometheus
-      interval: 15s
-      path: /metrics
+  activeDeadlineSeconds: 120
+  template:
+    spec:
+      serviceAccountName: {{ .Values.argoWorkflowServiceAccountName | default "argo-workflow-executor" }}
+      containers:
+      - name: apply-monitor
+        image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Waiting for ServiceMonitor CRD to be established..."
+          kubectl wait --for=condition=Established crd/servicemonitors.monitoring.coreos.com --timeout=120s
+          echo "Creating ServiceMonitor for otel-collector..."
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: monitoring.coreos.com/v1
+          kind: ServiceMonitor
+          metadata:
+            name: otel-collector-monitor
+            namespace: {{ .Release.Namespace }}
+            labels:
+              app: otel-collector
+              release: kube-prometheus-stack
+          spec:
+            selector:
+              matchLabels:
+                app: otel-collector
+            namespaceSelector:
+              matchNames:
+                - {{ .Release.Namespace }}
+            endpoints:
+              - port: prometheus
+                interval: 15s
+                path: /metrics
+          EOF
+          echo "ServiceMonitor created successfully."
+      restartPolicy: Never
+  backoffLimit: 2
 {{- end }}

@@ -173,6 +173,24 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
     }
 }
 
+const DEFAULT_AUTO_CREATE_CONFIG: z.infer<typeof KAFKA_CLUSTER_CONFIG> = { autoCreate: {} };
+
+/** Resolve kafkaClusterConfiguration, auto-injecting autoCreate entries only when no explicit kafka config was provided. */
+function resolveKafkaClusters(userConfig: { kafkaClusterConfiguration?: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>, traffic?: { proxies?: Record<string, { kafka?: string }> } }) {
+    const explicit = userConfig.kafkaClusterConfiguration ?? {};
+    if (Object.keys(explicit).length > 0) {
+        return explicit;
+    }
+    const clusters: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>> = {};
+    for (const proxy of Object.values(userConfig.traffic?.proxies || {})) {
+        const key = proxy.kafka ?? "default";
+        if (!(key in clusters)) {
+            clusters[key] = DEFAULT_AUTO_CREATE_CONFIG;
+        }
+    }
+    return clusters;
+}
+
 /** Build a NAMED_KAFKA_CLIENT_CONFIG from a kafka cluster reference and topic. */
 function buildKafkaClientConfig(
     kafkaClusterKey: string,
@@ -291,7 +309,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     /** Collect auto-created kafka clusters with their aggregated topics from proxies. */
     private buildKafkaClusters(userConfig: InputConfig) {
-        const kafkaClusters = userConfig.kafkaClusterConfiguration ?? {};
+        const kafkaClusters = resolveKafkaClusters(userConfig);
         // Aggregate topics per kafka cluster from proxies
         const topicsByCluster = new Map<string, Set<string>>();
         for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
@@ -312,7 +330,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     /** Denormalize each proxy with source endpoint and kafka client config. */
     private buildProxies(userConfig: InputConfig) {
-        const kafkaClusters = userConfig.kafkaClusterConfiguration ?? {};
+        const kafkaClusters = resolveKafkaClusters(userConfig);
         return Object.entries(userConfig.traffic?.proxies || {}).map(([proxyName, proxy]) => {
             const sourceCluster = userConfig.sourceClusters[proxy.source];
             if (!sourceCluster) {
@@ -463,7 +481,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     /** Build traffic replay configs by resolving proxy → kafka chain. */
     private buildTrafficReplays(userConfig: InputConfig) {
-        const kafkaClusters = userConfig.kafkaClusterConfiguration ?? {};
+        const kafkaClusters = resolveKafkaClusters(userConfig);
         const proxies = userConfig.traffic?.proxies;
 
         return Object.entries(userConfig.traffic?.replayers || {}).map(([_name, replayer]) => {

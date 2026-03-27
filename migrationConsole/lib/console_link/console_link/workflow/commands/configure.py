@@ -155,13 +155,13 @@ def _handle_missing_config_secrets(secret_store, missing, interactive):
             "\n  ".join(missing))
 
 
-def _handle_add_basic_creds_secrets(secret_store, missing_secrets):
-    num_missing = len(missing_secrets)
+def _handle_add_basic_creds_secrets(secret_store, missing_names):
+    num_missing = len(missing_names)
     click.echo(f"{num_missing} secret{'s' if num_missing > 1 else ''} used in the cluster definitions must be created.")
 
     i = 0
-    while i < len(missing_secrets):
-        s = missing_secrets[i]
+    while i < len(missing_names):
+        s = missing_names[i]
 
         if not click.confirm(f"Would you like to create secret '{s}' now?", default=True):
             click.echo(f"Skipped creating {s}")

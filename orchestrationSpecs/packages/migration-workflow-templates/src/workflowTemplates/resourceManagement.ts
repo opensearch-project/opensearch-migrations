@@ -51,6 +51,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                 },
                 conditions: {successCondition: "status.listeners"}
             })
+            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
         )
     )
 
@@ -115,6 +116,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                 },
                 conditions: {successCondition: "status.phase == Ready"}
             })
+            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
         )
     )
 
@@ -131,6 +133,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                 },
                 conditions: {successCondition: "status.phase == Ready"}
             })
+            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
         )
     )
 
@@ -147,6 +150,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                 },
                 conditions: {successCondition: "status.phase == Ready"}
             })
+            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
         )
     )
 

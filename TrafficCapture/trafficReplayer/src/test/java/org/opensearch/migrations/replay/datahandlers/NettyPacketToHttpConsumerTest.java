@@ -357,7 +357,6 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @Tag("longTest")
     public void testMetricCountsFor_testThatConnectionsAreKeptAliveAndShared(boolean useTls) throws Exception {
         testThatConnectionsAreKeptAliveAndShared(useTls, false);
-        Thread.sleep(200); // let metrics settle down
         var allMetricData = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         long tcpOpenConnectionCount = allMetricData.stream()
             .filter(md -> md.getName().startsWith("tcpConnectionCount"))

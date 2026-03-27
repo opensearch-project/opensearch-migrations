@@ -167,7 +167,7 @@
             }
           },
           "args": [
-            "\nset -e -x\n\n# Save pod name to output path\necho $HOSTNAME > /tmp/podname\n\necho File contents...\n \nbase64 -d > /config/migration_services.yaml_ << EOF\n{{=toBase64(inputs.parameters.configContents)}}\nEOF\n\ncat /config/migration_services.yaml_ |\njq -f workflowConfigToServicesConfig.jq > /config/migration_services.yaml\n\n. /etc/profile.d/venv.sh\nsource /.venv/bin/activate\n\necho file dump\necho ---\nexport MIGRATION_USE_SERVICES_YAML_CONFIG=true\ncat /config/migration_services.yaml\necho ---\n\n{{inputs.parameters.command}}\n"
+            "\nset -e -x\n\n# Save pod name to output path\necho $HOSTNAME > /tmp/podname\n\necho File contents...\n \nbase64 -d > /config/migration_services.yaml_ << EOF\n{{=toBase64(inputs.parameters.configContents)}}\nEOF\n\ncat /config/migration_services.yaml_ |\njq -f workflowConfigToServicesConfig.jq > /config/migration_services.yaml\n\necho file dump\necho ---\nexport MIGRATION_USE_SERVICES_YAML_CONFIG=true\ncat /config/migration_services.yaml\necho ---\n\n{{inputs.parameters.command}}\n"
           ]
         },
         "metadata": {

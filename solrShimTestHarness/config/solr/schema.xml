@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Solr managed schema for the Amazon Customer Reviews validation dataset.
+  Solr 9.x compatible.
+-->
+<schema name="validation" version="1.6">
+
+  <!-- ======================== Field Types ======================== -->
+
+  <!-- Text field with standard tokenization and lowercasing -->
+  <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100">
+    <analyzer type="index">
+      <tokenizer class="solr.StandardTokenizerFactory"/>
+      <filter class="solr.LowerCaseFilterFactory"/>
+    </analyzer>
+    <analyzer type="query">
+      <tokenizer class="solr.StandardTokenizerFactory"/>
+      <filter class="solr.LowerCaseFilterFactory"/>
+    </analyzer>
+  </fieldType>
+
+  <!-- Exact-match string (keyword), docValues enabled by default -->
+  <fieldType name="string" class="solr.StrField" sortMissingLast="true" docValues="true"/>
+
+  <!-- Numeric types -->
+  <fieldType name="pint" class="solr.IntPointField" docValues="true"/>
+  <fieldType name="pfloat" class="solr.FloatPointField" docValues="true"/>
+  <fieldType name="plong" class="solr.LongPointField" docValues="true"/>
+
+  <!-- Date type -->
+  <fieldType name="pdate" class="solr.DatePointField" docValues="true"/>
+
+  <!-- Boolean type -->
+  <fieldType name="boolean" class="solr.BoolField" sortMissingLast="true"/>
+
+  <!-- ======================== Fields ======================== -->
+
+  <!-- Unique document identifier -->
+  <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false"/>
+
+  <!-- Text fields (term, phrase, boolean, highlighting queries) -->
+  <field name="product_title" type="text_general" indexed="true" stored="true"/>
+  <field name="review_body" type="text_general" indexed="true" stored="true"/>
+  <field name="review_headline" type="text_general" indexed="true" stored="true"/>
+
+  <!-- Keyword fields (facets, filters) — docValues via string fieldType -->
+  <field name="product_category" type="string" indexed="true" stored="true" docValues="true"/>
+  <field name="marketplace" type="string" indexed="true" stored="true" docValues="true"/>
+  <field name="product_id" type="string" indexed="true" stored="true" docValues="true"/>
+
+  <!-- Numeric fields (range queries, boosting, sorting) — docValues via pint fieldType -->
+  <field name="star_rating" type="pint" indexed="true" stored="true" docValues="true"/>
+  <field name="helpful_votes" type="pint" indexed="true" stored="true" docValues="true"/>
+  <field name="total_votes" type="pint" indexed="true" stored="true" docValues="true"/>
+
+  <!-- Date field (datetime range facets, sorting) — docValues via pdate fieldType -->
+  <field name="review_date" type="pdate" indexed="true" stored="true" docValues="true"/>
+
+  <!-- Boolean fields (filter queries) -->
+  <field name="verified_purchase" type="boolean" indexed="true" stored="true" docValues="true"/>
+  <field name="vine" type="boolean" indexed="true" stored="true" docValues="true"/>
+
+  <!-- Solr internal fields -->
+  <field name="_version_" type="plong" indexed="false" stored="false" docValues="true"/>
+  <field name="_root_" type="string" indexed="true" stored="false" docValues="false"/>
+
+  <!-- ======================== Unique Key ======================== -->
+  <uniqueKey>id</uniqueKey>
+
+</schema>
