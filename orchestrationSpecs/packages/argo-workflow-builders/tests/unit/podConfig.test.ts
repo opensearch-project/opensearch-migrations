@@ -807,3 +807,100 @@ describe('Pod Config - Synchronization', () => {
         expect(true).toBe(true);
     });
 });
+
+
+describe('Pod Config - markAsShortLived', () => {
+    it('should add karpenter do-not-disrupt annotation', () => {
+        const wf = WorkflowBuilder.create({
+            k8sResourceName: 'test-short-lived',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addResources(EXAMPLE_RESOURCES)
+                .markAsShortLived()
+            )
+        )
+        .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const template = rendered.spec.templates.find((t: any) => t.name === 'test');
+
+        expect(template.metadata).toBeDefined();
+        expect(template.metadata.annotations).toEqual({ 'karpenter.sh/do-not-disrupt': 'true' });
+    });
+
+    it('should merge with existing pod metadata labels and annotations', () => {
+        const wf = WorkflowBuilder.create({
+            k8sResourceName: 'test-short-lived-merge',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addResources(EXAMPLE_RESOURCES)
+                .addPodMetadata(() => ({
+                    labels: { app: 'test' },
+                    annotations: { 'custom/note': 'hello' }
+                }))
+                .markAsShortLived()
+            )
+        )
+        .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const template = rendered.spec.templates.find((t: any) => t.name === 'test');
+
+        expect(template.metadata.labels).toEqual({ app: 'test' });
+        expect(template.metadata.annotations).toEqual({
+            'custom/note': 'hello',
+            'karpenter.sh/do-not-disrupt': 'true'
+        });
+    });
+
+    it('should work when called before addPodMetadata', () => {
+        const wf = WorkflowBuilder.create({
+            k8sResourceName: 'test-short-lived-before',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addResources(EXAMPLE_RESOURCES)
+                .markAsShortLived()
+                .addPodMetadata(() => ({
+                    labels: { app: 'test' }
+                }))
+            )
+        )
+        .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const template = rendered.spec.templates.find((t: any) => t.name === 'test');
+
+        expect(template.metadata.labels).toEqual({ app: 'test' });
+        expect(template.metadata.annotations).toEqual({ 'karpenter.sh/do-not-disrupt': 'true' });
+    });
+
+    it('should reject duplicate markAsShortLived calls at compile time', () => {
+        WorkflowBuilder.create({
+            k8sResourceName: 'test-duplicate-short-lived',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            // @ts-expect-error - duplicate markAsShortLived should be rejected
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addResources(EXAMPLE_RESOURCES)
+                .markAsShortLived()
+                .markAsShortLived()
+            )
+        );
+        expect(true).toBe(true);
+    });
+});

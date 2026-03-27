@@ -140,6 +140,7 @@ type HasHostAliases = { __hasHostAliases: true };
 type HasPodSpecPatch = { __hasPodSpecPatch: true };
 type HasRetryStrategy = { __hasRetryStrategy: true };
 type HasSynchronization = { __hasSynchronization: true };
+type HasShortLived = { __hasShortLived: true };
 
 // Runtime storage for pod config (not tracked in type system individually)
 type PodConfigData = {
@@ -155,6 +156,7 @@ type PodConfigData = {
     securityContext?: PodSecurityContext;
     hostAliases?: HostAlias[];
     podSpecPatch?: AllowLiteralOrExpression<string>;
+    shortLived?: boolean;
 };
 
 export class ContainerBuilder<
@@ -235,8 +237,17 @@ export class ContainerBuilder<
             mountPath: config.mountPath,
             readOnly: config.readOnly
         }));
+        const shortLivedAnnotations = this.podConfig.shortLived
+            ? { 'karpenter.sh/do-not-disrupt': 'true' } : undefined;
+        const mergedMetadata = (this.podConfig.metadata || shortLivedAnnotations) ? {
+            ...this.podConfig.metadata,
+            annotations: {
+                ...this.podConfig.metadata?.annotations,
+                ...shortLivedAnnotations
+            }
+        } : undefined;
         return {
-            ...(this.podConfig.metadata && { metadata: this.podConfig.metadata }),
+            ...(mergedMetadata && { metadata: mergedMetadata }),
             ...(this.podConfig.tolerations && { tolerations: this.podConfig.tolerations }),
             ...(this.podConfig.nodeSelector && { nodeSelector: this.podConfig.nodeSelector }),
             ...(this.podConfig.activeDeadlineSeconds !== undefined && { activeDeadlineSeconds: this.podConfig.activeDeadlineSeconds }),
@@ -576,6 +587,17 @@ export class ContainerBuilder<
         builderFn: (ctx: { inputs: InputParamsToExpressions<InputParamsScope>, workflowInputs: WorkflowInputsToExpressions<ParentWorkflowScope> }) => PodMetadata
     ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasMetadata> {
         return this.withUpdates({ podConfig: { ...this.podConfig, metadata: builderFn({ inputs: this.inputs, workflowInputs: this.workflowInputs }) } });
+    }
+
+    /**
+     * Mark this pod as short-lived, adding karpenter.sh/do-not-disrupt annotation
+     * to prevent Karpenter from evicting the node while this pod is running.
+     * Can be combined with addPodMetadata - annotations are merged at render time.
+     */
+    markAsShortLived(
+        this: PodConfigBrands extends HasShortLived ? never : this,
+    ): ContainerBuilder<ParentWorkflowScope, InputParamsScope, ContainerScope, VolumeScope, EnvScope, OutputParamsScope, PodConfigBrands & HasShortLived> {
+        return this.withUpdates({ podConfig: { ...this.podConfig, shortLived: true } });
     }
 
     addTolerations(

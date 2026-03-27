@@ -42,11 +42,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addEnvVar("MIGRATION_CONFIG_BASE64", cb.inputs.migrationConfigBase64)
             .addArgs([configureAndSubmitScript])
-            .addPodMetadata(() => ({
-                annotations: {
-                    'karpenter.sh/do-not-disrupt': 'true'
-                }
-            }))
+            .markAsShortLived()
         )
     )
 
@@ -67,11 +63,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
                 typeToken<string>(),
                 "Workflow status output from monitor script"
             )
-            .addPodMetadata(() => ({
-                annotations: {
-                    'karpenter.sh/do-not-disrupt': 'true'
-                }
-            }))
+            .markAsShortLived()
         )
         .addRetryParameters({
             limit: "{{workflow.parameters.monitor-retry-limit}}",
@@ -106,11 +98,7 @@ else
     exit 1
 fi
             `])
-            .addPodMetadata(() => ({
-                annotations: {
-                    'karpenter.sh/do-not-disrupt': 'true'
-                }
-            }))
+            .markAsShortLived()
         )
     )
 

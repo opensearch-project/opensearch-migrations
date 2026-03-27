@@ -166,11 +166,9 @@ export const MigrationConsole = WorkflowBuilder.create({
                     'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
                     'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
                     'migrations.opensearch.org/task': inputs.taskK8sLabel
-                },
-                annotations: {
-                    'karpenter.sh/do-not-disrupt': 'true'
                 }
             }))
+            .markAsShortLived()
         )
         .addPathOutput("statusOutput", "/tmp/status-output.txt", typeToken<string>())
         .addPathOutput("overriddenPhase", "/tmp/phase-output.txt", typeToken<string>())

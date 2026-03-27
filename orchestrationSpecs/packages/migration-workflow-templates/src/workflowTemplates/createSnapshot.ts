@@ -144,11 +144,9 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     'migrations.opensearch.org/target': inputs.targetK8sLabel,
                     'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
                     'migrations.opensearch.org/task': inputs.taskK8sLabel
-                },
-                annotations: {
-                    'karpenter.sh/do-not-disrupt': 'true'
                 }
             }))
+            .markAsShortLived()
         )
     )
 
