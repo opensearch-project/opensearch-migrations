@@ -8,9 +8,10 @@ ARG CORRETTO_VERSION=8
 ARG BASE_IMAGE=amazoncorretto:8-alpine
 ARG ES_VERSION
 ARG TARBALL_URL
+ARG DOWNLOADER_IMAGE=amazonlinux:2023
+ARG CONFIG_BUILDER_IMAGE=amazonlinux:2023
 
 # --- Stage 1: Download and extract tarball (AL2023) ---
-ARG DOWNLOADER_IMAGE=amazonlinux:2023
 FROM ${DOWNLOADER_IMAGE} AS downloader
 ARG ES_VERSION
 ARG TARBALL_URL
@@ -76,7 +77,6 @@ RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     fi
 
 # --- Stage 3: Prepare version-specific config and entrypoint (AL2023) ---
-ARG CONFIG_BUILDER_IMAGE=amazonlinux:2023
 FROM ${CONFIG_BUILDER_IMAGE} AS config-builder
 ARG ES_VERSION
 
