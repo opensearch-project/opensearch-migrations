@@ -38,13 +38,13 @@ if [[ "$CONTEXT" =~ (eks:|gke_|aks-|migration-eks-) ]]; then
   
   # Resource requests/limits for buildkit pods — ensures pods get scheduled on
   # appropriately sized nodes and aren't evicted during large builds.
-  # do-not-disrupt prevents Karpenter from evicting build nodes mid-build.
+  # Note: Karpenter disruption protection is handled by the NodePool's WhenEmpty
+  # consolidation policy — the kubernetes driver doesn't support pod annotations.
   BUILDKIT_RESOURCE_OPTS=(
     --driver-opt="requests.cpu=${BUILDKIT_REQUESTS_CPU:-4}"
     --driver-opt="requests.memory=${BUILDKIT_REQUESTS_MEMORY:-8Gi}"
     --driver-opt="limits.cpu=${BUILDKIT_LIMITS_CPU:-8}"
     --driver-opt="limits.memory=${BUILDKIT_LIMITS_MEMORY:-16Gi}"
-    '--driver-opt=annotations.karpenter.sh/do-not-disrupt=true'
   )
 
   docker buildx create \
