@@ -989,14 +989,21 @@ migration_console|console"
         crane_copy_retry "$src" "$dst"
       done
     else
-      # Copy from public ECR using release image names
-      aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
-        crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
+      # Copy from public ECR, trying pull-through cache first when available
+      _ecr_public_authed=false
       echo "$MA_IMAGES" | while IFS='|' read -r build_name public_suffix; do
-        src="public.ecr.aws/opensearchproject/opensearch-migrations-${public_suffix}:${RELEASE_VERSION}"
         dst="${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest"
         echo "  $public_suffix → $dst"
-        crane_copy_retry "$src" "$dst"
+        if [[ -n "${ECR_PULL_THROUGH_ENDPOINT:-}" ]] && \
+           crane_copy_retry "${ECR_PULL_THROUGH_ENDPOINT}/ecr-public/opensearchproject/opensearch-migrations-${public_suffix}:${RELEASE_VERSION}" "$dst" 2>/dev/null; then
+          continue
+        fi
+        if [[ "$_ecr_public_authed" != "true" ]]; then
+          aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
+            crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
+          _ecr_public_authed=true
+        fi
+        crane_copy_retry "public.ecr.aws/opensearchproject/opensearch-migrations-${public_suffix}:${RELEASE_VERSION}" "$dst"
       done
     fi
     # Tag mirrored images with the immutable IMAGE_TAG

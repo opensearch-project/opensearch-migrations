@@ -72,7 +72,34 @@ aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
 # Override: DOCKERHUB_MIRRORS="mirror.gcr.io docker.io public.ecr.aws" ./mirrorToEcr.sh ...
 DOCKERHUB_MIRRORS="${DOCKERHUB_MIRRORS:-mirror.gcr.io docker.io public.ecr.aws}"
 
-# Copies a single image to ECR, trying mirror sources for mirror.gcr.io/* images.
+# --- ECR pull-through cache (optional, from Jenkins host environment) ---
+# When set, images from mapped registries are tried via pull-through cache first.
+PTC="${ECR_PULL_THROUGH_ENDPOINT:-}"
+if [ -n "$PTC" ]; then
+  echo "ECR pull-through cache enabled: $PTC"
+  # Authenticate with pull-through cache ECR (may be a different account than ECR_HOST)
+  aws ecr get-login-password --region "$REGION" 2>/dev/null | \
+    crane auth login "$PTC" -u AWS --password-stdin 2>/dev/null || true
+fi
+
+# Registry hostname → ECR pull-through cache prefix (matches PullThroughCacheHelper.groovy)
+ptc_rewrite() {
+  [ -z "$PTC" ] && return 1
+  local image="$1" registry path prefix
+  case "$image" in
+    docker.io/*)            prefix="docker-hub";          path="${image#docker.io/}" ;;
+    registry-1.docker.io/*) prefix="docker-hub";          path="${image#registry-1.docker.io/}" ;;
+    mirror.gcr.io/*)        prefix="docker-hub";          path="${image#mirror.gcr.io/}" ;;
+    public.ecr.aws/*)       prefix="ecr-public";          path="${image#public.ecr.aws/}" ;;
+    ghcr.io/*)              prefix="github-container-registry"; path="${image#ghcr.io/}" ;;
+    registry.k8s.io/*)      prefix="k8s";                 path="${image#registry.k8s.io/}" ;;
+    quay.io/*)              prefix="quay";                path="${image#quay.io/}" ;;
+    *) return 1 ;;
+  esac
+  echo "${PTC}/${prefix}/${path}"
+}
+
+# Copies a single image to ECR, trying pull-through cache then mirror sources.
 copy_image() {
   local image="$1" image_no_tag="${image%%:*}" tag="${image##*:}"
   local ecr_repo="mirrored/${image_no_tag}"
@@ -93,6 +120,11 @@ copy_image() {
   ;; esac
 
   aws ecr create-repository --repository-name "$ecr_repo" --region "$REGION" 2>/dev/null || true
+
+  # Prepend pull-through cache source if available (fastest path — same-region ECR to ECR)
+  local ptc_src
+  ptc_src=$(ptc_rewrite "$image") && sources="$ptc_src ${sources}"
+
   for src in $sources; do
     for attempt in 1 2 3; do
       if crane copy "$src" "$dest" 2>/dev/null; then
