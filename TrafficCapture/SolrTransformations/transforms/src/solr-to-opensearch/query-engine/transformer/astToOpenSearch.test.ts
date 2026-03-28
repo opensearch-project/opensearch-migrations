@@ -13,3 +13,55 @@ describe('transformNode', () => {
     expect(mustArray[0].get('bool')).toBeDefined();
   });
 });
+
+
+describe('transformNode – GroupNode handling', () => {
+  // GroupNode is a pass-through: it unwraps and transforms its child directly.
+  // These tests ensure grouping semantics are preserved via AST nesting.
+
+  it('unwraps GroupNode and transforms its child', () => {
+    const result = transformNode({
+      type: 'group',
+      child: { type: 'field', field: 'title', value: 'java' },
+    });
+
+    expect(result).toEqual(new Map([
+      ['match', new Map([['title', 'java']])],
+    ]));
+  });
+
+  it('preserves nested bool structure through group unwrapping', () => {
+    // (A OR B) → GroupNode wrapping BoolNode
+    const result = transformNode({
+      type: 'group',
+      child: {
+        type: 'bool',
+        and: [],
+        or: [
+          { type: 'field', field: 'title', value: 'java' },
+          { type: 'field', field: 'title', value: 'python' },
+        ],
+        not: [],
+      },
+    });
+
+    const boolMap = result.get('bool') as Map<string, any>;
+    expect(boolMap).toBeDefined();
+    expect(boolMap.get('should')).toHaveLength(2);
+  });
+
+  it('handles nested groups correctly', () => {
+    // ((A)) → nested GroupNodes
+    const result = transformNode({
+      type: 'group',
+      child: {
+        type: 'group',
+        child: { type: 'field', field: 'title', value: 'java' },
+      },
+    });
+
+    expect(result).toEqual(new Map([
+      ['match', new Map([['title', 'java']])],
+    ]));
+  });
+});
