@@ -22,7 +22,7 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {Deployment} from "@opensearch-migrations/argo-workflow-builders";
-import {makeMountpointRepoParamDict, getSnapshotLocalDir, S3_MOUNT_PATH} from "./metadataMigration";
+import {makeMountpointRepoParamDict, getSnapshotLocalDir, getS3BucketName, S3_MOUNT_PATH} from "./metadataMigration";
 import {
     setupLog4jConfigForContainer,
     setupTestCredsForContainer,
@@ -81,8 +81,72 @@ function getRfsDeploymentName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs"));
 }
 
-/** Static PVC name — matches the Helm-managed PVC in s3CsiPvc.yaml */
+/** Dynamic PVC name scoped to the session */
 const S3_SNAPSHOT_PVC_NAME = "s3-snapshot";
+
+function getS3SnapshotPvName(sessionName: BaseExpression<string>) {
+    return expr.concat(sessionName, expr.literal("-s3-snapshot"));
+}
+
+function createS3SnapshotPvManifest(
+    pvName: BaseExpression<string>,
+    pvcName: AllowLiteralOrExpression<string>,
+    namespace: BaseExpression<string>,
+    bucketName: BaseExpression<string>,
+    region: BaseExpression<string>,
+    useLocalStack: BaseExpression<boolean>,
+    localStackEndpoint: BaseExpression<string>
+) {
+    return {
+        apiVersion: "v1",
+        kind: "PersistentVolume",
+        metadata: {
+            name: makeStringTypeProxy(pvName)
+        },
+        spec: {
+            capacity: { storage: "1200Gi" },
+            accessModes: ["ReadOnlyMany"],
+            storageClassName: "",
+            claimRef: {
+                namespace: makeStringTypeProxy(namespace),
+                name: makeStringTypeProxy(pvcName)
+            },
+            mountOptions: makeDirectTypeProxy(
+                expr.ternary(
+                    useLocalStack,
+                    expr.literal(["--read-only", "--force-path-style"] as readonly string[]),
+                    expr.literal(["--read-only"] as readonly string[])
+                )
+            ),
+            csi: {
+                driver: "s3.csi.aws.com",
+                volumeHandle: makeStringTypeProxy(pvName),
+                volumeAttributes: {
+                    bucketName: makeStringTypeProxy(bucketName),
+                    authenticationSource: makeStringTypeProxy(
+                        expr.ternary(useLocalStack, expr.literal("driver"), expr.literal("pod")))
+                }
+            },
+            persistentVolumeReclaimPolicy: "Delete"
+        }
+    };
+}
+
+function createS3SnapshotPvcManifest(pvcName: AllowLiteralOrExpression<string>, pvName: BaseExpression<string>) {
+    return {
+        apiVersion: "v1",
+        kind: "PersistentVolumeClaim",
+        metadata: {
+            name: makeStringTypeProxy(pvcName)
+        },
+        spec: {
+            accessModes: ["ReadOnlyMany"],
+            storageClassName: "",
+            resources: { requests: { storage: "1200Gi" } },
+            volumeName: makeStringTypeProxy(pvName)
+        }
+    };
+}
 
 function getRfsDeploymentManifest
 (args: {
@@ -529,6 +593,87 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(c => c)))
 
 
+    .addTemplate("createS3SnapshotPv", t => t
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addRequiredInput("bucketName", typeToken<string>())
+        .addRequiredInput("region", typeToken<string>())
+        .addRequiredInput("useLocalStack", typeToken<boolean>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                manifest: createS3SnapshotPvManifest(
+                    getS3SnapshotPvName(b.inputs.sessionName),
+                    S3_SNAPSHOT_PVC_NAME,
+                    expr.getWorkflowValue("namespace"),
+                    b.inputs.bucketName,
+                    b.inputs.region,
+                    expr.deserializeRecord(b.inputs.useLocalStack),
+                    expr.literal("localstack")
+                )
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("createS3SnapshotPvc", t => t
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                manifest: createS3SnapshotPvcManifest(
+                    S3_SNAPSHOT_PVC_NAME,
+                    getS3SnapshotPvName(b.inputs.sessionName)
+                )
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("deleteS3SnapshotPv", t => t
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "delete",
+                manifest: {
+                    apiVersion: "v1",
+                    kind: "PersistentVolume",
+                    metadata: {
+                        name: makeStringTypeProxy(getS3SnapshotPvName(b.inputs.sessionName))
+                    }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("setupS3SnapshotVolume", t => t
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+        .addSteps(b => {
+            const repoConfig = expr.omit(
+                expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RoleArn");
+            return b
+                .addStep("createPv", INTERNAL, "createS3SnapshotPv", c =>
+                    c.register({
+                        sessionName: b.inputs.sessionName,
+                        bucketName: getS3BucketName(repoConfig),
+                        region: expr.get(repoConfig, "awsRegion"),
+                        useLocalStack: expr.dig(
+                            expr.deserializeRecord(b.inputs.snapshotConfig),
+                            ["repoConfig", "useLocalStack"], false)
+                    }))
+                .addStep("createPvc", INTERNAL, "createS3SnapshotPvc", c =>
+                    c.register({sessionName: b.inputs.sessionName}));
+        })
+    )
+
+    .addTemplate("cleanupS3SnapshotVolume", t => t
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addSteps(b => b
+            .addStep("deletePv", INTERNAL, "deleteS3SnapshotPv", c =>
+                c.register({sessionName: b.inputs.sessionName}))
+        )
+    )
+
+
     .addTemplate("setupAndRunBulkLoad", t => t
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
@@ -542,6 +687,14 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addSteps(b => {
             const createRfsCluster = shouldCreateRfsWorkCoordinationCluster(b.inputs.documentBackfillConfig);
             return b
+                // Create S3 CSI PV/PVC for the snapshot bucket
+                .addStep("setupS3Volume", INTERNAL, "setupS3SnapshotVolume", c =>
+                    c.register({
+                        sessionName: b.inputs.sessionName,
+                        snapshotConfig: b.inputs.snapshotConfig
+                    })
+                )
+
                 // (conditional) Deploy an OpenSearch cluster for RFS work coordination
                 .addStep("createRfsCoordinator", RfsCoordinatorCluster, "createRfsCoordinator", c =>
                         c.register({
@@ -568,6 +721,11 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName)
                         }),
                     {when: {templateExp: createRfsCluster}}
+                )
+
+                // Cleanup S3 CSI PV (PVC is owner-referenced, cleaned up by Argo)
+                .addStep("cleanupS3Volume", INTERNAL, "cleanupS3SnapshotVolume", c =>
+                    c.register({sessionName: b.inputs.sessionName})
                 );
         })
     )

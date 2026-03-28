@@ -661,6 +661,181 @@
         }
       },
       {
+        "name": "creates3snapshotpv",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "bucketName"
+            },
+            {
+              "name": "region"
+            },
+            {
+              "name": "useLocalStack"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: v1\nkind: PersistentVolume\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-s3-snapshot'}}\"\nspec:\n  capacity:\n    storage: 1200Gi\n  accessModes:\n    - ReadOnlyMany\n  storageClassName: \"\"\n  claimRef:\n    namespace: \"{{workflow.namespace}}\"\n    name: s3-snapshot\n  mountOptions: '{{=((fromJSON(inputs.parameters.useLocalStack)) ? ([\"--read-only\",\"--force-path-style\"]) : ([\"--read-only\"]))}}'\n  csi:\n    driver: s3.csi.aws.com\n    volumeHandle: \"{{=inputs.parameters.sessionName+'-s3-snapshot'}}\"\n    volumeAttributes:\n      bucketName: \"{{inputs.parameters.bucketName}}\"\n      authenticationSource: \"{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('driver') : ('pod'))}}\"\n  persistentVolumeReclaimPolicy: Delete\n",
+          "action": "apply"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "creates3snapshotpvc",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: s3-snapshot\nspec:\n  accessModes:\n    - ReadOnlyMany\n  storageClassName: \"\"\n  resources:\n    requests:\n      storage: 1200Gi\n  volumeName: \"{{=inputs.parameters.sessionName+'-s3-snapshot'}}\"\n",
+          "action": "apply",
+          "setOwnerReference": true
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deletes3snapshotpv",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: v1\nkind: PersistentVolume\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-s3-snapshot'}}\"\n",
+          "action": "delete"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "setups3snapshotvolume",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName"
+            },
+            {
+              "name": "snapshotConfig"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "creates3snapshotpv",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "bucketName",
+                    "value": "{{=sprig.regexReplaceAll('^s3://([^/]+).*$', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], '${1}')}}"
+                  },
+                  {
+                    "name": "region",
+                    "value": "{{=sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion']}}"
+                  },
+                  {
+                    "name": "useLocalStack",
+                    "value": "{{=sprig.dig('repoConfig', 'useLocalStack', false, fromJSON(inputs.parameters.snapshotConfig))}}"
+                  }
+                ]
+              },
+              "name": "createPv"
+            }
+          ],
+          [
+            {
+              "template": "creates3snapshotpvc",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  }
+                ]
+              },
+              "name": "createPvc"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "cleanups3snapshotvolume",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "sessionName"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "deletes3snapshotpv",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  }
+                ]
+              },
+              "name": "deletePv"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "setupandrunbulkload",
         "inputs": {
           "parameters": [
@@ -712,6 +887,24 @@
           ]
         },
         "steps": [
+          [
+            {
+              "template": "setups3snapshotvolume",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  }
+                ]
+              },
+              "name": "setupS3Volume"
+            }
+          ],
           [
             {
               "templateRef": {
@@ -816,6 +1009,20 @@
                 ]
               },
               "name": "cleanupRfsCoordinator"
+            }
+          ],
+          [
+            {
+              "template": "cleanups3snapshotvolume",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "sessionName",
+                    "value": "{{inputs.parameters.sessionName}}"
+                  }
+                ]
+              },
+              "name": "cleanupS3Volume"
             }
           ]
         ],

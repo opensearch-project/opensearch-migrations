@@ -65,6 +65,17 @@ export function makeRepoParamDict(
 export const S3_MOUNT_PATH = "/mnt/s3";
 
 /**
+ * Extract the S3 bucket name from an s3RepoPathUri.
+ * Converts s3://bucket-name/path → bucket-name.
+ */
+export function getS3BucketName(repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>) {
+    return new FunctionExpression<string, string, ExpressionType, "complicatedExpression">(
+        "sprig.regexReplaceAll",
+        [expr.literal("^s3://([^/]+).*$"), expr.get(repoConfig, "s3RepoPathUri"),
+         expr.literal("${1}")] as any);
+}
+
+/**
  * Compute the local filesystem path for a snapshot repo mounted via S3 CSI driver.
  * Converts s3://bucket/path → /mnt/s3/path.
  */
