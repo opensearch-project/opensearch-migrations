@@ -1,4 +1,4 @@
-{{- $bucketName := printf "migrations-default-%s-%s-%s" (toString .Values.aws.account) .Values.stageName .Values.aws.region -}}
+{{- $bucketName := .Values.defaultBucketConfiguration.s3SnapshotBucketName | default (printf "migrations-default-%s-%s-%s" (toString .Values.aws.account) .Values.stageName .Values.aws.region) -}}
 apiVersion: v1
 kind: PersistentVolume
 metadata:
