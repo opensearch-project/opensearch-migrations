@@ -273,6 +273,22 @@ describe('parseSolrQuery', () => {
         value: 2,
       });
     });
+
+    it('parses boost on match all *:*^2', () => {
+      const { ast, errors } = parseSolrQuery('*:*^2', emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast).toEqual({
+        type: 'boost',
+        child: { type: 'matchAll' },
+        value: 2,
+      });
+    });
+
+    it('fails to parse non-numeric boost value (^abc)', () => {
+      const { ast, errors } = parseSolrQuery('title:java^abc', emptyParams);
+      expect(ast).toBeNull();
+      expect(errors).toHaveLength(1);
+    });
   });
 
   // ─── Combined query ──────────────────────────────────────────────────────
