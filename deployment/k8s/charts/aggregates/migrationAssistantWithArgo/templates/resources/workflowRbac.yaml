@@ -24,7 +24,7 @@ rules:
 
   # Add permissions for pods and pod logs (needed for Argo workflow execution)
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "secrets", "configmaps", "serviceaccounts"]
+    resources: ["pods", "pods/log", "services", "secrets", "configmaps", "serviceaccounts", "persistentvolumeclaims"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # For services
@@ -104,6 +104,29 @@ subjects:
 roleRef:
   kind: ClusterRole
   name: {{ .Release.Namespace }}-cert-issuer-manager
+  apiGroup: rbac.authorization.k8s.io
+---
+# ClusterRole for PersistentVolumes (cluster-scoped resources needed for S3 CSI snapshot mounts)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-pv-manager
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-pv-manager-binding
+subjects:
+  - kind: ServiceAccount
+    name: argo-workflow-executor
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-pv-manager
   apiGroup: rbac.authorization.k8s.io
 ---
 # ClusterRole for ValidatingAdmissionPolicies (cluster-scoped resources)
