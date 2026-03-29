@@ -181,7 +181,7 @@ jobs:
         uses: ./.github/actions/jenkins-trigger
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
-          job_name: ${{ github.event_name == 'push' && 'main-eks-byos-integ-test' || 'pr-eks-byos-integ-test' }}
+          job_name: ${{ github.event_name == 'push' && 'main-byos-eks-integ-test' || 'byos-eks-integ-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
