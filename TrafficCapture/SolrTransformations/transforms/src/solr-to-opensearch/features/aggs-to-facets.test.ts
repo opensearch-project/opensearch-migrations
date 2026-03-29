@@ -242,4 +242,202 @@ describe('aggs-to-facets MicroTransform', () => {
       expect(buckets[0].get('count')).toBe(5);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Nested aggregation response conversion
+  // ---------------------------------------------------------------------------
+
+  describe('nested aggregation conversion in buckets', () => {
+    it('should convert nested terms agg results within buckets', () => {
+      // Simulate: categories → brands (nested terms inside each bucket)
+      const nestedBrandsAgg = new Map<string, any>([
+        ['buckets', [
+          new Map<string, any>([['key', 'acme'], ['doc_count', 10]]),
+          new Map<string, any>([['key', 'globex'], ['doc_count', 5]]),
+        ]],
+      ]);
+      const outerBuckets = [
+        new Map<string, any>([
+          ['key', 'electronics'],
+          ['doc_count', 15],
+          ['brands', nestedBrandsAgg],
+        ]),
+      ];
+      const aggs = new Map([
+        ['categories', new Map<string, any>([['buckets', outerBuckets]])],
+      ]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 100 });
+      response.apply(ctx);
+
+      const facets: JavaMap = ctx.responseBody.get('facets');
+      const categories: JavaMap = facets.get('categories');
+      const catBuckets: JavaMap[] = categories.get('buckets');
+
+      expect(catBuckets).toHaveLength(1);
+      expect(catBuckets[0].get('val')).toBe('electronics');
+      expect(catBuckets[0].get('count')).toBe(15);
+
+      // Nested facet result
+      const brands: JavaMap = catBuckets[0].get('brands');
+      expect(brands).toBeDefined();
+      const brandBuckets: JavaMap[] = brands.get('buckets');
+      expect(brandBuckets).toHaveLength(2);
+      expect(brandBuckets[0].get('val')).toBe('acme');
+      expect(brandBuckets[0].get('count')).toBe(10);
+      expect(brandBuckets[1].get('val')).toBe('globex');
+      expect(brandBuckets[1].get('count')).toBe(5);
+    });
+
+    it('should not add nested keys for buckets with no nested aggs', () => {
+      const aggs = new Map([
+        ['categories', osTermsAgg([{ key: 'food', doc_count: 3 }])],
+      ]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 10 });
+      response.apply(ctx);
+
+      const facets: JavaMap = ctx.responseBody.get('facets');
+      const bucket: JavaMap = facets.get('categories').get('buckets')[0];
+      // Should only have val and count — no extra keys
+      expect(bucket.size).toBe(2);
+      expect(bucket.has('val')).toBe(true);
+      expect(bucket.has('count')).toBe(true);
+    });
+
+    it('should handle multiple nested aggs within the same bucket', () => {
+      const nestedBrandsAgg = new Map<string, any>([
+        ['buckets', [
+          new Map<string, any>([['key', 'acme'], ['doc_count', 8]]),
+        ]],
+      ]);
+      const nestedPricesAgg = new Map<string, any>([
+        ['buckets', [
+          new Map<string, any>([['key', 0], ['doc_count', 3]]),
+          new Map<string, any>([['key', 25], ['doc_count', 5]]),
+        ]],
+      ]);
+      const outerBuckets = [
+        new Map<string, any>([
+          ['key', 'electronics'],
+          ['doc_count', 8],
+          ['brands', nestedBrandsAgg],
+          ['prices', nestedPricesAgg],
+        ]),
+      ];
+      const aggs = new Map([
+        ['categories', new Map<string, any>([['buckets', outerBuckets]])],
+      ]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 50 });
+      response.apply(ctx);
+
+      const bucket: JavaMap = ctx.responseBody.get('facets').get('categories').get('buckets')[0];
+      expect(bucket.has('brands')).toBe(true);
+      expect(bucket.has('prices')).toBe(true);
+      expect(bucket.get('brands').get('buckets')).toHaveLength(1);
+      expect(bucket.get('prices').get('buckets')).toHaveLength(2);
+    });
+  });
+
+  describe('nested aggregation conversion in filter aggs', () => {
+    it('should convert nested terms agg results within a filter aggregation', () => {
+      // Simulate: expensive (filter) → categories (nested terms)
+      const nestedCategoriesAgg = new Map<string, any>([
+        ['buckets', [
+          new Map<string, any>([['key', 'electronics'], ['doc_count', 5]]),
+          new Map<string, any>([['key', 'clothing'], ['doc_count', 2]]),
+        ]],
+      ]);
+      const filterAgg = new Map<string, any>([
+        ['doc_count', 7],
+        ['categories', nestedCategoriesAgg],
+      ]);
+      const aggs = new Map([['expensive', filterAgg]]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 100 });
+      response.apply(ctx);
+
+      const facets: JavaMap = ctx.responseBody.get('facets');
+      const expensive: JavaMap = facets.get('expensive');
+      expect(expensive.get('count')).toBe(7);
+
+      // Nested facet result
+      const categories: JavaMap = expensive.get('categories');
+      expect(categories).toBeDefined();
+      const catBuckets: JavaMap[] = categories.get('buckets');
+      expect(catBuckets).toHaveLength(2);
+      expect(catBuckets[0].get('val')).toBe('electronics');
+      expect(catBuckets[0].get('count')).toBe(5);
+      expect(catBuckets[1].get('val')).toBe('clothing');
+      expect(catBuckets[1].get('count')).toBe(2);
+    });
+
+    it('should not add nested keys for filter aggs with no nested aggs', () => {
+      const filterAgg = new Map<string, any>([['doc_count', 17]]);
+      const aggs = new Map([['expensive', filterAgg]]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 100 });
+      response.apply(ctx);
+
+      const expensive: JavaMap = ctx.responseBody.get('facets').get('expensive');
+      // Should only have count — no extra keys
+      expect(expensive.size).toBe(1);
+      expect(expensive.has('count')).toBe(true);
+    });
+  });
+
+  describe('multi-level nested response conversion', () => {
+    it('should handle three levels of nested aggregation results', () => {
+      // Simulate: categories → brands → price_ranges (3 levels)
+      const priceRangeAgg = new Map<string, any>([
+        ['buckets', [
+          new Map<string, any>([['key', 0], ['doc_count', 2]]),
+          new Map<string, any>([['key', 50], ['doc_count', 3]]),
+        ]],
+      ]);
+      const brandsAgg = new Map<string, any>([
+        ['buckets', [
+          new Map<string, any>([
+            ['key', 'acme'],
+            ['doc_count', 5],
+            ['price_ranges', priceRangeAgg],
+          ]),
+        ]],
+      ]);
+      const categoriesAgg = new Map<string, any>([
+        ['buckets', [
+          new Map<string, any>([
+            ['key', 'electronics'],
+            ['doc_count', 5],
+            ['brands', brandsAgg],
+          ]),
+        ]],
+      ]);
+      const aggs = new Map([['categories', categoriesAgg]]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 100 });
+      response.apply(ctx);
+
+      const facets: JavaMap = ctx.responseBody.get('facets');
+
+      // Level 1: categories
+      const catBucket: JavaMap = facets.get('categories').get('buckets')[0];
+      expect(catBucket.get('val')).toBe('electronics');
+      expect(catBucket.get('count')).toBe(5);
+
+      // Level 2: brands (nested in category bucket)
+      const brandBucket: JavaMap = catBucket.get('brands').get('buckets')[0];
+      expect(brandBucket.get('val')).toBe('acme');
+      expect(brandBucket.get('count')).toBe(5);
+
+      // Level 3: price_ranges (nested in brand bucket)
+      const priceRangeBuckets: JavaMap[] = brandBucket.get('price_ranges').get('buckets');
+      expect(priceRangeBuckets).toHaveLength(2);
+      expect(priceRangeBuckets[0].get('val')).toBe(0);
+      expect(priceRangeBuckets[0].get('count')).toBe(2);
+      expect(priceRangeBuckets[1].get('val')).toBe(50);
+      expect(priceRangeBuckets[1].get('count')).toBe(3);
+    });
+  });
 });
