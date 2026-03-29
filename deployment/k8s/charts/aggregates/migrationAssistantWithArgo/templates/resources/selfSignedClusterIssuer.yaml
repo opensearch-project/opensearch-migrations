@@ -10,6 +10,9 @@ metadata:
 spec:
   activeDeadlineSeconds: 600
   template:
+    metadata:
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
       serviceAccountName: {{ .Values.argoWorkflowServiceAccountName | default "argo-workflow-executor" }}
       containers:

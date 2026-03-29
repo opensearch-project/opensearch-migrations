@@ -69,6 +69,7 @@ include 'TrafficCapture:trafficReplayer'
 include 'TrafficCapture:transformationShim'
 include 'TrafficCapture:SolrTransformations'
 include 'buildImages'
+include 'custom-es-images'
 include 'kiro-cli'
 
 
