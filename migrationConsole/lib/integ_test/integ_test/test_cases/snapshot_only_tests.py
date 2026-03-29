@@ -85,6 +85,11 @@ class Test0010ExternalSnapshotMigration(MATestBase):
 
     def prepare_workflow_snapshot_and_migration_config(self):
         """Configure for external snapshot with template exclusion for invalid names."""
+        backfill_config = {
+            "podReplicas": self.pod_replicas,
+            "maxConnections": 50,
+            "initialLeaseDuration": "PT2H",
+        }
         self.workflow_snapshot_and_migration_config = [{
             "snapshotConfig": {
                 "snapshotNameConfig": {
@@ -93,7 +98,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
             },
             "migrations": [{
                 "metadataMigrationConfig": {},
-                "documentBackfillConfig": {"podReplicas": self.pod_replicas}
+                "documentBackfillConfig": backfill_config
             }]
         }]
 
