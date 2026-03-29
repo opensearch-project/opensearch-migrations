@@ -71,6 +71,8 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
     if api_exception:
         error_message = f"Unable to connect to server. Underlying exception: {api_exception}"
         raise ClusterAPIRequestError(error_message)
+    elif last_response is None:
+        raise ClusterAPIRequestError(f"Connection failed for request: {method.name} {path} - no response received")
     else:
         error_message = (f"Failed to receive desired status code of {expected_status_code} and instead "
                          f"received {last_received_status} for request: {method.name} {path}")
