@@ -183,8 +183,8 @@ class SolrToOpenSearchMigrationSkill:
     def _looks_like_schema(message: str, message_lc: str) -> bool:
         """Return True if *message* appears to contain or request a schema conversion."""
         if (
-            SolrToOpenSearchMigrationSkill._SCHEMA_START_TAG in message
-            and SolrToOpenSearchMigrationSkill._SCHEMA_END_TAG in message
+            SolrToOpenSearchMigrationSkill._SCHEMA_START_TAG in message and
+                SolrToOpenSearchMigrationSkill._SCHEMA_END_TAG in message
         ):
             return True
         schema_keywords = ("schema" in message_lc or "migrate" in message_lc or "convert" in message_lc)
