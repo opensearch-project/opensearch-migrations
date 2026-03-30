@@ -30,10 +30,11 @@ ensure_crane() {
 }
 
 # Registry hostname → ECR pull-through cache prefix (matches PullThroughCacheHelper.groovy)
-# Globals: PTC
+# Args: <ptc-endpoint> <image>
 ptc_rewrite() {
-  [ -z "$PTC" ] && return 1
-  local image="$1" path prefix
+  local ptc="$1" image="$2"
+  [ -z "$ptc" ] && return 1
+  local path prefix
   case "$image" in
     docker.io/*)            prefix="docker-hub";          path="${image#docker.io/}" ;;
     registry-1.docker.io/*) prefix="docker-hub";          path="${image#registry-1.docker.io/}" ;;
@@ -44,21 +45,22 @@ ptc_rewrite() {
     quay.io/*)              prefix="quay";                path="${image#quay.io/}" ;;
     *) return 1 ;;
   esac
-  echo "${PTC}/${prefix}/${path}"
+  echo "${ptc}/${prefix}/${path}"
 }
 
 # Copy a single image to ECR, trying pull-through cache then mirror sources.
-# Globals: ECR_HOST, REGION, DOCKERHUB_MIRRORS, PTC
+# Args: <ecr-host> <region> <dockerhub-mirrors> <ptc-endpoint> <image>
 copy_image() {
-  local image="$1" image_no_tag="${image%%:*}" tag="${image##*:}"
+  local ecr_host="$1" region="$2" dockerhub_mirrors="$3" ptc="$4" image="$5"
+  local image_no_tag="${image%%:*}" tag="${image##*:}"
   local ecr_repo="mirrored/${image_no_tag}"
-  local dest="${ECR_HOST}/${ecr_repo}:${tag}"
+  local dest="${ecr_host}/${ecr_repo}:${tag}"
 
   # Build source candidates — for mirror.gcr.io/*, try each mirror
   local sources="$image"
   case "$image" in mirror.gcr.io/*)
     local path="${image#mirror.gcr.io/}" ; sources=""
-    for m in $DOCKERHUB_MIRRORS; do
+    for m in $dockerhub_mirrors; do
       if [ "$m" = "public.ecr.aws" ]; then
         case "$path" in library/*) sources="${sources:+$sources }${m}/docker/${path}" ;; esac
       else
@@ -67,11 +69,11 @@ copy_image() {
     done
   ;; esac
 
-  aws ecr create-repository --repository-name "$ecr_repo" --region "$REGION" 2>/dev/null || true
+  aws ecr create-repository --repository-name "$ecr_repo" --region "$region" 2>/dev/null || true
 
   # Prepend pull-through cache source if available (fastest path — same-region ECR to ECR)
   local ptc_src
-  ptc_src=$(ptc_rewrite "$image") && sources="$ptc_src ${sources}"
+  ptc_src=$(ptc_rewrite "$ptc" "$image") && sources="$ptc_src ${sources}"
 
   for src in $sources; do
     for attempt in 1 2 3; do
@@ -89,25 +91,24 @@ copy_image() {
 # Args: <ecr-host> <region> <images-string>
 mirror_images_to_ecr() {
   local ecr_host="$1" region="$2" images="$3"
-  ECR_HOST="$ecr_host" REGION="$region"
-  DOCKERHUB_MIRRORS="${DOCKERHUB_MIRRORS:-mirror.gcr.io docker.io public.ecr.aws}"
+  local dockerhub_mirrors="${DOCKERHUB_MIRRORS:-mirror.gcr.io docker.io public.ecr.aws}"
 
   ensure_crane
 
-  echo "Authenticating with ECR ($ECR_HOST)..."
+  echo "Authenticating with ECR ($ecr_host)..."
   local ecr_pass
-  ecr_pass=$(aws ecr get-login-password --region "$REGION")
-  echo "$ecr_pass" | crane auth login "$ECR_HOST" -u AWS --password-stdin
+  ecr_pass=$(aws ecr get-login-password --region "$region")
+  echo "$ecr_pass" | crane auth login "$ecr_host" -u AWS --password-stdin
 
   aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
     crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
 
   # ECR pull-through cache (optional, from Jenkins host environment)
-  PTC="${ECR_PULL_THROUGH_ENDPOINT:-}"
-  if [ -n "$PTC" ]; then
-    echo "ECR pull-through cache enabled: $PTC"
-    aws ecr get-login-password --region "$REGION" 2>/dev/null | \
-      crane auth login "$PTC" -u AWS --password-stdin 2>/dev/null || true
+  local ptc="${ECR_PULL_THROUGH_ENDPOINT:-}"
+  if [ -n "$ptc" ]; then
+    echo "ECR pull-through cache enabled: $ptc"
+    aws ecr get-login-password --region "$region" 2>/dev/null | \
+      crane auth login "$ptc" -u AWS --password-stdin 2>/dev/null || true
   fi
 
   echo ""
@@ -116,7 +117,7 @@ mirror_images_to_ecr() {
   _imglist=$(mktemp)
   echo "$images" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | grep -v '^#' | grep -v '^$' > "$_imglist"
   while IFS= read -r image; do
-    copy_image "$image" &
+    copy_image "$ecr_host" "$region" "$dockerhub_mirrors" "$ptc" "$image" &
   done < "$_imglist"
   rm -f "$_imglist"
   wait || { echo "⚠️  Some image copies failed" >&2; }
