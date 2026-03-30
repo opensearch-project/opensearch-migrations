@@ -14,45 +14,6 @@ export type ContainerVolumePair = {
     readonly sidecars: Container[]
 };
 
-const S3_SNAPSHOT_VOLUME_NAME = "snapshot-s3";
-
-/**
- * Add a PVC-backed S3 volume mount to a container definition.
- * Requires the Mountpoint S3 CSI Driver v2 and a static PV/PVC (via Helm templates).
- * Each pod gets its own Mountpoint Pod (FUSE process) even with a shared PVC.
- */
-export function setupS3CsiVolumeForContainer(
-    mountPath: string,
-    pvcClaimName: BaseExpression<string>,
-    def: ContainerVolumePair): ContainerVolumePair {
-
-    const {volumeMounts, ...restOfContainer} = def.container;
-    return {
-        volumes: [
-            ...def.volumes,
-            {
-                name: S3_SNAPSHOT_VOLUME_NAME,
-                persistentVolumeClaim: {
-                    claimName: makeStringTypeProxy(pvcClaimName),
-                    readOnly: true
-                }
-            }
-        ],
-        container: {
-            ...restOfContainer,
-            volumeMounts: [
-                ...(volumeMounts === undefined ? [] : volumeMounts),
-                {
-                    name: S3_SNAPSHOT_VOLUME_NAME,
-                    mountPath: mountPath,
-                    readOnly: true
-                }
-            ]
-        },
-        sidecars: def.sidecars
-    } as const;
-}
-
 export function setupTestCredsForContainer(
     useLocalStack: BaseExpression<boolean>,
     def: ContainerVolumePair): ContainerVolumePair {
@@ -172,16 +133,24 @@ export function setupLog4jConfigForContainer(
     } as const;
 }
 
+const S3_MOUNT_VOLUME_NAME = "snapshot-s3";
 const LUCENE_FUSE_VOLUME_NAME = "lucene-fuse";
+const S3_CACHE_VOLUME_NAME = "s3-cache";
 
 /**
- * Add a snapshot-fuse FUSE sidecar that translates ES/OS snapshot blobs into virtual Lucene files.
- * The sidecar reads from the S3 CSI mount and presents Lucene files at /mnt/lucene.
- * Requires the S3 CSI volume to already be configured (call setupS3CsiVolumeForContainer first).
+ * Add a snapshot-fuse sidecar that:
+ * 1. Runs mount-s3 to mount the S3 bucket at /mnt/s3 (with 5GB emptyDir cache)
+ * 2. Runs snapshot-fuse FUSE to translate ES/OS snapshot blobs into virtual Lucene files at /mnt/lucene
+ *
+ * Each pod independently mounts S3 and caches hot blocks locally. No PV/PVC or CSI driver required.
+ * This enables horizontal scaling — each pod gets its own mount-s3 process and cache.
  */
 export function setupSnapshotFuseSidecar(
     snapshotLocalDir: BaseExpression<string>,
     snapshotName: BaseExpression<string>,
+    s3Bucket: BaseExpression<string>,
+    s3Region: BaseExpression<string>,
+    useLocalStack: BaseExpression<boolean>,
     sidecarImage: BaseExpression<string>,
     sidecarImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     def: ContainerVolumePair): ContainerVolumePair {
@@ -190,7 +159,9 @@ export function setupSnapshotFuseSidecar(
     return {
         volumes: [
             ...def.volumes,
-            { name: LUCENE_FUSE_VOLUME_NAME, emptyDir: {} }
+            { name: S3_MOUNT_VOLUME_NAME, emptyDir: {} },
+            { name: LUCENE_FUSE_VOLUME_NAME, emptyDir: {} },
+            { name: S3_CACHE_VOLUME_NAME, emptyDir: { sizeLimit: "5Gi" } }
         ],
         container: {
             ...restOfContainer,
@@ -214,18 +185,42 @@ export function setupSnapshotFuseSidecar(
                     makeStringTypeProxy(expr.concat(expr.literal("--snapshot-name="), snapshotName)),
                     "--mount-point=/mnt/lucene"
                 ],
-                env: [{ name: "RUST_LOG", value: "info" }],
+                env: [
+                    { name: "RUST_LOG", value: "info" },
+                    { name: "S3_BUCKET", value: makeStringTypeProxy(s3Bucket) },
+                    { name: "AWS_REGION", value: makeStringTypeProxy(s3Region) },
+                    {
+                        name: "S3_ENDPOINT_URL",
+                        value: makeStringTypeProxy(expr.ternary(
+                            useLocalStack,
+                            expr.literal("http://localstack:4566"),
+                            expr.literal("")
+                        ))
+                    },
+                    {
+                        name: "S3_FORCE_PATH_STYLE",
+                        value: makeStringTypeProxy(expr.ternary(
+                            useLocalStack,
+                            expr.literal("true"),
+                            expr.literal("false")
+                        ))
+                    }
+                ],
                 securityContext: { privileged: true },
                 volumeMounts: [
                     {
-                        name: S3_SNAPSHOT_VOLUME_NAME,
+                        name: S3_MOUNT_VOLUME_NAME,
                         mountPath: "/mnt/s3",
-                        readOnly: true
+                        mountPropagation: "Bidirectional"
                     },
                     {
                         name: LUCENE_FUSE_VOLUME_NAME,
                         mountPath: "/mnt/lucene",
                         mountPropagation: "Bidirectional"
+                    },
+                    {
+                        name: S3_CACHE_VOLUME_NAME,
+                        mountPath: "/cache"
                     }
                 ]
             }

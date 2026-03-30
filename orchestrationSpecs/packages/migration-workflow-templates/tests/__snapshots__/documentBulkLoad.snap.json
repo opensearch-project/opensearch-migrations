@@ -267,11 +267,19 @@
             },
             {
               "name": "snapshotLocalDir",
-              "description": "Local path to snapshot repo (S3 CSI mount)"
+              "description": "Local path within S3 mount for snapshot repo"
             },
             {
               "name": "snapshotName",
               "description": "Snapshot name for FUSE sidecar"
+            },
+            {
+              "name": "s3Bucket",
+              "description": "S3 bucket name for per-pod mount-s3"
+            },
+            {
+              "name": "s3Region",
+              "description": "AWS region for S3 bucket"
             },
             {
               "name": "sourceK8sLabel"
@@ -304,7 +312,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceK8sLabel}}\"\n    migrations.opensearch.org/target: \"{{inputs.parameters.targetK8sLabel}}\"\n    migrations.opensearch.org/snapshot: \"{{inputs.parameters.snapshotK8sLabel}}\"\n    migrations.opensearch.org/from-snapshot-migration: \"{{inputs.parameters.fromSnapshotMigrationK8sLabel}}\"\n    migrations.opensearch.org/task: \"{{inputs.parameters.taskK8sLabel}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  strategy:\n    type: RollingUpdate\n    rollingUpdate:\n      maxUnavailable: 1\n      maxSurge: 1\n  selector:\n    matchLabels:\n      app: bulk-loader\n      deployment-name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n  template:\n    metadata:\n      labels:\n        app: bulk-loader\n        deployment-name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n        workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n        migrations.opensearch.org/source: \"{{inputs.parameters.sourceK8sLabel}}\"\n        migrations.opensearch.org/target: \"{{inputs.parameters.targetK8sLabel}}\"\n        migrations.opensearch.org/snapshot: \"{{inputs.parameters.snapshotK8sLabel}}\"\n        migrations.opensearch.org/from-snapshot-migration: \"{{inputs.parameters.fromSnapshotMigrationK8sLabel}}\"\n        migrations.opensearch.org/task: \"{{inputs.parameters.taskK8sLabel}}\"\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: bulk-loader\n          image: \"{{inputs.parameters.imageReindexFromSnapshotLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}\"\n          command:\n            - /rfs-app/runJavaWithClasspathWithRepeat.sh\n          args:\n            - org.opensearch.migrations.RfsMigrateDocuments\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.rfsJsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: TARGET_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}\"\n                  key: username\n                  optional: true\n            - name: TARGET_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}\"\n                  key: password\n                  optional: true\n            - name: COORDINATOR_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}\"\n                  key: username\n                  optional: true\n            - name: COORDINATOR_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}\"\n                  key: password\n                  optional: true\n            - name: FAILED_REQUESTS_LOGGER_LEVEL\n              value: \"OFF\"\n            - name: CONSOLE_LOG_FORMAT\n              value: json\n            - name: JDK_JAVA_OPTIONS\n              value: \"{{=inputs.parameters.jvmArgs + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}\"\n            - name: AWS_SHARED_CREDENTIALS_FILE\n              value: \"{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials/configuration') : (''))}}\"\n          volumeMounts:\n            - name: log4j-configuration\n              mountPath: /config/logConfiguration\n              readOnly: true\n            - name: snapshot-s3\n              mountPath: /mnt/s3\n              readOnly: true\n            - name: lucene-fuse\n              mountPath: /mnt/lucene\n              mountPropagation: HostToContainer\n            - name: localstack-test-creds\n              mountPath: /config/credentials\n              readOnly: true\n        - name: snapshot-fuse\n          image: \"{{inputs.parameters.imageSnapshotFuseLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageSnapshotFusePullPolicy}}\"\n          args:\n            - \"{{='--repo-root='+inputs.parameters.snapshotLocalDir}}\"\n            - \"{{='--snapshot-name='+inputs.parameters.snapshotName}}\"\n            - --mount-point=/mnt/lucene\n          env:\n            - name: RUST_LOG\n              value: info\n          securityContext:\n            privileged: true\n          volumeMounts:\n            - name: snapshot-s3\n              mountPath: /mnt/s3\n              readOnly: true\n            - name: lucene-fuse\n              mountPath: /mnt/lucene\n              mountPropagation: Bidirectional\n      volumes:\n        - name: log4j-configuration\n          configMap:\n            name: \"{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}\"\n            optional: {{=!(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)))}}\n        - name: snapshot-s3\n          persistentVolumeClaim:\n            claimName: s3-snapshot\n            readOnly: true\n        - name: lucene-fuse\n          emptyDir: {}\n        - name: localstack-test-creds\n          configMap:\n            name: localstack-test-creds\n            optional: {{=!(fromJSON(inputs.parameters.useLocalStack))}}\n",
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceK8sLabel}}\"\n    migrations.opensearch.org/target: \"{{inputs.parameters.targetK8sLabel}}\"\n    migrations.opensearch.org/snapshot: \"{{inputs.parameters.snapshotK8sLabel}}\"\n    migrations.opensearch.org/from-snapshot-migration: \"{{inputs.parameters.fromSnapshotMigrationK8sLabel}}\"\n    migrations.opensearch.org/task: \"{{inputs.parameters.taskK8sLabel}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  strategy:\n    type: RollingUpdate\n    rollingUpdate:\n      maxUnavailable: 1\n      maxSurge: 1\n  selector:\n    matchLabels:\n      app: bulk-loader\n      deployment-name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n  template:\n    metadata:\n      labels:\n        app: bulk-loader\n        deployment-name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n        workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n        migrations.opensearch.org/source: \"{{inputs.parameters.sourceK8sLabel}}\"\n        migrations.opensearch.org/target: \"{{inputs.parameters.targetK8sLabel}}\"\n        migrations.opensearch.org/snapshot: \"{{inputs.parameters.snapshotK8sLabel}}\"\n        migrations.opensearch.org/from-snapshot-migration: \"{{inputs.parameters.fromSnapshotMigrationK8sLabel}}\"\n        migrations.opensearch.org/task: \"{{inputs.parameters.taskK8sLabel}}\"\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: bulk-loader\n          image: \"{{inputs.parameters.imageReindexFromSnapshotLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}\"\n          command:\n            - /rfs-app/runJavaWithClasspathWithRepeat.sh\n          args:\n            - org.opensearch.migrations.RfsMigrateDocuments\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.rfsJsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: TARGET_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}\"\n                  key: username\n                  optional: true\n            - name: TARGET_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}\"\n                  key: password\n                  optional: true\n            - name: COORDINATOR_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}\"\n                  key: username\n                  optional: true\n            - name: COORDINATOR_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}\"\n                  key: password\n                  optional: true\n            - name: FAILED_REQUESTS_LOGGER_LEVEL\n              value: \"OFF\"\n            - name: CONSOLE_LOG_FORMAT\n              value: json\n            - name: JDK_JAVA_OPTIONS\n              value: \"{{=inputs.parameters.jvmArgs + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}\"\n            - name: AWS_SHARED_CREDENTIALS_FILE\n              value: \"{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials/configuration') : (''))}}\"\n          volumeMounts:\n            - name: log4j-configuration\n              mountPath: /config/logConfiguration\n              readOnly: true\n            - name: lucene-fuse\n              mountPath: /mnt/lucene\n              mountPropagation: HostToContainer\n            - name: localstack-test-creds\n              mountPath: /config/credentials\n              readOnly: true\n        - name: snapshot-fuse\n          image: \"{{inputs.parameters.imageSnapshotFuseLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageSnapshotFusePullPolicy}}\"\n          args:\n            - \"{{='--repo-root='+inputs.parameters.snapshotLocalDir}}\"\n            - \"{{='--snapshot-name='+inputs.parameters.snapshotName}}\"\n            - --mount-point=/mnt/lucene\n          env:\n            - name: RUST_LOG\n              value: info\n            - name: S3_BUCKET\n              value: \"{{inputs.parameters.s3Bucket}}\"\n            - name: AWS_REGION\n              value: \"{{inputs.parameters.s3Region}}\"\n            - name: S3_ENDPOINT_URL\n              value: \"{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('http://localstack:4566') : (''))}}\"\n            - name: S3_FORCE_PATH_STYLE\n              value: \"{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('true') : ('false'))}}\"\n          securityContext:\n            privileged: true\n          volumeMounts:\n            - name: snapshot-s3\n              mountPath: /mnt/s3\n              mountPropagation: Bidirectional\n            - name: lucene-fuse\n              mountPath: /mnt/lucene\n              mountPropagation: Bidirectional\n            - name: s3-cache\n              mountPath: /cache\n      volumes:\n        - name: log4j-configuration\n          configMap:\n            name: \"{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}\"\n            optional: {{=!(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)))}}\n        - name: snapshot-s3\n          emptyDir: {}\n        - name: lucene-fuse\n          emptyDir: {}\n        - name: s3-cache\n          emptyDir:\n            sizeLimit: 5Gi\n        - name: localstack-test-creds\n          configMap:\n            name: localstack-test-creds\n            optional: {{=!(fromJSON(inputs.parameters.useLocalStack))}}\n",
           "action": "create",
           "setOwnerReference": true
         },
@@ -424,6 +432,14 @@
                   {
                     "name": "snapshotName",
                     "value": "{{=fromJSON(inputs.parameters.snapshotConfig)['snapshotName']}}"
+                  },
+                  {
+                    "name": "s3Bucket",
+                    "value": "{{=sprig.regexReplaceAll('^s3://([^/]+).*$', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], '${1}')}}"
+                  },
+                  {
+                    "name": "s3Region",
+                    "value": "{{=sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion']}}"
                   },
                   {
                     "name": "resources",
@@ -661,181 +677,6 @@
         }
       },
       {
-        "name": "creates3snapshotpv",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "sessionName"
-            },
-            {
-              "name": "bucketName"
-            },
-            {
-              "name": "region"
-            },
-            {
-              "name": "useLocalStack"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: v1\nkind: PersistentVolume\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-s3-snapshot'}}\"\nspec:\n  capacity:\n    storage: 1200Gi\n  accessModes:\n    - ReadOnlyMany\n  storageClassName: \"\"\n  claimRef:\n    namespace: \"{{workflow.namespace}}\"\n    name: s3-snapshot\n  mountOptions: {{=((fromJSON(inputs.parameters.useLocalStack)) ? ([\"--read-only\",\"--force-path-style\"]) : ([\"--read-only\"]))}}\n  csi:\n    driver: s3.csi.aws.com\n    volumeHandle: \"{{=inputs.parameters.sessionName+'-s3-snapshot'}}\"\n    volumeAttributes:\n      bucketName: \"{{inputs.parameters.bucketName}}\"\n      authenticationSource: \"{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('driver') : ('pod'))}}\"\n  persistentVolumeReclaimPolicy: Delete\n",
-          "action": "apply"
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "Always",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "creates3snapshotpvc",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "sessionName"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: v1\nkind: PersistentVolumeClaim\nmetadata:\n  name: s3-snapshot\nspec:\n  accessModes:\n    - ReadOnlyMany\n  storageClassName: \"\"\n  resources:\n    requests:\n      storage: 1200Gi\n  volumeName: \"{{=inputs.parameters.sessionName+'-s3-snapshot'}}\"\n",
-          "action": "apply",
-          "setOwnerReference": true
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "Always",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "deletes3snapshotpv",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "sessionName"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: v1\nkind: PersistentVolume\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-s3-snapshot'}}\"\n",
-          "action": "delete"
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "Always",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "setups3snapshotvolume",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "sessionName"
-            },
-            {
-              "name": "snapshotConfig"
-            }
-          ]
-        },
-        "steps": [
-          [
-            {
-              "template": "creates3snapshotpv",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "sessionName",
-                    "value": "{{inputs.parameters.sessionName}}"
-                  },
-                  {
-                    "name": "bucketName",
-                    "value": "{{=sprig.regexReplaceAll('^s3://([^/]+).*$', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], '${1}')}}"
-                  },
-                  {
-                    "name": "region",
-                    "value": "{{=sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion']}}"
-                  },
-                  {
-                    "name": "useLocalStack",
-                    "value": "{{=sprig.dig('repoConfig', 'useLocalStack', false, fromJSON(inputs.parameters.snapshotConfig))}}"
-                  }
-                ]
-              },
-              "name": "createPv"
-            }
-          ],
-          [
-            {
-              "template": "creates3snapshotpvc",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "sessionName",
-                    "value": "{{inputs.parameters.sessionName}}"
-                  }
-                ]
-              },
-              "name": "createPvc"
-            }
-          ]
-        ],
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "cleanups3snapshotvolume",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "sessionName"
-            }
-          ]
-        },
-        "steps": [
-          [
-            {
-              "template": "deletes3snapshotpv",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "sessionName",
-                    "value": "{{inputs.parameters.sessionName}}"
-                  }
-                ]
-              },
-              "name": "deletePv"
-            }
-          ]
-        ],
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
         "name": "setupandrunbulkload",
         "inputs": {
           "parameters": [
@@ -887,24 +728,6 @@
           ]
         },
         "steps": [
-          [
-            {
-              "template": "setups3snapshotvolume",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "sessionName",
-                    "value": "{{inputs.parameters.sessionName}}"
-                  },
-                  {
-                    "name": "snapshotConfig",
-                    "value": "{{inputs.parameters.snapshotConfig}}"
-                  }
-                ]
-              },
-              "name": "setupS3Volume"
-            }
-          ],
           [
             {
               "templateRef": {
@@ -1009,20 +832,6 @@
                 ]
               },
               "name": "cleanupRfsCoordinator"
-            }
-          ],
-          [
-            {
-              "template": "cleanups3snapshotvolume",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "sessionName",
-                    "value": "{{inputs.parameters.sessionName}}"
-                  }
-                ]
-              },
-              "name": "cleanupS3Volume"
             }
           ]
         ],

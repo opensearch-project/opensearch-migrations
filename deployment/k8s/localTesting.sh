@@ -63,22 +63,6 @@ kubectl config set-context --current --namespace=ma
 # Nice to have additions to minikube
 minikube addons enable metrics-server
 
-# Install Mountpoint S3 CSI Driver v2 (controller + node)
-# Create dummy AWS credentials secret for localstack (CSI driver references this with optional: true)
-kubectl create secret generic aws-secret \
-  --namespace kube-system \
-  --from-literal=key_id=test \
-  --from-literal=access_key=test \
-  --from-literal=session_token=test \
-  --dry-run=client -o yaml | kubectl apply -f -
-helm repo add aws-mountpoint-s3-csi-driver https://awslabs.github.io/mountpoint-s3-csi-driver
-helm repo update aws-mountpoint-s3-csi-driver
-helm upgrade --install aws-mountpoint-s3-csi-driver aws-mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver \
-  --namespace kube-system \
-  --set node.tolerateAllTaints=true \
-  --wait --timeout 5m
-echo "✅  S3 CSI Driver v2 installed"
-
 cd "${MIGRATIONS_REPO_ROOT_DIR}"/deployment/k8s/
 
 # Helm installs

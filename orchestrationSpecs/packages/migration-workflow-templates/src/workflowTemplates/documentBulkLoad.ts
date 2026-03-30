@@ -22,11 +22,10 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {Deployment} from "@opensearch-migrations/argo-workflow-builders";
-import {makeMountpointRepoParamDict, getSnapshotLocalDir, getS3BucketName, S3_MOUNT_PATH} from "./metadataMigration";
+import {makeMountpointRepoParamDict, getSnapshotLocalDir, getS3BucketName} from "./metadataMigration";
 import {
     setupLog4jConfigForContainer,
     setupTestCredsForContainer,
-    setupS3CsiVolumeForContainer,
     setupSnapshotFuseSidecar
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
@@ -81,73 +80,6 @@ function getRfsDeploymentName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs"));
 }
 
-/** Dynamic PVC name scoped to the session */
-const S3_SNAPSHOT_PVC_NAME = "s3-snapshot";
-
-function getS3SnapshotPvName(sessionName: BaseExpression<string>) {
-    return expr.concat(sessionName, expr.literal("-s3-snapshot"));
-}
-
-function createS3SnapshotPvManifest(
-    pvName: BaseExpression<string>,
-    pvcName: AllowLiteralOrExpression<string>,
-    namespace: BaseExpression<string>,
-    bucketName: BaseExpression<string>,
-    region: BaseExpression<string>,
-    useLocalStack: BaseExpression<boolean>,
-    localStackEndpoint: BaseExpression<string>
-) {
-    return {
-        apiVersion: "v1",
-        kind: "PersistentVolume",
-        metadata: {
-            name: makeStringTypeProxy(pvName)
-        },
-        spec: {
-            capacity: { storage: "1200Gi" },
-            accessModes: ["ReadOnlyMany"],
-            storageClassName: "",
-            claimRef: {
-                namespace: makeStringTypeProxy(namespace),
-                name: makeStringTypeProxy(pvcName)
-            },
-            mountOptions: makeDirectTypeProxy(
-                expr.ternary(
-                    useLocalStack,
-                    expr.literal(["--read-only", "--force-path-style"] as readonly string[]),
-                    expr.literal(["--read-only"] as readonly string[])
-                )
-            ),
-            csi: {
-                driver: "s3.csi.aws.com",
-                volumeHandle: makeStringTypeProxy(pvName),
-                volumeAttributes: {
-                    bucketName: makeStringTypeProxy(bucketName),
-                    authenticationSource: makeStringTypeProxy(
-                        expr.ternary(useLocalStack, expr.literal("driver"), expr.literal("pod")))
-                }
-            },
-            persistentVolumeReclaimPolicy: "Delete"
-        }
-    };
-}
-
-function createS3SnapshotPvcManifest(pvcName: AllowLiteralOrExpression<string>, pvName: BaseExpression<string>) {
-    return {
-        apiVersion: "v1",
-        kind: "PersistentVolumeClaim",
-        metadata: {
-            name: makeStringTypeProxy(pvcName)
-        },
-        spec: {
-            accessModes: ["ReadOnlyMany"],
-            storageClassName: "",
-            resources: { requests: { storage: "1200Gi" } },
-            volumeName: makeStringTypeProxy(pvName)
-        }
-    };
-}
-
 function getRfsDeploymentManifest
 (args: {
     workflowName: BaseExpression<string>,
@@ -167,6 +99,9 @@ function getRfsDeploymentManifest
 
     snapshotLocalDir: BaseExpression<string>,
     snapshotName: BaseExpression<string>,
+    s3Bucket: BaseExpression<string>,
+    s3Region: BaseExpression<string>,
+    useLocalStack: BaseExpression<boolean>,
     fuseSidecarImage: BaseExpression<string>,
     fuseSidecarImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
 
@@ -269,17 +204,16 @@ function getRfsDeploymentManifest
         setupSnapshotFuseSidecar(
             args.snapshotLocalDir,
             args.snapshotName,
+            args.s3Bucket,
+            args.s3Region,
+            args.useLocalStack,
             args.fuseSidecarImage,
             args.fuseSidecarImagePullPolicy,
-            setupS3CsiVolumeForContainer(
-                S3_MOUNT_PATH,
-                expr.literal(S3_SNAPSHOT_PVC_NAME),
-                setupLog4jConfigForContainer(
-                    useCustomLogging,
-                    args.loggingConfigMap,
-                    {container: baseContainerDefinition, volumes: [], sidecars: []},
-                    args.jvmArgs
-                )
+            setupLog4jConfigForContainer(
+                useCustomLogging,
+                args.loggingConfigMap,
+                {container: baseContainerDefinition, volumes: [], sidecars: []},
+                args.jvmArgs
             )
         )
     );
@@ -465,8 +399,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
-        .addRequiredInput("snapshotLocalDir", typeToken<string>(), "Local path to snapshot repo (S3 CSI mount)")
+        .addRequiredInput("snapshotLocalDir", typeToken<string>(), "Local path within S3 mount for snapshot repo")
         .addRequiredInput("snapshotName", typeToken<string>(), "Snapshot name for FUSE sidecar")
+        .addRequiredInput("s3Bucket", typeToken<string>(), "S3 bucket name for per-pod mount-s3")
+        .addRequiredInput("s3Region", typeToken<string>(), "AWS region for S3 bucket")
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("targetK8sLabel", typeToken<string>())
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
@@ -493,6 +429,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     resources: expr.deserializeRecord(b.inputs.resources),
                     snapshotLocalDir: b.inputs.snapshotLocalDir,
                     snapshotName: b.inputs.snapshotName,
+                    s3Bucket: b.inputs.s3Bucket,
+                    s3Region: b.inputs.s3Region,
+                    useLocalStack: expr.deserializeRecord(b.inputs.useLocalStack),
                     fuseSidecarImage: b.inputs.imageSnapshotFuseLocation,
                     fuseSidecarImagePullPolicy: b.inputs.imageSnapshotFusePullPolicy,
                     sourceK8sLabel: b.inputs.sourceK8sLabel,
@@ -538,6 +477,11 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     snapshotLocalDir: getSnapshotLocalDir(
                         expr.omit(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RoleArn")),
                     snapshotName: expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "snapshotName"),
+                    s3Bucket: getS3BucketName(
+                        expr.omit(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RoleArn")),
+                    s3Region: expr.get(
+                        expr.omit(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RoleArn"),
+                        "awsRegion"),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
@@ -593,87 +537,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(c => c)))
 
 
-    .addTemplate("createS3SnapshotPv", t => t
-        .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("bucketName", typeToken<string>())
-        .addRequiredInput("region", typeToken<string>())
-        .addRequiredInput("useLocalStack", typeToken<boolean>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                manifest: createS3SnapshotPvManifest(
-                    getS3SnapshotPvName(b.inputs.sessionName),
-                    S3_SNAPSHOT_PVC_NAME,
-                    expr.getWorkflowValue("namespace"),
-                    b.inputs.bucketName,
-                    b.inputs.region,
-                    expr.deserializeRecord(b.inputs.useLocalStack),
-                    expr.literal("localstack")
-                )
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-    .addTemplate("createS3SnapshotPvc", t => t
-        .addRequiredInput("sessionName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: true,
-                manifest: createS3SnapshotPvcManifest(
-                    S3_SNAPSHOT_PVC_NAME,
-                    getS3SnapshotPvName(b.inputs.sessionName)
-                )
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-    .addTemplate("deleteS3SnapshotPv", t => t
-        .addRequiredInput("sessionName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "delete",
-                manifest: {
-                    apiVersion: "v1",
-                    kind: "PersistentVolume",
-                    metadata: {
-                        name: makeStringTypeProxy(getS3SnapshotPvName(b.inputs.sessionName))
-                    }
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-    .addTemplate("setupS3SnapshotVolume", t => t
-        .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
-        .addSteps(b => {
-            const repoConfig = expr.omit(
-                expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RoleArn");
-            return b
-                .addStep("createPv", INTERNAL, "createS3SnapshotPv", c =>
-                    c.register({
-                        sessionName: b.inputs.sessionName,
-                        bucketName: getS3BucketName(repoConfig),
-                        region: expr.get(repoConfig, "awsRegion"),
-                        useLocalStack: expr.dig(
-                            expr.deserializeRecord(b.inputs.snapshotConfig),
-                            ["repoConfig", "useLocalStack"], false)
-                    }))
-                .addStep("createPvc", INTERNAL, "createS3SnapshotPvc", c =>
-                    c.register({sessionName: b.inputs.sessionName}));
-        })
-    )
-
-    .addTemplate("cleanupS3SnapshotVolume", t => t
-        .addRequiredInput("sessionName", typeToken<string>())
-        .addSteps(b => b
-            .addStep("deletePv", INTERNAL, "deleteS3SnapshotPv", c =>
-                c.register({sessionName: b.inputs.sessionName}))
-        )
-    )
-
-
     .addTemplate("setupAndRunBulkLoad", t => t
         .addRequiredInput("sourceVersion", typeToken<z.infer<typeof CLUSTER_VERSION_STRING>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
@@ -687,14 +550,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addSteps(b => {
             const createRfsCluster = shouldCreateRfsWorkCoordinationCluster(b.inputs.documentBackfillConfig);
             return b
-                // Create S3 CSI PV/PVC for the snapshot bucket
-                .addStep("setupS3Volume", INTERNAL, "setupS3SnapshotVolume", c =>
-                    c.register({
-                        sessionName: b.inputs.sessionName,
-                        snapshotConfig: b.inputs.snapshotConfig
-                    })
-                )
-
                 // (conditional) Deploy an OpenSearch cluster for RFS work coordination
                 .addStep("createRfsCoordinator", RfsCoordinatorCluster, "createRfsCoordinator", c =>
                         c.register({
@@ -704,7 +559,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     {when: {templateExp: createRfsCluster}}
                 )
 
-                // Always run bulk load, use deployed cluster or target cluster based on flag 'createRfsCluster'
+                // Run bulk load — each pod mounts S3 independently via mount-s3 sidecar
                 .addStep("runBulkLoad", INTERNAL, "runBulkLoad", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
@@ -721,11 +576,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName)
                         }),
                     {when: {templateExp: createRfsCluster}}
-                )
-
-                // Cleanup S3 CSI PV (PVC is owner-referenced, cleaned up by Argo)
-                .addStep("cleanupS3Volume", INTERNAL, "cleanupS3SnapshotVolume", c =>
-                    c.register({sessionName: b.inputs.sessionName})
                 );
         })
     )
