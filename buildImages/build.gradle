@@ -135,6 +135,12 @@ def buildKitProjects = [
                         ":TrafficCapture:dockerSolution:syncArtifact_migration_console_staging_noDockerBuild",
                         "buildKit_migrationConsoleBase" // All buildKit projects are configured at the root
                 ]
+        ],
+        [
+                serviceName: "snapshotFuse",
+                contextDir: "fuse-lucene",
+                imageName:  "snapshot_fuse",
+                imageTag:   "latest"
         ]
 ]
 
@@ -216,12 +222,6 @@ def testBuildKitProjects = [
                         TARBALL_URL: "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.10.2-linux-ARCH.tar.gz"
                 ]
         ],
-        [
-                serviceName: "snapshotFuse",
-                contextDir: "fuse-lucene",
-                imageName:  "snapshot_fuse",
-                imageTag:   "latest"
-        ]
 ]
 
 // Test-only images: not required for main MA operations, excluded with -PskipTestImages=true
