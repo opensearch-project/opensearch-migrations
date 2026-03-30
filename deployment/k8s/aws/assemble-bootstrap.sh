@@ -42,7 +42,7 @@ extract_body() {
   # Remove shebang, standalone set lines, and everything from the main guard to EOF
   sed -E \
     -e '1{/^#!/d}' \
-    -e '/^set -[a-z]+$/d' \
+    -e '/^set -[a-z ]+$/d' \
     -e '/^if \[\[ "\$\{BASH_SOURCE\[0\]\}" == "\$0" \]\]; then$/,$ d' \
     "$file"
 }
