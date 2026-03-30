@@ -9,6 +9,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
@@ -19,6 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.Matcher;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -29,6 +31,7 @@ import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.hasItems;
 
 /**
@@ -291,6 +294,116 @@ class EndToEndTest extends BaseMigrationTest {
 
     private List<String> getNames(List<CreationResult> items) {
         return items.stream().map(CreationResult::getName).collect(Collectors.toList());
+    }
+
+    @Test
+    @Tag("isolatedTest")
+    @SneakyThrows
+    void partialFailureRerun_exitsNonZeroDueToAlreadyExists() {
+        try (
+            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+        ) {
+            this.sourceCluster = sourceCluster;
+            this.targetCluster = targetCluster;
+            startClusters();
+
+            var indexA = "index-partial-a";
+            var indexB = "index-partial-b";
+            sourceOperations.createDocument(indexA, "1", "{\"field\": \"value\"}");
+            sourceOperations.createDocument(indexB, "1", "{\"field\": \"value\"}");
+
+            // Migrate only indexA (simulating a partial migration)
+            var run1Args = new MigrateOrEvaluateArgs();
+            run1Args.sourceArgs.host = sourceCluster.getUrl();
+            run1Args.targetArgs.host = targetCluster.getUrl();
+            var run1Filter = new DataFilterArgs();
+            run1Filter.indexAllowlist = List.of(indexA);
+            run1Args.dataFilterArgs = run1Filter;
+
+            MigrationItemResult run1Result = executeMigration(run1Args, MetadataCommands.MIGRATE);
+            log.info("Run 1 result: {}", run1Result.asCliOutput());
+            assertThat("Run 1 should succeed (only indexA migrated)", run1Result.getExitCode(), equalTo(0));
+            assertThat(targetOperations.get("/" + indexA).getKey(), equalTo(200));
+            assertThat(targetOperations.get("/" + indexB).getKey(), equalTo(404));
+
+            // Re-run migration for both indices — indexA already exists → ALREADY_EXISTS
+            var run2Args = new MigrateOrEvaluateArgs();
+            run2Args.sourceArgs.host = sourceCluster.getUrl();
+            run2Args.targetArgs.host = targetCluster.getUrl();
+            // No allowlist — migrate all indices
+
+            MigrationItemResult run2Result = executeMigration(run2Args, MetadataCommands.MIGRATE);
+            log.info("Run 2 result: {}", run2Result.asCliOutput());
+
+            // Re-run exits non-zero due to ALREADY_EXISTS items from the first run
+            assertThat("Re-run should exit non-zero due to ALREADY_EXISTS", run2Result.getExitCode(), greaterThan(0));
+            assertThat("Re-run should report alreadyExistsCount > 0",
+                run2Result.getItems().getAlreadyExistsCount(), greaterThan(0));
+            var alreadyExistsNames = run2Result.getItems().getIndexes().stream()
+                .filter(r -> r.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS)
+                .map(CreationResult::getName)
+                .collect(Collectors.toList());
+            assertThat("indexA should be reported as ALREADY_EXISTS", alreadyExistsNames, hasItems(indexA));
+
+            // Backfill does not proceed when exit code is non-zero
+            // The non-zero exit code signals to the orchestrator that backfill must not start.
+            // We verify this by asserting the exit code is non-zero (the contract that prevents backfill).
+            assertThat("Non-zero exit code prevents backfill from proceeding",
+                run2Result.getExitCode(), greaterThan(0));
+        }
+    }
+
+    @Test
+    @Tag("isolatedTest")
+    @SneakyThrows
+    void partialFailureRerun_withAllowExisting_exitsZeroAndBackfillPermitted() {
+        try (
+            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+        ) {
+            this.sourceCluster = sourceCluster;
+            this.targetCluster = targetCluster;
+            startClusters();
+
+            // Set up two indices on the source cluster
+            var indexA = "index-allow-a";
+            var indexB = "index-allow-b";
+            sourceOperations.createDocument(indexA, "1", "{\"field\": \"value\"}");
+            sourceOperations.createDocument(indexB, "1", "{\"field\": \"value\"}");
+
+            // Migrate only indexA (simulating a partial migration)
+            var run1Args = new MigrateOrEvaluateArgs();
+            run1Args.sourceArgs.host = sourceCluster.getUrl();
+            run1Args.targetArgs.host = targetCluster.getUrl();
+            var run1Filter = new DataFilterArgs();
+            run1Filter.indexAllowlist = List.of(indexA);
+            run1Args.dataFilterArgs = run1Filter;
+
+            MigrationItemResult run1Result = executeMigration(run1Args, MetadataCommands.MIGRATE);
+            assertThat("Run 1 should succeed", run1Result.getExitCode(), equalTo(0));
+
+            // Re-run with --allow-existing — indexA already exists but is silently skipped
+            var run2Args = new MigrateOrEvaluateArgs();
+            run2Args.sourceArgs.host = sourceCluster.getUrl();
+            run2Args.targetArgs.host = targetCluster.getUrl();
+            run2Args.allowExisting = true;
+
+            MigrationItemResult run2Result = executeMigration(run2Args, MetadataCommands.MIGRATE);
+            log.info("Run 2 (--allow-existing) result: {}", run2Result.asCliOutput());
+
+            // With --allow-existing: exits 0 and backfill is permitted
+            assertThat("Re-run with --allow-existing should exit 0", run2Result.getExitCode(), equalTo(0));
+            assertThat("No ALREADY_EXISTS items should be recorded with --allow-existing",
+                run2Result.getItems().getAlreadyExistsCount(), equalTo(0));
+
+            // Both indices should now exist on the target
+            assertThat(targetOperations.get("/" + indexA).getKey(), equalTo(200));
+            assertThat(targetOperations.get("/" + indexB).getKey(), equalTo(200));
+
+            // Exit code 0 signals that backfill is permitted to proceed
+            assertThat("Exit code 0 permits backfill to proceed", run2Result.getExitCode(), equalTo(0));
+        }
     }
 
     private void verifyTargetCluster(MetadataCommands command,

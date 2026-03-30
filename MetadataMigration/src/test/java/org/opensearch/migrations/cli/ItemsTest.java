@@ -1,11 +1,20 @@
 package org.opensearch.migrations.cli;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.cli.Items.ItemsBuilder;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 
+import net.jqwik.api.Arbitraries;
+import net.jqwik.api.Arbitrary;
+import net.jqwik.api.ForAll;
+import net.jqwik.api.From;
+import net.jqwik.api.Property;
+import net.jqwik.api.Provide;
+import net.jqwik.api.constraints.Size;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
@@ -132,13 +141,17 @@ public class ItemsTest {
         
         assertThat(stringOutput, containsString("Migrated Items:"));
         assertThat(stringOutput, containsString("ERROR - it2 failed on target cluster: 403 Forbidden"));
-        assertThat(stringOutput, containsString("WARN - it1 already exists"));
+        assertThat(stringOutput, containsString("ERROR - it1 already exists"));
         assertThat(stringOutput, containsString("Index Templates:"));
         assertThat(stringOutput, containsString("Component Templates:"));
         assertThat(stringOutput, containsString("Indexes:"));
         assertThat(stringOutput, containsString("Aliases:"));
         assertThat(stringOutput, containsStringCount(Items.NONE_FOUND_MARKER, 3));
-        assertThat(stringOutput, hasLineCount(13));
+        assertThat(stringOutput, hasLineCount(23));
+        assertThat(stringOutput, containsString("Already Existing Items (1 item(s) already exist on the target cluster):"));
+        assertThat(stringOutput, containsString("- it1"));
+        assertThat(stringOutput, containsString("(a) Delete the conflicting items from the target cluster and re-run from scratch."));
+        assertThat(stringOutput, containsString("(b) Use --index-allowlist on the metadata step to migrate only the missing items."));
         
         // Test JSON Output
         var jsonOutput = items.asJsonOutput();
@@ -254,6 +267,61 @@ public class ItemsTest {
 
     }
 
+    @Test
+    void alreadyExistsItems_appearInBothCliAndJsonOutput() throws Exception {
+        var items = Items.builder()
+            .dryRun(false)
+            .indexTemplates(List.of(
+                CreationResult.builder().name("my-template").failureType(CreationFailureType.ALREADY_EXISTS).build()
+            ))
+            .componentTemplates(List.of(
+                CreationResult.builder().name("my-component").failureType(CreationFailureType.ALREADY_EXISTS).build()
+            ))
+            .indexes(List.of(
+                CreationResult.builder().name("my-index").failureType(CreationFailureType.ALREADY_EXISTS).build()
+            ))
+            .aliases(List.of(
+                CreationResult.builder().name("my-alias").failureType(CreationFailureType.ALREADY_EXISTS).build()
+            ))
+            .build();
+
+        // CLI output assertions
+        var cliOutput = items.asCliOutput();
+        assertThat(cliOutput, containsString("ERROR - my-template already exists"));
+        assertThat(cliOutput, containsString("ERROR - my-component already exists"));
+        assertThat(cliOutput, containsString("ERROR - my-index already exists"));
+        assertThat(cliOutput, containsString("ERROR - my-alias already exists"));
+        assertThat(cliOutput, containsString("Already Existing Items (4 item(s) already exist on the target cluster):"));
+        assertThat(cliOutput, containsString("- my-template"));
+        assertThat(cliOutput, containsString("- my-component"));
+        assertThat(cliOutput, containsString("- my-index"));
+        assertThat(cliOutput, containsString("- my-alias"));
+        assertThat(cliOutput, containsString("(a) Delete the conflicting items from the target cluster and re-run from scratch."));
+        assertThat(cliOutput, containsString("(b) Use --index-allowlist on the metadata step to migrate only the missing items."));
+
+        // JSON output assertions
+        var json = items.asJsonOutput();
+        assertThat(json.toPrettyString(), json.has("alreadyExistsCount"), is(true));
+        assertThat(json.toPrettyString(), json.get("alreadyExistsCount").asInt(), equalTo(4));
+
+        for (var entry : List.of(
+                new String[]{"indexTemplates", "my-template"},
+                new String[]{"componentTemplates", "my-component"},
+                new String[]{"indexes", "my-index"},
+                new String[]{"aliases", "my-alias"})) {
+            var fieldName = entry[0];
+            var expectedName = entry[1];
+            var array = json.get(fieldName);
+            assertThat(json.toPrettyString(), array.size(), equalTo(1));
+            var item = array.get(0);
+            assertThat(json.toPrettyString(), item.get("name").asText(), equalTo(expectedName));
+            assertThat(json.toPrettyString(), item.get("successful").asBoolean(), is(false));
+            var failure = item.get("failure");
+            assertThat(json.toPrettyString(), failure.get("type").asText(), equalTo("ALREADY_EXISTS"));
+            assertThat(json.toPrettyString(), failure.get("fatal").asBoolean(), is(false));
+        }
+    }
+
     private ItemsBuilder createEmptyItemsBuilder() {
         return Items.builder()
             .dryRun(false)
@@ -261,5 +329,167 @@ public class ItemsTest {
             .componentTemplates(List.of())
             .indexes(List.of())
             .aliases(List.of());
+    }
+
+    @Property(tries = 100)
+    void propertyFullRunCompletionWithMixedResults(
+            @ForAll @Size(min = 0, max = 5) List<@From("creationResults") CreationResult> indexTemplates,
+            @ForAll @Size(min = 0, max = 5) List<@From("creationResults") CreationResult> componentTemplates,
+            @ForAll @Size(min = 0, max = 5) List<@From("creationResults") CreationResult> indexes,
+            @ForAll @Size(min = 0, max = 5) List<@From("creationResults") CreationResult> aliases) {
+
+        var items = Items.builder()
+            .dryRun(false)
+            .indexTemplates(indexTemplates)
+            .componentTemplates(componentTemplates)
+            .indexes(indexes)
+            .aliases(aliases)
+            .build();
+
+        // Assert every submitted item appears in the result — no items silently dropped
+        assertThat(items.getIndexTemplates().size(), equalTo(indexTemplates.size()));
+        assertThat(items.getComponentTemplates().size(), equalTo(componentTemplates.size()));
+        assertThat(items.getIndexes().size(), equalTo(indexes.size()));
+        assertThat(items.getAliases().size(), equalTo(aliases.size()));
+
+        // Assert getAlreadyExistsCount() matches actual ALREADY_EXISTS count across all four types
+        long expectedCount = Stream.of(indexTemplates, componentTemplates, indexes, aliases)
+            .flatMap(Collection::stream)
+            .filter(r -> r.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS)
+            .count();
+        assertThat(items.getAlreadyExistsCount(), equalTo((int) expectedCount));
+    }
+
+    @Property(tries = 100)
+    void propertyCliOutputContainsAlreadyExistsNamesAndRemediation(
+            @ForAll @Size(min = 0, max = 4) List<@From("creationResults") CreationResult> indexTemplates,
+            @ForAll @Size(min = 0, max = 4) List<@From("creationResults") CreationResult> componentTemplates,
+            @ForAll @Size(min = 0, max = 4) List<@From("creationResults") CreationResult> indexes,
+            @ForAll @Size(min = 0, max = 4) List<@From("creationResults") CreationResult> aliases,
+            @ForAll @From("alreadyExistsResult") CreationResult extraAlreadyExists) {
+
+        // Inject at least one ALREADY_EXISTS item into indexes to guarantee ≥1 ALREADY_EXISTS
+        var indexesWithAtLeastOne = new java.util.ArrayList<>(indexes);
+        indexesWithAtLeastOne.add(extraAlreadyExists);
+
+        var items = Items.builder()
+            .dryRun(false)
+            .indexTemplates(indexTemplates)
+            .componentTemplates(componentTemplates)
+            .indexes(indexesWithAtLeastOne)
+            .aliases(aliases)
+            .build();
+
+        var output = items.asCliOutput();
+
+        // Assert every ALREADY_EXISTS item name appears in the output
+        Stream.of(indexTemplates, componentTemplates, indexesWithAtLeastOne, aliases)
+            .flatMap(Collection::stream)
+            .filter(r -> r.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS)
+            .map(CreationResult::getName)
+            .forEach(name -> assertThat(output, containsString(name)));
+
+        // Assert remediation guidance is present — option (a) and option (b)
+        assertThat(output, containsString("(a) Delete the conflicting items from the target cluster and re-run from scratch."));
+        assertThat(output, containsString("(b) Use --index-allowlist on the metadata step to migrate only the missing items."));
+    }
+
+    @Property(tries = 100)
+    void cliOutput_alreadyExistsItemsRenderAsErrorsNotWarnings(
+            @ForAll @From("alreadyExistsResult") CreationResult alreadyExistsItem,
+            @ForAll boolean putInIndexTemplates,
+            @ForAll boolean putInComponentTemplates,
+            @ForAll boolean putInIndexes,
+            @ForAll boolean putInAliases) {
+
+        // Place the ALREADY_EXISTS item in at least one list; default to indexes if none selected
+        boolean useIndexes = putInIndexes || (!putInIndexTemplates && !putInComponentTemplates && !putInAliases);
+
+        var items = Items.builder()
+            .dryRun(false)
+            .indexTemplates(putInIndexTemplates ? List.of(alreadyExistsItem) : List.of())
+            .componentTemplates(putInComponentTemplates ? List.of(alreadyExistsItem) : List.of())
+            .indexes(useIndexes ? List.of(alreadyExistsItem) : List.of())
+            .aliases(putInAliases ? List.of(alreadyExistsItem) : List.of())
+            .build();
+
+        var output = items.asCliOutput();
+
+        // The ALREADY_EXISTS item must appear as ERROR, not WARN (action required)
+        assertThat(output, containsString("ERROR - " + alreadyExistsItem.getName() + " already exists"));
+        assertThat(output, not(containsString("WARN - " + alreadyExistsItem.getName())));
+    }
+
+    // Property 5: JSON output alreadyExistsCount field presence and correctness
+    @Property(tries = 100)
+    void propertyJsonAlreadyExistsCountFieldPresenceAndCorrectness(
+            @ForAll @Size(min = 0, max = 4) List<@From("creationResults") CreationResult> indexTemplates,
+            @ForAll @Size(min = 0, max = 4) List<@From("creationResults") CreationResult> componentTemplates,
+            @ForAll @Size(min = 0, max = 4) List<@From("creationResults") CreationResult> indexes,
+            @ForAll @Size(min = 0, max = 4) List<@From("creationResults") CreationResult> aliases) {
+
+        var items = Items.builder()
+            .dryRun(false)
+            .indexTemplates(indexTemplates)
+            .componentTemplates(componentTemplates)
+            .indexes(indexes)
+            .aliases(aliases)
+            .build();
+
+        var json = items.asJsonOutput();
+        int expectedCount = items.getAlreadyExistsCount();
+
+        if (expectedCount > 0) {
+            // Field must be present and equal to the count
+            assertThat(json.toPrettyString(), json.has("alreadyExistsCount"), is(true));
+            assertThat(json.toPrettyString(), json.get("alreadyExistsCount").asInt(), equalTo(expectedCount));
+        } else {
+            // Field must be absent when count is zero
+            assertThat(json.toPrettyString(), json.has("alreadyExistsCount"), is(false));
+        }
+
+        // For each item type, verify per-item failure structure for ALREADY_EXISTS items
+        for (var entry : List.of(
+                new Object[]{"indexTemplates", indexTemplates},
+                new Object[]{"componentTemplates", componentTemplates},
+                new Object[]{"indexes", indexes},
+                new Object[]{"aliases", aliases})) {
+            String fieldName = (String) entry[0];
+            @SuppressWarnings("unchecked")
+            List<CreationResult> list = (List<CreationResult>) entry[1];
+            var jsonArray = json.get(fieldName);
+            for (int i = 0; i < list.size(); i++) {
+                var result = list.get(i);
+                var jsonItem = jsonArray.get(i);
+                if (result.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS) {
+                    assertThat(json.toPrettyString(), jsonItem.get("successful").asBoolean(), is(false));
+                    var failure = jsonItem.get("failure");
+                    assertThat(json.toPrettyString(), failure, is(notNullValue()));
+                    assertThat(json.toPrettyString(), failure.get("type").asText(), equalTo("ALREADY_EXISTS"));
+                    assertThat(json.toPrettyString(), failure.get("fatal").asBoolean(), is(false));
+                }
+            }
+        }
+    }
+
+    @Provide
+    Arbitrary<CreationResult> alreadyExistsResult() {
+        return Arbitraries.strings()
+            .withCharRange('a', 'z')
+            .ofMinLength(1)
+            .ofMaxLength(20)
+            .map(name -> CreationResult.builder()
+                .name("ae-" + name)
+                .failureType(CreationResult.CreationFailureType.ALREADY_EXISTS)
+                .build());
+    }
+
+    @Provide
+    Arbitrary<CreationResult> creationResults() {
+        return Arbitraries.of(
+            CreationResult.builder().name("item-success").build(),
+            CreationResult.builder().name("item-already-exists").failureType(CreationResult.CreationFailureType.ALREADY_EXISTS).build(),
+            CreationResult.builder().name("item-fatal").failureType(CreationResult.CreationFailureType.TARGET_CLUSTER_FAILURE).build()
+        );
     }
 }

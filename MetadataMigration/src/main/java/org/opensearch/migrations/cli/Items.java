@@ -37,6 +37,14 @@ public class Items implements JsonOutput {
     private final List<CreationResult> aliases;
     private final String failureMessage;
 
+    public int getAlreadyExistsCount() {
+        return (int) Stream.of(indexTemplates, componentTemplates, indexes, aliases)
+            .filter(Objects::nonNull)
+            .flatMap(Collection::stream)
+            .filter(r -> r.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS)
+            .count();
+    }
+
     public List<String> getAllErrors() {
         var errors = new ArrayList<String>();
         if (failureMessage != null) {
@@ -65,7 +73,46 @@ public class Items implements JsonOutput {
         appendSection(sb, "Indexes", getIndexes());
         appendSection(sb, "Aliases", getAliases());
 
+        int alreadyExistsCount = getAlreadyExistsCount();
+        if (alreadyExistsCount > 0) {
+            sb.append("Already Existing Items (")
+              .append(alreadyExistsCount)
+              .append(" item(s) already exist on the target cluster):")
+              .append(System.lineSeparator());
+            appendAlreadyExistsSection(sb, "Index Templates", getIndexTemplates());
+            appendAlreadyExistsSection(sb, "Component Templates", getComponentTemplates());
+            appendAlreadyExistsSection(sb, "Indexes", getIndexes());
+            appendAlreadyExistsSection(sb, "Aliases", getAliases());
+            sb.append(Format.indentToLevel(1)).append("Remediation:").append(System.lineSeparator());
+            sb.append(Format.indentToLevel(2))
+              .append("These items already exist on the target cluster and may have stale schemas.")
+              .append(System.lineSeparator());
+            sb.append(Format.indentToLevel(2)).append("Options:").append(System.lineSeparator());
+            sb.append(Format.indentToLevel(3))
+              .append("(a) Delete the conflicting items from the target cluster and re-run from scratch.")
+              .append(System.lineSeparator());
+            sb.append(Format.indentToLevel(3))
+              .append("(b) Use --index-allowlist on the metadata step to migrate only the missing items.")
+              .append(System.lineSeparator());
+            sb.append(Format.indentToLevel(2))
+              .append("To suppress this warning and exit with code 0, re-run with --allow-existing.")
+              .append(System.lineSeparator());
+        }
+
         return sb.toString();
+    }
+
+    private void appendAlreadyExistsSection(StringBuilder sb, String sectionTitle, List<CreationResult> items) {
+        var alreadyExistingNames = items.stream()
+            .filter(r -> r.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS)
+            .map(CreationResult::getName)
+            .sorted()
+            .collect(Collectors.toList());
+        if (!alreadyExistingNames.isEmpty()) {
+            sb.append(Format.indentToLevel(1)).append(sectionTitle).append(":").append(System.lineSeparator());
+            alreadyExistingNames.forEach(name ->
+                sb.append(Format.indentToLevel(2)).append("- ").append(name).append(System.lineSeparator()));
+        }
     }
 
     private void appendSection(StringBuilder sb, String sectionTitle, List<CreationResult> items) {
@@ -119,8 +166,11 @@ public class Items implements JsonOutput {
         if (result.getFailureType() == null) {
             return "";
         }
+        // ALREADY_EXISTS renders as ERROR (action required), even though it is non-fatal
+        boolean isError = result.getFailureType().isFatal()
+            || result.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS;
         var sb = new StringBuilder()
-            .append(result.getFailureType().isFatal() ? "ERROR" : "WARN")
+            .append(isError ? "ERROR" : "WARN")
             .append(" - ")
             .append(result.getName())
             .append(" ")
@@ -142,6 +192,11 @@ public class Items implements JsonOutput {
         var root = JsonNodeFactory.instance.objectNode();
 
         root.put("dryRun", dryRun);
+
+        int alreadyExistsCount = getAlreadyExistsCount();
+        if (alreadyExistsCount > 0) {
+            root.put("alreadyExistsCount", alreadyExistsCount);
+        }
 
         buildArray("indexTemplates", indexTemplates, root);
         buildArray("componentTemplates", componentTemplates, root);

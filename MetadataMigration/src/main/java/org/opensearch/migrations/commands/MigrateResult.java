@@ -20,6 +20,7 @@ public class MigrateResult implements MigrationItemResult {
     private final Transformers transformations;
 
     public int getExitCode() {
-        return Math.max(exitCode, collectErrors().size());
+        int alreadyExistsCount = (items != null) ? items.getAlreadyExistsCount() : 0;
+        return Math.max(exitCode, Math.max(collectErrors().size(), alreadyExistsCount));
     }
 }

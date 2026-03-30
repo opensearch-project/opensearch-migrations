@@ -52,6 +52,7 @@ public class MigrationItemResultTest {
         assertThat(result, containsString("10 issue(s) detected"));
         verify(items).asCliOutput();
         verify(items, times(2)).getAllErrors();
+        verify(items).getAlreadyExistsCount();
         verifyNoMoreInteractions(items);
     }
 

@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.worker;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.AwarenessAttributeSettings;
 import org.opensearch.migrations.MigrationMode;
@@ -28,6 +29,7 @@ public class IndexRunner {
     private final Transformer transformer;
     private final List<String> indexAllowlist;
     private final AwarenessAttributeSettings awarenessAttributeSettings;
+    private final boolean allowExisting;
 
     public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) {
         var repoDataProvider = metadataFactory.getRepoDataProvider();
@@ -35,7 +37,7 @@ public class IndexRunner {
         var skipCreation = FilterScheme.filterByAllowList(indexAllowlist).negate();
 
         for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(snapshotName)) {
-            List<CreationResult> creationResults;
+            final List<CreationResult> creationResults;
             if (skipCreation.test(index.getName())) {
                 log.atInfo()
                         .setMessage("Index {} was not part of the allowlist and will not be migrated.")
@@ -46,7 +48,14 @@ public class IndexRunner {
                         .failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER)
                         .build());
             } else {
-                creationResults = createIndex(index.getName(), mode, context);
+                var rawResults = createIndex(index.getName(), mode, context);
+                creationResults = allowExisting
+                    ? rawResults.stream()
+                        .map(r -> r.getFailureType() == CreationFailureType.ALREADY_EXISTS
+                            ? CreationResult.builder().name(r.getName()).build()
+                            : r)
+                        .collect(Collectors.toList())
+                    : rawResults;
             }
 
             creationResults.forEach(results::index);
