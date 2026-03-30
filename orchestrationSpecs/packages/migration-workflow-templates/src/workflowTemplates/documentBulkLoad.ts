@@ -31,6 +31,7 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
+import {getTargetHttpAuthCredsEnvVars, getCoordinatorHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
 
@@ -103,16 +104,6 @@ function getRfsDeploymentManifest
     fromSnapshotMigrationK8sLabel: BaseExpression<string>,
     taskK8sLabel: BaseExpression<string>
 }): Deployment {
-    const targetBasicCredsSecretName = expr.ternary(
-        expr.isEmpty(args.targetBasicCredsSecretNameOrEmpty),
-        expr.literal("empty"),
-        args.targetBasicCredsSecretNameOrEmpty
-    );
-    const coordinatorBasicCredsSecretName = expr.ternary(
-        expr.isEmpty(args.coordinatorBasicCredsSecretNameOrEmpty),
-        expr.literal("empty"),
-        args.coordinatorBasicCredsSecretNameOrEmpty
-    );
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
     const baseContainerDefinition = {
         name: "bulk-loader",
@@ -133,46 +124,8 @@ function getRfsDeploymentManifest
             // As of now, we only have this block (though a couple others will come about too) and it
             // doesn't seem like it's worth the complexity.  There's some readability value to having
             // less normalization here as it benefits readability.
-            {
-                name: "TARGET_USERNAME",
-                valueFrom: {
-                    secretKeyRef: {
-                        name: makeStringTypeProxy(targetBasicCredsSecretName),
-                        key: "username",
-                        optional: true
-                    }
-                }
-            },
-            {
-                name: "TARGET_PASSWORD",
-                valueFrom: {
-                    secretKeyRef: {
-                        name: makeStringTypeProxy(targetBasicCredsSecretName),
-                        key: "password",
-                        optional: true
-                    }
-                }
-            },
-            {
-                name: "COORDINATOR_USERNAME",
-                valueFrom: {
-                    secretKeyRef: {
-                        name: makeStringTypeProxy(coordinatorBasicCredsSecretName),
-                        key: "username",
-                        optional: true
-                    }
-                }
-            },
-            {
-                name: "COORDINATOR_PASSWORD",
-                valueFrom: {
-                    secretKeyRef: {
-                        name: makeStringTypeProxy(coordinatorBasicCredsSecretName),
-                        key: "password",
-                        optional: true
-                    }
-                }
-            },
+            ...getTargetHttpAuthCredsEnvVars(args.targetBasicCredsSecretNameOrEmpty),
+            ...getCoordinatorHttpAuthCredsEnvVars(args.coordinatorBasicCredsSecretNameOrEmpty),
             // We don't have a mechanism to scrape these off disk so need to disable this to avoid filling up the disk
             {
                 name: "FAILED_REQUESTS_LOGGER_LEVEL",

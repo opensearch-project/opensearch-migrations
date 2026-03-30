@@ -16,6 +16,7 @@ import {
 import {setupLog4jConfigForContainer} from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
+import {getTargetHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
@@ -94,26 +95,7 @@ function getReplayerDeploymentManifest
         ],
         resources: makeDirectTypeProxy(args.resources),
         env: [
-            {
-                name: "TARGET_USERNAME",
-                valueFrom: {
-                    secretKeyRef: {
-                        name: makeStringTypeProxy(args.basicAuthSecretName),
-                        key: "username",
-                        optional: true
-                    }
-                }
-            },
-            {
-                name: "TARGET_PASSWORD",
-                valueFrom: {
-                    secretKeyRef: {
-                        name: makeStringTypeProxy(args.basicAuthSecretName),
-                        key: "password",
-                        optional: true
-                    }
-                }
-            }
+            ...getTargetHttpAuthCredsEnvVars(args.basicAuthSecretName),
         ]
     };
     const finalContainerDefinition =
