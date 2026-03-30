@@ -120,7 +120,7 @@ mirror_images_to_ecr() {
     copy_image "$ecr_host" "$region" "$dockerhub_mirrors" "$ptc" "$image" &
   done < "$_imglist"
   rm -f "$_imglist"
-  wait || { echo "⚠️  Some image copies failed" >&2; }
+  wait || { echo "❌ Some image copies failed" >&2; exit 1; }
 }
 
 # Mirror helm charts to ECR as OCI artifacts.
