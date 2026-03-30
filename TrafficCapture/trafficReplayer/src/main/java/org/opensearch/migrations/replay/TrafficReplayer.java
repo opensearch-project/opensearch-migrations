@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay;
 import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.nio.charset.Charset;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -17,6 +18,8 @@ import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
+import org.opensearch.migrations.replay.sink.GzipJsonLinesSink;
+import org.opensearch.migrations.replay.sink.TupleWriter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -183,9 +186,6 @@ public class TrafficReplayer {
         @ParametersDelegate
         private RequestTransformationParams requestTransformationParams = new RequestTransformationParams();
 
-        @ParametersDelegate
-        private TupleTransformationParams tupleTransformationParams = new TupleTransformationParams();
-
         @Parameter(
             required = false,
             names = { "--user-agent", "--userAgent" },
@@ -289,6 +289,34 @@ public class TrafficReplayer {
             description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-output-dir", "--tupleOutputDir" },
+            arity = 1,
+            description = "Directory for compressed tuple output files (local path or Mountpoint S3 mount)")
+        String tupleOutputDir = "./tuples";
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-max-lag-seconds", "--tupleMaxLagSeconds" },
+            arity = 1,
+            description = "Maximum seconds before rotating/committing a tuple file")
+        int tupleMaxLagSeconds = 60;
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-max-file-size-mb", "--tupleMaxFileSizeMb" },
+            arity = 1,
+            description = "Maximum uncompressed size in MB before rotating a tuple file")
+        int tupleMaxFileSizeMb = 256;
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-ring-buffer-size", "--tupleRingBufferSize" },
+            arity = 1,
+            description = "LMAX Disruptor ring buffer size for tuple writing (must be power of 2)")
+        int tupleRingBufferSize = 8192;
     }
 
     @Getter
@@ -327,44 +355,6 @@ public class TrafficReplayer {
                 "--" + REQUEST_CAMEL_TRANSFORMER_ARG_PREFIX + "transformerConfigFile"},
             arity = 1,
             description = "Path to the JSON configuration file of message transformers.")
-        private String transformerConfigFile;
-    }
-
-    @Getter
-    public static class TupleTransformationParams implements TransformerParams {
-        public String getTransformerConfigParameterArgPrefix() {
-            return TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX;
-        }
-        static final String TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX = "tuple-";
-        static final String TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX = "tuple";
-
-        @Parameter(
-            required = false,
-            names = { "--" + TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX + "transformer-config-base64",
-                "--" + TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX + "TransformerConfigBase64" },
-            arity = 1,
-            description = "Configuration of tuple transformers.  The same contents as --tuple-transformer-config but " +
-                "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
-        private String transformerConfigEncoded;
-
-        @Parameter(
-            required = false,
-            names = { "--" + TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX + "transformer-config",
-                "--" + TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX + "TransformerConfig" },
-            arity = 1,
-            description = "Configuration of tuple transformers.  Either as a string that identifies the "
-                + "transformer that should be run (with default settings) or as json to specify options "
-                + "as well as multiple transformers to run in sequence.  "
-                + "For json, keys are the (simple) names of the loaded transformers and values are the "
-                + "configuration passed to each of the transformers.")
-        private String transformerConfig;
-
-        @Parameter(
-            required = false,
-            names = { "--" + TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX + "transformer-config-file",
-                "--" + TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX + "TransformerConfigFile" } ,
-            arity = 1,
-            description = "Path to the JSON configuration file of tuple transformers.")
         private String transformerConfigFile;
     }
 
@@ -507,13 +497,6 @@ public class TrafficReplayer {
                 log.atInfo().setMessage("Request Transformations config string: {}")
                     .addArgument(requestTransformerConfig).log();
             }
-
-            String tupleTransformerConfig = TransformerConfigUtils.getTransformerConfig(params.tupleTransformationParams);
-            if (requestTransformerConfig != null) {
-                log.atInfo().setMessage("Tuple Transformations config string: {}")
-                    .addArgument(tupleTransformerConfig).log();
-            }
-
             final var orderedRequestTracker = new OrderedWorkerTracker<Void>();
             final var hostname = uri.getHost();
 
@@ -571,9 +554,14 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            var resultsToLogsConsumer = new ResultsToLogsConsumer(null, null,
-                    () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig));
-            var tupleWriter = new TupleParserChainConsumer(resultsToLogsConsumer);
+            var tupleWriter = new TupleWriter(
+                new GzipJsonLinesSink(
+                    Path.of(params.tupleOutputDir),
+                    params.tupleMaxFileSizeMb * 1024L * 1024L,
+                    Duration.ofSeconds(params.tupleMaxLagSeconds)
+                ),
+                params.tupleRingBufferSize
+            );
             tr.setupRunAndWaitForReplayWithShutdownChecks(
                 Duration.ofSeconds(params.observedPacketConnectionTimeout),
                 serverTimeout,

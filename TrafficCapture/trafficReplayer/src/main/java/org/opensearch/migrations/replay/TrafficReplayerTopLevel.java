@@ -21,6 +21,7 @@ import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
+import org.opensearch.migrations.replay.sink.TupleWriter;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
@@ -162,7 +163,20 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        TupleWriter tupleWriter,
+        Duration quiescentDuration
+    ) throws InterruptedException, ExecutionException {
+        setupRunAndWaitForReplayToFinish(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, tupleWriter, null, quiescentDuration);
+    }
+
+    public void setupRunAndWaitForReplayToFinish(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
+        TupleWriter tupleWriter,
+        Consumer<SourceTargetCaptureTuple> tupleObserver,
         Duration quiescentDuration
     ) throws InterruptedException, ExecutionException {
         var senderOrchestrator = new RequestSenderOrchestrator(
@@ -185,7 +199,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             new CapturedTrafficToHttpTransactionAccumulator(
                 observedPacketConnectionTimeout,
                 "(see command line option " + TrafficReplayer.PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
-                new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer, trafficSource,
+                new TrafficReplayerAccumulationCallbacks(replayEngine, tupleWriter, tupleObserver, trafficSource,
                     quiescentDuration)
             );
         this.currentAccumulator.set(trafficToHttpTransactionAccumulator);
@@ -263,7 +277,20 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        TupleWriter tupleWriter,
+        Duration quiescentDuration
+    ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
+        setupRunAndWaitForReplayWithShutdownChecks(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, tupleWriter, null, quiescentDuration);
+    }
+
+    public void setupRunAndWaitForReplayWithShutdownChecks(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
+        TupleWriter tupleWriter,
+        Consumer<SourceTargetCaptureTuple> tupleObserver,
         Duration quiescentDuration
     ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
         try {
@@ -272,7 +299,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 targetServerResponseTimeout,
                 trafficSource,
                 timeShifter,
-                resultTupleConsumer,
+                tupleWriter,
+                tupleObserver,
                 quiescentDuration
             );
         } catch (InterruptedException e) {
