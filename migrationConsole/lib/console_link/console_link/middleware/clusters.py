@@ -146,7 +146,7 @@ def connection_check(cluster: Cluster) -> ConnectionResult:
                                 connection_established=False)
 
     if caught_exception is None and r is not None and r.status_code == 404:
-        # Serverless — detect collection type
+        # Serverless — detect collection type (skip root probe, we already know it's 404)
         cluster.detect_serverless_collection_type(skip_root_probe=True)
         try:
             cluster.call_api("/_cat/indices", timeout=3)
@@ -178,7 +178,9 @@ def run_test_benchmarks(cluster: Cluster):
 
 
 def _ensure_vectorsearch_workload():
-    """Ensure the vectorsearch workload is available in the OSB workload cache."""
+    """Ensure the vectorsearch workload is available in the OSB workload cache.
+    Used by run_aoss_test_benchmarks to pre-stage snapshot data on a source cluster
+    before creating a BYOS snapshot for AOSS vector collection tests."""
     workload_dir = os.path.expanduser("~/.osb/benchmarks/workloads/default/vectorsearch")
     workload_file = os.path.join(workload_dir, "workload.json")
     if os.path.exists(workload_file):
@@ -198,12 +200,19 @@ def _ensure_vectorsearch_workload():
 
 
 def run_aoss_test_benchmarks(cluster: Cluster):
-    """Run all OSB workloads for AOSS integration tests."""
+    """Run all OSB workloads for AOSS integration tests (search, timeseries, and vector).
+
+    Intended for manually pre-staging snapshot data on a source cluster before
+    creating a BYOS snapshot for AOSS integration tests.
+    """
+    # Search workloads
     cluster.execute_benchmark_workload(workload="geonames")
     cluster.execute_benchmark_workload(workload="pmc")
     cluster.execute_benchmark_workload(workload="so")
+    # Timeseries workloads
     cluster.execute_benchmark_workload(workload="http_logs")
     cluster.execute_benchmark_workload(workload="eventdata")
+    # Vector workloads
     _ensure_vectorsearch_workload()
     cluster.execute_benchmark_workload(
         workload="vectorsearch",
@@ -231,6 +240,7 @@ def run_aoss_test_benchmarks(cluster: Cluster):
     )
 
 
+# As a default we exclude system indices and searchguard indices
 def clear_indices(cluster: Cluster):
     if cluster.is_serverless:
         try:

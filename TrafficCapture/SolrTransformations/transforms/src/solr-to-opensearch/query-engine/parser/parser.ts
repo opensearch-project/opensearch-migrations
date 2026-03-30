@@ -38,22 +38,17 @@
  */
 
 import * as peggy from 'peggy';
-import { readFileSync } from 'node:fs';
+import grammar from './solr.pegjs';
 import type { ASTNode } from '../ast/nodes';
 import type { ParseResult, ParseError } from './types';
 
-// Lazily compiled parser — the grammar is read from disk and compiled
+// Lazily compiled parser — the grammar is inlined at build time and compiled
 // on the first call to parseSolrQuery, then cached for all subsequent calls.
-// This avoids paying the compile cost at module import time.
 let parserInstance: peggy.Parser | null = null;
-
-// Path to the grammar file, co-located with this module.
-const GRAMMAR_PATH = new URL('solr.pegjs', import.meta.url);
 
 /** Return the cached parser, compiling the grammar on first call. */
 function getParser(): peggy.Parser {
   if (parserInstance) return parserInstance;
-  const grammar = readFileSync(GRAMMAR_PATH, 'utf-8');
   parserInstance = peggy.generate(grammar);
   return parserInstance;
 }

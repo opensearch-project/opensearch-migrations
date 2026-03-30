@@ -6,8 +6,8 @@ metadata:
 spec:
   weight: 50
   limits:
-    cpu: "32"
-    memory: "64Gi"
+    cpu: "64"
+    memory: "128Gi"
   template:
     spec:
       nodeClassRef:
@@ -35,6 +35,6 @@ spec:
           value: "true"
           effect: NoSchedule
   disruption:
-    consolidationPolicy: WhenEmptyOrUnderutilized
-    consolidateAfter: 600s
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 300s
 {{- end }}

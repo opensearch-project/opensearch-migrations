@@ -29,7 +29,7 @@ describe('Pod Config - Metadata', () => {
 
         expect(template.metadata).toBeDefined();
         expect(template.metadata.labels).toEqual({ app: 'test', tier: 'backend' });
-        expect(template.metadata.annotations).toEqual({ 'prometheus.io/scrape': 'true' });
+        expect(template.metadata.annotations).toEqual({ 'prometheus.io/scrape': 'true', 'karpenter.sh/do-not-disrupt': 'true' });
     });
 
     it('should render pod metadata with expressions from inputs', () => {
@@ -315,7 +315,7 @@ describe('Pod Config - Combined', () => {
 
         expect(template.activeDeadlineSeconds).toBe(1800);
         expect(template.nodeSelector).toEqual({ tier: 'backend' });
-        expect(template.metadata.annotations).toEqual({ note: 'test' });
+        expect(template.metadata.annotations).toEqual({ note: 'test', 'karpenter.sh/do-not-disrupt': 'true' });
     });
 });
 
@@ -802,6 +802,123 @@ describe('Pod Config - Synchronization', () => {
                 .addResources(EXAMPLE_RESOURCES)
                 .addSynchronization(() => ({ mutexes: [{ name: 'first' }] }))
                 .addSynchronization(() => ({ mutexes: [{ name: 'second' }] }))
+            )
+        );
+        expect(true).toBe(true);
+    });
+});
+
+
+describe('Pod Config - Karpenter Do-Not-Disrupt (default on)', () => {
+    it('should add karpenter do-not-disrupt annotation by default', () => {
+        const wf = WorkflowBuilder.create({
+            k8sResourceName: 'test-default-no-disrupt',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addResources(EXAMPLE_RESOURCES)
+            )
+        )
+        .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const template = rendered.spec.templates.find((t: any) => t.name === 'test');
+
+        expect(template.metadata).toBeDefined();
+        expect(template.metadata.annotations).toEqual({ 'karpenter.sh/do-not-disrupt': 'true' });
+    });
+
+    it('should merge default annotation with addPodMetadata labels and annotations', () => {
+        const wf = WorkflowBuilder.create({
+            k8sResourceName: 'test-default-merge',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addResources(EXAMPLE_RESOURCES)
+                .addPodMetadata(() => ({
+                    labels: { app: 'test' },
+                    annotations: { 'custom/note': 'hello' }
+                }))
+            )
+        )
+        .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const template = rendered.spec.templates.find((t: any) => t.name === 'test');
+
+        expect(template.metadata.labels).toEqual({ app: 'test' });
+        expect(template.metadata.annotations).toEqual({
+            'custom/note': 'hello',
+            'karpenter.sh/do-not-disrupt': 'true'
+        });
+    });
+
+    it('should remove do-not-disrupt annotation when allowDisruption is called', () => {
+        const wf = WorkflowBuilder.create({
+            k8sResourceName: 'test-allow-disruption',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addResources(EXAMPLE_RESOURCES)
+                .allowDisruption()
+            )
+        )
+        .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const template = rendered.spec.templates.find((t: any) => t.name === 'test');
+
+        expect(template.metadata).toBeUndefined();
+    });
+
+    it('should only include user annotations when allowDisruption is called with addPodMetadata', () => {
+        const wf = WorkflowBuilder.create({
+            k8sResourceName: 'test-allow-disruption-with-meta',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addResources(EXAMPLE_RESOURCES)
+                .addPodMetadata(() => ({
+                    labels: { app: 'test' },
+                    annotations: { 'custom/note': 'hello' }
+                }))
+                .allowDisruption()
+            )
+        )
+        .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const template = rendered.spec.templates.find((t: any) => t.name === 'test');
+
+        expect(template.metadata.labels).toEqual({ app: 'test' });
+        expect(template.metadata.annotations).toEqual({ 'custom/note': 'hello' });
+    });
+
+    it('should reject duplicate allowDisruption calls at compile time', () => {
+        WorkflowBuilder.create({
+            k8sResourceName: 'test-duplicate-allow-disruption',
+            serviceAccountName: 'default'
+        })
+        .addTemplate('test', t => t
+            // @ts-expect-error - duplicate allowDisruption should be rejected
+            .addContainer(c => c
+                .addImageInfo('nginx:latest', 'IfNotPresent')
+                .addCommand(['echo'])
+                .addResources(EXAMPLE_RESOURCES)
+                .allowDisruption()
+                .allowDisruption()
             )
         );
         expect(true).toBe(true);
