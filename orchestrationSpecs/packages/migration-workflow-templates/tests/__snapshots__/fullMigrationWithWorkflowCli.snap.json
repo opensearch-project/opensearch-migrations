@@ -136,6 +136,15 @@
                 "path": "/tmp/outputs/monitorResult"
               }
             }
+          ],
+          "artifacts": [
+            {
+              "name": "monitorResult",
+              "path": "/tmp/outputs/monitorResult",
+              "archive": {
+                "none": {}
+              }
+            }
           ]
         }
       },

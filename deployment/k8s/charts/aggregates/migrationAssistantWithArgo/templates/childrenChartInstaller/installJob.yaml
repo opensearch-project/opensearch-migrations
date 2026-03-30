@@ -193,6 +193,15 @@ spec:
           {{- end }}
                   --timeout {{ default "300" $chart.timeout }}s \
                   --set global.managedBy="{{ $.Release.Name }}" \
+          {{- if eq $name "argo-workflows" }}
+                  --set artifactRepository.s3.bucket="{{ printf "migrations-default-%s-%s-%s" (toString $.Values.aws.account) $.Values.stageName $.Values.aws.region }}" \
+                  --set artifactRepository.s3.region="{{ $.Values.aws.region }}" \
+            {{- if $.Values.defaultBucketConfiguration.useLocalStack }}
+                  --set artifactRepository.s3.endpoint="{{ $.Values.defaultBucketConfiguration.endpoint }}.{{ $.Release.Namespace }}.svc.cluster.local:4566" \
+            {{- else }}
+                  --set artifactRepository.s3.endpoint="s3.{{ $.Values.aws.region }}.amazonaws.com" \
+            {{- end }}
+          {{- end }}
                   $VALUE_PARAM \
           {{- if $chart.waitForInstallation }}
                   --wait
