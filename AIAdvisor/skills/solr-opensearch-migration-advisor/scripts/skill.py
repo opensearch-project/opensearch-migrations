@@ -176,24 +176,30 @@ class SolrToOpenSearchMigrationSkill:
     # Message handlers (one per intent)
     # ------------------------------------------------------------------
 
+    _SCHEMA_START_TAG = "<schema"
+    _SCHEMA_END_TAG = "</schema>"
+
     @staticmethod
     def _looks_like_schema(message: str, message_lc: str) -> bool:
         """Return True if *message* appears to contain or request a schema conversion."""
-        if "<schema" in message and "</schema>" in message:
+        if (
+            SolrToOpenSearchMigrationSkill._SCHEMA_START_TAG in message
+            and SolrToOpenSearchMigrationSkill._SCHEMA_END_TAG in message
+        ):
             return True
         schema_keywords = ("schema" in message_lc or "migrate" in message_lc or "convert" in message_lc)
-        return schema_keywords and "<schema" in message
+        return schema_keywords and SolrToOpenSearchMigrationSkill._SCHEMA_START_TAG in message
 
     def _handle_schema(self, message: str, state: SessionState) -> str:
         """Handle a schema conversion request."""
-        schema_start = message.find("<schema")
-        schema_end = message.find("</schema>")
+        schema_start = message.find(self._SCHEMA_START_TAG)
+        schema_end = message.find(self._SCHEMA_END_TAG)
         if schema_start == -1 or schema_end == -1:
             return (
                 "I detected you want to convert a schema, but I couldn't find "
                 "the XML content. Please paste your full `schema.xml` content."
             )
-        schema_xml = message[schema_start: schema_end + 9]
+        schema_xml = message[schema_start: schema_end + len(self._SCHEMA_END_TAG)]
         mapping = self.convert_schema_xml(schema_xml)
         state.set_fact("schema_migrated", True)
         state.advance_progress(1)
