@@ -133,6 +133,9 @@
             "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
             "migrations.opensearch.org/from-snapshot-migration": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}",
             "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}"
+          },
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
           }
         },
         "volumes": [

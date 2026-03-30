@@ -39,8 +39,10 @@ describe("paramsFns runtime validation", () => {
                 "emptyDag": {
                     "body": {"dag": []},
                     "inputs": {},
+                    "outputArtifacts": {},
                     "outputs": {},
-                    "retryStrategy": {}
+                    "retryStrategy": {},
+                    "synchronization": undefined
                 },
             },
             "workflowParameters": {}
@@ -128,16 +130,20 @@ describe("paramsFns runtime validation", () => {
                             "description": undefined,
                         },
                     },
+                    "outputArtifacts": {},
                     "outputs": {},
-                    "retryStrategy": {}
+                    "retryStrategy": {},
+                    "synchronization": undefined
                 },
                 "doNothing": {
                     "body": {
                         "steps": [],
                     },
                     "inputs": {},
+                    "outputArtifacts": {},
                     "outputs": {},
-                    "retryStrategy": {}
+                    "retryStrategy": {},
+                    "synchronization": undefined
                 },
             },
             "workflowParameters": {}

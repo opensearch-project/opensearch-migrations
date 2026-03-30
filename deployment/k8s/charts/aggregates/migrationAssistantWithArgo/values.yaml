@@ -313,6 +313,15 @@ charts:
     repository: "https://argoproj.github.io/argo-helm"
     values:
       fullnameOverride: "argo"
+      # Credentials are configured per-environment:
+      # - valuesForLocalK8s.yaml: static credentials for LocalStack
+      # - valuesEks.yaml: SDK credentials (IAM roles)
+      useStaticCredentials: false
+      artifactRepository:
+        archiveLogs: true
+        s3:
+          insecure: false
+          keyFormat: "argo-artifacts/{{workflow.name}}/{{pod.name}}"
       images:
         pullPolicy: IfNotPresent
       crds:
