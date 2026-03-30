@@ -120,8 +120,8 @@ export class WaitForNewResourceBuilder<
             (typeof waitOpts.maxDurationSeconds === "number" ? waitOpts.maxDurationSeconds : DEFAULT_WAIT_DURATION);
         const maxDurationSeconds = waitOpts.maxDurationSeconds ?? maxKubeWaitDuration;
         const resources = waitOpts.kubectlPodResources ?? {
-            limits: { cpu: "50m", memory: "32Mi" },
-            requests: { cpu: "50m", memory: "32Mi" }
+            limits: { cpu: "50m", memory: "64Mi" },
+            requests: { cpu: "50m", memory: "64Mi" }
         };
 
         const namespaceArgs =
