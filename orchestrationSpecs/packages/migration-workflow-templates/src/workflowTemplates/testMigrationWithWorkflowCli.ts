@@ -62,6 +62,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
                 typeToken<string>(),
                 "Workflow status output from monitor script"
             )
+            .addArtifactOutput("monitorResult", "/tmp/outputs/monitorResult")
         )
         .addRetryParameters({
             limit: "{{workflow.parameters.monitor-retry-limit}}",
