@@ -679,7 +679,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: v1\nkind: PersistentVolume\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-s3-snapshot'}}\"\nspec:\n  capacity:\n    storage: 1200Gi\n  accessModes:\n    - ReadOnlyMany\n  storageClassName: \"\"\n  claimRef:\n    namespace: \"{{workflow.namespace}}\"\n    name: s3-snapshot\n  mountOptions: '{{=((fromJSON(inputs.parameters.useLocalStack)) ? ([\"--read-only\",\"--force-path-style\"]) : ([\"--read-only\"]))}}'\n  csi:\n    driver: s3.csi.aws.com\n    volumeHandle: \"{{=inputs.parameters.sessionName+'-s3-snapshot'}}\"\n    volumeAttributes:\n      bucketName: \"{{inputs.parameters.bucketName}}\"\n      authenticationSource: \"{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('driver') : ('pod'))}}\"\n  persistentVolumeReclaimPolicy: Delete\n",
+          "manifest": "apiVersion: v1\nkind: PersistentVolume\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-s3-snapshot'}}\"\nspec:\n  capacity:\n    storage: 1200Gi\n  accessModes:\n    - ReadOnlyMany\n  storageClassName: \"\"\n  claimRef:\n    namespace: \"{{workflow.namespace}}\"\n    name: s3-snapshot\n  mountOptions: {{=((fromJSON(inputs.parameters.useLocalStack)) ? ([\"--read-only\",\"--force-path-style\"]) : ([\"--read-only\"]))}}\n  csi:\n    driver: s3.csi.aws.com\n    volumeHandle: \"{{=inputs.parameters.sessionName+'-s3-snapshot'}}\"\n    volumeAttributes:\n      bucketName: \"{{inputs.parameters.bucketName}}\"\n      authenticationSource: \"{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('driver') : ('pod'))}}\"\n  persistentVolumeReclaimPolicy: Delete\n",
           "action": "apply"
         },
         "retryStrategy": {

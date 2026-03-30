@@ -168,11 +168,12 @@ function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
 
 export function unwrapPlaceholdersAndStringify(obj: any): string {
     const result = toSafeYamlOutput(obj);
-    // in this yaml output, the value won't need to be quoted when it starts with a string -
-    // as long as REMOVE_PREVIOUS_QUOTE_SENTINEL starts with a character, there won't actually be a quote
+    // Strip sentinels and any surrounding quotes the YAML serializer may have added.
+    // The YAML library quotes values containing `: ` or other special sequences even when
+    // the sentinel prefix would normally prevent it, so we must also remove those quotes.
     return result
-        .replace(new RegExp(`${REMOVE_PREVIOUS_QUOTE_SENTINEL}`, 'g'), '')
-        .replace(new RegExp(`${REMOVE_NEXT_QUOTE_SENTINEL}`, 'g'), '');
+        .replace(new RegExp(`['"]?${REMOVE_PREVIOUS_QUOTE_SENTINEL}`, 'g'), '')
+        .replace(new RegExp(`${REMOVE_NEXT_QUOTE_SENTINEL}['"]?`, 'g'), '');
 }
 
 function formatBody(body: GenericScope) {
