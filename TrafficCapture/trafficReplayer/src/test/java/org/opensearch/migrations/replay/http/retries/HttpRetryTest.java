@@ -166,7 +166,16 @@ public class HttpRetryTest {
         );
         try (var rootContext = TestContext.withAllTracking()) {
             var f = executor.submit(() -> scheduleSingleRequest(clientConnectionPool, rootContext).get());
-            Thread.sleep(4 * 1000);
+
+            // Wait until multiple connection attempts have been made instead of sleeping a fixed duration
+            var deadline = System.currentTimeMillis() + 10_000;
+            while (System.currentTimeMillis() < deadline) {
+                var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
+                if (InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "requestConnectingExceptionCount") > 1) {
+                    break;
+                }
+                Thread.sleep(10);
+            }
             var ccpShutdownFuture = clientConnectionPool.shutdownNow();
 
             var e = Assertions.assertThrows(Exception.class, f::get);

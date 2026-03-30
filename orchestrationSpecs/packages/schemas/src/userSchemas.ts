@@ -396,12 +396,12 @@ export const USER_RFS_OPTIONS = z.object({
 });
 
 export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
-    replicas:      z.number().int().min(1).default(1).optional(),
-    storage:       z.discriminatedUnion("type", [
-                       z.object({ type: z.literal("ephemeral") }),
-                       z.object({ type: z.literal("persistent-claim"), size: z.string() })
-                   ]).default({ type: "ephemeral" }).optional(),
-    partitions:    z.number().int().min(1).default(1).optional(),
+    replicas: z.number().int().min(1).default(1).optional(),
+    storage: z.discriminatedUnion("type", [
+        z.object({ type: z.literal("ephemeral") }),
+        z.object({ type: z.literal("persistent-claim"), size: z.string() })
+    ]).default({ type: "ephemeral" }).optional(),
+    partitions: z.number().int().min(1).default(1).optional(),
     topicReplicas: z.number().int().min(1).default(1).optional(),
 });
 
@@ -445,7 +445,7 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
     z.record(z.string(), S3_REPO_CONFIG)
-    .describe("Keys are the repository names that are managed by the source cluster");
+        .describe("Keys are the repository names that are managed by the source cluster");
 
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional(),
@@ -512,7 +512,7 @@ export const SNAPSHOT_CONFIGS_MAP = z.record(
 export const SNAPSHOT_INFO = z.object({
     repos: SOURCE_CLUSTER_REPOS_RECORD.optional(),
     snapshots: SNAPSHOT_CONFIGS_MAP
-})
+});
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING,
@@ -562,7 +562,7 @@ export const PER_SNAPSHOT_MIGRATION_CONFIG_RECORD =
         SNAPSHOT_MIGRATION_CONFIG_ARRAY.min(1));
 
 export const NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG = z.object({
-    skipApprovals : z.boolean().default(false).optional(), // TODO - format
+    skipApprovals: z.boolean().default(false).optional(), // TODO - format
     fromSource: z.string(),
     toTarget: z.string(),
     perSnapshotConfig: PER_SNAPSHOT_MIGRATION_CONFIG_RECORD.optional(),
@@ -587,7 +587,7 @@ export const TARGET_CLUSTERS_MAP = z.record(z.string(), TARGET_CLUSTER_CONFIG);
 export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
 (
     z.object({
-        skipApprovals : z.boolean().default(false).optional(), // TODO - format
+        skipApprovals: z.boolean().default(false).optional(), // TODO - format
         kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional(),
         sourceClusters: SOURCE_CLUSTERS_MAP,
         targetClusters: TARGET_CLUSTERS_MAP,
@@ -639,6 +639,15 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         code: z.ZodIssueCode.custom,
                         message: `Proxy '${proxyName}' references unknown source '${proxyConfig.source}'. Available: ${Object.keys(data.sourceClusters).join(', ')}`,
                         path: ['traffic', 'proxies', proxyName, 'source']
+                    });
+                }
+                const kafkaRef = proxyConfig.kafka;
+                const kafkaClusters = data.kafkaClusterConfiguration ?? {};
+                if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Proxy '${proxyName}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}`,
+                        path: ['traffic', 'proxies', proxyName, 'kafka']
                     });
                 }
             }

@@ -113,11 +113,12 @@ def perform_request(url: str, payload: dict, headers: dict, retries: int = 3, ba
     return session.post(url, json=payload, headers=headers)
 
 
-def _find_queue_url(trigger_response: dict) -> Optional[str]:
-    """Extract the queue URL from the trigger response for the first triggered job."""
-    for _name, job_info in trigger_response.get("jobs", {}).items():
+def _find_queue_url(trigger_response: dict, job_name: str = None) -> Optional[str]:
+    """Extract the queue URL from the trigger response for the specified job."""
+    for name, job_info in trigger_response.get("jobs", {}).items():
         if job_info.get("triggered") is True:
-            return job_info.get("url") or None
+            if job_name is None or job_name in name:
+                return job_info.get("url") or None
     return None
 
 
@@ -137,7 +138,7 @@ def wait_for_job_completion(config: JenkinsConfig, trigger_response: dict) -> Jo
     global _active_build_url
     total_wait_time = 0
 
-    queue_url = _find_queue_url(trigger_response)
+    queue_url = _find_queue_url(trigger_response, job_name=config.job_name)
     logging.info(f"Detected jenkins queue_url: {queue_url}")
     if not queue_url:
         raise RuntimeError(f"Unable to determine queue_url for job: {config.job_name}")
@@ -196,8 +197,8 @@ def handle_job_monitoring(config: JenkinsConfig, response: Response) -> JobResul
 
     if len(triggered_jobs) > 1:
         logging.warning(
-            f"This tool currently only supports triggering a single pipeline, but these "
-            f"pipelines were triggered: {triggered_jobs}. Only the specified job will be checked."
+            f"Multiple pipelines were triggered: {triggered_jobs}. "
+            f"Monitoring only the specified job: {config.job_name}"
         )
 
     return wait_for_job_completion(config=config, trigger_response=body)

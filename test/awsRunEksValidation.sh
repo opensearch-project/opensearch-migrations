@@ -11,7 +11,7 @@ usage() {
   echo "  2. Installs Migration Assistant via aws-bootstrap.sh"
   echo "  3. Validates migration console pod is accessible"
   echo ""
-  echo "By default, uses public container images."
+  echo "By default, mirrors public container images to private ECR."
   echo "Optionally supports building from source for testing unreleased changes."
   echo ""
   echo "Usage: "

@@ -15,8 +15,14 @@ fi
 BUILDER_NAME="builder-${CONTEXT//[^a-zA-Z0-9_-]/-}"
 
 # Check if builder already exists and is healthy
-if docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
-  echo "Builder '$BUILDER_NAME' already configured and healthy"
+# Fast path: inspect without --bootstrap returns instantly
+if docker buildx inspect "$BUILDER_NAME" 2>/dev/null | grep -q "Status: running"; then
+  echo "Builder '$BUILDER_NAME' already running, skipping bootstrap"
+  docker buildx use "$BUILDER_NAME"
+  exit 0
+# Slow path: --bootstrap tries to start buildkit pods
+elif docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
+  echo "Builder '$BUILDER_NAME' bootstrapped successfully"
   docker buildx use "$BUILDER_NAME"
   exit 0
 fi
@@ -30,6 +36,17 @@ NAMESPACE="${BUILDKIT_NAMESPACE:-buildkit}"
 if [[ "$CONTEXT" =~ (eks:|gke_|aks-|migration-eks-) ]]; then
   echo "Detected cloud K8s, using kubernetes driver with native multi-arch builds"
   
+  # Resource requests/limits for buildkit pods — ensures pods get scheduled on
+  # appropriately sized nodes and aren't evicted during large builds.
+  # Note: Karpenter disruption protection is handled by the NodePool's WhenEmpty
+  # consolidation policy — the kubernetes driver doesn't support pod annotations.
+  BUILDKIT_RESOURCE_OPTS=(
+    --driver-opt="requests.cpu=${BUILDKIT_REQUESTS_CPU:-4}"
+    --driver-opt="requests.memory=${BUILDKIT_REQUESTS_MEMORY:-8Gi}"
+    --driver-opt="limits.cpu=${BUILDKIT_LIMITS_CPU:-8}"
+    --driver-opt="limits.memory=${BUILDKIT_LIMITS_MEMORY:-16Gi}"
+  )
+
   docker buildx create \
     --name="$BUILDER_NAME" \
     --driver=kubernetes \
@@ -38,6 +55,7 @@ if [[ "$CONTEXT" =~ (eks:|gke_|aks-|migration-eks-) ]]; then
     --driver-opt="namespace=${NAMESPACE}" \
     --driver-opt="nodeselector=kubernetes.io/arch=amd64" \
     --driver-opt='"tolerations=key=build-nodepool,value=true,effect=NoSchedule"' \
+    "${BUILDKIT_RESOURCE_OPTS[@]}" \
     ${BUILDKIT_IMAGE:+--driver-opt="image=${BUILDKIT_IMAGE}"}
 
   docker buildx create \
@@ -49,6 +67,7 @@ if [[ "$CONTEXT" =~ (eks:|gke_|aks-|migration-eks-) ]]; then
     --driver-opt="namespace=${NAMESPACE}" \
     --driver-opt="nodeselector=kubernetes.io/arch=arm64" \
     --driver-opt='"tolerations=key=build-nodepool,value=true,effect=NoSchedule"' \
+    "${BUILDKIT_RESOURCE_OPTS[@]}" \
     ${BUILDKIT_IMAGE:+--driver-opt="image=${BUILDKIT_IMAGE}"}
 else
   echo "Detected local K8s, using remote driver with port-forwards"

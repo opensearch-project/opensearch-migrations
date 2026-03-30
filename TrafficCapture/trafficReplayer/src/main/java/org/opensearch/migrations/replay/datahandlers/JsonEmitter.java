@@ -148,7 +148,7 @@ public class JsonEmitter implements AutoCloseable {
      * @throws IOException
      */
     public PartialOutputAndContinuation getChunkAndContinuations(Object object, int minBytes) throws IOException {
-        log.trace("getChunkAndContinuations(..., " + minBytes + ")");
+        log.atTrace().setMessage("getChunkAndContinuations(..., {})").addArgument(minBytes).log();
         return getChunkAndContinuationsHelper(walkTreeWithContinuations(object), minBytes);
     }
 
@@ -174,7 +174,7 @@ public class JsonEmitter implements AutoCloseable {
         var compositeByteBuf = outputStream.compositeByteBuf;
         if (compositeByteBuf.numComponents() > NUM_SEGMENT_THRESHOLD || compositeByteBuf.readableBytes() > minBytes) {
             var byteBuf = outputStream.recycleByteBufRetained();
-            log.debug("getChunkAndContinuationsHelper->" + byteBuf.readableBytes() + " bytes + continuation");
+            log.atDebug().setMessage("getChunkAndContinuationsHelper->{} bytes + continuation").addArgument(byteBuf::readableBytes).log();
             return new PartialOutputAndContinuation(
                 byteBuf,
                 () -> getChunkAndContinuationsHelper(nextFragmentSupplier, minBytes)
@@ -187,7 +187,7 @@ public class JsonEmitter implements AutoCloseable {
                 throw Lombok.sneakyThrow(e);
             }
             var byteBuf = outputStream.recycleByteBufRetained();
-            log.debug("getChunkAndContinuationsHelper->" + byteBuf.readableBytes() + " bytes + null");
+            log.atDebug().setMessage("getChunkAndContinuationsHelper->{} bytes + null").addArgument(byteBuf::readableBytes).log();
             return new PartialOutputAndContinuation(byteBuf, null);
         }
         log.trace(
@@ -231,7 +231,7 @@ public class JsonEmitter implements AutoCloseable {
      * @return
      */
     private FragmentSupplier walkTreeWithContinuations(Object o) {
-        log.trace("walkTree... " + o);
+        log.atTrace().setMessage("walkTree... {}").addArgument(o).log();
         if (o instanceof Map.Entry) {
             var kvp = (Map.Entry<String, Object>) o;
             writeFieldName(kvp.getKey());

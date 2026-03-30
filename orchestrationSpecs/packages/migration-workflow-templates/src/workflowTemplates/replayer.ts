@@ -153,7 +153,7 @@ export const Replayer = WorkflowBuilder.create({
                 setOwnerReference: true,
                 manifest: getReplayerDeploymentManifest({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
-                    useCustomLogging: expr.equals(expr.literal(""), b.inputs.loggingConfigurationOverrideConfigMap),
+                    useCustomLogging: expr.not(expr.equals(expr.literal(""), b.inputs.loggingConfigurationOverrideConfigMap)),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     jvmArgs: b.inputs.jvmArgs,
                     name: b.inputs.name,

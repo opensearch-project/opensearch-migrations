@@ -91,9 +91,9 @@ clean_up_all () {
   done
 
   cd "$MIGRATION_CDK_PATH" || exit
-  cdk destroy "*" --force --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID"
+  npx cdk destroy "*" --force --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID"
   cd "$EC2_SOURCE_CDK_PATH" || exit
-  cdk destroy "*" --force --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
+  npx cdk destroy "*" --force --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
 }
 
 # One-time required CDK bootstrap setup for a given region. Only required if the 'CDKToolkit' CFN stack does not exist
@@ -245,7 +245,7 @@ else
   echo "Repo already exists, skipping clone."
 fi
 cd opensearch-cluster-cdk && git pull && git checkout migration-es && git pull
-npm install
+npm ci
 if [ "$BOOTSTRAP_REGION" = true ] ; then
   bootstrap_region
 fi
@@ -280,7 +280,7 @@ if [ "$SKIP_MIGRATION_DEPLOY" = false ] ; then
     echo "Error: building docker images failed, exiting."
     exit 1
   fi
-  npm install
+  npm ci
   cdk deploy "*" --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID" --require-approval never --concurrency 3
   if [ $? -ne 0 ]; then
     echo "Error: deploying migration stacks failed, exiting."
