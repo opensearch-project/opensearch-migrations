@@ -15,7 +15,6 @@
     "proxies": {
       "proxy1": {
         "source": "source",
-        "listenPort": 9201,
         "proxyConfig": {
           "listenPort": 9201
         }

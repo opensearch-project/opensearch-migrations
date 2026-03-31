@@ -8,6 +8,10 @@ const DOC_TRANSFORMER_SUFFIX = " Document transformers modify each document duri
 const EXPERT_FILE_SUFFIX = " [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.";
 const JVM_ARGS_DESC = "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). " +
     "If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage.";
+const LOGGING_CONFIG_OVERRIDE_DESC = "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
+    "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
+    "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
+    "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.";
 import deepmerge from "deepmerge";
 
 export function getZodKeys<T extends z.ZodRawShape>(schema: z.ZodObject<T>): readonly (keyof T)[] {
@@ -199,10 +203,7 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
 
 export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
-            "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
-            "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
-            "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."),
+        .describe(LOGGING_CONFIG_OVERRIDE_DESC),
     internetFacing: z.boolean().default(false).optional()
         .describe("When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC."),
     podReplicas: z.number().default(1).optional()
@@ -271,10 +272,7 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
-            "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
-            "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
-            "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."),
+        .describe(LOGGING_CONFIG_OVERRIDE_DESC),
     podReplicas: z.number().default(1).optional()
         .describe("Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.REPLAYER, (v ?? {})), RESOURCE_REQUIREMENTS)
@@ -347,10 +345,7 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
-            "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
-            "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
-            "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference.")
+        .describe(LOGGING_CONFIG_OVERRIDE_DESC)
 }).describe("Workflow-level options for snapshot creation, controlling naming and JVM configuration.");
 
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
@@ -379,10 +374,7 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
-            "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
-            "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
-            "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."),
+        .describe(LOGGING_CONFIG_OVERRIDE_DESC),
     skipEvaluateApproval: z.boolean().default(false).optional()
         .describe("When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."),
     skipMigrateApproval: z.boolean().default(false).optional()
@@ -438,10 +430,7 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()
         .describe(JVM_ARGS_DESC),
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
-        .describe("Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. " +
-            "The ConfigMap should have a single key whose value is the Log4j2 properties file content. " +
-            "When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. " +
-            "See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."),
+        .describe(LOGGING_CONFIG_OVERRIDE_DESC),
     skipApproval: z.boolean().default(false).optional()
         .describe("When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."),
     useTargetClusterForWorkCoordination: z.boolean().default(false)
