@@ -119,13 +119,13 @@ jobs:
         run: |
           pipenv run test
           pipenv run coverage xml
-          
+
       # Run tests for pyproject.toml-based projects
       - name: Run tests (pyproject.toml)
         if: matrix.py-project == 'AIAdvisor/skills/solr-opensearch-migration-advisor'
         run: |
           python3 -m pytest --cov=scripts --cov-report=xml
-          
+
       - name: Get Sanitized Name
         env:
           PY_PROJECT: ${{ matrix.py-project }}
