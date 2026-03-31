@@ -24,8 +24,10 @@ export function getTargetHttpAuthCreds(configMapNameOrEmpty: AllowLiteralOrExpre
 }
 
 /**
- * Returns basic auth env vars in K8s container env array format, for use in raw Deployment manifests
- * (as opposed to the record format used by ContainerBuilder's addEnvVarsFromRecord).
+ * Returns basic auth env vars in K8s container env array format, for use in raw Deployment manifests.
+ * The record-form helpers above (getTargetHttpAuthCreds, getSourceHttpAuthCreds) serve the same
+ * purpose for ContainerBuilder's addEnvVarsFromRecord(), where the argoResourceRenderer converts
+ * the record to K8s list format.
  */
 function makeK8sSecretEnvVar(envName: string, secretName: AllowLiteralOrExpression<string>, key: string) {
     return {
