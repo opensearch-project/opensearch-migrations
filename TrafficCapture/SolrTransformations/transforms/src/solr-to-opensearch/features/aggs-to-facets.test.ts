@@ -387,6 +387,54 @@ describe('aggs-to-facets MicroTransform', () => {
     });
   });
 
+  describe('date_histogram bucket conversion with key_as_string', () => {
+    it('should use key_as_string as val and filter it from nested agg detection', () => {
+      // date_histogram buckets have key (epoch millis), key_as_string (ISO), and doc_count
+      // All three are in BUCKET_META_KEYS and should NOT be treated as nested aggs
+      const nestedBrandsAgg = new Map<string, any>([
+        ['buckets', [
+          new Map<string, any>([['key', 'acme'], ['doc_count', 4]]),
+        ]],
+      ]);
+      const dateHistBuckets = [
+        new Map<string, any>([
+          ['key', 1704067200000],           // epoch millis
+          ['key_as_string', '2024-01-01'],   // formatted date
+          ['doc_count', 10],
+          ['brands', nestedBrandsAgg],
+        ]),
+        new Map<string, any>([
+          ['key', 1706745600000],
+          ['key_as_string', '2024-02-01'],
+          ['doc_count', 7],
+        ]),
+      ];
+      const aggs = new Map([
+        ['monthly', new Map<string, any>([['buckets', dateHistBuckets]])],
+      ]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 17 });
+      response.apply(ctx);
+
+      const facets: JavaMap = ctx.responseBody.get('facets');
+      const monthlyBuckets: JavaMap[] = facets.get('monthly').get('buckets');
+
+      expect(monthlyBuckets).toHaveLength(2);
+
+      // First bucket: key_as_string should be used as val, nested brands should be converted
+      expect(monthlyBuckets[0].get('val')).toBe('2024-01-01');
+      expect(monthlyBuckets[0].get('count')).toBe(10);
+      expect(monthlyBuckets[0].has('brands')).toBe(true);
+      expect(monthlyBuckets[0].get('brands').get('buckets')).toHaveLength(1);
+      expect(monthlyBuckets[0].get('brands').get('buckets')[0].get('val')).toBe('acme');
+
+      // Second bucket: no nested aggs, only val + count
+      expect(monthlyBuckets[1].get('val')).toBe('2024-02-01');
+      expect(monthlyBuckets[1].get('count')).toBe(7);
+      expect(monthlyBuckets[1].size).toBe(2);
+    });
+  });
+
   describe('multi-level nested response conversion', () => {
     it('should handle three levels of nested aggregation results', () => {
       // Simulate: categories → brands → price_ranges (3 levels)
@@ -438,6 +486,65 @@ describe('aggs-to-facets MicroTransform', () => {
       expect(priceRangeBuckets[0].get('count')).toBe(2);
       expect(priceRangeBuckets[1].get('val')).toBe(50);
       expect(priceRangeBuckets[1].get('count')).toBe(3);
+    });
+
+    it('should handle mixed nesting: query (filter) → terms → range', () => {
+      // Simulates: expensive (filter agg) → categories (terms) → price_ranges (histogram)
+      const priceRangeAgg = new Map<string, any>([
+        ['buckets', [
+          new Map<string, any>([['key', 0], ['doc_count', 1]]),
+          new Map<string, any>([['key', 50], ['doc_count', 4]]),
+        ]],
+      ]);
+      const categoriesAgg = new Map<string, any>([
+        ['buckets', [
+          new Map<string, any>([
+            ['key', 'electronics'],
+            ['doc_count', 5],
+            ['price_ranges', priceRangeAgg],
+          ]),
+          new Map<string, any>([
+            ['key', 'clothing'],
+            ['doc_count', 3],
+          ]),
+        ]],
+      ]);
+      // Filter agg (from query facet): has doc_count + nested terms agg
+      const filterAgg = new Map<string, any>([
+        ['doc_count', 8],
+        ['categories', categoriesAgg],
+      ]);
+      const aggs = new Map([['expensive', filterAgg]]);
+      const body = new Map<string, any>([['aggregations', aggs]]);
+      const ctx = buildCtx(body, { hitsTotal: 100 });
+      response.apply(ctx);
+
+      const facets: JavaMap = ctx.responseBody.get('facets');
+
+      // Level 1: filter agg → count
+      const expensive: JavaMap = facets.get('expensive');
+      expect(expensive.get('count')).toBe(8);
+
+      // Level 2: nested terms agg within the filter
+      const categories: JavaMap = expensive.get('categories');
+      expect(categories).toBeDefined();
+      const catBuckets: JavaMap[] = categories.get('buckets');
+      expect(catBuckets).toHaveLength(2);
+      expect(catBuckets[0].get('val')).toBe('electronics');
+      expect(catBuckets[0].get('count')).toBe(5);
+      expect(catBuckets[1].get('val')).toBe('clothing');
+      expect(catBuckets[1].get('count')).toBe(3);
+
+      // Level 3: nested range agg within the terms bucket
+      const priceRangeBkts: JavaMap[] = catBuckets[0].get('price_ranges').get('buckets');
+      expect(priceRangeBkts).toHaveLength(2);
+      expect(priceRangeBkts[0].get('val')).toBe(0);
+      expect(priceRangeBkts[0].get('count')).toBe(1);
+      expect(priceRangeBkts[1].get('val')).toBe(50);
+      expect(priceRangeBkts[1].get('count')).toBe(4);
+
+      // Clothing bucket should have no nested aggs
+      expect(catBuckets[1].size).toBe(2);
     });
   });
 });
