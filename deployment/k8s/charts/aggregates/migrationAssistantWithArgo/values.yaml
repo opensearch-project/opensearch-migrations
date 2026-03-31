@@ -244,8 +244,8 @@ charts:
           limits:   { cpu: 250m, memory: 128Mi }
       webhook:
         resources:
-          requests: { cpu: 50m, memory: 32Mi }
-          limits:   { cpu: 100m, memory: 64Mi }
+          requests: { cpu: 50m, memory: 64Mi }
+          limits:   { cpu: 100m, memory: 128Mi }
 
   aws-privateca-issuer:
     version: "1.4.0"
@@ -255,8 +255,8 @@ charts:
       serviceAccount:
         name: aws-pca-issuer
       resources:
-        requests: { cpu: 25m, memory: 32Mi }
-        limits:   { cpu: 100m, memory: 64Mi }
+        requests: { cpu: 25m, memory: 64Mi }
+        limits:   { cpu: 100m, memory: 128Mi }
 
   ack-acmpca-controller:
     version: "1.2.2"
@@ -365,8 +365,8 @@ charts:
       server:
         replicas: 2
         resources:
-          requests: { cpu: 100m, memory: 128Mi }
-          limits:   { cpu: 500m, memory: 256Mi }
+          requests: { cpu: 100m, memory: 512Mi }
+          limits:   { cpu: 500m, memory: 512Mi }
         pdb:
           enabled: true
           minAvailable: 1  # Ensures at least 1 pod always running
@@ -568,8 +568,8 @@ charts:
         enabled: true
       prometheusOperator:
         resources:
-          requests: { cpu: 50m, memory: 64Mi }
-          limits:   { cpu: 250m, memory: 128Mi }
+          requests: { cpu: 50m, memory: 128Mi }
+          limits:   { cpu: 250m, memory: 256Mi }
       kube-state-metrics:
         resources:
           requests: { cpu: 50m, memory: 64Mi }
