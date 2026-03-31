@@ -258,6 +258,8 @@ class TestRunner:
                                 "images.trafficReplayer.tag": "migrations_traffic_replayer_latest",
                                 "images.reindexFromSnapshot.repository": repo,
                                 "images.reindexFromSnapshot.tag": "migrations_reindex_from_snapshot_latest",
+                                "images.snapshotFuse.repository": repo,
+                                "images.snapshotFuse.tag": "migrations_snapshot_fuse_latest",
                                 "images.migrationConsole.repository": repo,
                                 "images.migrationConsole.tag": mc_tag,
                                 "images.installer.repository": repo,
@@ -275,6 +277,7 @@ class TestRunner:
                                 "images.captureProxy.repository": f"{prefix}migrations/capture_proxy",
                                 "images.trafficReplayer.repository": f"{prefix}migrations/traffic_replayer",
                                 "images.reindexFromSnapshot.repository": f"{prefix}migrations/reindex_from_snapshot",
+                                "images.snapshotFuse.repository": f"{prefix}migrations/snapshot_fuse",
                                 "images.migrationConsole.repository": mc_repo,
                                 "images.installer.repository": mc_repo,
                                 # Kyverno image overrides
