@@ -16,7 +16,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends fuse libfuse2 wget ca-certificates && \
     ARCH=$(dpkg --print-architecture) && \
     wget -q "https://s3.amazonaws.com/mountpoint-s3-release/latest/${ARCH}/mount-s3.deb" -O /tmp/mount-s3.deb && \
-    apt-get install -y /tmp/mount-s3.deb && \
+    dpkg -i /tmp/mount-s3.deb || apt-get install -y -f --no-install-recommends && \
     rm /tmp/mount-s3.deb && \
     apt-get purge -y wget && \
     apt-get autoremove -y && \
