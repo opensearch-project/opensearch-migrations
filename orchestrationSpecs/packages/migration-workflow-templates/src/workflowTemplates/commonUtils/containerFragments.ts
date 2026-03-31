@@ -207,6 +207,14 @@ export function setupSnapshotFuseSidecar(
                             expr.literal("true"),
                             expr.literal("false")
                         ))
+                    },
+                    {
+                        name: "AWS_SHARED_CREDENTIALS_FILE",
+                        value: makeStringTypeProxy(expr.ternary(
+                            useLocalStack,
+                            expr.literal("/config/credentials/configuration"),
+                            expr.literal("")
+                        ))
                     }
                 ],
                 securityContext: { privileged: true },
@@ -219,6 +227,11 @@ export function setupSnapshotFuseSidecar(
                     {
                         name: S3_CACHE_VOLUME_NAME,
                         mountPath: "/cache"
+                    },
+                    {
+                        name: "localstack-test-creds",
+                        mountPath: "/config/credentials",
+                        readOnly: true
                     }
                 ]
             }
