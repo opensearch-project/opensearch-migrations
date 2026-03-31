@@ -145,6 +145,12 @@ solrSource:
       reclaimPolicy: "Delete"
       pvc: {}
   podOptions:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 1Gi
     # Solr startup can be slow; relax probes to avoid restart loops
     startupProbe:
       initialDelaySeconds: 30
