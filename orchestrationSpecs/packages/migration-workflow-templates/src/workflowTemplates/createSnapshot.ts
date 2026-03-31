@@ -37,6 +37,13 @@ const checkScript = `
     echo "Snapshot completed successfully" > /tmp/status-output.txt
     exit 0
   fi
+
+  # If snapshot has permanently failed, stop retrying
+  if [ "$status" = "FAILED" ]; then
+    echo "Snapshot failed" > /tmp/status-output.txt
+    echo Failed > /tmp/phase-output.txt
+    exit 0
+  fi
   
   # Deep check and save output in case there was a race condition
   deep_output=$(console --config-file=/config/migration_services.yaml snapshot status --deep-check)
