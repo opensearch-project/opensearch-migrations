@@ -702,7 +702,8 @@ def _poll_collection_status(cluster: Cluster, snapshot_name: str, coll: str) -> 
     async_id = f"{snapshot_name}-{coll}"
     try:
         r = cluster.call_api(
-            f"/solr/admin/collections?action=REQUESTSTATUS&requestid={async_id}&wt=json"
+            f"/solr/admin/collections?action=REQUESTSTATUS&requestid={async_id}&wt=json",
+            timeout=30
         )
         resp = r.json()
         state = resp.get("status", {}).get("state", "notfound")
@@ -750,12 +751,12 @@ def _accumulate_collection_result(result: dict, accum: dict) -> None:
 
 def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotStatus:
     """Build a SnapshotStatus from SolrCloud REQUESTSTATUS responses."""
-    r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+    r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json", timeout=30)
     collections = r.json().get("collections", [])
     if not collections:
         # Fall back to standalone cores
         try:
-            r = cluster.call_api("/solr/admin/cores?action=STATUS&wt=json")
+            r = cluster.call_api("/solr/admin/cores?action=STATUS&wt=json", timeout=30)
             collections = list(r.json().get("status", {}).keys())
         except Exception:
             collections = []

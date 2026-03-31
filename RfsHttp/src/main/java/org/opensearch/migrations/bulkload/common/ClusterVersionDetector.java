@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.time.Duration;
 import java.util.HashSet;
 
 import org.opensearch.migrations.Flavor;
@@ -54,7 +55,7 @@ public class ClusterVersionDetector {
                 .log())
             .retryWhen(RETRY_STRATEGY)
             .onErrorResume(e -> detectSolrVersion(client))
-            .block();
+            .block(Duration.ofSeconds(30));
 
         // Compatibility mode is only enabled on OpenSearch clusters responding with the version of 7.10.2
         if (!VersionMatchers.isES_7_10.test(versionFromRootApi)) {
@@ -83,7 +84,7 @@ public class ClusterVersionDetector {
                 assert versionFromRootApi != null;
                 return Mono.just(versionFromRootApi);
             })
-            .block();
+            .block(Duration.ofSeconds(30));
     }
 
     private static Mono<Version> detectSolrVersion(RestClient client) {
