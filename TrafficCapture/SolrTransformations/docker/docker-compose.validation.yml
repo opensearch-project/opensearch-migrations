@@ -116,6 +116,9 @@ services:
   # Mode 4: Dual-target, OpenSearch primary — returns OpenSearch response, validates against Solr
   shim-opensearch-primary:
     <<: *shim-base
+    volumes:
+      - transform-dist:/transforms:ro
+      - ./reporting-config.yaml:/config/reporting-config.yaml:ro
     ports:
       - "8084:8080"
     command:
@@ -136,6 +139,8 @@ services:
       - --timeout
       - "5000"
       - --watchTransforms
+      - --reporting-config
+      - /config/reporting-config.yaml
 
 volumes:
   transform-dist:
