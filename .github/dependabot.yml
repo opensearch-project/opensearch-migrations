@@ -4,6 +4,7 @@ updates:
     directory: "/deployment/migration-assistant-solution"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       migration-assistant-npm:
         patterns:
@@ -29,6 +30,7 @@ updates:
     directory: "/deployment/cdk/opensearch-service-migration"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       opensearch-cdk-npm:
         patterns:
@@ -51,6 +53,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       gradle-all:
         patterns:
@@ -83,6 +86,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       github-actions-all:
         patterns:
@@ -92,6 +96,7 @@ updates:
     directory: "/migrationConsole/lib/console_link"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       pip-console-link:
         patterns:
@@ -101,6 +106,7 @@ updates:
     directory: "/migrationConsole/cluster_tools"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       pip-cluster-tools:
         patterns:
@@ -110,6 +116,7 @@ updates:
     directory: "/migrationConsole/lib/integ_test"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       pip-integ-test:
         patterns:
@@ -119,6 +126,7 @@ updates:
     directory: "/libraries/testAutomation"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       pip-test-automation:
         patterns:
@@ -128,6 +136,7 @@ updates:
     directory: "/test/cleanupDeployment"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       pip-cleanup-deployment:
         patterns:
@@ -137,6 +146,7 @@ updates:
     directory: "/TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       pip-es-test-console:
         patterns:
@@ -146,6 +156,7 @@ updates:
     directory: "/TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       pip-k8s-configmap-utils:
         patterns:
@@ -155,6 +166,7 @@ updates:
     directory: "/TrafficCapture/dockerSolution/otelConfigs"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       pip-otel-configs:
         patterns:
