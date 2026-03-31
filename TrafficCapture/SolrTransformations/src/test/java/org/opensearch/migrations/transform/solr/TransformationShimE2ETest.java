@@ -18,6 +18,7 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JavascriptTransformer;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
 import org.opensearch.migrations.transform.shim.ShimMain;
+import org.opensearch.testcontainers.OpensearchContainer;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -51,36 +52,92 @@ class TransformationShimE2ETest {
         var config = loadMatrixConfig();
         var testCases = loadAllTestCases();
 
-        return testCases.stream().flatMap(tc -> {
-            var versions = tc.solrVersions() != null && !tc.solrVersions().isEmpty()
-                ? tc.solrVersions()
-                : config.defaultSolrVersions();
-            return versions.stream().map(solrVersion ->
-                DynamicTest.dynamicTest(
-                    tc.name() + " [" + solrVersion + "]",
-                    () -> executeTestCase(tc, solrVersion, config.defaultOpenSearchImage())
-                )
-            );
+        // Start a shared OpenSearch container once for all Solr versions
+        var sharedOpenSearch = ShimTestFixture.createOpenSearchContainer(config.defaultOpenSearchImage());
+        sharedOpenSearch.start();
+
+        // Group by Solr version: one shared fixture per version to avoid per-test container overhead
+        return config.defaultSolrVersions().stream().flatMap(solrVersion -> {
+            var testsForVersion = testCases.stream()
+                .filter(tc -> {
+                    var versions = tc.solrVersions() != null && !tc.solrVersions().isEmpty()
+                        ? tc.solrVersions() : config.defaultSolrVersions();
+                    return versions.contains(solrVersion);
+                })
+                .toList();
+
+            return Stream.of(DynamicTest.dynamicTest(
+                "all-tests [" + solrVersion + "]",
+                () -> {
+                    try {
+                        runAllTestsForVersion(testsForVersion, solrVersion, sharedOpenSearch);
+                    } finally {
+                        // Stop shared OpenSearch after the last version
+                        if (solrVersion.equals(config.defaultSolrVersions().get(config.defaultSolrVersions().size() - 1))) {
+                            sharedOpenSearch.stop();
+                        }
+                    }
+                }
+            ));
         });
     }
 
-    private void executeTestCase(
-            TestCaseDefinition tc, String solrImage, String openSearchImage) throws Exception {
-        var requestTransform = composeTransforms(tc.requestTransforms());
-        var responseTransform = composeTransforms(tc.responseTransforms());
-        var plugins = tc.plugins() != null ? tc.plugins() : List.<String>of();
+    /** Run all test cases for a single Solr version using one shared fixture. */
+    private void runAllTestsForVersion(
+            List<TestCaseDefinition> testCases, String solrImage,
+            OpensearchContainer<?> sharedOpenSearch) throws Exception {
+        if (testCases.isEmpty()) return;
 
-        try (var fixture = new ShimTestFixture(solrImage, openSearchImage, requestTransform, responseTransform)) {
+        var firstTc = testCases.get(0);
+        var requestTransform = composeTransforms(firstTc.requestTransforms());
+        var responseTransform = composeTransforms(firstTc.responseTransforms());
+        var plugins = firstTc.plugins() != null ? firstTc.plugins() : List.<String>of();
+
+        try (var fixture = new ShimTestFixture(solrImage, sharedOpenSearch, requestTransform, responseTransform)) {
             fixture.start(plugins);
+            var failures = new ArrayList<String>();
 
-            seedData(fixture, tc);
+            for (var tc : testCases) {
+                try {
+                    executeTestCase(fixture, tc, solrImage);
+                } catch (Exception e) {
+                    log.error("FAILED: {} [{}]: {}", tc.name(), solrImage, e.getMessage(), e);
+                    failures.add(tc.name() + ": " + e.getMessage());
+                } finally {
+                    cleanupData(fixture, tc);
+                }
+            }
 
-            var proxyResponse = sendRequest(fixture, fixture.getProxyBaseUrl() + tc.requestPath(), tc);
-            var proxyJson = MAPPER.readValue(proxyResponse, new TypeReference<Map<String, Object>>() {});
+            if (!failures.isEmpty()) {
+                fail(failures.size() + " test(s) failed for " + solrImage + ":\n" + String.join("\n", failures));
+            }
+        }
+    }
 
-            compareWithSolr(fixture, tc, proxyJson);
+    private void executeTestCase(
+            ShimTestFixture fixture, TestCaseDefinition tc, String solrImage) throws Exception {
+        seedData(fixture, tc);
 
-            log.info("PASSED: {} [{}]", tc.name(), solrImage);
+        var proxyResponse = sendRequest(fixture, fixture.getProxyBaseUrl() + tc.requestPath(), tc);
+        var proxyJson = MAPPER.readValue(proxyResponse, new TypeReference<Map<String, Object>>() {});
+
+        compareWithSolr(fixture, tc, proxyJson);
+
+        log.info("PASSED: {} [{}]", tc.name(), solrImage);
+    }
+
+    /** Clean up Solr core and OpenSearch index after each test case for data isolation. */
+    private void cleanupData(ShimTestFixture fixture, TestCaseDefinition tc) {
+        try {
+            fixture.httpGet(fixture.getSolrBaseUrl() + "/solr/admin/cores?action=UNLOAD&core="
+                + tc.collection() + "&deleteIndex=true&deleteDataDir=true&deleteInstanceDir=true");
+        } catch (Exception e) {
+            log.debug("Cleanup Solr core '{}': {}", tc.collection(), e.getMessage());
+        }
+        try {
+            fixture.httpDelete(fixture.getOpenSearchBaseUrl() + "/" + tc.collection());
+        } catch (Exception e) {
+            log.debug("Cleanup OpenSearch index '{}': {}", tc.collection(), e.getMessage());
         }
     }
 

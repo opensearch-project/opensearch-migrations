@@ -78,6 +78,9 @@ spec:
   ttlSecondsAfterFinished: 300
   backoffLimit: 10
   template:
+    metadata:
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
       serviceAccountName: {{ .Values.installer.serviceAccount.name }}
       restartPolicy: OnFailure

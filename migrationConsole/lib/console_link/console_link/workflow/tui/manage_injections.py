@@ -134,7 +134,9 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
                     "inputs": {"parameters": [p for p in node.get("inputs", {}).get("parameters", []) if
                                               p['name'] in ('groupName_view', 'configContents', 'name')]},
                     "outputs": {"parameters": [p for p in node.get("outputs", {}).get("parameters", []) if
-                                               p['name'] in ('statusOutput', 'overriddenPhase')]}
+                                               p['name'] in ('statusOutput', 'overriddenPhase')],
+                                "artifacts": [a for a in node.get("outputs", {}).get("artifacts", []) if
+                                              a['name'] in ('statusOutput',)]}
                 }
         except Exception as e:
             logger.error(f"Streaming parse failed: {e}")

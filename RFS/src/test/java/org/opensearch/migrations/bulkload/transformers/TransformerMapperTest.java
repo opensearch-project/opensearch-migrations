@@ -23,7 +23,7 @@ public class TransformerMapperTest {
 
         var transformer = mapper.getTransformer(0, params, false);
         assertThat(transformer, notNullValue());
-        assertThat(transformer, instanceOf(Transformer_ES_5_4_to_OS_2_19.class));
+        assertThat(transformer, instanceOf(CanonicalTransformer.class));
     }
 
     @Test
@@ -41,7 +41,7 @@ public class TransformerMapperTest {
 
         var transformer = mapper.getTransformer(0, params, true);
         assertThat(transformer, notNullValue());
-        assertThat(transformer, instanceOf(Transformer_ES_2_4_to_OS_2_19.class));
+        assertThat(transformer, instanceOf(CanonicalTransformer.class));
     }
 
     @Test

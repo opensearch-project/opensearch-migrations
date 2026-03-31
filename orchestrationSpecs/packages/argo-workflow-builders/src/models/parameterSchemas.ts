@@ -118,6 +118,30 @@ export type OutputParamDef<T extends PlainObject> = {
     | { fromWhere: "default"; default: BaseExpression<T> }
     );
 
+/**
+ * Output artifact definition — uploaded to S3 via Argo's artifact repository.
+ *
+ * Artifacts are files written to a container path that Argo uploads to the
+ * configured artifact repository (typically S3). Unlike parameter outputs
+ * (which are small strings), artifacts can be arbitrarily large.
+ *
+ * `archive: { none: {} }` disables Argo's default tar.gz compression so the
+ * file is stored as-is, which is required for plain-text retrieval via the
+ * Argo Server artifact API.
+ *
+ * See: https://argo-workflows.readthedocs.io/en/latest/walk-through/artifacts/
+ */
+export type OutputArtifactDef = {
+    /** Artifact name, used to reference this artifact in downstream steps. */
+    name: string;
+    /** Container filesystem path where the artifact file is written. */
+    path: string;
+    /** Archive settings. `{ none: {} }` disables compression. */
+    archive?: { none: {} };
+};
+
+export type OutputArtifactsRecord = Record<string, OutputArtifactDef>;
+
 /** Canonical maps for inputs/outputs (values are type-only descriptors). */
 export type InputParametersRecord = Record<string, InputParamDef<any, boolean>>;
 export type OutputParametersRecord = Record<string, OutputParamDef<any>>;
