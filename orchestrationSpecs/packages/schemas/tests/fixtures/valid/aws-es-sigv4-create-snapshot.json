@@ -5,9 +5,16 @@
       "endpoint": "https://my-domain.us-east-1.es.amazonaws.com",
       "authConfig": { "sigv4": { "region": "us-east-1" } },
       "snapshotInfo": {
+        "repos": {
+          "default": {
+            "awsRegion": "us-east-1",
+            "s3RepoPathUri": "s3://my-snapshot-bucket/snapshots",
+            "s3RoleArn": "arn:aws:iam::123456789012:role/SnapshotRole"
+          }
+        },
         "snapshots": {
           "snap1": {
-            "repoName": "",
+            "repoName": "default",
             "config": { "createSnapshotConfig": {} }
           }
         }

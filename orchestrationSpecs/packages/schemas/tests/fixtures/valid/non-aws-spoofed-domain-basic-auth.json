@@ -2,19 +2,12 @@
   "sourceClusters": {
     "source": {
       "version": "ES 7.10.2",
-      "endpoint": "https://abc123.aos.us-east-1.on.aws",
-      "authConfig": { "sigv4": { "region": "us-east-1" } },
+      "endpoint": "https://local.testenv.es.amazonaws.com.mydomain.local",
+      "authConfig": { "basic": { "secretName": "source-creds" } },
       "snapshotInfo": {
-        "repos": {
-          "default": {
-            "awsRegion": "us-east-1",
-            "s3RepoPathUri": "s3://my-snapshot-bucket/snapshots",
-            "s3RoleArn": "arn:aws:iam::123456789012:role/SnapshotRole"
-          }
-        },
         "snapshots": {
           "snap1": {
-            "repoName": "default",
+            "repoName": "",
             "config": { "createSnapshotConfig": {} }
           }
         }

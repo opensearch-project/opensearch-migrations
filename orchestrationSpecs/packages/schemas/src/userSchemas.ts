@@ -514,7 +514,7 @@ export const SNAPSHOT_INFO = z.object({
     snapshots: SNAPSHOT_CONFIGS_MAP
 });
 
-const AWS_MANAGED_ENDPOINT_PATTERN = /\.es\.amazonaws\.com|\.aos\.[a-z0-9-]+\.on\.aws/i;
+const AWS_MANAGED_ENDPOINT_PATTERN = /(?:\.es\.amazonaws\.com|\.aos\.[a-z0-9-]+\.on\.aws)(?::\d+)?(?:\/)?$/i;
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING,
