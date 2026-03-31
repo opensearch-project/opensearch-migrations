@@ -125,6 +125,12 @@ target:
 
 # Solr Operator configuration (only used when conditionalPackageInstalls.solrSource is true)
 solr-operator:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
   zookeeper-operator:
     install: true
     crd:
@@ -169,6 +175,13 @@ solrSource:
   zk:
     provided:
       replicas: 1
+      zookeeperPodPolicy:
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
   # S3 backup repository — configured per-environment in valuesSolrSource*.yaml
   backupRepositories: []
 
