@@ -697,15 +697,15 @@ async def test_tree_renders_with_artifact_outputs():
         labels = {get_clean_text_label(c) for c in tree.root.children}
 
         # node-1: artifact-based statusOutput — NOT shown in TUI label (can't resolve without API call)
-        check_label = next(l for l in labels if "Check Snapshot" in l)
+        check_label = next(lbl for lbl in labels if "Check Snapshot" in lbl)
         assert "ArtifactRef" not in check_label, f"Raw ArtifactRef leaked into label: {check_label}"
         assert "argo-artifacts" not in check_label, f"S3 key leaked into label: {check_label}"
 
         # node-3: parameter-based statusOutput — IS shown inline in TUI label
-        create_label = next(l for l in labels if "Create Snapshot" in l)
+        create_label = next(lbl for lbl in labels if "Create Snapshot" in lbl)
         assert "snapshot completed successfully" in create_label, \
             f"Parameter statusOutput should appear in label. Got: {create_label}"
 
         # node-2: no statusOutput at all
-        migrate_label = next(l for l in labels if "Migrate Data" in l)
+        migrate_label = next(lbl for lbl in labels if "Migrate Data" in lbl)
         assert "Running" in migrate_label, f"Expected Running phase. Got: {migrate_label}"

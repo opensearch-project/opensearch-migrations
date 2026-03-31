@@ -337,7 +337,7 @@ class TestArgoServiceFiltering:
     @patch('console_link.workflow.tui.manage_injections.requests.get')
     def test_filters_output_parameters_to_allowed_list(self, mock_get, mock_service_class):
         """Verify only statusOutput and overriddenPhase are kept in outputs."""
-        bloated = self._make_bloated_workflow_response()
+        _bloated = self._make_bloated_workflow_response()  # noqa: F841
 
     @patch('console_link.workflow.tui.manage_injections.WorkflowService')
     @patch('console_link.workflow.tui.manage_injections.requests.get')
