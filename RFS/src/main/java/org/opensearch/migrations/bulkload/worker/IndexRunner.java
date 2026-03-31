@@ -49,13 +49,15 @@ public class IndexRunner {
                         .build());
             } else {
                 var rawResults = createIndex(index.getName(), mode, context);
-                creationResults = allowExisting
-                    ? rawResults.stream()
+                if (allowExisting) {
+                    creationResults = rawResults.stream()
                         .map(r -> r.getFailureType() == CreationFailureType.ALREADY_EXISTS
                             ? CreationResult.builder().name(r.getName()).build()
                             : r)
-                        .collect(Collectors.toList())
-                    : rawResults;
+                        .collect(Collectors.toList());
+                } else {
+                    creationResults = rawResults;
+                }
             }
 
             creationResults.forEach(results::index);

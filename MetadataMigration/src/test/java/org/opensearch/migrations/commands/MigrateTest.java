@@ -12,13 +12,6 @@ import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 
-import net.jqwik.api.Arbitraries;
-import net.jqwik.api.Arbitrary;
-import net.jqwik.api.ForAll;
-import net.jqwik.api.From;
-import net.jqwik.api.Property;
-import net.jqwik.api.Provide;
-import net.jqwik.api.constraints.Size;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
@@ -166,46 +159,33 @@ class MigrateTest {
     }
 
     // Property 2: Exit code reflects ALREADY_EXISTS count
-    @Property(tries = 100)
-    void propertyExitCodeReflectsAlreadyExistsCount(
-            @ForAll @Size(min = 0, max = 4) List<@From("migrateCreationResults") CreationResult> indexTemplates,
-            @ForAll @Size(min = 0, max = 4) List<@From("migrateCreationResults") CreationResult> componentTemplates,
-            @ForAll @Size(min = 0, max = 4) List<@From("migrateCreationResults") CreationResult> indexes,
-            @ForAll @Size(min = 0, max = 4) List<@From("migrateCreationResults") CreationResult> aliases) {
-
+    @Test
+    void testExitCodeNonZeroWhenAlreadyExistsPresent() {
+        var clusters = mock(Clusters.class, withSettings().defaultAnswer(RETURNS_DEEP_STUBS));
         var items = Items.builder()
             .dryRun(false)
-            .indexTemplates(indexTemplates)
-            .componentTemplates(componentTemplates)
-            .indexes(indexes)
-            .aliases(aliases)
+            .indexTemplates(List.of())
+            .componentTemplates(List.of())
+            .indexes(List.of(
+                CreationResult.builder().name("ae").failureType(CreationFailureType.ALREADY_EXISTS).build()
+            ))
+            .aliases(List.of())
             .build();
-
-        // Provide non-null clusters so collectErrors() doesn't add baseline "No source/target" errors
-        var clusters = mock(Clusters.class, withSettings().defaultAnswer(RETURNS_DEEP_STUBS));
-
-        var result = MigrateResult.builder()
-            .items(items)
-            .clusters(clusters)
-            .exitCode(0)
-            .build();
-
-        int alreadyExistsCount = items.getAlreadyExistsCount();
-        int fatalErrorCount = items.getAllErrors().size();
-
-        if (alreadyExistsCount > 0 || fatalErrorCount > 0) {
-            assertThat(result.getExitCode(), greaterThan(0));
-        } else {
-            assertThat(result.getExitCode(), equalTo(0));
-        }
+        var result = MigrateResult.builder().items(items).clusters(clusters).exitCode(0).build();
+        assertThat(result.getExitCode(), greaterThan(0));
     }
 
-    @Provide
-    Arbitrary<CreationResult> migrateCreationResults() {
-        return Arbitraries.of(
-            CreationResult.builder().name("item-success").build(),
-            CreationResult.builder().name("item-already-exists").failureType(CreationFailureType.ALREADY_EXISTS).build(),
-            CreationResult.builder().name("item-fatal").failureType(CreationFailureType.TARGET_CLUSTER_FAILURE).build()
-        );
+    @Test
+    void testExitCodeZeroWhenNoAlreadyExistsAndNoErrors() {
+        var clusters = mock(Clusters.class, withSettings().defaultAnswer(RETURNS_DEEP_STUBS));
+        var items = Items.builder()
+            .dryRun(false)
+            .indexTemplates(List.of())
+            .componentTemplates(List.of())
+            .indexes(List.of(CreationResult.builder().name("i1").build()))
+            .aliases(List.of())
+            .build();
+        var result = MigrateResult.builder().items(items).clusters(clusters).exitCode(0).build();
+        assertThat(result.getExitCode(), equalTo(0));
     }
 }

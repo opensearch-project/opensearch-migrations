@@ -104,9 +104,10 @@ public abstract class MigratorEvaluatorBase {
     protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
         var items = Items.builder();
         items.dryRun(migrationMode.equals(MigrationMode.SIMULATE));
+        items.allowExisting(arguments.allowExisting);
 
         if (arguments.allowExisting) {
-            log.warn("--allow-existing is set. Items that already exist on the target cluster will be silently skipped.");
+            log.warn("--allow-existing is set. Items that already exist on the target cluster will be skipped without recording an ALREADY_EXISTS status.");
         }
 
         var metadataResults = migrateGlobalMetadata(migrationMode, clusters, transformer, context);

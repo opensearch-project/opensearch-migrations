@@ -27,6 +27,7 @@ import lombok.extern.slf4j.Slf4j;
 public class Items implements JsonOutput {
     static final String NONE_FOUND_MARKER = "<NONE FOUND>";
     private final boolean dryRun;
+    private final boolean allowExisting;
     @NonNull
     private final List<CreationResult> indexTemplates;
     @NonNull
@@ -74,45 +75,23 @@ public class Items implements JsonOutput {
         appendSection(sb, "Aliases", getAliases());
 
         int alreadyExistsCount = getAlreadyExistsCount();
-        if (alreadyExistsCount > 0) {
-            sb.append("Already Existing Items (")
-              .append(alreadyExistsCount)
-              .append(" item(s) already exist on the target cluster):")
+        if (alreadyExistsCount > 0 && !allowExisting) {
+            sb.append(System.lineSeparator());
+            sb.append(alreadyExistsCount)
+              .append(" item(s) already exist on the target cluster. To proceed, choose one of:")
               .append(System.lineSeparator());
-            appendAlreadyExistsSection(sb, "Index Templates", getIndexTemplates());
-            appendAlreadyExistsSection(sb, "Component Templates", getComponentTemplates());
-            appendAlreadyExistsSection(sb, "Indexes", getIndexes());
-            appendAlreadyExistsSection(sb, "Aliases", getAliases());
-            sb.append(Format.indentToLevel(1)).append("Remediation:").append(System.lineSeparator());
-            sb.append(Format.indentToLevel(2))
-              .append("These items already exist on the target cluster and may have stale schemas.")
+            sb.append(Format.indentToLevel(1))
+              .append("1. Clear the target indices and metadata, then re-run from scratch.")
               .append(System.lineSeparator());
-            sb.append(Format.indentToLevel(2)).append("Options:").append(System.lineSeparator());
-            sb.append(Format.indentToLevel(3))
-              .append("(a) Delete the conflicting items from the target cluster and re-run from scratch.")
+            sb.append(Format.indentToLevel(1))
+              .append("2. Use --index-allowlist on the metadata step to migrate only the missing items.")
               .append(System.lineSeparator());
-            sb.append(Format.indentToLevel(3))
-              .append("(b) Use --index-allowlist on the metadata step to migrate only the missing items.")
-              .append(System.lineSeparator());
-            sb.append(Format.indentToLevel(2))
-              .append("To suppress this warning and exit with code 0, re-run with --allow-existing.")
+            sb.append(Format.indentToLevel(1))
+              .append("3. Re-run with --allow-existing to proceed despite existing data (may result in stale metadata on target).")
               .append(System.lineSeparator());
         }
 
         return sb.toString();
-    }
-
-    private void appendAlreadyExistsSection(StringBuilder sb, String sectionTitle, List<CreationResult> items) {
-        var alreadyExistingNames = items.stream()
-            .filter(r -> r.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS)
-            .map(CreationResult::getName)
-            .sorted()
-            .collect(Collectors.toList());
-        if (!alreadyExistingNames.isEmpty()) {
-            sb.append(Format.indentToLevel(1)).append(sectionTitle).append(":").append(System.lineSeparator());
-            alreadyExistingNames.forEach(name ->
-                sb.append(Format.indentToLevel(2)).append("- ").append(name).append(System.lineSeparator()));
-        }
     }
 
     private void appendSection(StringBuilder sb, String sectionTitle, List<CreationResult> items) {
@@ -166,11 +145,8 @@ public class Items implements JsonOutput {
         if (result.getFailureType() == null) {
             return "";
         }
-        // ALREADY_EXISTS renders as ERROR (action required), even though it is non-fatal
-        boolean isError = result.getFailureType().isFatal()
-            || result.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS;
         var sb = new StringBuilder()
-            .append(isError ? "ERROR" : "WARN")
+            .append(result.getFailureType().isFatal() || (!allowExisting && result.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS) ? "ERROR" : "WARN")
             .append(" - ")
             .append(result.getName())
             .append(" ")

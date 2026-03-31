@@ -24,7 +24,6 @@ dependencies {
     testImplementation libs.mockito.core
     testImplementation libs.mockito.junit.jupiter
     testImplementation libs.hamcrest
-    testImplementation libs.jqwik
     testImplementation libs.testcontainers
     testImplementation libs.jackson.databind
 
