@@ -160,9 +160,22 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
     }
 }
 
-/** Resolve kafkaClusterConfiguration from user config. */
+const DEFAULT_AUTO_CREATE_CONFIG: z.infer<typeof KAFKA_CLUSTER_CONFIG> = { autoCreate: {} };
+
+/** Resolve kafkaClusterConfiguration, auto-injecting autoCreate entries only when no explicit kafka config was provided. */
 function resolveKafkaClusters(userConfig: { kafkaClusterConfiguration?: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>, traffic?: { proxies?: Record<string, { kafka?: string }> } }) {
-    return userConfig.kafkaClusterConfiguration ?? {};
+    const explicit = userConfig.kafkaClusterConfiguration ?? {};
+    if (Object.keys(explicit).length > 0) {
+        return explicit;
+    }
+    const clusters: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>> = {};
+    for (const proxy of Object.values(userConfig.traffic?.proxies || {})) {
+        const key = proxy.kafka ?? "default";
+        if (!(key in clusters)) {
+            clusters[key] = DEFAULT_AUTO_CREATE_CONFIG;
+        }
+    }
+    return clusters;
 }
 
 /** Build a NAMED_KAFKA_CLIENT_CONFIG from a kafka cluster reference and topic. */

@@ -1548,7 +1548,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         ],
         "description": "Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one."
       },
-      "description": "Kafka cluster configurations. Required when traffic capture proxies are configured. Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."
+      "default": {},
+      "description": "Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."
     },
     "sourceClusters": {
       "type": "object",

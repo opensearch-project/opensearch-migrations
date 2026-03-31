@@ -11,11 +11,6 @@
     }
   },
   "snapshotMigrationConfigs": [],
-  "kafkaClusterConfiguration": {
-    "default": {
-      "autoCreate": {}
-    }
-  },
   "traffic": {
     "proxies": {
       "proxy1": {

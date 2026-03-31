@@ -789,8 +789,8 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
     z.object({
         skipApprovals : z.boolean().default(false).optional()
             .describe("Global flag to skip all manual approval gates across the entire migration. When true, overrides all per-component skipApproval settings."),
-        kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.optional()
-            .describe("Kafka cluster configurations. Required when traffic capture proxies are configured. " +
+        kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional()
+            .describe("Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. " +
                 "Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."),
         sourceClusters: SOURCE_CLUSTERS_MAP
             .describe("Source Elasticsearch or OpenSearch clusters to migrate from."),
@@ -803,14 +803,6 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 "All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency.")
             .optional()
     }).describe("Top-level migration configuration defining source clusters, target clusters, snapshot migrations, and optional traffic capture/replay.").superRefine((data, ctx) => {
-        if (data.traffic && Object.keys(data.traffic.proxies).length > 0 &&
-            (!data.kafkaClusterConfiguration || Object.keys(data.kafkaClusterConfiguration).length === 0)) {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "kafkaClusterConfiguration is required when traffic capture proxies are configured.",
-                path: ['kafkaClusterConfiguration']
-            });
-        }
         for (let i = 0; i < data.snapshotMigrationConfigs.length; i++) {
             const mc = data.snapshotMigrationConfigs[i];
 
