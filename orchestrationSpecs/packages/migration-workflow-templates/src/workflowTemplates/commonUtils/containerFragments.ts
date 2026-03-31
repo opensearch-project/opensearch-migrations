@@ -136,6 +136,7 @@ export function setupLog4jConfigForContainer(
 const S3_MOUNT_VOLUME_NAME = "snapshot-s3";
 const LUCENE_FUSE_VOLUME_NAME = "lucene-fuse";
 const S3_CACHE_VOLUME_NAME = "s3-cache";
+const SHARED_MNT_VOLUME_NAME = "shared-mnt";
 
 /**
  * Add a snapshot-fuse sidecar that:
@@ -144,6 +145,9 @@ const S3_CACHE_VOLUME_NAME = "s3-cache";
  *
  * Each pod independently mounts S3 and caches hot blocks locally. No PV/PVC or CSI driver required.
  * This enables horizontal scaling — each pod gets its own mount-s3 process and cache.
+ *
+ * Uses a single shared emptyDir at /mnt so mount-s3 and snapshot-fuse can create
+ * subdirectories (/mnt/s3, /mnt/lucene) as FUSE mount points inside it.
  */
 export function setupSnapshotFuseSidecar(
     snapshotLocalDir: BaseExpression<string>,
@@ -159,8 +163,7 @@ export function setupSnapshotFuseSidecar(
     return {
         volumes: [
             ...def.volumes,
-            { name: S3_MOUNT_VOLUME_NAME, emptyDir: {} },
-            { name: LUCENE_FUSE_VOLUME_NAME, emptyDir: {} },
+            { name: SHARED_MNT_VOLUME_NAME, emptyDir: {} },
             { name: S3_CACHE_VOLUME_NAME, emptyDir: { sizeLimit: "5Gi" } }
         ],
         container: {
@@ -168,8 +171,8 @@ export function setupSnapshotFuseSidecar(
             volumeMounts: [
                 ...(volumeMounts === undefined ? [] : volumeMounts),
                 {
-                    name: LUCENE_FUSE_VOLUME_NAME,
-                    mountPath: "/mnt/lucene",
+                    name: SHARED_MNT_VOLUME_NAME,
+                    mountPath: "/mnt",
                     mountPropagation: "HostToContainer"
                 }
             ]
@@ -209,13 +212,8 @@ export function setupSnapshotFuseSidecar(
                 securityContext: { privileged: true },
                 volumeMounts: [
                     {
-                        name: S3_MOUNT_VOLUME_NAME,
-                        mountPath: "/mnt/s3",
-                        mountPropagation: "Bidirectional"
-                    },
-                    {
-                        name: LUCENE_FUSE_VOLUME_NAME,
-                        mountPath: "/mnt/lucene",
+                        name: SHARED_MNT_VOLUME_NAME,
+                        mountPath: "/mnt",
                         mountPropagation: "Bidirectional"
                     },
                     {
