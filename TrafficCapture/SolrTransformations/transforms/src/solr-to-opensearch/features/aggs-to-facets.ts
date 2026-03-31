@@ -16,6 +16,9 @@ import type { MicroTransform } from '../pipeline';
 import type { ResponseContext, JavaMap } from '../context';
 import { isMapLike } from './utils';
 
+/** Keys that are part of the bucket structure itself, not nested aggregation results. */
+const BUCKET_META_KEYS = new Set(['key', 'key_as_string', 'doc_count']);
+
 /**
  * Convert a single OpenSearch aggregation bucket to a Solr facet bucket.
  *
@@ -24,44 +27,92 @@ import { isMapLike } from './utils';
  * For date_histogram buckets, OpenSearch returns `key` as epoch millis and
  * `key_as_string` as the formatted date string. Solr returns ISO-8601 strings,
  * so we prefer `key_as_string` when present.
+ *
+ * Any remaining keys in the bucket (not in BUCKET_META_KEYS) are treated as
+ * nested aggregation results and recursively converted.
  */
 function convertBucket(osBucket: JavaMap): JavaMap {
   const solrBucket = new Map<string, any>();
   const keyAsString = osBucket.get('key_as_string');
   solrBucket.set('val', keyAsString ?? osBucket.get('key'));
   solrBucket.set('count', osBucket.get('doc_count'));
+
+  // Convert nested aggregation results within this bucket
+  for (const nestedKey of osBucket.keys()) {
+    if (BUCKET_META_KEYS.has(nestedKey)) continue;
+    const nestedAgg = osBucket.get(nestedKey);
+    if (isMapLike(nestedAgg)) {
+      solrBucket.set(nestedKey, convertSingleAgg(nestedAgg));
+    }
+  }
+
   return solrBucket;
+}
+
+/** Keys that are part of the filter aggregation structure itself, not nested aggregation results. */
+const FILTER_META_KEYS = new Set(['doc_count']);
+
+/**
+ * Copy nested aggregation results from a source Map into a target Map.
+ *
+ * Iterates over all keys in `source`, skipping those in `metaKeys`, and
+ * recursively converts any Map-like values via `convertSingleAgg`.
+ */
+function copyNestedAggs(target: JavaMap, source: JavaMap, metaKeys: Set<string>): void {
+  for (const key of source.keys()) {
+    if (metaKeys.has(key)) continue;
+    const nested = source.get(key);
+    if (isMapLike(nested)) {
+      target.set(key, convertSingleAgg(nested));
+    }
+  }
+}
+
+/** Convert a bucket-based aggregation (terms / range / histogram) to Solr format. */
+function convertBucketAgg(buckets: any[]): JavaMap {
+  const facetResult = new Map<string, any>();
+  const solrBuckets: JavaMap[] = [];
+  for (const bucket of buckets) {
+    if (!isMapLike(bucket)) {
+      throw new Error(`Expected aggregation bucket to be a Map, got: ${typeof bucket}`);
+    }
+    solrBuckets.push(convertBucket(bucket));
+  }
+  facetResult.set('buckets', solrBuckets);
+  return facetResult;
+}
+
+/** Convert a filter aggregation (from query facet) to Solr format. */
+function convertFilterAgg(aggResult: JavaMap): JavaMap {
+  const facetResult = new Map<string, any>();
+  facetResult.set('count', aggResult.get('doc_count'));
+  copyNestedAggs(facetResult, aggResult, FILTER_META_KEYS);
+  return facetResult;
 }
 
 /**
  * Convert a single OpenSearch aggregation result to Solr facet result.
  *
- * Currently supports terms aggregations (which have a `buckets` array).
+ * Supports:
+ *   - Terms / range / histogram aggregations (which have a `buckets` array)
+ *   - Filter aggregations (from query facets, which have `doc_count`)
+ *
+ * For both bucket-based and filter aggregations, any nested aggregation results
+ * are recursively converted.
  */
 function convertSingleAgg(aggResult: any): JavaMap {
-  const facetResult = new Map<string, any>();
-
   if (!isMapLike(aggResult)) {
     throw new Error(`Expected aggregation result to be a Map, got: ${typeof aggResult}`);
   }
 
   const buckets: any[] = aggResult.get('buckets');
   if (Array.isArray(buckets)) {
-    // Terms / range / histogram aggregations — convert each bucket
-    const solrBuckets: JavaMap[] = [];
-    for (const bucket of buckets) {
-      if (!isMapLike(bucket)) {
-        throw new Error(`Expected aggregation bucket to be a Map, got: ${typeof bucket}`);
-      }
-      solrBuckets.push(convertBucket(bucket));
-    }
-    facetResult.set('buckets', solrBuckets);
-  } else if (aggResult.has('doc_count')) {
-    // Filter aggregation (from query facet) — just has doc_count, no buckets
-    facetResult.set('count', aggResult.get('doc_count'));
+    return convertBucketAgg(buckets);
   }
-
-  return facetResult;
+  if (aggResult.has('doc_count')) {
+    return convertFilterAgg(aggResult);
+  }
+  return new Map<string, any>();
 }
 
 /**

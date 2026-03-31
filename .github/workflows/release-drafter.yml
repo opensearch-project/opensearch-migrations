@@ -167,7 +167,7 @@ jobs:
           file: opensearch-migrations-source.tar.gz
           output-file: opensearch-migrations-source-sbom.spdx.json
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         # Uses latest Helm version by default
       - name: Package Helm chart
         run: |
