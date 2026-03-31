@@ -514,6 +514,8 @@ export const SNAPSHOT_INFO = z.object({
     snapshots: SNAPSHOT_CONFIGS_MAP
 });
 
+const AWS_MANAGED_ENDPOINT_PATTERN = /\.es\.amazonaws\.com|\.aos\.[a-z0-9-]+\.on\.aws/i;
+
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING,
     enabled: z.boolean().default(true).optional(),
@@ -537,6 +539,18 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
                     path: ['snapshotInfo', 'snapshots', snapName, 'repoName']
                 });
             }
+        }
+    }
+
+    // AWS managed clusters require SigV4 auth when triggering snapshot creation
+    if (data.endpoint && AWS_MANAGED_ENDPOINT_PATTERN.test(data.endpoint)) {
+        const hasCreateSnapshot = Object.values(snapshots).some(s => "createSnapshotConfig" in s.config);
+        if (hasCreateSnapshot && (!data.authConfig || !("sigv4" in data.authConfig))) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "SigV4 auth is required for Amazon OpenSearch domains when the workflow creates snapshot",
+                path: ['authConfig']
+            });
         }
     }
 });
