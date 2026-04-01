@@ -323,8 +323,8 @@ class K8sService:
         self._clear_namespace_finalizers(self.namespace)
         # Delete main namespace with a timeout — if it hangs, force-clear namespace finalizers
         result = self.run_command(self._kubectl_base() + ["delete", "namespace", self.namespace,
-                         "--ignore-not-found", "--grace-period=0", "--force"],
-                         ignore_errors=True, timeout=60)
+                                  "--ignore-not-found", "--grace-period=0", "--force"],
+                                  ignore_errors=True, timeout=60)
         if result is None:
             # Timed out or failed — log what's blocking and force-clear namespace finalizers
             logger.warning(f"Namespace '{self.namespace}' deletion stuck, diagnosing...")
