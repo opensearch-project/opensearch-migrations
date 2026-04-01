@@ -1,5 +1,9 @@
+# Global ARGs (must be before first FROM to be usable in FROM lines)
+ARG BUILDER_IMAGE=docker.io/library/rust:1.83-slim
+ARG RUNTIME_IMAGE=docker.io/library/amazonlinux:2023
+
 # Multi-stage build: compile Rust binary, then copy to minimal runtime image
-FROM rust:1.83-slim AS builder
+FROM ${BUILDER_IMAGE} AS builder
 
 RUN apt-get update && apt-get install -y pkg-config libfuse-dev && rm -rf /var/lib/apt/lists/*
 
@@ -10,7 +14,7 @@ COPY src/ src/
 RUN cargo build --release && strip target/release/snapshot-fuse
 
 # Runtime image: AL2023 with FUSE support + mount-s3 for per-pod S3 access
-FROM docker.io/library/amazonlinux:2023
+FROM ${RUNTIME_IMAGE}
 
 RUN dnf install -y fuse fuse-libs && \
     ARCH=$(uname -m) && \
