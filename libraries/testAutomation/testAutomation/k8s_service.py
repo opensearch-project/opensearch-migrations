@@ -41,12 +41,18 @@ class K8sService:
     def run_command(self, command: List,
                     stdout: int | None = subprocess.PIPE,
                     stderr: int | None = subprocess.PIPE,
-                    ignore_errors: bool = False) -> CompletedProcess | None:
+                    ignore_errors: bool = False,
+                    timeout: int | None = None) -> CompletedProcess | None:
         """Runs a command using subprocess."""
         logger.info(f"Performing command: {' '.join(command)}")
         try:
-            result = subprocess.run(command, stdout=stdout, stderr=stderr, check=True, text=True)
+            result = subprocess.run(command, stdout=stdout, stderr=stderr, check=True, text=True, timeout=timeout)
             return result
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Command timed out after {timeout}s: {' '.join(command)}")
+            if not ignore_errors:
+                raise
+            return None
         except subprocess.CalledProcessError as e:
             if not ignore_errors:
                 logger.error(f"Error executing {' '.join(command)}: {e.stderr}")
@@ -311,14 +317,22 @@ class K8sService:
         # Delete kyverno's separate namespace if it exists (ownerReference cascade
         # may not complete in time when the parent namespace is force-deleted)
         self.run_command(self._kubectl_base() + ["delete", "namespace", "kyverno-ma",
-                         "--ignore-not-found", "--grace-period=0"], ignore_errors=True)
+                         "--ignore-not-found", "--grace-period=0"], ignore_errors=True, timeout=30)
         # Clear finalizers on CRD resources that can block namespace deletion
         # when their controllers are already gone
         self._clear_namespace_finalizers(self.namespace)
-        # Delete main namespace
-        self.run_command(self._kubectl_base() + ["delete", "namespace", self.namespace,
+        # Delete main namespace with a timeout — if it hangs, force-clear namespace finalizers
+        result = self.run_command(self._kubectl_base() + ["delete", "namespace", self.namespace,
                          "--ignore-not-found", "--grace-period=0", "--force"],
-                         ignore_errors=True)
+                         ignore_errors=True, timeout=60)
+        if result is None:
+            # Timed out or failed — log what's blocking and force-clear namespace finalizers
+            logger.warning(f"Namespace '{self.namespace}' deletion stuck, diagnosing...")
+            self.run_command(self._kubectl_base() + ["get", "all", "-n", self.namespace], ignore_errors=True)
+            self.run_command(
+                self._kubectl_base() + ["patch", "namespace", self.namespace, "--type=merge",
+                                        "-p", '{"metadata":{"finalizers":null}}'],
+                ignore_errors=True)
         # Wait for pods to fully terminate before deleting webhooks again
         # This prevents kyverno from recreating webhooks during termination
         self.wait_for_pods_terminated()
