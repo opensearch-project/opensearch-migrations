@@ -188,8 +188,7 @@ public class ParsedHttpMessagesAsDicts {
         @NonNull List<byte[]> data
     ) {
         return makeSafeMap(context, () -> {
-            try (var transformationCtx = context.getLogicalEnclosingScope().createTransformationContext();
-                var messageHolder = RefSafeHolder.create(
+            try (var messageHolder = RefSafeHolder.create(
                     RefSafeStreamUtils.refSafeTransform(
                     data.stream(),
                     Unpooled::wrappedBuffer,
@@ -197,8 +196,8 @@ public class ParsedHttpMessagesAsDicts {
                         HttpByteBufFormatter.processHttpMessageFromBufs(
                             HttpMessageType.REQUEST,
                             byteBufStream,
-                            new NettyDecodedHttpRequestConvertHandler(transformationCtx, false),
-                            new NettyJsonBodyAccumulateHandler(transformationCtx)
+                            new NettyDecodedHttpRequestConvertHandler(null, false),
+                            new NettyJsonBodyAccumulateHandler(null)
                         )
                     ))) {
                 var message = (HttpJsonRequestWithFaultingPayload) messageHolder.get();
@@ -228,8 +227,7 @@ public class ParsedHttpMessagesAsDicts {
         Duration latency
     ) {
         return makeSafeMap(context, () -> {
-            try (var transformationCtx = context.getLogicalEnclosingScope().createTransformationContext();
-                var messageHolder = RefSafeHolder.create(
+            try (var messageHolder = RefSafeHolder.create(
                     RefSafeStreamUtils.refSafeTransform(
                         data.stream(),
                         Unpooled::wrappedBuffer,
@@ -237,8 +235,8 @@ public class ParsedHttpMessagesAsDicts {
                             HttpByteBufFormatter.processHttpMessageFromBufs(
                                 HttpMessageType.RESPONSE,
                                 byteBufStream,
-                                new NettyDecodedHttpResponseConvertHandler(transformationCtx),
-                                new NettyJsonBodyAccumulateHandler(transformationCtx)
+                                new NettyDecodedHttpResponseConvertHandler(null),
+                                new NettyJsonBodyAccumulateHandler(null)
                             )
                     ))) {
                 var message = (HttpJsonResponseWithFaultingPayload) messageHolder.get();

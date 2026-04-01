@@ -28,7 +28,9 @@ public class NettyDecodedHttpResponseConvertHandler extends ChannelInboundHandle
     @Override
     public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
         if (msg instanceof HttpResponse) {
-            httpTransactionContext.onHeaderParse();
+            if (httpTransactionContext != null) {
+                httpTransactionContext.onHeaderParse();
+            }
             var response = (HttpResponse) msg;
             log.atDebug().setMessage("{} parsed response: {} {} {}")
                 .addArgument(diagnosticLabel)
