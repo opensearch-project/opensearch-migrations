@@ -7,14 +7,13 @@ cwd = f"{script_path}/../../../solr-opensearch-migration-advisor"
 
 async def call_api(prompt: str, options: dict, context: dict) -> dict:
     # check if test has continue flag set, and only then continue sessions
-    continue_conversation = (context.get("test", {})
-        .get("metadata", {})
-        .get("continue", False))
+    continue_conversation = (context.get("test", {}).get("metadata", {}).get("continue", False))
     agent_options = ClaudeAgentOptions(
-        continue_conversation=continue_conversation, # picks up most revent conversation (allows sequential tests, would fail on parallelized)
-        allowed_tools=["Read", "Edit", "Glob", "Grep", "Skill", "WebFetch"], # Tools Claude can use
+        # picks up most revent conversation (allows sequential tests, would fail on parallelized)
+        continue_conversation=continue_conversation,
+        allowed_tools=["Read", "Edit", "Glob", "Grep", "Skill", "WebFetch"],  # Tools Claude can use
         # permission_mode="acceptEdits",  # Auto-approve file edits
-        setting_sources=["project"], # for paths: https://platform.claude.com/docs/en/agent-sdk/skills
+        setting_sources=["project"],  # for paths: https://platform.claude.com/docs/en/agent-sdk/skills
         effort="medium",
         cwd=cwd
     )

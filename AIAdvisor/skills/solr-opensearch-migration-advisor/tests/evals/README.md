@@ -20,6 +20,8 @@
 ### PYTHON ENV SETUP
 - Run uv sync with eval extras: `uv sync --extra eval` 
 - `source .venv/bin/activate`
+- copy the `.env.example` file to `.env` file and fill in properties
+- run evals: `./scripts/run_evals.sh`
 
 
 
