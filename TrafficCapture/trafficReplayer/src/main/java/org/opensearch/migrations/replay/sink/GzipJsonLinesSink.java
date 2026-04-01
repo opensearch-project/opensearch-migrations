@@ -21,13 +21,14 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Writes tuples as gzip-compressed JSON lines to files compatible with Mountpoint S3.
  *
- * <p>Uses concatenated gzip members (RFC 1952 §2.2) to enable streaming commits:
- * each {@link #onEndOfBatch()} finishes the current gzip member, fsyncs the file,
- * and completes all pending futures immediately. A new gzip member is started for
- * subsequent writes. Standard {@code GZIPInputStream} reads concatenated members
- * seamlessly.</p>
+ * <p>Commits tuples on every {@link #onEndOfBatch()} by flushing the gzip stream
+ * (via {@code syncFlush=true}) and fsyncing the underlying file. This makes the
+ * compressed data durable on disk/S3 so Kafka offsets can be committed immediately,
+ * while preserving the deflate dictionary across flushes for good compression.</p>
  *
- * <p>Files are rotated to a new path when size or age thresholds are exceeded.</p>
+ * <p>Files are rotated (finish + close + open new) when size or age thresholds are
+ * exceeded. The file is only readable as valid gzip after {@code finish()} is called
+ * (on rotation or close), but durability for Kafka commit safety only requires fsync.</p>
  */
 @Slf4j
 public class GzipJsonLinesSink implements TupleSink {
@@ -76,35 +77,25 @@ public class GzipJsonLinesSink implements TupleSink {
         if (pendingFutures.isEmpty()) {
             return;
         }
-        try {
-            // Finish the current gzip member — writes a valid gzip trailer so the file
-            // is readable up to this point. Then fsync to flush to Mountpoint/disk.
-            gzipOut.finish();
-            fileOut.getFD().sync();
-        } catch (IOException e) {
-            log.atError().setCause(e).setMessage("Failed to flush/sync tuple file").log();
-            completeAllExceptionally(e);
-            return;
-        }
-        completeAll();
-
-        // Rotate to a new file if thresholds are met, otherwise start a new gzip member
-        // on the same FileOutputStream (concatenated gzip per RFC 1952).
         if (shouldRotate()) {
-            closeFileQuietly();
-            openNewFile();
+            rotate();
         } else {
             try {
-                gzipOut = new GZIPOutputStream(fileOut, true);
+                // syncFlush=true ensures flush() pushes all deflated data to the
+                // FileOutputStream. fsync then makes it durable on disk/Mountpoint.
+                gzipOut.flush();
+                fileOut.getFD().sync();
             } catch (IOException e) {
-                throw new UncheckedIOException("Failed to start new gzip member", e);
+                log.atError().setCause(e).setMessage("Failed to flush/sync tuple file").log();
+                completeAllExceptionally(e);
+                return;
             }
+            completeAll();
         }
     }
 
     @Override
     public void onIdle() {
-        // Flush any pending tuples that haven't been committed yet
         if (!pendingFutures.isEmpty()) {
             onEndOfBatch();
         }
@@ -134,12 +125,19 @@ public class GzipJsonLinesSink implements TupleSink {
             || Duration.between(fileOpenedAt, Instant.now()).compareTo(maxFileAge) >= 0;
     }
 
-    private void closeFileQuietly() {
+    private void rotate() {
         try {
+            gzipOut.finish();
+            fileOut.getFD().sync();
             fileOut.close();
         } catch (IOException e) {
-            log.atWarn().setCause(e).setMessage("Failed to close rotated tuple file").log();
+            log.atError().setCause(e).setMessage("Failed to rotate tuple file").log();
+            completeAllExceptionally(e);
+            openNewFile();
+            return;
         }
+        completeAll();
+        openNewFile();
     }
 
     private void openNewFile() {

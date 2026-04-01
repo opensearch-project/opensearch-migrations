@@ -45,14 +45,14 @@ class GzipJsonLinesSinkTest {
             assertFalse(f1.isDone());
             assertFalse(f2.isDone());
 
-            // onEndOfBatch should flush, fsync, and complete futures immediately
+            // onEndOfBatch flushes + fsyncs and completes futures immediately
             sink.onEndOfBatch();
             assertTrue(f1.isDone(), "Future should complete on onEndOfBatch");
             assertTrue(f2.isDone(), "Future should complete on onEndOfBatch");
             f1.get(1, TimeUnit.SECONDS);
             f2.get(1, TimeUnit.SECONDS);
 
-            // Write more tuples — they go into a new gzip member on the same file
+            // Write more — same gzip member, same file
             var f3 = new CompletableFuture<Void>();
             sink.accept(makeTuple("conn3.0"), f3);
             sink.onEndOfBatch();
@@ -60,7 +60,7 @@ class GzipJsonLinesSinkTest {
             f3.get(1, TimeUnit.SECONDS);
         }
 
-        // Verify the single file contains all 3 tuples (concatenated gzip members)
+        // File is valid gzip after close (which calls finish())
         var gzFiles = Files.list(tempDir).filter(p -> p.toString().endsWith(".log.gz")).toList();
         assertEquals(1, gzFiles.size());
 
@@ -80,7 +80,6 @@ class GzipJsonLinesSinkTest {
             sink.accept(makeTuple("conn1.0"), f1);
             assertFalse(f1.isDone());
 
-            // onIdle should flush pending tuples just like onEndOfBatch
             sink.onIdle();
             assertTrue(f1.isDone(), "Future should complete on onIdle when tuples are pending");
             f1.get(1, TimeUnit.SECONDS);
@@ -96,7 +95,6 @@ class GzipJsonLinesSinkTest {
                 futures[i] = new CompletableFuture<Void>();
                 sink.accept(makeTuple("conn" + i + ".0"), futures[i]);
                 sink.onEndOfBatch();
-                // Each future should be completed immediately after its onEndOfBatch
                 assertTrue(futures[i].isDone(), "Future " + i + " should be done after onEndOfBatch");
             }
         }
@@ -104,7 +102,6 @@ class GzipJsonLinesSinkTest {
         var gzFiles = Files.list(tempDir).filter(p -> p.toString().endsWith(".log.gz")).toList();
         assertTrue(gzFiles.size() > 1, "Expected multiple files from rotation, got " + gzFiles.size());
 
-        // All files should be valid gzip with JSON lines
         int totalLines = 0;
         for (var file : gzFiles) {
             try (var reader = new BufferedReader(
@@ -122,17 +119,15 @@ class GzipJsonLinesSinkTest {
 
     @Test
     void rotatesOnTimeThreshold() throws Exception {
-        // 1ms max age — should rotate after any delay
         try (var sink = new GzipJsonLinesSink(tempDir, 10 * 1024 * 1024, Duration.ofMillis(1))) {
             var f1 = new CompletableFuture<Void>();
             sink.accept(makeTuple("conn1.0"), f1);
             sink.onEndOfBatch();
-            assertTrue(f1.isDone(), "Future should be completed on onEndOfBatch");
+            assertTrue(f1.isDone());
             f1.get(1, TimeUnit.SECONDS);
 
             Thread.sleep(10);
 
-            // Write another tuple — onEndOfBatch should trigger rotation to new file
             var f2 = new CompletableFuture<Void>();
             sink.accept(makeTuple("conn2.0"), f2);
             sink.onEndOfBatch();
