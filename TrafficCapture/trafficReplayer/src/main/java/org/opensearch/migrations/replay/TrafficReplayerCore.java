@@ -98,6 +98,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     class TrafficReplayerAccumulationCallbacks implements AccumulationCallbacks {
         private final ReplayEngine replayEngine;
         private final TupleWriter tupleWriter;
+        /** Legacy synchronous tuple consumer (Log4J path). Mutually exclusive with tupleWriter. */
+        private final Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
         @lombok.Setter
         private Consumer<SourceTargetCaptureTuple> tupleObserver;
         private ITrafficCaptureSource trafficCaptureSource;
@@ -194,21 +196,32 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 // Escalate it up out handling stack and shutdown.
                 if (t == null || t instanceof Exception) {
                     try (var tupleHandlingContext = httpContext.createTupleContext()) {
-                        var writeFuture = packageAndWriteTuple(
-                            tupleHandlingContext,
-                            tupleWriter,
-                            rrPair,
-                            summary,
-                            (Exception) t
-                        );
-                        writeFuture.whenComplete((v, writeErr) -> {
-                            if (writeErr != null) {
-                                log.atError().setCause(writeErr)
-                                    .setMessage("Tuple write failed for {}, skipping Kafka commit")
-                                    .addArgument(context).log();
-                            }
+                        if (tupleWriter != null) {
+                            var writeFuture = packageAndWriteTuple(
+                                tupleHandlingContext,
+                                tupleWriter,
+                                rrPair,
+                                summary,
+                                (Exception) t
+                            );
+                            writeFuture.whenComplete((v, writeErr) -> {
+                                if (writeErr != null) {
+                                    log.atError().setCause(writeErr)
+                                        .setMessage("Tuple write failed for {}, skipping Kafka commit")
+                                        .addArgument(context).log();
+                                }
+                                commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
+                            });
+                        } else {
+                            packageAndWriteResponse(
+                                tupleHandlingContext,
+                                resultTupleConsumer,
+                                rrPair,
+                                summary,
+                                (Exception) t
+                            );
                             commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
-                        });
+                        }
                     }
                     // Count the final outcome once per request (not per retry)
                     countFinalOutcome(summary, t);
@@ -366,6 +379,32 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 throw new CompletionException(t);
             }
             return writeFuture;
+        }
+
+        private void packageAndWriteResponse(
+            IReplayContexts.ITupleHandlingContext tupleHandlingContext,
+            Consumer<SourceTargetCaptureTuple> tupleConsumer,
+            RequestResponsePacketPair rrPair,
+            TransformedTargetRequestAndResponseList summary,
+            Exception t
+        ) {
+            log.trace("done sending and finalizing data to the packet handler");
+
+            if (t != null) {
+                log.atError().setMessage("Got exception in CompletableFuture callback for {}")
+                    .addArgument(tupleHandlingContext)
+                    .setCause(t)
+                    .log();
+            }
+            try (var requestResponseTuple = new SourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
+                log.atDebug()
+                    .setMessage("Source/Target Request/Response tuple: {}").addArgument(requestResponseTuple).log();
+                tupleConsumer.accept(requestResponseTuple);
+            }
+
+            if (t != null) {
+                throw new CompletionException(t);
+            }
         }
     }
 

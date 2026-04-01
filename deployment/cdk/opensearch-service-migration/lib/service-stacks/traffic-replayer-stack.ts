@@ -115,7 +115,6 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         if (props.otelCollectorEnabled) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--otelCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
         }
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--tuple-output-dir", `\\$SHARED_LOGS_DIR_PATH/tuples`)
         command = props.extraArgs?.trim() ? command.concat(` ${props.extraArgs?.trim()}`) : command
 
         this.createService({

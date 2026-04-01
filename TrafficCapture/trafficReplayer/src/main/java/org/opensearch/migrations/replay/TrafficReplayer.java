@@ -186,6 +186,17 @@ public class TrafficReplayer {
         @ParametersDelegate
         private RequestTransformationParams requestTransformationParams = new RequestTransformationParams();
 
+        @ParametersDelegate
+        private TupleTransformationParams tupleTransformationParams = new TupleTransformationParams();
+
+        @Parameter(
+            required = false,
+            names = { "--enable-sync-tuples", "--enableSyncTuples" },
+            arity = 0,
+            description = "Enable the new synchronous tuple writing infrastructure (Disruptor + GzipJsonLinesSink). "
+                + "When not set, tuples are written via the legacy Log4J2 async appender path.")
+        boolean enableSyncTuples;
+
         @Parameter(
             required = false,
             names = { "--user-agent", "--userAgent" },
@@ -358,6 +369,44 @@ public class TrafficReplayer {
         private String transformerConfigFile;
     }
 
+    @Getter
+    public static class TupleTransformationParams implements TransformerParams {
+        public String getTransformerConfigParameterArgPrefix() {
+            return TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX;
+        }
+        static final String TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX = "tuple-";
+        static final String TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX = "tuple";
+
+        @Parameter(
+            required = false,
+            names = { "--" + TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX + "transformer-config-base64",
+                "--" + TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX + "TransformerConfigBase64" },
+            arity = 1,
+            description = "Configuration of tuple transformers.  The same contents as --tuple-transformer-config but " +
+                "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
+        private String transformerConfigEncoded;
+
+        @Parameter(
+            required = false,
+            names = { "--" + TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX + "transformer-config",
+                "--" + TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX + "TransformerConfig" },
+            arity = 1,
+            description = "Configuration of tuple transformers.  Either as a string that identifies the "
+                + "transformer that should be run (with default settings) or as json to specify options "
+                + "as well as multiple transformers to run in sequence.  "
+                + "For json, keys are the (simple) names of the loaded transformers and values are the "
+                + "configuration passed to each of the transformers.")
+        private String transformerConfig;
+
+        @Parameter(
+            required = false,
+            names = { "--" + TUPLE_TRANSFORMER_CONFIG_SNAKE_PARAMETER_ARG_PREFIX + "transformer-config-file",
+                "--" + TUPLE_TRANSFORMER_CONFIG_CAMEL_PARAMETER_ARG_PREFIX + "TransformerConfigFile" } ,
+            arity = 1,
+            description = "Path to the JSON configuration file of tuple transformers.")
+        private String transformerConfigFile;
+    }
+
     private static Parameters parseArgs(String[] args) {
         Parameters p = EnvVarParameterPuller.injectFromEnv(new Parameters(), "TRAFFIC_REPLAYER_");
         var parser = JsonCommandLineParser.newBuilder().addObject(p).build();
@@ -497,6 +546,13 @@ public class TrafficReplayer {
                 log.atInfo().setMessage("Request Transformations config string: {}")
                     .addArgument(requestTransformerConfig).log();
             }
+
+            String tupleTransformerConfig = TransformerConfigUtils.getTransformerConfig(params.tupleTransformationParams);
+            if (tupleTransformerConfig != null) {
+                log.atInfo().setMessage("Tuple Transformations config string: {}")
+                    .addArgument(tupleTransformerConfig).log();
+            }
+
             final var orderedRequestTracker = new OrderedWorkerTracker<Void>();
             final var hostname = uri.getHost();
 
@@ -554,22 +610,37 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            var tupleWriter = new TupleWriter(
-                new GzipJsonLinesSink(
-                    Path.of(params.tupleOutputDir),
-                    params.tupleMaxFileSizeMb * 1024L * 1024L,
-                    Duration.ofSeconds(params.tupleMaxLagSeconds)
-                ),
-                params.tupleRingBufferSize
-            );
-            tr.setupRunAndWaitForReplayWithShutdownChecks(
-                Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                serverTimeout,
-                blockingTrafficSource,
-                timeShifter,
-                tupleWriter,
-                Duration.ofMillis(params.quiescentPeriodMs)
-            );
+            if (params.enableSyncTuples) {
+                log.info("Sync tuple writing enabled — using Disruptor + GzipJsonLinesSink");
+                var tupleWriter = new TupleWriter(
+                    new GzipJsonLinesSink(
+                        Path.of(params.tupleOutputDir),
+                        params.tupleMaxFileSizeMb * 1024L * 1024L,
+                        Duration.ofSeconds(params.tupleMaxLagSeconds)
+                    ),
+                    params.tupleRingBufferSize
+                );
+                tr.setupRunAndWaitForReplayWithShutdownChecks(
+                    Duration.ofSeconds(params.observedPacketConnectionTimeout),
+                    serverTimeout,
+                    blockingTrafficSource,
+                    timeShifter,
+                    tupleWriter,
+                    Duration.ofMillis(params.quiescentPeriodMs)
+                );
+            } else {
+                var resultsToLogsConsumer = new ResultsToLogsConsumer(null, null,
+                        () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig));
+                var tupleWriter = new TupleParserChainConsumer(resultsToLogsConsumer);
+                tr.setupRunAndWaitForReplayWithShutdownChecks(
+                    Duration.ofSeconds(params.observedPacketConnectionTimeout),
+                    serverTimeout,
+                    blockingTrafficSource,
+                    timeShifter,
+                    tupleWriter,
+                    Duration.ofMillis(params.quiescentPeriodMs)
+                );
+            }
             log.info("Done processing TrafficStreams");
         } finally {
             scheduledExecutorService.shutdown();
