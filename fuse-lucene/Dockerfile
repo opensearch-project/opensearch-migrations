@@ -16,7 +16,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates fuse libfuse2 wget && \
     DEB_ARCH=$(dpkg --print-architecture) && \
     case "$DEB_ARCH" in amd64) S3_ARCH=x86_64;; arm64) S3_ARCH=aarch64;; *) echo "Unsupported arch: $DEB_ARCH" && exit 1;; esac && \
-    wget "https://s3.amazonaws.com/mountpoint-s3-release/latest/${S3_ARCH}/mount-s3.deb" -O /tmp/mount-s3.deb && \
+    wget --tries=3 --waitretry=5 --timeout=30 "https://s3.amazonaws.com/mountpoint-s3-release/latest/${S3_ARCH}/mount-s3.deb" -O /tmp/mount-s3.deb && \
+    dpkg-deb --info /tmp/mount-s3.deb > /dev/null && \
     dpkg -i /tmp/mount-s3.deb || (apt-get install -y -f --no-install-recommends && dpkg -i /tmp/mount-s3.deb) && \
     mount-s3 --version && \
     rm /tmp/mount-s3.deb && \
