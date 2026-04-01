@@ -220,12 +220,14 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                                 summary,
                                 (Exception) t
                             );
-                            commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
                         }
                     }
                     // Count the final outcome once per request (not per retry)
                     countFinalOutcome(summary, t);
                     recordTargetResponseCodes(summary);
+                    if (tupleWriter == null) {
+                        commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
+                    }
                     return null;
                 } else {
                     log.atError().setCause(t)
