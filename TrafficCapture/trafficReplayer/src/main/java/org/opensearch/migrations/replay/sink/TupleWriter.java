@@ -23,6 +23,8 @@ public class TupleWriter implements AutoCloseable {
             ringBufferSize,
             Thread::new,
             ProducerType.MULTI,
+            // Wakes the consumer thread every 1s during idle periods to trigger onTimeout(),
+            // which flushes any buffered tuples so Kafka commits aren't delayed indefinitely.
             new TimeoutBlockingWaitStrategy(1, TimeUnit.SECONDS)
         );
         disruptor.handleEventsWith(new TupleSinkHandler(sink));

@@ -207,8 +207,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                             writeFuture.whenComplete((v, writeErr) -> {
                                 if (writeErr != null) {
                                     log.atError().setCause(writeErr)
-                                        .setMessage("Tuple write failed for {}, skipping Kafka commit")
-                                        .addArgument(context).log();
+                                        .setMessage("Tuple write failed for {} (streams={})")
+                                        .addArgument(context)
+                                        .addArgument(rrPair.trafficStreamKeysBeingHeld).log();
                                 }
                                 commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
                             });
