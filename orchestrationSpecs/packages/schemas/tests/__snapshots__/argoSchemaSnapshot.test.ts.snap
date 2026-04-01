@@ -1160,6 +1160,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "Resource limits and requests for replayer container."
                     },
+                    "enableSyncTuples": {
+                      "type": "boolean",
+                      "default": true
+                    },
                     "kafkaTrafficEnableMSKAuth": {
                       "type": "boolean",
                       "default": false
@@ -1227,6 +1231,22 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "tupleTransformerConfigFile": {
                       "type": "string",
                       "description": "Path to the JSON configuration file for tuple transformers."
+                    },
+                    "tupleOutputDir": {
+                      "type": "string",
+                      "default": "./tuples"
+                    },
+                    "tupleMaxLagSeconds": {
+                      "type": "number",
+                      "default": 60
+                    },
+                    "tupleMaxFileSizeMb": {
+                      "type": "number",
+                      "default": 256
+                    },
+                    "tupleRingBufferSize": {
+                      "type": "number",
+                      "default": 8192
                     },
                     "userAgent": {
                       "type": "string",
@@ -2425,6 +2445,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     ],
                     "description": "Resource limits and requests for replayer container."
                   },
+                  "enableSyncTuples": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable the synchronous tuple writing infrastructure (Disruptor + GzipJsonLinesSink). When false, tuples are written via the legacy Log4J2 async appender path."
+                  },
                   "kafkaTrafficEnableMSKAuth": {
                     "type": "boolean",
                     "default": false,
@@ -2502,6 +2527,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "tupleTransformerConfigFile": {
                     "type": "string",
                     "description": "Path to the JSON configuration file for tuple transformers."
+                  },
+                  "tupleOutputDir": {
+                    "type": "string",
+                    "default": "./tuples",
+                    "description": "Directory for compressed tuple output files when enableSyncTuples is true (local path or Mountpoint S3 mount)."
+                  },
+                  "tupleMaxLagSeconds": {
+                    "type": "number",
+                    "default": 60,
+                    "description": "Maximum seconds before rotating/committing a tuple file (used with enableSyncTuples)."
+                  },
+                  "tupleMaxFileSizeMb": {
+                    "type": "number",
+                    "default": 256,
+                    "description": "Maximum uncompressed size in MB before rotating a tuple file (used with enableSyncTuples)."
+                  },
+                  "tupleRingBufferSize": {
+                    "type": "number",
+                    "default": 8192,
+                    "description": "LMAX Disruptor ring buffer size for tuple writing, must be power of 2 (used with enableSyncTuples)."
                   },
                   "userAgent": {
                     "type": "string",

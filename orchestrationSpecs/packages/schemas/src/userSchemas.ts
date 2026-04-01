@@ -224,6 +224,8 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
 });
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
+    enableSyncTuples: z.boolean().default(true).optional()
+        .describe("Enable the synchronous tuple writing infrastructure (Disruptor + GzipJsonLinesSink). When false, tuples are written via the legacy Log4J2 async appender path."),
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enables SASL properties required for connecting to MSK with IAM auth."),
     kafkaTrafficPropertyFile: z.string().optional()
@@ -258,6 +260,14 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
         .describe("Base64-encoded tuple transformer configuration."),
     tupleTransformerConfigFile: z.string().optional()
         .describe("Path to the JSON configuration file for tuple transformers."),
+    tupleOutputDir: z.string().default("./tuples").optional()
+        .describe("Directory for compressed tuple output files when enableSyncTuples is true (local path or Mountpoint S3 mount)."),
+    tupleMaxLagSeconds: z.number().default(60).optional()
+        .describe("Maximum seconds before rotating/committing a tuple file (used with enableSyncTuples)."),
+    tupleMaxFileSizeMb: z.number().default(256).optional()
+        .describe("Maximum uncompressed size in MB before rotating a tuple file (used with enableSyncTuples)."),
+    tupleRingBufferSize: z.number().default(8192).optional()
+        .describe("LMAX Disruptor ring buffer size for tuple writing, must be power of 2 (used with enableSyncTuples)."),
     userAgent: z.string().optional()
         .describe("String appended to the user-agent header for requests to the target cluster."),
 });
