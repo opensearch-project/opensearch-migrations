@@ -49,15 +49,7 @@ public class IndexRunner {
                         .build());
             } else {
                 var rawResults = createIndex(index.getName(), mode, context);
-                if (allowExistingIndices) {
-                    creationResults = rawResults.stream()
-                        .map(r -> r.getFailureType() == CreationFailureType.ALREADY_EXISTS
-                            ? CreationResult.builder().name(r.getName()).build()
-                            : r)
-                        .collect(Collectors.toList());
-                } else {
-                    creationResults = rawResults;
-                }
+                creationResults = applyAllowExistingIndices(rawResults);
             }
 
             creationResults.forEach(results::index);
@@ -72,6 +64,17 @@ public class IndexRunner {
             });
         }
         return results.build();
+    }
+
+    private List<CreationResult> applyAllowExistingIndices(List<CreationResult> rawResults) {
+        if (!allowExistingIndices) {
+            return rawResults;
+        }
+        return rawResults.stream()
+            .map(r -> r.getFailureType() == CreationFailureType.ALREADY_EXISTS
+                ? CreationResult.builder().name(r.getName()).build()
+                : r)
+            .collect(Collectors.toList());
     }
 
     private List<CreationResult> createIndex(String indexName, MigrationMode mode, ICreateIndexContext context) {
