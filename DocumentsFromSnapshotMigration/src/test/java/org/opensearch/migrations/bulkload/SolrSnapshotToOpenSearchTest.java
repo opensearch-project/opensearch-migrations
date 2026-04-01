@@ -68,7 +68,7 @@ public class SolrSnapshotToOpenSearchTest {
 
     static Stream<Arguments> solr8ToOpenSearch3() {
         return Stream.of(
-            Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V3_0_0)
+            Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V3_5_0)
         );
     }
 

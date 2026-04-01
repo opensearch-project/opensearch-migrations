@@ -151,15 +151,15 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
 
     static Stream<Arguments> versionPairs() {
         return Stream.of(
-            Arguments.of(SearchClusterContainer.ES_V1_7_6, SearchClusterContainer.OS_V3_0_0),
-            Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.OS_V3_0_0),
-            Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_V3_0_0),
-            Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V3_0_0),
-            Arguments.of(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V3_0_0),
-            Arguments.of(SearchClusterContainer.ES_V7_17, SearchClusterContainer.OS_V3_0_0),
-            Arguments.of(SearchClusterContainer.ES_V8_17, SearchClusterContainer.OS_V3_0_0),
-            Arguments.of(SearchClusterContainer.OS_V1_3_20, SearchClusterContainer.OS_V3_0_0),
-            Arguments.of(SearchClusterContainer.OS_V2_19_4, SearchClusterContainer.OS_V3_0_0)
+            Arguments.of(SearchClusterContainer.ES_V1_7_6, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.ES_V2_4_6, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.ES_V5_6_16, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.ES_V6_8_23, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.ES_V7_17, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.ES_V8_17, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.OS_V1_3_20, SearchClusterContainer.OS_V3_5_0),
+            Arguments.of(SearchClusterContainer.OS_V2_19_4, SearchClusterContainer.OS_V3_5_0)
         );
     }
 
