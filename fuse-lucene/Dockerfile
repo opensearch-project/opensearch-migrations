@@ -14,9 +14,11 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends fuse libfuse2 wget ca-certificates && \
-    ARCH=$(dpkg --print-architecture) && \
-    wget -q "https://s3.amazonaws.com/mountpoint-s3-release/latest/${ARCH}/mount-s3.deb" -O /tmp/mount-s3.deb && \
-    dpkg -i /tmp/mount-s3.deb || apt-get install -y -f --no-install-recommends && \
+    DEB_ARCH=$(dpkg --print-architecture) && \
+    case "$DEB_ARCH" in amd64) S3_ARCH=x86_64;; arm64) S3_ARCH=aarch64;; *) echo "Unsupported arch: $DEB_ARCH" && exit 1;; esac && \
+    wget "https://s3.amazonaws.com/mountpoint-s3-release/latest/${S3_ARCH}/mount-s3.deb" -O /tmp/mount-s3.deb && \
+    dpkg -i /tmp/mount-s3.deb || (apt-get install -y -f --no-install-recommends && dpkg -i /tmp/mount-s3.deb) && \
+    mount-s3 --version && \
     rm /tmp/mount-s3.deb && \
     apt-get purge -y wget && \
     apt-get autoremove -y && \
