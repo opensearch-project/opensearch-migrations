@@ -545,7 +545,7 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     // AWS managed clusters require SigV4 auth when triggering snapshot creation
     if (data.endpoint && AWS_MANAGED_ENDPOINT_PATTERN.test(data.endpoint)) {
         const hasCreateSnapshot = Object.values(snapshots).some(s => "createSnapshotConfig" in s.config);
-        if (hasCreateSnapshot && (!data.authConfig || !("sigv4" in data.authConfig))) {
+        if (hasCreateSnapshot && (!data.authConfig || !HTTP_AUTH_SIGV4.safeParse(data.authConfig).success)) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
                 message: "SigV4 auth is required for Amazon OpenSearch domains when the workflow creates snapshot",
@@ -555,7 +555,7 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     }
 
     // SigV4 auth + createSnapshotConfig requires s3RoleArn on the referenced repo
-    if (data.authConfig && "sigv4" in data.authConfig) {
+    if (data.authConfig && HTTP_AUTH_SIGV4.safeParse(data.authConfig).success) {
         for (const [snapName, snapConfig] of Object.entries(snapshots)) {
             if ("createSnapshotConfig" in snapConfig.config) {
                 const repo = repos?.[snapConfig.repoName];
