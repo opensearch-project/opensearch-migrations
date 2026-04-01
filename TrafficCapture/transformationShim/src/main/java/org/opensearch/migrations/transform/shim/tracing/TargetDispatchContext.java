@@ -93,4 +93,9 @@ public class TargetDispatchContext
         bytesReceived += bytes;
         meterIncrementEvent(getMetrics().targetBytesReceivedCounter, bytes);
     }
+
+    @Override
+    public IShimProxyContexts.ITransformContext createTransformContext(String direction) {
+        return new TransformContext(this, direction);
+    }
 }

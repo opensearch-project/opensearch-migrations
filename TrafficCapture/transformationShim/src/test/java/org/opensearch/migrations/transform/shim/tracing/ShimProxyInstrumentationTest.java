@@ -13,6 +13,7 @@ import java.util.Map;
 
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
+import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.shim.ShimProxy;
 import org.opensearch.migrations.transform.shim.validation.Target;
 
@@ -51,31 +52,34 @@ class ShimProxyInstrumentationTest {
 
     private InMemoryInstrumentationBundle bundle;
     private RootShimProxyContext rootContext;
-    private NioEventLoopGroup backendGroup;
-    private Channel backendChannel;
+    private NioEventLoopGroup backendGroupA;
+    private NioEventLoopGroup backendGroupB;
+    private Channel backendChannelA;
+    private Channel backendChannelB;
     private ShimProxy proxy;
-    private int backendPort;
     private int proxyPort;
 
     @BeforeEach
     void setUp() throws Exception {
         bundle = new InMemoryInstrumentationBundle(true, true);
         rootContext = new RootShimProxyContext(bundle.openTelemetrySdk, IContextTracker.DO_NOTHING_TRACKER);
-        backendPort = findFreePort();
         proxyPort = findFreePort();
     }
 
     @AfterEach
     void tearDown() throws Exception {
         if (proxy != null) proxy.stop();
-        if (backendChannel != null) backendChannel.close().sync();
-        if (backendGroup != null) backendGroup.shutdownGracefully().sync();
+        if (backendChannelA != null) backendChannelA.close().sync();
+        if (backendChannelB != null) backendChannelB.close().sync();
+        if (backendGroupA != null) backendGroupA.shutdownGracefully().sync();
+        if (backendGroupB != null) backendGroupB.shutdownGracefully().sync();
         bundle.close();
     }
 
     @Test
     void requestThroughProxy_emitsShimRequestSpan() throws Exception {
-        startBackend(backendPort, "{\"status\":\"ok\"}");
+        int backendPort = findFreePort();
+        startBackend("A", backendPort, "{\"status\":\"ok\"}");
 
         Map<String, Target> targets = new LinkedHashMap<>();
         targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPort)));
@@ -86,8 +90,6 @@ class ShimProxyInstrumentationTest {
 
         var resp = httpGet("http://localhost:" + proxyPort + "/test/endpoint");
         assertEquals(200, resp.statusCode());
-
-        // Wait briefly for async span completion
         Thread.sleep(200);
 
         var spans = bundle.getFinishedSpans();
@@ -104,7 +106,8 @@ class ShimProxyInstrumentationTest {
 
     @Test
     void requestThroughProxy_emitsCountMetric() throws Exception {
-        startBackend(backendPort, "{\"status\":\"ok\"}");
+        int backendPort = findFreePort();
+        startBackend("A", backendPort, "{\"status\":\"ok\"}");
 
         Map<String, Target> targets = new LinkedHashMap<>();
         targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPort)));
@@ -123,12 +126,12 @@ class ShimProxyInstrumentationTest {
 
     @Test
     void proxyWithoutRootContext_emitsNoSpans() throws Exception {
-        startBackend(backendPort, "{\"status\":\"ok\"}");
+        int backendPort = findFreePort();
+        startBackend("A", backendPort, "{\"status\":\"ok\"}");
 
         Map<String, Target> targets = new LinkedHashMap<>();
         targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPort)));
 
-        // Use constructor without rootContext (backward compat)
         proxy = new ShimProxy(proxyPort, targets, "alpha", List.of());
         proxy.start();
 
@@ -138,12 +141,97 @@ class ShimProxyInstrumentationTest {
         assertTrue(bundle.getFinishedSpans().isEmpty(), "No spans should be emitted without rootContext");
     }
 
+    @Test
+    void dualTargetDispatch_emitsTargetDispatchSpans() throws Exception {
+        int portA = findFreePort();
+        int portB = findFreePort();
+        startBackend("A", portA, "{\"source\":\"alpha\"}");
+        startBackend("B", portB, "{\"source\":\"beta\"}");
+
+        Map<String, Target> targets = new LinkedHashMap<>();
+        targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + portA)));
+        targets.put("beta", new Target("beta", URI.create("http://localhost:" + portB)));
+
+        proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
+            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
+        proxy.start();
+
+        httpGet("http://localhost:" + proxyPort + "/dual");
+        Thread.sleep(300);
+
+        var dispatchSpans = bundle.getFinishedSpans().stream()
+            .filter(s -> "targetDispatch".equals(s.getName()))
+            .toList();
+        assertEquals(2, dispatchSpans.size(), "Expected 2 targetDispatch spans");
+
+        assertTrue(dispatchSpans.stream().anyMatch(
+            s -> "alpha".equals(s.getAttributes().get(TargetDispatchContext.TARGET_NAME_ATTR))));
+        assertTrue(dispatchSpans.stream().anyMatch(
+            s -> "beta".equals(s.getAttributes().get(TargetDispatchContext.TARGET_NAME_ATTR))));
+
+        // Verify status codes are recorded
+        for (var span : dispatchSpans) {
+            assertEquals(200L, span.getAttributes().get(TargetDispatchContext.HTTP_STATUS_CODE_ATTR));
+        }
+    }
+
+    @Test
+    void targetWithTransform_emitsTransformSpan() throws Exception {
+        int backendPort = findFreePort();
+        startBackend("A", backendPort, "{\"status\":\"ok\"}");
+
+        // Identity transform — returns input unchanged
+        IJsonTransformer identityTransform = input -> input;
+
+        Map<String, Target> targets = new LinkedHashMap<>();
+        targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPort),
+            identityTransform, null, null));
+
+        proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
+            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
+        proxy.start();
+
+        httpGet("http://localhost:" + proxyPort + "/with-transform");
+        Thread.sleep(300);
+
+        var transformSpans = bundle.getFinishedSpans().stream()
+            .filter(s -> "transform".equals(s.getName()))
+            .toList();
+        assertFalse(transformSpans.isEmpty(), "Expected at least one transform span");
+
+        SpanData transformSpan = transformSpans.get(0);
+        assertEquals("request", transformSpan.getAttributes().get(TransformContext.TRANSFORM_DIRECTION_ATTR));
+        assertEquals("alpha", transformSpan.getAttributes().get(TransformContext.TARGET_NAME_ATTR));
+    }
+
+    @Test
+    void dispatchToUnreachableTarget_recordsException() throws Exception {
+        // Point at a port with nothing listening
+        int deadPort = findFreePort();
+
+        Map<String, Target> targets = new LinkedHashMap<>();
+        targets.put("dead", new Target("dead", URI.create("http://localhost:" + deadPort)));
+
+        proxy = new ShimProxy(proxyPort, targets, "dead", null, List.of(),
+            null, false, Duration.ofSeconds(2), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
+        proxy.start();
+
+        httpGet("http://localhost:" + proxyPort + "/fail");
+        Thread.sleep(300);
+
+        // Should still have a shimRequest span
+        var requestSpans = bundle.getFinishedSpans().stream()
+            .filter(s -> "shimRequest".equals(s.getName()))
+            .toList();
+        assertFalse(requestSpans.isEmpty(), "Expected shimRequest span even on failure");
+    }
+
     // --- Mock backend ---
 
-    private void startBackend(int port, String responseBody) throws InterruptedException {
-        backendGroup = new NioEventLoopGroup(1);
-        backendChannel = new ServerBootstrap()
-            .group(backendGroup)
+    private void startBackend(String label, int port, String responseBody) throws InterruptedException {
+        NioEventLoopGroup group = new NioEventLoopGroup(1);
+        Channel channel = new ServerBootstrap()
+            .group(group)
             .channel(NioServerSocketChannel.class)
             .childHandler(new ChannelInitializer<SocketChannel>() {
                 @Override
@@ -167,6 +255,14 @@ class ShimProxyInstrumentationTest {
                 }
             })
             .bind(port).sync().channel();
+
+        if ("A".equals(label)) {
+            backendGroupA = group;
+            backendChannelA = channel;
+        } else {
+            backendGroupB = group;
+            backendChannelB = channel;
+        }
     }
 
     private static HttpResponse<String> httpGet(String url) throws Exception {

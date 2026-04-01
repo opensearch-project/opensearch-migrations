@@ -8,6 +8,7 @@ public interface IShimProxyContexts {
         private ActivityNames() {}
         public static final String SHIM_REQUEST = "shimRequest";
         public static final String TARGET_DISPATCH = "targetDispatch";
+        public static final String TRANSFORM = "transform";
     }
 
     class MetricNames {
@@ -27,5 +28,10 @@ public interface IShimProxyContexts {
 
         void addBytesSent(int bytes);
         void addBytesReceived(int bytes);
+        ITransformContext createTransformContext(String direction);
+    }
+
+    interface ITransformContext extends IScopedInstrumentationAttributes {
+        String ACTIVITY_NAME = ActivityNames.TRANSFORM;
     }
 }
