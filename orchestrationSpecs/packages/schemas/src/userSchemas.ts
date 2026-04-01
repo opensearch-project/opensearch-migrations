@@ -553,6 +553,22 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
             });
         }
     }
+
+    // SigV4 auth + createSnapshotConfig requires s3RoleArn on the referenced repo
+    if (data.authConfig && "sigv4" in data.authConfig) {
+        for (const [snapName, snapConfig] of Object.entries(snapshots)) {
+            if ("createSnapshotConfig" in snapConfig.config) {
+                const repo = repos?.[snapConfig.repoName];
+                if (repo && !repo.s3RoleArn) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Snapshot '${snapName}' uses SigV4 auth with createSnapshotConfig but repo '${snapConfig.repoName}' is missing s3RoleArn`,
+                        path: ['snapshotInfo', 'repos', snapConfig.repoName, 's3RoleArn']
+                    });
+                }
+            }
+        }
+    }
 });
 
 export const NORMALIZED_COMPLETE_SNAPSHOT_CONFIG = z.object({
