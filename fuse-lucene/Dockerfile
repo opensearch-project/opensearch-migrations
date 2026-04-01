@@ -9,21 +9,20 @@ COPY src/ src/
 
 RUN cargo build --release && strip target/release/snapshot-fuse
 
-# Runtime image: minimal with FUSE support + mount-s3 for per-pod S3 access
-FROM debian:bookworm-slim
+# Runtime image: AL2023 with FUSE support + mount-s3 for per-pod S3 access
+FROM docker.io/library/amazonlinux:2023
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates fuse libfuse2 wget && \
-    DEB_ARCH=$(dpkg --print-architecture) && \
-    case "$DEB_ARCH" in amd64) S3_ARCH=x86_64;; arm64) S3_ARCH=aarch64;; *) echo "Unsupported arch: $DEB_ARCH" && exit 1;; esac && \
-    wget --tries=3 --waitretry=5 --timeout=30 "https://s3.amazonaws.com/mountpoint-s3-release/latest/${S3_ARCH}/mount-s3.deb" -O /tmp/mount-s3.deb && \
-    dpkg-deb --info /tmp/mount-s3.deb > /dev/null && \
-    dpkg -i /tmp/mount-s3.deb || (apt-get install -y -f --no-install-recommends && dpkg -i /tmp/mount-s3.deb) && \
+RUN dnf install -y fuse fuse-libs && \
+    ARCH=$(uname -m) && \
+    case "$ARCH" in x86_64) S3_ARCH=x86_64;; aarch64) S3_ARCH=arm64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac && \
+    curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors \
+      "https://s3.amazonaws.com/mountpoint-s3-release/latest/${S3_ARCH}/mount-s3.rpm" -o /tmp/mount-s3.rpm && \
+    rpm -K /tmp/mount-s3.rpm && \
+    dnf install -y /tmp/mount-s3.rpm && \
     mount-s3 --version && \
-    rm /tmp/mount-s3.deb && \
-    apt-get purge -y wget && \
-    apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/*
+    rm /tmp/mount-s3.rpm && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf
 
 COPY --from=builder /build/target/release/snapshot-fuse /usr/local/bin/snapshot-fuse
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
