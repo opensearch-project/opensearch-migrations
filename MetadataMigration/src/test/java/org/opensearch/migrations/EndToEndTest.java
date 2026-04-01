@@ -263,7 +263,7 @@ class EndToEndTest extends BaseMigrationTest {
                                       List<TemplateType> templateTypes,
                                       TestData testData) {
         log.info(result.asCliOutput());
-        assertThat(result.getExitCode(), equalTo(0));
+        assertThat(result.getExitCode(), greaterThan(0));
 
         var migratedItems = result.getItems();
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexTemplates())),
@@ -383,18 +383,18 @@ class EndToEndTest extends BaseMigrationTest {
             MigrationItemResult run1Result = executeMigration(run1Args, MetadataCommands.MIGRATE);
             assertThat("Run 1 should succeed", run1Result.getExitCode(), equalTo(0));
 
-            // Re-run with --allow-existing — indexA already exists but is silently skipped
+            // Re-run with --allow-existing-indices — indexA already exists but is silently skipped
             var run2Args = new MigrateOrEvaluateArgs();
             run2Args.sourceArgs.host = sourceCluster.getUrl();
             run2Args.targetArgs.host = targetCluster.getUrl();
-            run2Args.allowExisting = true;
+            run2Args.allowExistingIndices = true;
 
             MigrationItemResult run2Result = executeMigration(run2Args, MetadataCommands.MIGRATE);
-            log.info("Run 2 (--allow-existing) result: {}", run2Result.asCliOutput());
+            log.info("Run 2 (--allow-existing-indices) result: {}", run2Result.asCliOutput());
 
-            // With --allow-existing: exits 0 and backfill is permitted
-            assertThat("Re-run with --allow-existing should exit 0", run2Result.getExitCode(), equalTo(0));
-            assertThat("No ALREADY_EXISTS items should be recorded with --allow-existing",
+            // With --allow-existing-indices: exits 0 and backfill is permitted
+            assertThat("Re-run with --allow-existing-indices should exit 0", run2Result.getExitCode(), equalTo(0));
+            assertThat("No ALREADY_EXISTS items should be recorded with --allow-existing-indices",
                 run2Result.getItems().getAlreadyExistsCount(), equalTo(0));
 
             // Both indices should now exist on the target

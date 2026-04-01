@@ -27,7 +27,6 @@ import lombok.extern.slf4j.Slf4j;
 public class Items implements JsonOutput {
     static final String NONE_FOUND_MARKER = "<NONE FOUND>";
     private final boolean dryRun;
-    private final boolean allowExisting;
     @NonNull
     private final List<CreationResult> indexTemplates;
     @NonNull
@@ -39,9 +38,7 @@ public class Items implements JsonOutput {
     private final String failureMessage;
 
     public int getAlreadyExistsCount() {
-        return (int) Stream.of(indexTemplates, componentTemplates, indexes, aliases)
-            .filter(Objects::nonNull)
-            .flatMap(Collection::stream)
+        return (int) indexes.stream()
             .filter(r -> r.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS)
             .count();
     }
@@ -56,6 +53,14 @@ public class Items implements JsonOutput {
             .filter(Objects::nonNull)
             .flatMap(Collection::stream)
             .filter(result -> result.getFailureType() != null && result.getFailureType().isFatal())
+            .map(this::failureMessage)
+            .forEach(errors::add);
+
+        // Indexes that already exist on the target are treated as fatal — they block backfill
+        // to prevent documents from being indexed against potentially stale mappings.
+        // Templates/aliases with ALREADY_EXISTS remain non-fatal warnings.
+        indexes.stream()
+            .filter(r -> r.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS)
             .map(this::failureMessage)
             .forEach(errors::add);
 
@@ -75,11 +80,12 @@ public class Items implements JsonOutput {
         appendSection(sb, "Aliases", getAliases());
 
         int alreadyExistsCount = getAlreadyExistsCount();
-        if (alreadyExistsCount > 0 && !allowExisting) {
+        if (alreadyExistsCount > 0) {
             sb.append(System.lineSeparator());
             sb.append(alreadyExistsCount)
-              .append(" item(s) already exist on the target cluster. To proceed, choose one of:")
+              .append(" index(es) already exist on the target cluster and may have stale mappings.")
               .append(System.lineSeparator());
+            sb.append("To proceed, choose one of:").append(System.lineSeparator());
             sb.append(Format.indentToLevel(1))
               .append("1. Clear the target indices and metadata, then re-run from scratch.")
               .append(System.lineSeparator());
@@ -87,7 +93,7 @@ public class Items implements JsonOutput {
               .append("2. Use --index-allowlist on the metadata step to migrate only the missing items.")
               .append(System.lineSeparator());
             sb.append(Format.indentToLevel(1))
-              .append("3. Re-run with --allow-existing to proceed despite existing data (may result in stale metadata on target).")
+              .append("3. Re-run with --allow-existing-indices to proceed despite existing data (may result in stale metadata on target).")
               .append(System.lineSeparator());
         }
 
@@ -145,8 +151,10 @@ public class Items implements JsonOutput {
         if (result.getFailureType() == null) {
             return "";
         }
+        boolean isIndexAlreadyExists = result.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS
+            && indexes.contains(result);
         var sb = new StringBuilder()
-            .append(result.getFailureType().isFatal() || (!allowExisting && result.getFailureType() == CreationResult.CreationFailureType.ALREADY_EXISTS) ? "ERROR" : "WARN")
+            .append(result.getFailureType().isFatal() || isIndexAlreadyExists ? "ERROR" : "WARN")
             .append(" - ")
             .append(result.getName())
             .append(" ")

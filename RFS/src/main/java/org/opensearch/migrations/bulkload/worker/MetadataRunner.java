@@ -23,7 +23,7 @@ public class MetadataRunner {
     private final GlobalMetadata.Factory metadataFactory;
     private final GlobalMetadataCreator metadataCreator;
     private final Transformer transformer;
-    private final boolean allowExisting;
+    private final boolean allowExistingIndices;
 
     public GlobalMetadataCreatorResults migrateMetadata(MigrationMode mode, IClusterMetadataContext context) {
         log.info("Migrating the Templates...");
@@ -31,7 +31,7 @@ public class MetadataRunner {
         var transformedRoot = transformer.transformGlobalMetadata(globalMetadata);
         var results = metadataCreator.create(transformedRoot, mode, context);
         log.info("Templates migration complete");
-        if (allowExisting) {
+        if (allowExistingIndices) {
             return suppressAlreadyExists(results);
         }
         return results;

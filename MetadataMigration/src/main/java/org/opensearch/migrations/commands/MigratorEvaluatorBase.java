@@ -104,10 +104,9 @@ public abstract class MigratorEvaluatorBase {
     protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
         var items = Items.builder();
         items.dryRun(migrationMode.equals(MigrationMode.SIMULATE));
-        items.allowExisting(arguments.allowExisting);
 
-        if (arguments.allowExisting) {
-            log.warn("--allow-existing is set. Items that already exist on the target cluster will be skipped without recording an ALREADY_EXISTS status.");
+        if (arguments.allowExistingIndices) {
+            log.warn("--allow-existing-indices is set. Items that already exist on the target cluster will be skipped without recording an ALREADY_EXISTS status.");
         }
 
         var metadataResults = migrateGlobalMetadata(migrationMode, clusters, transformer, context);
@@ -138,7 +137,7 @@ public abstract class MigratorEvaluatorBase {
             clusters.getSource().getGlobalMetadata(),
             clusters.getTarget().getGlobalMetadataCreator(),
             transformer,
-            arguments.allowExisting
+            arguments.allowExistingIndices
         );
         var metadataResults = metadataRunner.migrateMetadata(mode, context.createMetadataMigrationContext());
         log.info("Metadata copy complete.");
@@ -153,7 +152,7 @@ public abstract class MigratorEvaluatorBase {
             transformer,
             arguments.dataFilterArgs.indexAllowlist,
             clusters.getTarget().getAwarenessAttributeSettings(),
-            arguments.allowExisting
+            arguments.allowExistingIndices
         );
         var indexResults = indexRunner.migrateIndices(mode, context.createIndexContext());
         log.info("Index copy complete.");

@@ -29,7 +29,7 @@ public class IndexRunner {
     private final Transformer transformer;
     private final List<String> indexAllowlist;
     private final AwarenessAttributeSettings awarenessAttributeSettings;
-    private final boolean allowExisting;
+    private final boolean allowExistingIndices;
 
     public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) {
         var repoDataProvider = metadataFactory.getRepoDataProvider();
@@ -49,7 +49,7 @@ public class IndexRunner {
                         .build());
             } else {
                 var rawResults = createIndex(index.getName(), mode, context);
-                if (allowExisting) {
+                if (allowExistingIndices) {
                     creationResults = rawResults.stream()
                         .map(r -> r.getFailureType() == CreationFailureType.ALREADY_EXISTS
                             ? CreationResult.builder().name(r.getName()).build()

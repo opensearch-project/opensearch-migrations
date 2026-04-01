@@ -96,14 +96,14 @@ class MigrateTest {
     }
 
     @Test
-    void migrate_allowExistingFlag_exitsZeroWhenItemsAlreadyExist() {
+    void migrate_allowExistingIndicesFlag_exitsZeroWhenItemsAlreadyExist() {
         var args = new MigrateArgs();
-        args.allowExisting = true;
+        args.allowExistingIndices = true;
         var context = mock(RootMetadataMigrationContext.class);
         var clusters = mock(Clusters.class, withSettings().defaultAnswer(RETURNS_DEEP_STUBS));
         var transformers = mock(Transformers.class, withSettings().defaultAnswer(RETURNS_DEEP_STUBS));
 
-        // With --allow-existing, already-existing items are silently skipped and not recorded as ALREADY_EXISTS
+        // With --allow-existing-indices, already-existing items are silently skipped and not recorded as ALREADY_EXISTS
         var items = Items.builder()
             .dryRun(false)
             .indexTemplates(List.of())

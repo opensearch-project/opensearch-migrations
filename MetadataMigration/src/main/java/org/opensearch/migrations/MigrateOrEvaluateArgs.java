@@ -21,10 +21,10 @@ public class MigrateOrEvaluateArgs {
             converter = OutputFormat.OutputFormatConverter.class)
     public OutputFormat outputFormat = OutputFormat.HUMAN_READABLE;
 
-    @Parameter(names = { "--allow-existing" },
+    @Parameter(names = { "--allow-existing-indices" },
             description = "When set, items that already exist on the target cluster are silently skipped "
                 + "and do not cause a non-zero exit code. Use only after verifying the target cluster state.")
-    public boolean allowExisting = false;
+    public boolean allowExistingIndices = false;
 
     @Parameter(names = { "--snapshot-name" }, description = "The name of the snapshot to migrate")
     public String snapshotName;

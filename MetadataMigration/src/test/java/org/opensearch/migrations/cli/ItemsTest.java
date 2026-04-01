@@ -132,13 +132,13 @@ public class ItemsTest {
         
         assertThat(stringOutput, containsString("Migrated Items:"));
         assertThat(stringOutput, containsString("ERROR - it2 failed on target cluster: 403 Forbidden"));
-        assertThat(stringOutput, containsString("ERROR - it1 already exists"));
+        assertThat(stringOutput, containsString("WARN - it1 already exists"));
         assertThat(stringOutput, containsString("Index Templates:"));
         assertThat(stringOutput, containsString("Component Templates:"));
         assertThat(stringOutput, containsString("Indexes:"));
         assertThat(stringOutput, containsString("Aliases:"));
         assertThat(stringOutput, containsStringCount(Items.NONE_FOUND_MARKER, 3));
-        assertThat(stringOutput, hasLineCount(19));
+        assertThat(stringOutput, hasLineCount(13));
         
         // Test JSON Output
         var jsonOutput = items.asJsonOutput();
@@ -274,10 +274,10 @@ public class ItemsTest {
 
         // CLI output assertions
         var cliOutput = items.asCliOutput();
-        assertThat(cliOutput, containsString("ERROR - my-template already exists"));
-        assertThat(cliOutput, containsString("ERROR - my-component already exists"));
+        assertThat(cliOutput, containsString("WARN - my-template already exists"));
+        assertThat(cliOutput, containsString("WARN - my-component already exists"));
         assertThat(cliOutput, containsString("ERROR - my-index already exists"));
-        assertThat(cliOutput, containsString("ERROR - my-alias already exists"));
+        assertThat(cliOutput, containsString("WARN - my-alias already exists"));
         assertThat(cliOutput, containsString("- my-template"));
         assertThat(cliOutput, containsString("- my-component"));
         assertThat(cliOutput, containsString("- my-index"));
@@ -286,7 +286,8 @@ public class ItemsTest {
         // JSON output assertions
         var json = items.asJsonOutput();
         assertThat(json.toPrettyString(), json.has("alreadyExistsCount"), is(true));
-        assertThat(json.toPrettyString(), json.get("alreadyExistsCount").asInt(), equalTo(4));
+        // Only indexes count toward alreadyExistsCount
+        assertThat(json.toPrettyString(), json.get("alreadyExistsCount").asInt(), equalTo(1));
 
         for (var entry : List.of(
                 new String[]{"indexTemplates", "my-template"},
@@ -309,7 +310,6 @@ public class ItemsTest {
     private ItemsBuilder createEmptyItemsBuilder() {
         return Items.builder()
             .dryRun(false)
-            .allowExisting(false)
             .indexTemplates(List.of())
             .componentTemplates(List.of())
             .indexes(List.of())
@@ -343,7 +343,8 @@ public class ItemsTest {
         assertThat(items.getComponentTemplates().size(), equalTo(1));
         assertThat(items.getIndexes().size(), equalTo(2));
         assertThat(items.getAliases().size(), equalTo(1));
-        assertThat(items.getAlreadyExistsCount(), equalTo(2));
+        // Only indexes count — the ALREADY_EXISTS in indexTemplates stays WARN
+        assertThat(items.getAlreadyExistsCount(), equalTo(1));
     }
 
     @Test
@@ -356,7 +357,8 @@ public class ItemsTest {
             .indexes(List.of(ae))
             .aliases(List.of(ae))
             .build();
-        assertThat(items.getAlreadyExistsCount(), equalTo(4));
+        // Only indexes count toward alreadyExistsCount — templates/aliases stay WARN
+        assertThat(items.getAlreadyExistsCount(), equalTo(1));
     }
 
     @Test
@@ -401,29 +403,12 @@ public class ItemsTest {
 
         var output = items.asCliOutput();
 
-        // Without allowExisting, ALREADY_EXISTS renders as ERROR
+        // Without allowExistingIndices, ALREADY_EXISTS renders as ERROR
         assertThat(output, containsString("ERROR - ae-item already exists"));
         assertThat(output, not(containsString("WARN - ae-item")));
     }
 
-    @Test
-    void testAlreadyExistsItemsRenderAsWarningsWhenAllowExistingSet() {
-        var alreadyExistsItem = CreationResult.builder()
-            .name("ae-item")
-            .failureType(CreationResult.CreationFailureType.ALREADY_EXISTS)
-            .build();
 
-        var items = createEmptyItemsBuilder()
-            .allowExisting(true)
-            .indexes(List.of(alreadyExistsItem))
-            .build();
-
-        var output = items.asCliOutput();
-
-        // With allowExisting, ALREADY_EXISTS renders as WARN (legacy behavior)
-        assertThat(output, containsString("WARN - ae-item already exists"));
-        assertThat(output, not(containsString("ERROR - ae-item")));
-    }
 
     // Feature: metadata-already-exists-detection, Property 5: JSON alreadyExistsCount field presence and correctness
     @Test
