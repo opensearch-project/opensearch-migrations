@@ -255,8 +255,9 @@ class K8sService:
         logger.warning(f"Timeout waiting for pods to terminate in {self.namespace}")
 
     def wait_for_namespace_deleted(self, namespace: str, timeout_seconds: int = 120) -> None:
-        """Poll until namespace is fully deleted, raise TimeoutError if not."""
+        """Poll until namespace is fully deleted, clearing finalizers if stuck."""
         deadline = time.time() + timeout_seconds
+        finalizers_cleared = False
         while time.time() < deadline:
             result = self.run_command(
                 self._kubectl_base() + ["get", "namespace", namespace, "-o", "name"],
@@ -265,8 +266,41 @@ class K8sService:
             if not result or not result.stdout.strip():
                 logger.info(f"Namespace '{namespace}' deleted successfully")
                 return
+            # If we've waited more than half the timeout, try clearing namespace finalizers
+            if not finalizers_cleared and time.time() > deadline - timeout_seconds / 2:
+                logger.info(f"Namespace '{namespace}' still terminating, clearing finalizers")
+                self._clear_namespace_finalizers(namespace)
+                self.run_command(
+                    self._kubectl_base() + [
+                        "patch", "namespace", namespace, "--type=merge",
+                        "-p", '{"metadata":{"finalizers":null}}'
+                    ], ignore_errors=True
+                )
+                finalizers_cleared = True
             time.sleep(3)
         raise TimeoutError(f"Namespace '{namespace}' still exists after {timeout_seconds}s")
+
+    def _clear_namespace_finalizers(self, namespace: str) -> None:
+        """Remove finalizers from all resources in a namespace to prevent deletion from hanging."""
+        # Clear finalizers on known CRD types that commonly block namespace deletion
+        for resource_type in ["workflows.argoproj.io", "cronworkflows.argoproj.io",
+                              "clusterworkflowtemplates.argoproj.io", "workflowtemplates.argoproj.io",
+                              "sensors.argoproj.io", "eventsources.argoproj.io",
+                              "datasnapshots.migrations.opensearch.org",
+                              "capturedtraffics.migrations.opensearch.org"]:
+            self.run_command(
+                self._kubectl_base() + [
+                    "get", resource_type, "-n", namespace,
+                    "-o", "name"
+                ], ignore_errors=True
+            )
+            # Patch all instances to remove finalizers
+            self.run_command(
+                self._kubectl_base() + [
+                    "patch", resource_type, "-n", namespace, "--all", "--type=merge",
+                    "-p", '{"metadata":{"finalizers":null}}'
+                ], ignore_errors=True
+            )
 
     def delete_namespace(self) -> None:
         logger.info(f"Deleting namespace '{self.namespace}'")
@@ -278,9 +312,13 @@ class K8sService:
         # may not complete in time when the parent namespace is force-deleted)
         self.run_command(self._kubectl_base() + ["delete", "namespace", "kyverno-ma",
                          "--ignore-not-found", "--grace-period=0"], ignore_errors=True)
+        # Clear finalizers on CRD resources that can block namespace deletion
+        # when their controllers are already gone
+        self._clear_namespace_finalizers(self.namespace)
         # Delete main namespace
         self.run_command(self._kubectl_base() + ["delete", "namespace", self.namespace,
-                         "--ignore-not-found", "--grace-period=0", "--force"])
+                         "--ignore-not-found", "--grace-period=0", "--force"],
+                         ignore_errors=True)
         # Wait for pods to fully terminate before deleting webhooks again
         # This prevents kyverno from recreating webhooks during termination
         self.wait_for_pods_terminated()
