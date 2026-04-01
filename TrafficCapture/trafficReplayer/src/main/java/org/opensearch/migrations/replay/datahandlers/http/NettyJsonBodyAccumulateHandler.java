@@ -112,8 +112,8 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                     } else {
                         payload.put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, parsedJsonObjects.get(0));
                     }
-                    if (!jsonAccumulator.hasPartialValues()) {
-                        if (context != null) { context.onJsonPayloadParseSucceeded(); }
+                    if (!jsonAccumulator.hasPartialValues() && context != null) {
+                        context.onJsonPayloadParseSucceeded();
                     }
                 }
                 if (jsonAccumulator.hasPartialValues() || parsedJsonObjects.isEmpty()) {
