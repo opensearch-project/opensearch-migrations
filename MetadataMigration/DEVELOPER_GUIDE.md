@@ -5,6 +5,7 @@
 - [How to run tests](#how-to-run-tests)
 - [How to use the tool interactively](#how-to-use-the-tool-interactively)
   - [S3 Snapshot](#s3-snapshot)
+  - [Using S3 Snapshots with LocalStack](#using-s3-snapshots-with-localstack)
   - [On-Disk Snapshot](#on-disk-snapshot)
   - [Handling Auth](#handling-auth)
   - [Allowlisting the templates and indices to migrate](#allowlisting-the-templates-and-indices-to-migrate)
@@ -53,6 +54,28 @@ From the root directory of the repo, run a CLI command like so:
 ```
 
 In order for this succeed, you'll need to make sure you have valid AWS Credentials in your key ring (~/.aws/credentials) with permission to operate on the S3 URI specified.
+
+### Using S3 Snapshots with LocalStack
+
+When using [LocalStack](https://localstack.cloud/) as a local S3-compatible endpoint, you must use an **IP address** (e.g., `127.0.0.1`) instead of `localhost` in the `--s3-endpoint` value. This is because LocalStack requires S3 path‑style addressing, and the AWS SDK defaults to virtual‑host style. Using an IP address forces the SDK to use path‑style access, which avoids empty results from S3 operations like `ListObjectsV2`.
+
+For example, if LocalStack is running on port 4566:
+
+```shell
+./gradlew MetadataMigration:run --args='migrate \
+  --snapshot-name my-snapshot \
+  --s3-local-dir /tmp/s3_files \
+  --s3-repo-uri s3://my-bucket/my/snapshot/dir \
+  --s3-endpoint http://127.0.0.1:4566 \
+  --s3-region us-east-1 \
+  --source-version OS\ 1.3 \
+  --target-host http://localhost:9200'
+```
+
+> **Note:** If you use `http://localhost:4566` instead, you may see the error:
+> `Cannot find the snapshot repository root in S3 bucket`. Switching to `127.0.0.1` resolves this.
+
+For Kubernetes deployments, the orchestration layer supports a `localstack://` protocol prefix that automatically resolves the hostname to an IP address. See the [Deploying to Kubernetes](https://github.com/opensearch-project/opensearch-migrations/wiki/Deploying-to-Kubernetes) wiki for details.
 
 ### On-Disk Snapshot
 
