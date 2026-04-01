@@ -224,8 +224,6 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
 });
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
-    enableSyncTuples: z.boolean().default(true).optional()
-        .describe("Enable the synchronous tuple writing infrastructure (Disruptor + GzipJsonLinesSink). When false, tuples are written via the legacy Log4J2 async appender path."),
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enables SASL properties required for connecting to MSK with IAM auth."),
     kafkaTrafficPropertyFile: z.string().optional()

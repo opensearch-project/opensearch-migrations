@@ -61,6 +61,7 @@ function makeReplayerParamsDict(
             kafkaTrafficBrokers: expr.get(expr.deserializeRecord(kafkaConfig), "kafkaConnection"),
             kafkaTrafficTopic: expr.get(expr.deserializeRecord(kafkaConfig), "kafkaTopic"),
             kafkaTrafficGroupId: kafkaGroupId,
+            enableSyncTuples: true,
         })
     );
 }

@@ -1160,10 +1160,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "Resource limits and requests for replayer container."
                     },
-                    "enableSyncTuples": {
-                      "type": "boolean",
-                      "default": true
-                    },
                     "kafkaTrafficEnableMSKAuth": {
                       "type": "boolean",
                       "default": false
@@ -2444,11 +2440,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "requests"
                     ],
                     "description": "Resource limits and requests for replayer container."
-                  },
-                  "enableSyncTuples": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Enable the synchronous tuple writing infrastructure (Disruptor + GzipJsonLinesSink). When false, tuples are written via the legacy Log4J2 async appender path."
                   },
                   "kafkaTrafficEnableMSKAuth": {
                     "type": "boolean",
