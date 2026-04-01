@@ -2,7 +2,6 @@ package org.opensearch.migrations.bulkload.solr;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

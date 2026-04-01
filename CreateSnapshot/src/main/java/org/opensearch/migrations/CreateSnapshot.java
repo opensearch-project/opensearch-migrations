@@ -2,7 +2,6 @@ package org.opensearch.migrations;
 
 import java.util.List;
 
-import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.bulkload.common.ClusterVersionDetector;

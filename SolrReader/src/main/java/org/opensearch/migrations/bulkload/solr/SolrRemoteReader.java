@@ -1,6 +1,5 @@
 package org.opensearch.migrations.bulkload.solr;
 
-import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.ClusterVersionDetector;

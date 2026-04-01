@@ -1,20 +1,17 @@
 package org.opensearch.migrations.bulkload;
 
 import java.io.File;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
@@ -33,7 +30,6 @@ import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
-import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;

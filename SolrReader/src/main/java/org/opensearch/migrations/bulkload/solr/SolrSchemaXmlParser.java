@@ -1,15 +1,14 @@
 package org.opensearch.migrations.bulkload.solr;
 
+import javax.xml.parsers.DocumentBuilderFactory;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import javax.xml.parsers.DocumentBuilderFactory;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
