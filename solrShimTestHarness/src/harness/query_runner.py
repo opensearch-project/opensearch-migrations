@@ -34,7 +34,7 @@ def _execute_query(base_url: str, query_path: str, timeout: int) -> tuple[Option
 
     try:
         start = time.monotonic()
-        resp = requests.get(url, timeout=timeout)
+        resp = requests.get(url, timeout=timeout, headers={'Accept-Encoding': 'identity'})
         elapsed_ms = (time.monotonic() - start) * 1000
         resp.raise_for_status()
         return resp.json(), elapsed_ms, None

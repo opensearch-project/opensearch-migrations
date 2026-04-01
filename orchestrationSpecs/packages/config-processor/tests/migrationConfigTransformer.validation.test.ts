@@ -30,8 +30,7 @@ describe('MigrationConfigTransformer validation', () => {
                     "snapshots": {
                         "snap1": {
                             "config": {
-                                "createSnapshotConfig": {},
-                                "requiredForCompleteMigration": true
+                                "createSnapshotConfig": {}
                             },
                             "repoName": "default"
                         }
