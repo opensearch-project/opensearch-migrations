@@ -153,7 +153,7 @@ class ShimProxyInstrumentationTest {
         targets.put("beta", new Target("beta", URI.create("http://localhost:" + portB)));
 
         proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
-            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
+            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext, null);
         proxy.start();
 
         httpGet("http://localhost:" + proxyPort + "/dual");
@@ -188,7 +188,7 @@ class ShimProxyInstrumentationTest {
             identityTransform, null, null));
 
         proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
-            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
+            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext, null);
         proxy.start();
 
         httpGet("http://localhost:" + proxyPort + "/with-transform");
@@ -213,7 +213,7 @@ class ShimProxyInstrumentationTest {
         targets.put("dead", new Target("dead", URI.create("http://localhost:" + deadPort)));
 
         proxy = new ShimProxy(proxyPort, targets, "dead", null, List.of(),
-            null, false, Duration.ofSeconds(2), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext);
+            null, false, Duration.ofSeconds(2), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH, rootContext, null);
         proxy.start();
 
         httpGet("http://localhost:" + proxyPort + "/fail");

@@ -335,25 +335,29 @@ public class OpenSearchMetricsSink implements MetricsSink {
         try {
             var tree = MAPPER.readTree(responseBody);
             if (tree.has("errors") && tree.get("errors").asBoolean()) {
-                int failedCount = 0;
-                var items = tree.get("items");
-                if (items != null && items.isArray()) {
-                    for (var item : items) {
-                        var index = item.get("index");
-                        if (index != null && index.has("error")) {
-                            failedCount++;
-                            if (failedCount <= 3) {  // Log first 3 errors
-                                log.warn("Document indexing error: {}", 
-                                    index.get("error").toPrettyString());
-                            }
-                        }
-                    }
-                }
+                int failedCount = countAndLogFailures(tree);
                 log.warn("Bulk index had {} failures out of {} documents", failedCount, totalDocs);
             }
         } catch (Exception e) {
             log.debug("Could not parse bulk response for failure check", e);
         }
+    }
+
+    private int countAndLogFailures(com.fasterxml.jackson.databind.JsonNode tree) {
+        int failedCount = 0;
+        var items = tree.get("items");
+        if (items != null && items.isArray()) {
+            for (var item : items) {
+                var index = item.get("index");
+                if (index != null && index.has("error")) {
+                    failedCount++;
+                    if (failedCount <= 3) {
+                        log.warn("Document indexing error: {}", index.get("error").toPrettyString());
+                    }
+                }
+            }
+        }
+        return failedCount;
     }
 
     /**

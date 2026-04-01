@@ -12,9 +12,9 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 public class ReportingConfig {
     private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory());
 
-    private boolean enabled = true;
-    @JsonProperty("include_request_body") private boolean includeRequestBody;
-    private SinkConfig sink;
+    public boolean enabled = true;
+    @JsonProperty("include_request_body") public boolean includeRequestBody;
+    public SinkConfig sink;
 
     public static ReportingConfig parse(Path path) throws IOException {
         return YAML_MAPPER.readValue(path.toFile(), ReportingConfig.class);
@@ -34,29 +34,29 @@ public class ReportingConfig {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    static class SinkConfig {
-        String type;
-        OpenSearchSinkConfig opensearch;
+    public static class SinkConfig {
+        public String type;
+        public OpenSearchSinkConfig opensearch;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    static class OpenSearchSinkConfig {
-        String uri;
-        @JsonProperty("index_prefix") String indexPrefix = "shim-metrics";
-        @JsonProperty("bulk_size") int bulkSize = 100;
-        @JsonProperty("flush_interval_ms") long flushIntervalMs = 5000;
-        AuthConfig auth;
+    public static class OpenSearchSinkConfig {
+        public String uri;
+        @JsonProperty("index_prefix") public String indexPrefix = "shim-metrics";
+        @JsonProperty("bulk_size") public int bulkSize = 100;
+        @JsonProperty("flush_interval_ms") public long flushIntervalMs = 5000;
+        public AuthConfig auth;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    static class AuthConfig {
-        String username;
-        String password;
-        TlsConfig tls;
+    public static class AuthConfig {
+        public String username;
+        public String password;
+        public TlsConfig tls;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    static class TlsConfig {
-        boolean insecure;
+    public static class TlsConfig {
+        public boolean insecure;
     }
 }
