@@ -18,6 +18,17 @@ import java.util.zip.GZIPOutputStream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * Writes tuples as gzip-compressed JSON lines to files compatible with Mountpoint S3.
+ *
+ * <p>Uses concatenated gzip members (RFC 1952 §2.2) to enable streaming commits:
+ * each {@link #onEndOfBatch()} finishes the current gzip member, fsyncs the file,
+ * and completes all pending futures immediately. A new gzip member is started for
+ * subsequent writes. Standard {@code GZIPInputStream} reads concatenated members
+ * seamlessly.</p>
+ *
+ * <p>Files are rotated to a new path when size or age thresholds are exceeded.</p>
+ */
 @Slf4j
 public class GzipJsonLinesSink implements TupleSink {
     private static final DateTimeFormatter TIMESTAMP_FORMAT =
@@ -62,17 +73,41 @@ public class GzipJsonLinesSink implements TupleSink {
 
     @Override
     public void onEndOfBatch() {
-        try {
-            gzipOut.flush();
-        } catch (IOException e) {
-            log.atError().setCause(e).setMessage("Failed to flush gzip stream").log();
+        if (pendingFutures.isEmpty()) {
+            return;
         }
-        maybeRotate();
+        try {
+            // Finish the current gzip member — writes a valid gzip trailer so the file
+            // is readable up to this point. Then fsync to flush to Mountpoint/disk.
+            gzipOut.finish();
+            fileOut.getFD().sync();
+        } catch (IOException e) {
+            log.atError().setCause(e).setMessage("Failed to flush/sync tuple file").log();
+            completeAllExceptionally(e);
+            return;
+        }
+        completeAll();
+
+        // Rotate to a new file if thresholds are met, otherwise start a new gzip member
+        // on the same FileOutputStream (concatenated gzip per RFC 1952).
+        if (shouldRotate()) {
+            closeFileQuietly();
+            openNewFile();
+        } else {
+            try {
+                gzipOut = new GZIPOutputStream(fileOut, true);
+            } catch (IOException e) {
+                throw new UncheckedIOException("Failed to start new gzip member", e);
+            }
+        }
     }
 
     @Override
     public void onIdle() {
-        maybeRotate();
+        // Flush any pending tuples that haven't been committed yet
+        if (!pendingFutures.isEmpty()) {
+            onEndOfBatch();
+        }
     }
 
     @Override
@@ -90,31 +125,21 @@ public class GzipJsonLinesSink implements TupleSink {
             return;
         }
         completeAll();
+        gzipOut = null;
+        fileOut = null;
     }
 
-    private void maybeRotate() {
-        if (pendingFutures.isEmpty()) {
-            return;
-        }
-        if (bytesWritten >= maxFileSizeBytes
-            || Duration.between(fileOpenedAt, Instant.now()).compareTo(maxFileAge) >= 0) {
-            rotate();
-        }
+    private boolean shouldRotate() {
+        return bytesWritten >= maxFileSizeBytes
+            || Duration.between(fileOpenedAt, Instant.now()).compareTo(maxFileAge) >= 0;
     }
 
-    private void rotate() {
+    private void closeFileQuietly() {
         try {
-            gzipOut.finish();
-            fileOut.getFD().sync();
             fileOut.close();
         } catch (IOException e) {
-            log.atError().setCause(e).setMessage("Failed to rotate tuple file").log();
-            completeAllExceptionally(e);
-            openNewFile();
-            return;
+            log.atWarn().setCause(e).setMessage("Failed to close rotated tuple file").log();
         }
-        completeAll();
-        openNewFile();
     }
 
     private void openNewFile() {
@@ -124,7 +149,7 @@ public class GzipJsonLinesSink implements TupleSink {
         var path = outputDir.resolve(filename);
         try {
             fileOut = new FileOutputStream(path.toFile());
-            gzipOut = new GZIPOutputStream(fileOut);
+            gzipOut = new GZIPOutputStream(fileOut, true);
             bytesWritten = 0;
             fileOpenedAt = Instant.now();
             log.atInfo().setMessage("Opened new tuple file: {}").addArgument(path).log();
