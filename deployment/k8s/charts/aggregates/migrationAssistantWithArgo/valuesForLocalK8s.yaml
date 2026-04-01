@@ -85,6 +85,17 @@ charts:
 
   argo-workflows:
     values:
+      # LocalStack uses static credentials for S3 artifact storage
+      useStaticCredentials: true
+      artifactRepository:
+        s3:
+          insecure: true
+          accessKeySecret:
+            name: argo-artifact-s3-creds
+            key: accessKey
+          secretKeySecret:
+            name: argo-artifact-s3-creds
+            key: secretKey
       controller:
         replicas: 1
         pdb:

@@ -7,6 +7,7 @@ def call(Map config = [:]) {
     def vpcMode = config.vpcMode ?: 'create'
     def isImportVpc = (vpcMode == 'import')
     def jobName = config.jobName ?: (isImportVpc ? "eksImportVPCSolutionsCFNTest" : "eksCreateVPCSolutionsCFNTest")
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -22,8 +23,7 @@ def call(Map config = [:]) {
         }
 
         options {
-            // Acquire lock on a given deployment stage
-            lock(label: params.STAGE, quantity: 1, variable: 'stage')
+            lock(label: lockLabel, quantity: 1)
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
@@ -44,13 +44,13 @@ def call(Map config = [:]) {
             )
         }
 
-        environment {
-            TEST_VPC_STACK_NAME = "test-vpc-${stage}-${currentBuild.number}-${params.REGION}"
-        }
-
         stages {
             stage('Checkout') {
                 steps {
+                    script {
+                        env.maStageName = "${params.STAGE}-${currentBuild.number}"
+                        env.TEST_VPC_STACK_NAME = "test-vpc-${env.maStageName}-${params.REGION}"
+                    }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }
@@ -70,7 +70,7 @@ def call(Map config = [:]) {
                                           --stack-name "${env.TEST_VPC_STACK_NAME}" \
                                           --region "${params.REGION}" \
                                           --template-body '${getTestVpcTemplate()}' \
-                                          --parameters ParameterKey=Stage,ParameterValue=${stage}
+                                          --parameters ParameterKey=Stage,ParameterValue=${maStageName}
 
                                         echo "Waiting for test VPC stack CREATE_COMPLETE..."
                                         aws cloudformation wait stack-create-complete \
@@ -87,15 +87,15 @@ def call(Map config = [:]) {
                 }
             }
 
-            // Use aws-bootstrap.sh (the production deployment path) which builds
-            // minified CFN templates via cdkSynthMinified to stay under the
-            // CloudFormation --template-body 51,200 byte limit.
+            // Use the assembled dist/aws-bootstrap.sh (the production deployment path)
+            // which is the self-contained script customers actually run.
+            // assemble-bootstrap.sh inlines all sourced helpers into a single file.
             stage('Deploy & Install') {
                 steps {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
                             def templateName = isImportVpc ? "Migration-Assistant-Infra-Import-VPC-eks" : "Migration-Assistant-Infra-Create-VPC-eks"
-                            env.STACK_NAME = "${templateName}-${stage}-${currentBuild.number}-${params.REGION}"
+                            env.STACK_NAME = "${templateName}-${maStageName}-${params.REGION}"
 
                             def bootstrapArgs = isImportVpc ?
                                 "--deploy-import-vpc-cfn --vpc-id ${env.TEST_VPC_ID} --subnet-ids ${env.TEST_SUBNET_IDS}" :
@@ -107,13 +107,14 @@ def call(Map config = [:]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 7200, roleSessionName: 'jenkins-session') {
                                     sh """
                                         set -euo pipefail
-                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                        ./deployment/k8s/aws/assemble-bootstrap.sh
+                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                           ${bootstrapArgs} \
                                           --build-cfn \
                                           ${buildImagesArg} \
                                           ${buildChartArg} \
                                           --stack-name "${env.STACK_NAME}" \
-                                          --stage "${stage}" \
+                                          --stage "${maStageName}" \
                                           --region "${params.REGION}" \
                                           --version latest \
                                           --skip-console-exec \
@@ -192,7 +193,7 @@ def call(Map config = [:]) {
                         // Clean up the kubeconfig context entry created by aws-bootstrap.sh
                         sh """
                             if command -v kubectl >/dev/null 2>&1; then
-                                kubectl config delete-context migration-eks-cluster-${stage}-${params.REGION} 2>/dev/null || echo "No kubectl context to clean up"
+                                kubectl config delete-context migration-eks-cluster-${maStageName}-${params.REGION} 2>/dev/null || echo "No kubectl context to clean up"
                             else
                                 echo "kubectl not found on agent; skipping context cleanup"
                             fi

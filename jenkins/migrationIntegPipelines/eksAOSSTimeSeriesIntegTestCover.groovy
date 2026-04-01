@@ -9,4 +9,4 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
          remote: "${gitUrl}"])
 
 def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
-eksAOSSIntegPipeline(collectionType: 'TIMESERIES', defaultStageId: 'aossts', jobName: jobNameOverride ?: 'pr-eks-aoss-timeseries-integ-test')
+eksAOSSIntegPipeline(collectionType: 'TIMESERIES', defaultStageId: 'aosst', jobName: jobNameOverride ?: 'pr-eks-aoss-timeseries-integ-test')

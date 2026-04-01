@@ -13,8 +13,8 @@
  *   orExpr / andExpr / unaryExpr → BoolNode
  *   fieldExpr (field:value)      → FieldNode
  *   fieldExpr (field:"text")     → PhraseNode
- *   barePhrase ("text")          → PhraseNode (field="" → resolved to df)
- *   bareValue (text)             → FieldNode  (field="" → resolved to df)
+ *   barePhrase ("text")          → BareNode (isPhrase=true)
+ *   bareValue (text)             → BareNode (isPhrase=false)
  *   fieldExpr (field:[range])    → RangeNode
  *   matchAll / empty query       → MatchAllNode
  *   group                        → GroupNode
@@ -33,7 +33,7 @@
  *
  * Responsibilities:
  *   - Parse the query string into an AST
- *   - Apply the default field (df) from params to bare values and phrases
+ *   - Apply the default field (df) from params to BareNode nodes
  *   - Return parse errors as ParseError (never throws)
  */
 
@@ -112,12 +112,11 @@ export function toParseError(err: unknown): ParseError {
   };
 }
 
-/** Walk the AST and replace empty field strings with the default field.
+/** Walk the AST and resolve BareNode default fields.
  *
- * This handles the Lucene parser's single `df` parameter. For eDisMax's
- * multi-field `qf` (e.g., `qf=title^2 content^1`), bare terms need to be
- * expanded into a BoolNode with one clause per qf field — that's a separate
- * post-parse AST transformation, not handled here.
+ * For BareNode (bare terms/phrases), sets the defaultField property
+ * based on the df parameter. When df is '_text_' (Solr's default catch-all),
+ * leaves defaultField undefined so the transformer omits it from the output.
  *
  * Uses an explicit switch over node types instead of duck-typing ('field' in node)
  * to keep full type safety — the compiler catches missing cases when new node
@@ -128,7 +127,13 @@ function resolveDefaultFields(node: ASTNode, df: string): void {
     case 'field':
     case 'phrase':
     case 'range':
-      if (node.field === '') node.field = df;
+      // These nodes have explicit fields from the grammar, nothing to resolve
+      break;
+    case 'bare':
+      // Set defaultField only if df is not the Solr catch-all
+      if (df !== '_text_') {
+        node.defaultField = df;
+      }
       break;
     case 'bool':
       // Clean up grammar artifact — implicit flag shouldn't leak into AST
@@ -186,6 +191,7 @@ function applyDefaultOperator(node: ASTNode): void {
     case 'group':
       applyDefaultOperator(node.child);
       break;
+    case 'bare':
     case 'field':
     case 'phrase':
     case 'range':

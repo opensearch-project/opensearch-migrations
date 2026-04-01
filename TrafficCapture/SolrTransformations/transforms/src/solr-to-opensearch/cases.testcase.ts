@@ -305,6 +305,52 @@ export const testCases: TestCase[] = [
     ],
   }),
 
+  solrTest('facet-nested-terms-in-terms', {
+    description: 'Nested facet: terms facet with a nested terms sub-facet',
+    documents: [
+      { id: '1', title: 'laptop', category: 'electronics', brand: 'acme' },
+      { id: '2', title: 'phone', category: 'electronics', brand: 'acme' },
+      { id: '3', title: 'tablet', category: 'electronics', brand: 'globex' },
+      { id: '4', title: 'shirt', category: 'clothing', brand: 'acme' },
+      { id: '5', title: 'pants', category: 'clothing', brand: 'globex' },
+      { id: '6', title: 'apple', category: 'food', brand: 'farms' },
+    ],
+    requestPath:
+      '/solr/testcollection/select?q=*:*&wt=json&json.facet=' +
+      encodeURIComponent(JSON.stringify({
+        categories: {
+          type: 'terms',
+          field: 'category',
+          sort: 'count desc',
+          facet: {
+            brands: {
+              type: 'terms',
+              field: 'brand',
+              sort: 'count desc',
+            },
+          },
+        },
+      })),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        category: { type: 'string' },
+        brand: { type: 'string' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        category: { type: 'keyword' },
+        brand: { type: 'keyword' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.response', rule: 'ignore', reason: 'Facet test — only validating $.facets, not hits' },
+    ],
+  }),
+
   // ───────────────────────────────────────────────────────────
   // Highlighting tests
   // ───────────────────────────────────────────────────────────

@@ -111,6 +111,9 @@
             "migrations.opensearch.org/target": "{{inputs.parameters.targetK8sLabel}}",
             "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
             "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}"
+          },
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
           }
         },
         "outputs": {
