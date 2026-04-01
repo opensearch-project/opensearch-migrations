@@ -143,7 +143,8 @@ def call(Map config = [:]) {
                                         echo "Resolved VPC ID from subnet: ${vpcId}"
                                     }
                                     sh """
-                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                        ./deployment/k8s/aws/assemble-bootstrap.sh
+                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                           --deploy-import-vpc-cfn \
                                           --build-cfn \
                                           --stack-name "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}" \

@@ -87,9 +87,9 @@ def call(Map config = [:]) {
                 }
             }
 
-            // Use aws-bootstrap.sh (the production deployment path) which builds
-            // minified CFN templates via cdkSynthMinified to stay under the
-            // CloudFormation --template-body 51,200 byte limit.
+            // Use the assembled dist/aws-bootstrap.sh (the production deployment path)
+            // which is the self-contained script customers actually run.
+            // assemble-bootstrap.sh inlines all sourced helpers into a single file.
             stage('Deploy & Install') {
                 steps {
                     timeout(time: 90, unit: 'MINUTES') {
@@ -107,7 +107,8 @@ def call(Map config = [:]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 7200, roleSessionName: 'jenkins-session') {
                                     sh """
                                         set -euo pipefail
-                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                        ./deployment/k8s/aws/assemble-bootstrap.sh
+                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                           ${bootstrapArgs} \
                                           --build-cfn \
                                           ${buildImagesArg} \
