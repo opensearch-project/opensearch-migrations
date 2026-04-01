@@ -930,6 +930,78 @@
     "path": "/solr/testharness/select?q=*:*&rows=3&sort=id+asc&cursorMark=*&wt=json"
   },
   {
+    "id": "cursor_pagination-seq-001",
+    "category": "cursor_pagination",
+    "description": "Sequential cursor walk \u2014 5 pages of 10 docs sorted by star_rating desc with id tiebreaker",
+    "path": "/solr/testharness/select?q=*:*&rows=10&sort=star_rating%20desc,id%20asc&cursorMark=*&wt=json",
+    "sequence": {
+      "maxPages": 5
+    }
+  },
+  {
+    "id": "cursor_pagination-seq-002",
+    "category": "cursor_pagination",
+    "description": "Sequential cursor walk with fq filter \u2014 walk Books category up to 5 pages",
+    "path": "/solr/testharness/select?q=product_category:Books&rows=20&sort=review_date%20desc,id%20asc&cursorMark=*&wt=json",
+    "sequence": {
+      "maxPages": 5
+    }
+  },
+  {
+    "id": "cursor_pagination-seq-003",
+    "category": "cursor_pagination",
+    "description": "Sequential cursor walk with small page size \u2014 3 docs per page, 4 pages",
+    "path": "/solr/testharness/select?q=*:*&rows=3&sort=helpful_votes%20desc,id%20asc&cursorMark=*&wt=json",
+    "sequence": {
+      "maxPages": 4
+    }
+  },
+  {
+    "id": "cursor_pagination-seq-004",
+    "category": "cursor_pagination",
+    "description": "Sequential cursor walk to end \u2014 narrow fq filter to force end detection within few pages",
+    "path": "/solr/testharness/select?q=*:*&fq=star_rating:1&rows=50&sort=review_date%20asc,id%20asc&cursorMark=*&wt=json",
+    "sequence": {
+      "maxPages": 20
+    }
+  },
+  {
+    "id": "cursor_pagination-004",
+    "category": "cursor_pagination",
+    "description": "Cursor with multi-field sort (3 sort fields + id tiebreaker)",
+    "path": "/solr/testharness/select?q=*:*&rows=5&sort=star_rating%20desc,helpful_votes%20desc,review_date%20asc,id%20asc&cursorMark=*&wt=json"
+  },
+  {
+    "id": "cursor_pagination-005",
+    "category": "cursor_pagination",
+    "description": "Cursor with highlighting \u2014 combined feature test",
+    "path": "/solr/testharness/select?q=review_body:excellent&rows=5&sort=star_rating%20desc,id%20asc&cursorMark=*&hl=true&hl.fl=review_body&wt=json"
+  },
+  {
+    "id": "cursor_pagination-006",
+    "category": "cursor_pagination",
+    "description": "Cursor with facets \u2014 combined feature test",
+    "path": "/solr/testharness/select?q=*:*&rows=5&sort=id%20asc&cursorMark=*&facet=true&facet.field=product_category&wt=json"
+  },
+  {
+    "id": "cursor_pagination-seq-005",
+    "category": "cursor_pagination",
+    "description": "Sequential cursor walk with large page size (100 docs per page)",
+    "path": "/solr/testharness/select?q=product_category:Electronics&rows=100&sort=star_rating%20desc,id%20asc&cursorMark=*&wt=json",
+    "sequence": {
+      "maxPages": 3
+    }
+  },
+  {
+    "id": "cursor_pagination-seq-006",
+    "category": "cursor_pagination",
+    "description": "Sequential cursor walk \u2014 query matching very few docs, should end quickly",
+    "path": "/solr/testharness/select?q=product_title:xyznonexistent&rows=10&sort=id%20asc&cursorMark=*&wt=json",
+    "sequence": {
+      "maxPages": 3
+    }
+  },
+  {
     "id": "advanced_sort-001",
     "category": "advanced_sort",
     "description": "Multi-field sort with tiebreaker",
