@@ -260,7 +260,8 @@ class EndToEndTest extends BaseMigrationTest {
                                       List<TemplateType> templateTypes,
                                       TestData testData) {
         log.info(result.asCliOutput());
-        assertThat(result.getExitCode(), equalTo(0));
+        // Exit code is 1 because INDEX_ALREADY_EXISTS is a fatal error
+        assertThat(result.getExitCode(), equalTo(1));
 
         var migratedItems = result.getItems();
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexTemplates())),

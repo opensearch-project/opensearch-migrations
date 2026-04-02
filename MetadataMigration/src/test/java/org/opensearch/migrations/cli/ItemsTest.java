@@ -228,6 +228,25 @@ public class ItemsTest {
         assertThat(jsonOutput.toPrettyString(), failure5.get("exception").asText(), equalTo("re1"));
 
     }
+    @Test
+    void testIndexAlreadyExistsSuggestions() throws Exception {
+        var items = createEmptyItemsBuilder()
+            .indexes(List.of(
+                CreationResult.builder().name("my_index").failureType(CreationFailureType.INDEX_ALREADY_EXISTS).build()
+            ))
+            .build();
+
+        var stringOutput = items.asCliOutput();
+        assertThat(stringOutput, containsString("ERROR - my_index already exists"));
+        assertThat(stringOutput, containsString("console clusters clear-indices --cluster target"));
+        assertThat(stringOutput, containsString("--index-allowlist"));
+
+        var jsonOutput = items.asJsonOutput();
+        var indexes = jsonOutput.get("indexes");
+        assertThat(jsonOutput.toPrettyString(), indexes.get(0).get("failure").get("type").asText(), equalTo("INDEX_ALREADY_EXISTS"));
+        assertThat(jsonOutput.toPrettyString(), indexes.get(0).get("failure").get("fatal").asBoolean(), is(true));
+    }
+
 
     @Test
     void testWithFailures() throws Exception {
