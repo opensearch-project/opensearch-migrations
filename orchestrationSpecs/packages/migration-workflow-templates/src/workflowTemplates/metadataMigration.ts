@@ -103,10 +103,16 @@ function makeParamsDict(
 
     const base = expr.mergeDicts(targetAndOptions, snapshotParams);
 
-    // When sourceEndpoint is provided, add sourceHost param.
+    // When sourceEndpoint is non-empty at runtime, add sourceHost param.
     // MetadataMigration CLI prioritizes --source-host over snapshot params.
     if (sourceEndpoint) {
-        return expr.mergeDicts(base, makeSourceHostParamsDict(sourceVersion, sourceEndpoint));
+        return expr.mergeDicts(base,
+            expr.ternary(
+                expr.isEmpty(sourceEndpoint),
+                expr.makeDict({}),
+                makeSourceHostParamsDict(sourceVersion, sourceEndpoint)
+            )
+        );
     }
 
     return base;

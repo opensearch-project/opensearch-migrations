@@ -79,9 +79,13 @@ function makeParamsDict(
 
     // Pass sourceHost for Solr backup migrations (RFS detects Solr from sourceVersion)
     if (sourceEndpoint) {
-        return expr.mergeDicts(base, expr.makeDict({
-            sourceHost: sourceEndpoint
-        }));
+        return expr.mergeDicts(base,
+            expr.ternary(
+                expr.isEmpty(sourceEndpoint),
+                expr.makeDict({}),
+                expr.makeDict({ sourceHost: sourceEndpoint })
+            )
+        );
     }
     return base;
 }
