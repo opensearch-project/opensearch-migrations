@@ -758,7 +758,7 @@
                 "parameters": [
                   {
                     "name": "resourceName",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['dataSnapshotResourceName']}}"
+                    "value": "{{=(('dataSnapshotResourceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']) ? (fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['dataSnapshotResourceName']) : (''))}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -784,7 +784,7 @@
                 "parameters": [
                   {
                     "name": "resourceName",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['dataSnapshotResourceName']}}"
+                    "value": "{{=(('dataSnapshotResourceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']) ? (fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['dataSnapshotResourceName']) : (''))}}"
                   }
                 ]
               },
