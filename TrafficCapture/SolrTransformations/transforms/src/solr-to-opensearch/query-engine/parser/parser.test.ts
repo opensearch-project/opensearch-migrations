@@ -35,17 +35,33 @@ describe('parseSolrQuery', () => {
       expect(errors).toEqual([]);
       expect(ast).toEqual({ type: 'field', field: 'title', value: 'java' });
     });
+  });
 
-    it('resolves bare value to df', () => {
-      const { ast, errors } = parseSolrQuery('java', paramsWithDf('title'));
-      expect(errors).toEqual([]);
-      expect(ast).toEqual({ type: 'field', field: 'title', value: 'java' });
-    });
+  // ─── BareNode ───────────────────────────────────────────────────────
 
-    it('defaults df to _text_ when not provided', () => {
+  describe('BareNode', () => {
+    it('parses bare term without df', () => {
       const { ast, errors } = parseSolrQuery('java', emptyParams);
       expect(errors).toEqual([]);
-      expect(ast).toEqual({ type: 'field', field: '_text_', value: 'java' });
+      expect(ast).toEqual({ type: 'bare', value: 'java', isPhrase: false });
+    });
+
+    it('parses bare term with df', () => {
+      const { ast, errors } = parseSolrQuery('java', paramsWithDf('title'));
+      expect(errors).toEqual([]);
+      expect(ast).toEqual({ type: 'bare', value: 'java', isPhrase: false, defaultField: 'title' });
+    });
+
+    it('parses bare phrase without df', () => {
+      const { ast, errors } = parseSolrQuery('"hello world"', emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast).toEqual({ type: 'bare', value: 'hello world', isPhrase: true });
+    });
+
+    it('parses bare phrase with df', () => {
+      const { ast, errors } = parseSolrQuery('"hello world"', paramsWithDf('content'));
+      expect(errors).toEqual([]);
+      expect(ast).toEqual({ type: 'bare', value: 'hello world', isPhrase: true, defaultField: 'content' });
     });
   });
 
@@ -56,12 +72,6 @@ describe('parseSolrQuery', () => {
       const { ast, errors } = parseSolrQuery('title:"hello world"', emptyParams);
       expect(errors).toEqual([]);
       expect(ast).toEqual({ type: 'phrase', text: 'hello world', field: 'title' });
-    });
-
-    it('resolves bare phrase to df', () => {
-      const { ast, errors } = parseSolrQuery('"hello world"', paramsWithDf('content'));
-      expect(errors).toEqual([]);
-      expect(ast).toEqual({ type: 'phrase', text: 'hello world', field: 'content' });
     });
   });
 
@@ -403,7 +413,17 @@ describe('parseSolrQuery', () => {
       expect(errors).toEqual([]);
       expect(ast).toEqual({
         type: 'boost',
-        child: { type: 'field', field: 'title', value: 'java' },
+        child: { type: 'bare', value: 'java', isPhrase: false, defaultField: 'title' },
+        value: 2,
+      });
+    });
+
+    it('parses boost on bare phrase', () => {
+      const { ast, errors } = parseSolrQuery('"hello world"^2', paramsWithDf('content'));
+      expect(errors).toEqual([]);
+      expect(ast).toEqual({
+        type: 'boost',
+        child: { type: 'bare', value: 'hello world', isPhrase: true, defaultField: 'content' },
         value: 2,
       });
     });
@@ -434,7 +454,7 @@ describe('parseSolrQuery', () => {
           },
           {
             type: 'bool', and: [], or: [], not: [
-              { type: 'phrase', text: 'hello world', field: 'content' },
+              { type: 'bare', value: 'hello world', isPhrase: true, defaultField: 'content' },
             ],
           },
         ],

@@ -73,8 +73,9 @@ jobs:
           - migrationConsole/lib/console_link
           - migrationConsole/cluster_tools
           - k8sConfigMapUtilScripts
+          - AIAdvisor/skills/solr-opensearch-migration-advisor
     env:
-      WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
+      WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'AIAdvisor/') && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
@@ -97,14 +98,34 @@ jobs:
           kubectl get nodes
           kubectl get namespaces
 
-      - run: |
+      - name: Install dependencies (Pipfile)
+        if: matrix.py-project != 'AIAdvisor/skills/solr-opensearch-migration-advisor'
+        run: |
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy --dev
           pipenv graph
 
-      - run: |
+      # Install dependencies for pyproject.toml-based projects
+      - name: Install dependencies (pyproject.toml)
+        if: matrix.py-project == 'AIAdvisor/skills/solr-opensearch-migration-advisor'
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -e ".[dev]"
+          python3 -m pip list
+
+      # Run tests for Pipfile-based projects
+      - name: Run tests (Pipfile)
+        if: matrix.py-project != 'AIAdvisor/skills/solr-opensearch-migration-advisor'
+        run: |
           pipenv run test
           pipenv run coverage xml
+
+      # Run tests for pyproject.toml-based projects
+      - name: Run tests (pyproject.toml)
+        if: matrix.py-project == 'AIAdvisor/skills/solr-opensearch-migration-advisor'
+        run: |
+          python3 -m pytest --cov=scripts --cov-report=xml
+
       - name: Get Sanitized Name
         env:
           PY_PROJECT: ${{ matrix.py-project }}

@@ -8,7 +8,7 @@
  *
  * Example:
  *   Input: BoolNode { and: [FieldNode(title,java), RangeNode(price,10,100)], or: [], not: [] }
- *   Output: Map{"bool" → Map{"must" → [Map{"term"→...}, Map{"range"→...}]}}
+ *   Output: Map{"bool" → Map{"must" → [Map{"match"→...}, Map{"range"→...}]}}
  *
  * Empty clause arrays are omitted from the output Map — only clauses with
  * children are included. For example, `title:java AND author:smith` has
