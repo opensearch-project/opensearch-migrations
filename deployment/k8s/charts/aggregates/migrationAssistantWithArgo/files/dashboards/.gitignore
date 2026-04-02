@@ -1,4 +1,3 @@
-# These dashboard JSONs are intentionally tracked as Helm chart assets.
-# The root .gitignore excludes *.json dashboard files globally; override that here.
-!capture-replay-dashboard.json
-!reindex-from-snapshot-dashboard.json
+# The root .gitignore excludes dashboard JSON files globally; override that here
+# so all JSON files in this directory are tracked as Helm chart assets.
+!*.json
