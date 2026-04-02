@@ -152,7 +152,8 @@ function getRfsDeploymentManifest
                 "migrations.opensearch.org/target": makeStringTypeProxy(args.targetK8sLabel),
                 "migrations.opensearch.org/snapshot": makeStringTypeProxy(args.snapshotK8sLabel),
                 "migrations.opensearch.org/from-snapshot-migration": makeStringTypeProxy(args.fromSnapshotMigrationK8sLabel),
-                "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel)
+                "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
+                "migrations.opensearch.org/pausable": "true"
             },
         },
         spec: {

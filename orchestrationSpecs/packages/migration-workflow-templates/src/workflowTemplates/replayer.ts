@@ -109,7 +109,8 @@ function getReplayerDeploymentManifest
             name: makeDirectTypeProxy(args.name),
             labels: {
                 app: "replayer",
-                "workflows.argoproj.io/workflow": makeDirectTypeProxy(args.workflowName)
+                "workflows.argoproj.io/workflow": makeDirectTypeProxy(args.workflowName),
+                "migrations.opensearch.org/pausable": "true"
             },
         },
         spec: {

@@ -13,6 +13,9 @@ from .commands.approve import approve_command
 from .commands.status import status_command
 from .commands.output import output_command
 from .commands.manage import manage_command
+from .commands.pause import pause_command
+from .commands.resume import resume_command
+from .commands.scale import scale_command
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +96,9 @@ workflow_cli.add_command(approve_command)
 workflow_cli.add_command(status_command)
 workflow_cli.add_command(output_command)
 workflow_cli.add_command(manage_command)
+workflow_cli.add_command(pause_command)
+workflow_cli.add_command(resume_command)
+workflow_cli.add_command(scale_command)
 workflow_cli.add_command(util_group)
 
 
