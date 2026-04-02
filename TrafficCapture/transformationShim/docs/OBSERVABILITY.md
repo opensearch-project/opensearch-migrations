@@ -76,7 +76,7 @@ Low-cardinality attributes are attached to metrics for aggregation:
 The `solrShimTestHarness` docker-compose includes a Grafana LGTM stack:
 
 ```bash
-cd solrShimTestHarness && ./run.sh
+cd solrMigrationDevSandbox && ./run.sh
 ```
 
 - Grafana UI: http://localhost:3000 (admin/admin)
