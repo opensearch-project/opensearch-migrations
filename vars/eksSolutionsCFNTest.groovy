@@ -16,7 +16,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: config.defaultGitUrl ?: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: config.defaultGitBranch ?: 'main', description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
-            string(name: 'STAGE', defaultValue: config.defaultStage ?: (isImportVpc ? "eks-impvpc" : "eks-crtvpc"), description: 'Stage name for deployment environment')
+            string(name: 'STAGE', defaultValue: config.defaultStage ?: (isImportVpc ? "eksivpc" : "ekscvpc"), description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: "us-east-1", description: 'AWS region for deployment')
             booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source instead of using public images')
             booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
