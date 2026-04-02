@@ -29,7 +29,7 @@ static def expandVersionString(String input) {
 
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksbyos"
-    def jobName = config.jobName ?: "byos-eks-integ-test"
+    def jobName = config.jobName ?: "eks-byos-integ-test"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
     def clusterContextFilePath = "tmp/cluster-context-byos-${currentBuild.number}.json"
     def testIds = config.testIds ?: "0010"
