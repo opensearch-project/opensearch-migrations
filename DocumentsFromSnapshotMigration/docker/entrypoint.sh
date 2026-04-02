@@ -77,8 +77,8 @@ cleanup_directories() {
 # Wait for snapshot-fuse sidecar readiness sentinel before starting
 FUSE_READY_FILE="${FUSE_READY_FILE:-/mnt/.fuse-ready}"
 if [[ -d "/mnt" ]]; then
-    echo "Waiting for snapshot-fuse sidecar to be ready (sentinel: ${FUSE_READY_FILE})..."
-    FUSE_TIMEOUT=60
+    echo "Waiting for snapshot-fuse sidecar (sentinel: ${FUSE_READY_FILE})..."
+    FUSE_TIMEOUT=120
     while [[ ! -f "${FUSE_READY_FILE}" ]] && [[ $FUSE_TIMEOUT -gt 0 ]]; do
         sleep 1
         FUSE_TIMEOUT=$((FUSE_TIMEOUT-1))
@@ -86,7 +86,8 @@ if [[ -d "/mnt" ]]; then
     if [[ -f "${FUSE_READY_FILE}" ]]; then
         echo "Snapshot-fuse sidecar is ready"
     else
-        echo "Warning: Timed out waiting for snapshot-fuse readiness sentinel"
+        echo "ERROR: Timed out waiting for snapshot-fuse readiness sentinel" >&2
+        exit 1
     fi
 fi
 
