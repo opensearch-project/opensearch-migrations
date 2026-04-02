@@ -6,7 +6,7 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
          remote: "${gitUrl}"])
 
 // Allow job name overrides for matrix parent and child job routing
-def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
+def jobNameOverride = params.JOB_NAME_OVERRIDE ?: env.JOB_BASE_NAME ?: ''
 def childJobNameOverride = params.CHILD_JOB_NAME_OVERRIDE ?: ''
 k8sMatrixTest(
         jobName: jobNameOverride ?: null,

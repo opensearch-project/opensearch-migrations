@@ -8,5 +8,5 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
+def jobNameOverride = params.JOB_NAME_OVERRIDE ?: env.JOB_BASE_NAME ?: ''
 eksAOSSIntegPipeline(collectionType: 'VECTORSEARCH', defaultStageId: 'aossv', jobName: jobNameOverride ?: 'pr-eks-aoss-vector-integ-test')
