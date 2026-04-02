@@ -1144,13 +1144,8 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
               "Action": [
                 "cloudwatch:PutDashboard",
                 "cloudwatch:GetDashboard",
-                "cloudwatch:TagResource",
+                "cloudwatch:DeleteDashboards",
               ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
-              "Action": "cloudwatch:DeleteDashboards",
               "Effect": "Allow",
               "Resource": {
                 "Fn::Join": [
@@ -1168,6 +1163,11 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
                   ],
                 ],
               },
+            },
+            {
+              "Action": "cloudwatch:TagResource",
+              "Effect": "Allow",
+              "Resource": "*",
             },
             {
               "Action": [
@@ -2323,13 +2323,8 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
               "Action": [
                 "cloudwatch:PutDashboard",
                 "cloudwatch:GetDashboard",
-                "cloudwatch:TagResource",
+                "cloudwatch:DeleteDashboards",
               ],
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
-              "Action": "cloudwatch:DeleteDashboards",
               "Effect": "Allow",
               "Resource": {
                 "Fn::Join": [
@@ -2347,6 +2342,11 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                   ],
                 ],
               },
+            },
+            {
+              "Action": "cloudwatch:TagResource",
+              "Effect": "Allow",
+              "Resource": "*",
             },
             {
               "Action": [
