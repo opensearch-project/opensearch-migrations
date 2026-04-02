@@ -46,8 +46,14 @@ services:
       - transform-dist:/transforms/dist
     command: ["sh", "-c", "npm install && npm run build"]
 
+  otel-lgtm:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - "3000:3000"    # Grafana UI
+      - "4317:4317"    # OTLP gRPC receiver
+
   translation-shim:
-    image: migrations/transformation_shim
+    image: localhost:5001/migrations/transformation_shim
     entrypoint: ["java", "-cp", "/app/resources:/app/classes:/app/libs/*",
       "org.opensearch.migrations.transform.shim.ShimMain"]
     ports:
@@ -59,20 +65,26 @@ services:
         condition: service_healthy
       transform-builder:
         condition: service_completed_successfully
+      otel-lgtm:
+        condition: service_started
     command:
       - --listenPort
       - "8080"
+      - --target
+      - solr=http://solr:8983
       - --target
       - opensearch=http://opensearch:9200
       - --primary
       - opensearch
       - --targetTransform
       - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
+      - --otelCollectorEndpoint
+      - http://otel-lgtm:4317
 
   # Dual-target shim (Solr primary): sends to both Solr and OpenSearch,
   # returns Solr response, validates against OpenSearch. Port 18083.
   translation-shim-dual-solr:
-    image: migrations/transformation_shim
+    image: localhost:5001/migrations/transformation_shim
     entrypoint: ["java", "-cp", "/app/resources:/app/classes:/app/libs/*",
       "org.opensearch.migrations.transform.shim.ShimMain"]
     ports:
@@ -86,6 +98,8 @@ services:
         condition: service_healthy
       transform-builder:
         condition: service_completed_successfully
+      otel-lgtm:
+        condition: service_started
     command:
       - --listenPort
       - "8080"
@@ -103,11 +117,13 @@ services:
       - doc-count:solr,opensearch:assert=solr==opensearch
       - --timeout
       - "5000"
+      - --otelCollectorEndpoint
+      - http://otel-lgtm:4317
 
   # Dual-target shim (OpenSearch primary): sends to both, returns OpenSearch
   # response, validates against Solr. Port 18084.
   translation-shim-dual-os:
-    image: migrations/transformation_shim
+    image: localhost:5001/migrations/transformation_shim
     entrypoint: ["java", "-cp", "/app/resources:/app/classes:/app/libs/*",
       "org.opensearch.migrations.transform.shim.ShimMain"]
     ports:
@@ -121,6 +137,8 @@ services:
         condition: service_healthy
       transform-builder:
         condition: service_completed_successfully
+      otel-lgtm:
+        condition: service_started
     command:
       - --listenPort
       - "8080"
@@ -138,6 +156,8 @@ services:
       - doc-count:solr,opensearch:assert=solr==opensearch
       - --timeout
       - "5000"
+      - --otelCollectorEndpoint
+      - http://otel-lgtm:4317
 
 volumes:
   transform-dist:
