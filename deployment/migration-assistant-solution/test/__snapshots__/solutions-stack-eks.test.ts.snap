@@ -1142,6 +1142,35 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
             },
             {
               "Action": [
+                "cloudwatch:PutDashboard",
+                "cloudwatch:GetDashboard",
+                "cloudwatch:TagResource",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "cloudwatch:DeleteDashboards",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":cloudwatch::",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":dashboard/MA-*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
                 "acm-pca:IssueCertificate",
                 "acm-pca:GetCertificate",
                 "acm-pca:DescribeCertificateAuthority",
@@ -2286,6 +2315,35 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                       "Ref": "AWS::AccountId",
                     },
                     ":role/*",
+                  ],
+                ],
+              },
+            },
+            {
+              "Action": [
+                "cloudwatch:PutDashboard",
+                "cloudwatch:GetDashboard",
+                "cloudwatch:TagResource",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": "cloudwatch:DeleteDashboards",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition",
+                    },
+                    ":cloudwatch::",
+                    {
+                      "Ref": "AWS::AccountId",
+                    },
+                    ":dashboard/MA-*",
                   ],
                 ],
               },

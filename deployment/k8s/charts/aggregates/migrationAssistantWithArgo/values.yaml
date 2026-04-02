@@ -99,6 +99,10 @@ workerFleets: {}
 
 stageName: dev
 
+cloudwatchDashboards:
+  enabled: false
+  deleteOnUninstall: true
+
 defaultBucketConfiguration:
   create: true
   deleteOnUninstall: true

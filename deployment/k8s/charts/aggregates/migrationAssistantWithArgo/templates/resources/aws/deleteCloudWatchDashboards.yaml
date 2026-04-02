@@ -1,0 +1,54 @@
+{{- if and .Values.cloudwatchDashboards.enabled .Values.cloudwatchDashboards.deleteOnUninstall }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: delete-cloudwatch-dashboards-{{ .Release.Name }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: cloudwatch-dashboards-delete
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: {{ .Values.defaultBucketConfiguration.serviceAccountName }}
+      restartPolicy: Never
+      containers:
+        - name: aws-cli
+          image: {{ .Values.defaultBucketConfiguration.bucketOperationImage }}
+          imagePullPolicy: {{ .Values.defaultBucketConfiguration.bucketOperationImagePullPolicy }}
+          env:
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: aws-metadata
+                  key: AWS_REGION
+            - name: STAGE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: aws-metadata
+                  key: STAGE_NAME
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              delete_dashboard() {
+                local name="$1"
+                local full_name="MA-${STAGE_NAME}-${AWS_REGION}-${name}"
+                echo "Deleting dashboard: ${full_name}"
+                aws cloudwatch delete-dashboards \
+                  --dashboard-names "${full_name}" \
+                  --region "${AWS_REGION}" \
+                  && echo "OK: Dashboard deleted: ${full_name}" \
+                  || echo "WARN: Could not delete dashboard: ${full_name}"
+              }
+              delete_dashboard "CaptureReplay"
+              delete_dashboard "ReindexFromSnapshot"
+{{- end }}

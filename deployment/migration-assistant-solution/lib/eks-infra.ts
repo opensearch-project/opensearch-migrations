@@ -256,6 +256,23 @@ export class EKSInfra extends Construct {
                 actions: ['iam:PassRole'],
                 resources: [`arn:${Aws.PARTITION}:iam::${Stack.of(this).account}:role/*`]
             }),
+            // CloudWatch dashboard management for Helm post-install/pre-delete hooks
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    'cloudwatch:PutDashboard',
+                    'cloudwatch:GetDashboard',
+                    'cloudwatch:TagResource',
+                ],
+                resources: ['*'],
+            }),
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: ['cloudwatch:DeleteDashboards'],
+                resources: [
+                    `arn:${Aws.PARTITION}:cloudwatch::${Stack.of(this).account}:dashboard/MA-*`
+                ],
+            }),
             // ACM PCA permissions for TLS certificate issuance via cert-manager
             new PolicyStatement({
                 effect: Effect.ALLOW,

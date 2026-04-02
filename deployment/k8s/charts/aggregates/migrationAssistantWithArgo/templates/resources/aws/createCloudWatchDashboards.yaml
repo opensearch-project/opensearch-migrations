@@ -1,0 +1,69 @@
+{{- if .Values.cloudwatchDashboards.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-cloudwatch-dashboards-{{ .Release.Name }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: cloudwatch-dashboards-create
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: {{ .Values.defaultBucketConfiguration.serviceAccountName }}
+      restartPolicy: OnFailure
+      containers:
+        - name: aws-cli
+          image: {{ .Values.defaultBucketConfiguration.bucketOperationImage }}
+          imagePullPolicy: {{ .Values.defaultBucketConfiguration.bucketOperationImagePullPolicy }}
+          env:
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: aws-metadata
+                  key: AWS_REGION
+            - name: STAGE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: aws-metadata
+                  key: STAGE_NAME
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              deploy_dashboard() {
+                local name="$1"
+                local file="$2"
+                local full_name="MA-${STAGE_NAME}-${AWS_REGION}-${name}"
+                echo "Deploying dashboard: ${full_name}"
+                local arn
+                arn=$(aws cloudwatch put-dashboard \
+                  --dashboard-name "${full_name}" \
+                  --dashboard-body "file://${file}" \
+                  --region "${AWS_REGION}" \
+                  --query 'DashboardArn' --output text)
+                aws cloudwatch tag-resource \
+                  --resource-arn "${arn}" \
+                  --tags "Key=ManagedBy,Value=migration-assistant" "Key=Stage,Value=${STAGE_NAME}" "Key=Region,Value=${AWS_REGION}" \
+                  --region "${AWS_REGION}"
+                echo "OK: Dashboard deployed and tagged: ${full_name}"
+              }
+              deploy_dashboard "CaptureReplay" "/dashboards/capture-replay-dashboard.json"
+              deploy_dashboard "ReindexFromSnapshot" "/dashboards/reindex-from-snapshot-dashboard.json"
+          volumeMounts:
+            - name: dashboards
+              mountPath: /dashboards
+              readOnly: true
+      volumes:
+        - name: dashboards
+          configMap:
+            name: cloudwatch-dashboards-config
+{{- end }}

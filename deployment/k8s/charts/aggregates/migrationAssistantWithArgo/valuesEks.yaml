@@ -18,6 +18,10 @@ cluster:
 workloadsNodePool:
   architectures: ["amd64", "arm64"]
 
+cloudwatchDashboards:
+  enabled: true
+  deleteOnUninstall: true
+
 defaultBucketConfiguration:
   useLocalStack: false
   deleteOnUninstall: true
