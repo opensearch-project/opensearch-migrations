@@ -11,7 +11,8 @@ import {
 export type ContainerVolumePair = {
     readonly container: Container,
     readonly volumes: Volume[],
-    readonly sidecars: Container[]
+    readonly sidecars: Container[],
+    readonly initContainers: Container[]
 };
 
 export function setupTestCredsForContainer(
@@ -48,7 +49,8 @@ export function setupTestCredsForContainer(
                 }
             ]
         },
-        sidecars: def.sidecars
+        sidecars: def.sidecars,
+        initContainers: def.initContainers
     } as const;
 }
 
@@ -129,7 +131,8 @@ export function setupLog4jConfigForContainer(
                 }
             ]
         },
-        sidecars: def.sidecars
+        sidecars: def.sidecars,
+        initContainers: def.initContainers
     } as const;
 }
 
@@ -139,9 +142,12 @@ const S3_CACHE_VOLUME_NAME = "s3-cache";
 const SHARED_MNT_VOLUME_NAME = "shared-mnt";
 
 /**
- * Add a snapshot-fuse sidecar that:
+ * Add a snapshot-fuse native sidecar (init container with restartPolicy: Always) that:
  * 1. Runs mount-s3 to mount the S3 bucket at /mnt/s3 (with 5GB emptyDir cache)
  * 2. Runs snapshot-fuse FUSE to translate ES/OS snapshot blobs into virtual Lucene files at /mnt/lucene
+ *
+ * As a native sidecar (K8s 1.29+), kubelet guarantees it starts and passes its
+ * startupProbe before any regular containers start — eliminating race conditions.
  *
  * Each pod independently mounts S3 and caches hot blocks locally. No PV/PVC or CSI driver required.
  * This enables horizontal scaling — each pod gets its own mount-s3 process and cache.
@@ -177,10 +183,12 @@ export function setupSnapshotFuseSidecar(
                 }
             ]
         },
-        sidecars: [
-            ...def.sidecars,
+        sidecars: def.sidecars,
+        initContainers: [
+            ...def.initContainers,
             {
                 name: "snapshot-fuse",
+                restartPolicy: "Always",
                 image: makeStringTypeProxy(sidecarImage),
                 imagePullPolicy: makeStringTypeProxy(sidecarImagePullPolicy),
                 args: [
@@ -188,6 +196,14 @@ export function setupSnapshotFuseSidecar(
                     makeStringTypeProxy(expr.concat(expr.literal("--snapshot-name="), snapshotName)),
                     "--mount-point=/mnt/lucene"
                 ],
+                startupProbe: {
+                    exec: {
+                        command: ["mountpoint", "-q", "/mnt/lucene"]
+                    },
+                    initialDelaySeconds: 1,
+                    periodSeconds: 2,
+                    failureThreshold: 60
+                },
                 env: [
                     { name: "RUST_LOG", value: "info" },
                     { name: "S3_BUCKET", value: makeStringTypeProxy(s3Bucket) },

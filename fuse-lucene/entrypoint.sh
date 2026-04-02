@@ -49,10 +49,5 @@ if [ -n "${S3_BUCKET:-}" ]; then
     fi
 fi
 
-# Signal readiness so other containers can wait for the mount
-READY_FILE="${READY_FILE:-/mnt/.fuse-ready}"
-touch "${READY_FILE}"
-echo "Wrote readiness sentinel: ${READY_FILE}"
-
 # Start snapshot-fuse with all passed arguments
 exec snapshot-fuse "$@"

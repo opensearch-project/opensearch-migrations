@@ -212,7 +212,7 @@ function getRfsDeploymentManifest
             setupLog4jConfigForContainer(
                 useCustomLogging,
                 args.loggingConfigMap,
-                {container: baseContainerDefinition, volumes: [], sidecars: []},
+                {container: baseContainerDefinition, volumes: [], sidecars: [], initContainers: []},
                 args.jvmArgs
             )
         )
@@ -262,6 +262,7 @@ function getRfsDeploymentManifest
                 },
                 spec: {
                     serviceAccountName: "argo-workflow-executor",
+                    initContainers: [...finalContainerDefinition.initContainers],
                     containers: [finalContainerDefinition.container, ...finalContainerDefinition.sidecars],
                     volumes: [...finalContainerDefinition.volumes]
                 }
