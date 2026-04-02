@@ -1324,6 +1324,127 @@ class TestArgoWorkflows:
                 except ApiException:
                     pass
 
+    def test_workflow_status_with_artifact_outputs(self, argo_workflows):
+        """Verify workflow status renders correctly when nodes produce artifact outputs.
+
+        Regression test for TypeError when statusOutput is stored as an S3 artifact
+        instead of an inline parameter. The quick-start-minimal manifest includes MinIO,
+        so artifact storage is available.
+        """
+        argo_namespace = argo_workflows["namespace"]
+        logger.info(f"\nTesting workflow status with artifact outputs (namespace: {argo_namespace})")
+
+        workflow_spec = {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Workflow",
+            "metadata": {
+                "generateName": "test-artifact-output-",
+                "namespace": argo_namespace,
+            },
+            "spec": {
+                "entrypoint": "main",
+                "templates": [
+                    {
+                        "name": "main",
+                        "steps": [[{
+                            "name": "produce-artifact",
+                            "template": "write-status"
+                        }]]
+                    },
+                    {
+                        "name": "write-status",
+                        "container": {
+                            "image": "busybox",
+                            "command": ["sh", "-c"],
+                            "args": ["echo 'snapshot completed' > /tmp/status-output.txt"]
+                        },
+                        "outputs": {
+                            "artifacts": [
+                                {
+                                    "name": "statusOutput",
+                                    "path": "/tmp/status-output.txt",
+                                    "archive": {"none": {}}
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+
+        custom_api = client.CustomObjectsApi()
+        workflow_name = None
+
+        try:
+            result = custom_api.create_namespaced_custom_object(
+                group="argoproj.io", version="v1alpha1",
+                namespace=argo_namespace, plural="workflows",
+                body=workflow_spec
+            )
+            workflow_name = result["metadata"]["name"]
+            logger.info(f"Submitted workflow: {workflow_name}")
+
+            # Wait for completion
+            max_wait = 120
+            start_time = time.time()
+            workflow_phase = "Unknown"
+
+            while time.time() - start_time < max_wait:
+                wf = custom_api.get_namespaced_custom_object(
+                    group="argoproj.io", version="v1alpha1",
+                    namespace=argo_namespace, plural="workflows",
+                    name=workflow_name
+                )
+                workflow_phase = wf.get("status", {}).get("phase", "Unknown")
+                if workflow_phase in ("Succeeded", "Failed", "Error"):
+                    break
+                time.sleep(2)
+
+            assert workflow_phase == "Succeeded", (
+                f"Workflow did not succeed (phase: {workflow_phase})"
+            )
+
+            # Verify the artifact was actually stored
+            nodes = wf.get("status", {}).get("nodes", {})
+            has_artifact = any(
+                any(a.get("name") == "statusOutput" for a in n.get("outputs", {}).get("artifacts", []))
+                for n in nodes.values()
+            )
+            assert has_artifact, (
+                f"No statusOutput artifact found in workflow nodes. "
+                f"Node outputs: {[(nid, n.get('outputs')) for nid, n in nodes.items()]}"
+            )
+            logger.info("✓ Workflow produced statusOutput artifact")
+
+            # Run workflow status CLI — this is the path that was crashing
+            runner = CliRunner()
+            status_result = runner.invoke(
+                workflow_cli,
+                ['status', '--workflow-name', workflow_name, '--namespace', argo_namespace,
+                 '--argo-server', 'https://localhost:2746', '--insecure']
+            )
+            assert status_result.exit_code == 0, (
+                f"Status command failed (exit {status_result.exit_code}): {status_result.output}"
+            )
+
+            logger.info(f"Status output:\n{status_result.output}")
+            assert workflow_name in status_result.output
+            assert "Succeeded" in status_result.output
+            logger.info("✓ workflow status renders correctly with artifact outputs")
+
+        except ApiException as e:
+            pytest.fail(f"Kubernetes API error: {e}")
+        finally:
+            if workflow_name:
+                try:
+                    custom_api.delete_namespaced_custom_object(
+                        group="argoproj.io", version="v1alpha1",
+                        namespace=argo_namespace, plural="workflows",
+                        name=workflow_name
+                    )
+                except ApiException:
+                    pass
+
 
 def test_k3s_container_support():
     """Test that k3s container support is available"""

@@ -619,3 +619,93 @@ def test_copy_to_clipboard_protocol_logic(env_updates, expected_wrapper, mocker)
 
     assert copy_to_clipboard(test_text) is True
     mock_stdout.assert_called_with(expected_output)
+
+
+@pytest.mark.asyncio
+async def test_tree_renders_with_artifact_outputs():
+    """Verify workflow manage renders without crashing when nodes have artifact-based statusOutput.
+
+    Regression test for TypeError: can only concatenate str (not "ArtifactRef") to str.
+    When Argo stores statusOutput as an S3 artifact instead of an inline parameter,
+    get_step_status_output returns an ArtifactRef object. The TUI cannot resolve artifacts
+    (that requires an API call), so the status output is omitted from the label.
+
+    Contrast with parameter-based statusOutput (node-3), which IS shown inline.
+    """
+    workflow = {
+        "metadata": {"name": "test-wf", "resourceVersion": "123"},
+        "status": {
+            "startedAt": "2023-01-01T00:00:00Z",
+            "nodes": {
+                "node-1": {
+                    "id": "node-1", "displayName": "Check Snapshot", "type": "Pod",
+                    "phase": PHASE_SUCCEEDED, "children": [],
+                    "startedAt": "2023-01-01T00:01:00Z",
+                    "finishedAt": "2023-01-01T00:02:00Z",
+                    "inputs": {"parameters": [{"name": "configContents", "value": "cfg"}]},
+                    "outputs": {
+                        "parameters": [
+                            {"name": "overriddenPhase", "value": "", "valueFrom": {"path": "/tmp/phase-output.txt"}}
+                        ],
+                        "artifacts": [
+                            {"name": "statusOutput", "path": "/tmp/status-output.txt",
+                             "s3": {"key": "argo-artifacts/test-wf/node-1/statusOutput"},
+                             "archive": {"none": {}}}
+                        ]
+                    }
+                },
+                "node-2": {
+                    "id": "node-2", "displayName": "Migrate Data", "type": "Pod",
+                    "phase": PHASE_RUNNING, "children": [],
+                    "startedAt": "2023-01-01T00:02:00Z",
+                    "inputs": {"parameters": []},
+                    "outputs": {"parameters": [], "artifacts": []}
+                },
+                "node-3": {
+                    "id": "node-3", "displayName": "Create Snapshot", "type": "Pod",
+                    "phase": PHASE_SUCCEEDED, "children": [],
+                    "startedAt": "2023-01-01T00:00:30Z",
+                    "finishedAt": "2023-01-01T00:01:00Z",
+                    "inputs": {"parameters": [{"name": "configContents", "value": "cfg"}]},
+                    "outputs": {
+                        "parameters": [
+                            {"name": "statusOutput", "value": "snapshot completed successfully"}
+                        ],
+                        "artifacts": []
+                    }
+                }
+            }
+        }
+    }
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": True}, workflow)
+
+    app = WorkflowTreeApp(
+        namespace="default", name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=MagicMock(),
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0
+    )
+
+    async with app.run_test() as pilot:
+        tree = app.query_one("#workflow-tree")
+        assert await wait_until(pilot, lambda: len(tree.root.children) == 3, timeout=5.0), \
+            f"Expected 3 nodes, got {len(tree.root.children)}"
+
+        labels = {get_clean_text_label(c) for c in tree.root.children}
+
+        # node-1: artifact-based statusOutput — NOT shown in TUI label (can't resolve without API call)
+        check_label = next(lbl for lbl in labels if "Check Snapshot" in lbl)
+        assert "ArtifactRef" not in check_label, f"Raw ArtifactRef leaked into label: {check_label}"
+        assert "argo-artifacts" not in check_label, f"S3 key leaked into label: {check_label}"
+
+        # node-3: parameter-based statusOutput — IS shown inline in TUI label
+        create_label = next(lbl for lbl in labels if "Create Snapshot" in lbl)
+        assert "snapshot completed successfully" in create_label, \
+            f"Parameter statusOutput should appear in label. Got: {create_label}"
+
+        # node-2: no statusOutput at all
+        migrate_label = next(lbl for lbl in labels if "Migrate Data" in lbl)
+        assert "Running" in migrate_label, f"Expected Running phase. Got: {migrate_label}"
