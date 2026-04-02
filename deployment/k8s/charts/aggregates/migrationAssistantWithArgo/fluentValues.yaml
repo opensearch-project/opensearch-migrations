@@ -44,9 +44,15 @@ config:
         Merge_Log_Key    log_processed
     
     [FILTER]
+        Name          lua
+        Match         kube.*
+        script        /fluentbit/scripts/trim.lua
+        call          set_pod_container_tag
+
+    [FILTER]
         Name          rewrite_tag
         Match         kube.*
-        Rule          $kubernetes['pod_name'] ^(.*)$ $kubernetes['pod_name'] false
+        Rule          $pod_container_tag ^(.+)$ $1 false
         Emitter_Name  re_emitted
   
     [FILTER]

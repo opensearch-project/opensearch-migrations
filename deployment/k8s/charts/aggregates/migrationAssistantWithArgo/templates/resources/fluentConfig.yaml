@@ -20,6 +20,16 @@ metadata:
     "helm.sh/hook-weight": "-1" # Make accessible earlier for charts that mount
 data:
   trim.lua: |
+    function set_pod_container_tag(tag, timestamp, record)
+        local k = record["kubernetes"]
+        if k then
+            local pod = k["pod_name"] or "unknown"
+            local container = k["container_name"] or "main"
+            record["pod_container_tag"] = pod .. "." .. container
+        end
+        return 1, timestamp, record
+    end
+
     function trim_log(tag, timestamp, record)
         if record["log_processed"] then
             if record["log_processed"]["msg"] then

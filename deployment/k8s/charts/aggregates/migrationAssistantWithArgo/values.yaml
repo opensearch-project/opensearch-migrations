@@ -454,9 +454,15 @@ charts:
               Annotations        Off
           
           [FILTER]
+              Name               lua
+              Match              kube.*
+              script             /fluentbit/scripts/trim.lua
+              call               set_pod_container_tag
+
+          [FILTER]
               Name               rewrite_tag
               Match              kube.*
-              Rule               $kubernetes['pod_name'] ^(.*)$ fluentbit-$1 false
+              Rule               $pod_container_tag ^(.+)$ fluentbit-$1 false
               Emitter_Name       re_emitted
           
           [FILTER]
@@ -505,6 +511,7 @@ charts:
               Remove             docker_id
               Remove             container_hash
               Remove             pod-template-hash
+              Remove             pod_container_tag
               Remove             workflows.argoproj.io/completed
               Remove_regex       ^app\.kubernetes\.io
               Remove_regex       ^batch\.kubernetes\.io
