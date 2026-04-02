@@ -9,8 +9,10 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval.MultiTypeResolutionBehavior;
 
@@ -19,6 +21,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.Matcher;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -260,7 +263,6 @@ class EndToEndTest extends BaseMigrationTest {
                                       List<TemplateType> templateTypes,
                                       TestData testData) {
         log.info(result.asCliOutput());
-        assertThat(result.getExitCode(), equalTo(0));
 
         var migratedItems = result.getItems();
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexTemplates())),
@@ -271,10 +273,14 @@ class EndToEndTest extends BaseMigrationTest {
             hasItems(Stream.concat(testData.blogIndexNames.stream(),
                 Stream.of(testData.movieIndexName)).toArray(String[]::new)));
         assertThat(getNames(getFailedResultsByType(migratedItems.getIndexes(),
-                CreationResult.CreationFailureType.ALREADY_EXISTS)),
+                CreationResult.CreationFailureType.INDEX_ALREADY_EXISTS)),
             hasItems(testData.indexThatAlreadyExists));
         assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())),
             hasItems(testData.aliasNames.toArray(new String[0])));
+
+        // INDEX_ALREADY_EXISTS is fatal, so exit code should be non-zero
+        assertThat("Exit code should be non-zero due to INDEX_ALREADY_EXISTS",
+            result.getExitCode(), Matchers.greaterThan(0));
     }
 
     private List<CreationResult> getSuccessfulResults(List<CreationResult> results) {
@@ -334,5 +340,84 @@ class EndToEndTest extends BaseMigrationTest {
             }
             assertThat(res.getValue(), res.getKey(), verifyResponseCode);
         }
+    }
+
+    /**
+     * Verifies that INDEX_ALREADY_EXISTS is fatal (non-zero exit) while TEMPLATE_ALREADY_EXISTS is not.
+     *
+     * Scenario:
+     * 1. Create an index and a legacy template on source
+     * 2. Migrate both to target (should succeed)
+     * 3. Re-run evaluate — index already exists (fatal), template already exists (non-fatal)
+     * 4. Re-run migrate — same behavior
+     */
+    @Test
+    @SneakyThrows
+    void alreadyExistsBehavior_indexIsFatal_templateIsNot() {
+        try (
+            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+        ) {
+            this.sourceCluster = sourceCluster;
+            this.targetCluster = targetCluster;
+            startClusters();
+
+            var indexName = "already-exists-test-index";
+            var templateName = "already-exists-test-template";
+            var templatePattern = "already-exists-test-*";
+
+            // Set up source with an index and a legacy template
+            sourceOperations.createDocument(indexName, "1", "{\"field\": \"value\"}");
+            sourceOperations.createLegacyTemplate(templateName, templatePattern);
+
+            // First migration — everything should succeed
+            var args = new MigrateOrEvaluateArgs();
+            args.sourceArgs.host = sourceCluster.getUrl();
+            args.targetArgs.host = targetCluster.getUrl();
+
+            var migrateResult = executeMigration(args, MetadataCommands.MIGRATE);
+            log.info("Initial migrate result: {}", migrateResult.asCliOutput());
+            assertThat("Initial migration should succeed", migrateResult.getExitCode(), equalTo(0));
+
+            // Re-run evaluate — both index and template already exist on target
+            var evalResult = executeMigration(args, MetadataCommands.EVALUATE);
+            log.info("Re-run evaluate result: {}", evalResult.asCliOutput());
+            verifyAlreadyExistsBehavior(evalResult, indexName, templateName);
+
+            // Re-run migrate — same assertions
+            var rerunResult = executeMigration(args, MetadataCommands.MIGRATE);
+            log.info("Re-run migrate result: {}", rerunResult.asCliOutput());
+            verifyAlreadyExistsBehavior(rerunResult, indexName, templateName);
+
+            // Verify the CLI output contains guidance for resolving index already exists
+            assertThat("CLI output should contain resolution guidance",
+                rerunResult.asCliOutput(), containsString("console clusters clear-indices --cluster target"));
+            assertThat("CLI output should mention --index-allowlist",
+                rerunResult.asCliOutput(), containsString("--index-allowlist"));
+        }
+    }
+
+    private void verifyAlreadyExistsBehavior(MigrationItemResult result, String indexName, String templateName) {
+        var items = result.getItems();
+
+        // Index already exists should be fatal
+        var indexFailures = getFailedResultsByType(items.getIndexes(), CreationFailureType.INDEX_ALREADY_EXISTS);
+        assertThat("Index should be reported as INDEX_ALREADY_EXISTS",
+            getNames(indexFailures), hasItems(indexName));
+        assertThat("INDEX_ALREADY_EXISTS should be fatal",
+            indexFailures.stream().allMatch(CreationResult::wasFatal), equalTo(true));
+
+        // Template already exists should be non-fatal
+        var templateFailures = items.getIndexTemplates().stream()
+            .filter(r -> CreationFailureType.TEMPLATE_ALREADY_EXISTS.equals(r.getFailureType()))
+            .collect(Collectors.toList());
+        assertThat("Template should be reported as TEMPLATE_ALREADY_EXISTS",
+            getNames(templateFailures), hasItems(templateName));
+        assertThat("TEMPLATE_ALREADY_EXISTS should not be fatal",
+            templateFailures.stream().noneMatch(CreationResult::wasFatal), equalTo(true));
+
+        // Exit code should be non-zero due to fatal index failure
+        assertThat("Exit code should be non-zero due to INDEX_ALREADY_EXISTS",
+            result.getExitCode(), Matchers.greaterThan(0));
     }
 }

@@ -31,7 +31,7 @@ public class GlobalMetadataCreatorResultsTest {
             .legacyTemplates(List.of())
             .indexTemplates(List.of(
                 CreationResult.builder().name("foobar").build(),
-                CreationResult.builder().name("barfoo").failureType(CreationFailureType.ALREADY_EXISTS).build()
+                CreationResult.builder().name("barfoo").failureType(CreationFailureType.TEMPLATE_ALREADY_EXISTS).build()
             ))
             .build();
         

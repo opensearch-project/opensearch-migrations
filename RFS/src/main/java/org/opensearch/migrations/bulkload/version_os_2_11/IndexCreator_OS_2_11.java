@@ -124,7 +124,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         }
 
         if (alreadyExists) {
-            result.failureType(CreationFailureType.ALREADY_EXISTS);
+            result.failureType(CreationFailureType.INDEX_ALREADY_EXISTS);
         }
 
         if (mode == MigrationMode.SIMULATE) {

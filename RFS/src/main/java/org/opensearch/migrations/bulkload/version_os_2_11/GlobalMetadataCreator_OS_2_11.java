@@ -166,7 +166,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
             try {
                 if (mode == MigrationMode.SIMULATE) {
                     if (templateType.alreadyExistsCheck.templateAlreadyExists(client, templateName)) {
-                        creationResult.failureType(CreationFailureType.ALREADY_EXISTS);
+                        creationResult.failureType(CreationFailureType.TEMPLATE_ALREADY_EXISTS);
                         log.warn("Template {} already exists on the target, it will not be created during a migration", templateName);
                     }
                 } else if (mode == MigrationMode.PERFORM) {
@@ -191,7 +191,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
             try {
                 var createdTemplate = templateType.creator.createTemplate(client, templateName, templateBody, context);
                 if (createdTemplate.isEmpty()) {
-                    creationResult.failureType(CreationFailureType.ALREADY_EXISTS);
+                    creationResult.failureType(CreationFailureType.TEMPLATE_ALREADY_EXISTS);
                     log.warn("Template {} already exists on the target, unable to create", templateName);
                 }
                 return;

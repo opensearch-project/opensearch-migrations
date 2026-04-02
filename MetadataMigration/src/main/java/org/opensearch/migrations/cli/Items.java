@@ -9,6 +9,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.commands.JsonOutput;
 import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -64,10 +65,35 @@ public class Items implements JsonOutput {
         appendSection(sb, "Component Templates", getComponentTemplates());
         appendSection(sb, "Indexes", getIndexes());
         appendSection(sb, "Aliases", getAliases());
+        appendIndexAlreadyExistsGuidance(sb);
 
         return sb.toString();
     }
 
+
+    private void appendIndexAlreadyExistsGuidance(StringBuilder sb) {
+        boolean hasIndexAlreadyExists = indexes.stream()
+            .anyMatch(r -> r.getFailureType() == CreationFailureType.INDEX_ALREADY_EXISTS);
+        if (!hasIndexAlreadyExists) {
+            return;
+        }
+        sb.append("To resolve index already exists failures, you can either:" + System.lineSeparator());
+        sb.append(Format.indentToLevel(1))
+          .append("1. Clear target indices and re-run the migration:")
+          .append(System.lineSeparator());
+        sb.append(Format.indentToLevel(2))
+          .append("console clusters clear-indices --cluster target")
+          .append(System.lineSeparator());
+        sb.append(Format.indentToLevel(2))
+          .append("Or selectively: console clusters curl -X DELETE target_cluster \"/<index-name>\"")
+          .append(System.lineSeparator());
+        sb.append(Format.indentToLevel(1))
+          .append("2. Specify only the indices you want to migrate with --index-allowlist")
+          .append(System.lineSeparator());
+        sb.append(Format.indentToLevel(2))
+          .append("Run with --help for syntax details")
+          .append(System.lineSeparator());
+    }
     private void appendSection(StringBuilder sb, String sectionTitle, List<CreationResult> items) {
         sb.append(Format.indentToLevel(1))
           .append(sectionTitle)
