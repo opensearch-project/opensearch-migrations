@@ -211,37 +211,10 @@ public class LuceneReader {
                 return null;  // Skip documents with missing id
             }
 
-            if (sourceBytes == null || sourceBytes.length == 0) {
-                if (mappingContext != null) {
-                    // Try to reconstruct _source from doc_values and stored fields (Solr path)
-                    log.atDebug().setMessage("Document {} has no _source, attempting reconstruction from doc_values and stored fields")
-                        .addArgument(openSearchDocId).log();
-                    String reconstructed = SourceReconstructor.reconstructSource(reader, luceneDocId, document, mappingContext);
-                    
-                    if (reconstructed == null || reconstructed.isEmpty()) {
-                        log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, _source is missing and reconstruction failed.")
-                            .addArgument(luceneDocId)
-                            .addArgument(getSegmentReaderDebugInfo)
-                            .addArgument(indexDirectoryPath)
-                            .log();
-                        return null;  // Skip these
-                    }
-                    sourceBytes = reconstructed.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                    log.atDebug().setMessage("Successfully reconstructed _source for document {} from doc_values")
-                        .addArgument(openSearchDocId).log();
-                } else {
-                    log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have the _source field enabled.")
-                        .addArgument(luceneDocId)
-                        .addArgument(getSegmentReaderDebugInfo)
-                        .addArgument(indexDirectoryPath)
-                        .log();
-                    return null;  // Skip these
-                }
-            } else if (mappingContext != null) {
-                // Merge excluded fields from doc_values and stored fields (Solr path)
-                String merged = SourceReconstructor.mergeWithDocValues(
-                    new String(sourceBytes, java.nio.charset.StandardCharsets.UTF_8), reader, luceneDocId, document, mappingContext);
-                sourceBytes = merged.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            sourceBytes = resolveSourceBytes(sourceBytes, reader, luceneDocId, document, mappingContext,
+                openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath);
+            if (sourceBytes == null) {
+                return null;
             }
 
             log.atDebug().setMessage("Reading document {}").addArgument(openSearchDocId).log();
@@ -264,6 +237,53 @@ public class LuceneReader {
 
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
         return new LuceneDocumentChange(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes, routing, operation);
+    }
+
+    /**
+     * Resolves the _source bytes for a document, either from the existing source, by reconstruction
+     * from doc_values (Solr path), or by merging excluded fields.
+     * @return resolved source bytes, or null if the document should be skipped
+     */
+    private static byte[] resolveSourceBytes(byte[] sourceBytes, LuceneLeafReader reader, int luceneDocId,
+            LuceneDocument document, FieldMappingContext mappingContext, String openSearchDocId,
+            Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath) {
+        if (sourceBytes == null || sourceBytes.length == 0) {
+            return reconstructSourceBytes(reader, luceneDocId, document, mappingContext,
+                openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath);
+        }
+        if (mappingContext != null) {
+            String merged = SourceReconstructor.mergeWithDocValues(
+                new String(sourceBytes, java.nio.charset.StandardCharsets.UTF_8), reader, luceneDocId, document, mappingContext);
+            return merged.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        }
+        return sourceBytes;
+    }
+
+    private static byte[] reconstructSourceBytes(LuceneLeafReader reader, int luceneDocId,
+            LuceneDocument document, FieldMappingContext mappingContext, String openSearchDocId,
+            Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath) {
+        if (mappingContext == null) {
+            log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have the _source field enabled.")
+                .addArgument(luceneDocId)
+                .addArgument(getSegmentReaderDebugInfo)
+                .addArgument(indexDirectoryPath)
+                .log();
+            return null;
+        }
+        log.atDebug().setMessage("Document {} has no _source, attempting reconstruction from doc_values and stored fields")
+            .addArgument(openSearchDocId).log();
+        String reconstructed = SourceReconstructor.reconstructSource(reader, luceneDocId, document, mappingContext);
+        if (reconstructed == null || reconstructed.isEmpty()) {
+            log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, _source is missing and reconstruction failed.")
+                .addArgument(luceneDocId)
+                .addArgument(getSegmentReaderDebugInfo)
+                .addArgument(indexDirectoryPath)
+                .log();
+            return null;
+        }
+        log.atDebug().setMessage("Successfully reconstructed _source for document {} from doc_values")
+            .addArgument(openSearchDocId).log();
+        return reconstructed.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
     /** Backwards-compatible overload without mapping context */
