@@ -212,24 +212,33 @@ public class LuceneReader {
             }
 
             if (sourceBytes == null || sourceBytes.length == 0) {
-                // Try to reconstruct _source from doc_values and stored fields
-                log.atDebug().setMessage("Document {} has no _source, attempting reconstruction from doc_values and stored fields")
-                    .addArgument(openSearchDocId).log();
-                String reconstructed = SourceReconstructor.reconstructSource(reader, luceneDocId, document, mappingContext);
-                
-                if (reconstructed == null || reconstructed.isEmpty()) {
-                    log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, _source is missing and reconstruction failed.")
+                if (mappingContext != null) {
+                    // Try to reconstruct _source from doc_values and stored fields (Solr path)
+                    log.atDebug().setMessage("Document {} has no _source, attempting reconstruction from doc_values and stored fields")
+                        .addArgument(openSearchDocId).log();
+                    String reconstructed = SourceReconstructor.reconstructSource(reader, luceneDocId, document, mappingContext);
+                    
+                    if (reconstructed == null || reconstructed.isEmpty()) {
+                        log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, _source is missing and reconstruction failed.")
+                            .addArgument(luceneDocId)
+                            .addArgument(getSegmentReaderDebugInfo)
+                            .addArgument(indexDirectoryPath)
+                            .log();
+                        return null;  // Skip these
+                    }
+                    sourceBytes = reconstructed.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    log.atDebug().setMessage("Successfully reconstructed _source for document {} from doc_values")
+                        .addArgument(openSearchDocId).log();
+                } else {
+                    log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have the _source field enabled.")
                         .addArgument(luceneDocId)
                         .addArgument(getSegmentReaderDebugInfo)
                         .addArgument(indexDirectoryPath)
                         .log();
                     return null;  // Skip these
                 }
-                sourceBytes = reconstructed.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                log.atDebug().setMessage("Successfully reconstructed _source for document {} from doc_values")
-                    .addArgument(openSearchDocId).log();
-            } else {
-                // Merge excluded fields from doc_values and stored fields
+            } else if (mappingContext != null) {
+                // Merge excluded fields from doc_values and stored fields (Solr path)
                 String merged = SourceReconstructor.mergeWithDocValues(
                     new String(sourceBytes, java.nio.charset.StandardCharsets.UTF_8), reader, luceneDocId, document, mappingContext);
                 sourceBytes = merged.getBytes(java.nio.charset.StandardCharsets.UTF_8);

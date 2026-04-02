@@ -1131,25 +1131,6 @@ if [[ "$build_chart_and_dashboards" != "true" ]]; then
 fi
 
 # --- helm install ---
-# Ensure a default StorageClass exists for dynamically-provisioned PVCs
-# (e.g. RFS coordinator). EKS Auto Mode uses ebs.csi.eks.amazonaws.com.
-if ! kubectl get storageclass -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}' 2>/dev/null | grep -q .; then
-  echo "No default StorageClass found, creating gp3..."
-  kubectl apply -f - <<'SC_EOF'
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: gp3
-  annotations:
-    storageclass.kubernetes.io/is-default-class: "true"
-provisioner: ebs.csi.eks.amazonaws.com
-parameters:
-  type: gp3
-volumeBindingMode: WaitForFirstConsumer
-reclaimPolicy: Delete
-allowVolumeExpansion: true
-SC_EOF
-fi
 # When using packaged chart, valuesEks.yaml is extracted from the tgz since
 # helm can't reference files inside an archive. When using the local chart,
 # values files are referenced directly. To add new values files, update both paths.

@@ -39,27 +39,27 @@ images:
   captureProxy:
     repository: migrations/capture_proxy
     tag: latest
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
   trafficReplayer:
     repository: migrations/traffic_replayer
     tag: latest
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
   reindexFromSnapshot:
     repository: migrations/reindex_from_snapshot
     tag: latest
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
   migrationConsole:
     repository: migrations/migration_console
     tag: latest
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
   installer:
     repository: migrations/migration_console
     tag: latest
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
   coordinatorCluster:
     repository: mirror.gcr.io/opensearchproject/opensearch
     tag: "3.1.0"
-    pullPolicy: Always
+    pullPolicy: IfNotPresent
 
 # Default AWS values are dummy values for LocalStack usage
 aws:
@@ -326,7 +326,7 @@ charts:
         # Override appVersion v3.7.8 to v3.7.9 to incorporate retry delay overflow fix
         # https://github.com/argoproj/argo-workflows/pull/15277
         tag: v3.7.9
-        pullPolicy: Always
+        pullPolicy: IfNotPresent
       crds:
         # Full CRDs enable Validating Admission Policy support and kubectl explain on Argo CRDs
         full: true
