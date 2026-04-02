@@ -218,7 +218,7 @@
             },
             {
               "name": "skipApprovalMap",
-              "value": {},
+              "value": "{}",
               "valueFrom": {
                 "configMapKeyRef": {
                   "name": "{{workflow.parameters.approvalConfigMapName}}",
@@ -376,7 +376,7 @@
           [
             {
               "template": "approvemigrate",
-              "when": "{{=!(fromJSON(inputs.parameters.skipMigrateApproval))}}",
+              "when": "!({{inputs.parameters.skipMigrateApproval}})",
               "arguments": {
                 "parameters": [
                   {

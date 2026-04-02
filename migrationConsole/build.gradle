@@ -47,6 +47,9 @@ tasks.register('makeAndStageWorkflowTemplates', NpmTask) {
     inputs.dir(workflowTemplatesP.dir("src"))
     // Resource files embedded in templates
     inputs.dir(workflowTemplatesP.dir("resources"))
+    // Dependency packages whose source affects template generation
+    inputs.dir(orchestrationSpecsDirP.dir("packages/argo-workflow-builders/src"))
+    inputs.dir(orchestrationSpecsDirP.dir("packages/schemas/src"))
     // Package-level config files
     inputs.file(workflowTemplatesP.file("package.json"))
     inputs.file(workflowTemplatesP.file("tsconfig.json"))

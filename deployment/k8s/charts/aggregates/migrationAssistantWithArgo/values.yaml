@@ -309,7 +309,7 @@ charts:
 
 
   argo-workflows:
-    version: "0.47.1"
+    version: "1.0.5"
     repository: "https://argoproj.github.io/argo-helm"
     values:
       fullnameOverride: "argo"
@@ -327,6 +327,9 @@ charts:
         # https://github.com/argoproj/argo-workflows/pull/15277
         tag: v3.7.9
         pullPolicy: Always
+      crds:
+        # Full CRDs enable Validating Admission Policy support and kubectl explain on Argo CRDs
+        full: true
       controller:
         pdb:
           enabled: true
@@ -334,7 +337,7 @@ charts:
         resources:
           requests: { cpu: 100m, memory: 128Mi }
           limits:   { cpu: 500m, memory: 256Mi }
-        containerSecurityContext:
+        securityContext:
           runAsNonRoot: true
           allowPrivilegeEscalation: false
         clusterWorkflowTemplates:
@@ -343,6 +346,11 @@ charts:
           enabled: true
         resourceRateLimit: { "limit": 10.0, "burst": 25 }
         workflowWorkers: 16
+        # Auto-restart pods that fail before entering Running state (e.g. DiskPressure, MemoryPressure evictions)
+        # Avoids needing retryStrategy on every template for transient infrastructure issues
+        failedPodRestart:
+          enabled: true
+          maxRestarts: 3
 
         replicas: 2
         affinity:
