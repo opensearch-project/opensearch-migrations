@@ -348,6 +348,7 @@ class EndToEndTest extends BaseMigrationTest {
      * 4. Re-run migrate — same behavior
      */
     @Test
+    @Tag("isolatedTest")
     @SneakyThrows
     void alreadyExistsBehavior_indexIsFatal_templateIsNot() {
         try (
