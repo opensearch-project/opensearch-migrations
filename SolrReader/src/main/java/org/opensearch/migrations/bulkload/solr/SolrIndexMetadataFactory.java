@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.solr;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.SnapshotRepo.Provider;
@@ -56,7 +57,7 @@ public class SolrIndexMetadataFactory implements IndexMetadata.Factory {
                 result.set(collection, indexNode);
             }
         } catch (IOException e) {
-            throw new RuntimeException("Failed to read Solr collection metadata", e);
+            throw new UncheckedIOException("Failed to read Solr collection metadata", e);
         }
         return result;
     }

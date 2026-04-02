@@ -26,6 +26,7 @@ public class SolrClient implements AutoCloseable {
     private static final int DEFAULT_MAX_RETRIES = 3;
     private static final long BASE_DELAY_MS = 500;
     private static final long MAX_DELAY_MS = 10_000;
+    private static final String COLLECTIONS_KEY = "collections";
 
     private final String baseUrl;
     private final HttpClient httpClient;
@@ -61,7 +62,7 @@ public class SolrClient implements AutoCloseable {
     public List<String> listCollections() throws IOException {
         try {
             var node = getJson(baseUrl + "/solr/admin/collections?action=LIST&wt=json");
-            var collections = node.get("collections");
+            var collections = node.get(COLLECTIONS_KEY);
             if (collections != null && collections.isArray()) {
                 return MAPPER.convertValue(collections, MAPPER.getTypeFactory()
                     .constructCollectionType(List.class, String.class));
@@ -103,7 +104,7 @@ public class SolrClient implements AutoCloseable {
     public JsonNode getClusterState(String collection) throws IOException {
         try {
             var node = getJson(baseUrl + "/solr/admin/collections?action=CLUSTERSTATUS&collection=" + collection + "&wt=json");
-            return node.path("cluster").path("collections").path(collection);
+            return node.path("cluster").path(COLLECTIONS_KEY).path(collection);
         } catch (Exception e) {
             return null;
         }
@@ -113,7 +114,7 @@ public class SolrClient implements AutoCloseable {
     public boolean isSolrCloud() {
         try {
             var node = getJson(baseUrl + "/solr/admin/collections?action=LIST&wt=json");
-            return node.has("collections");
+            return node.has(COLLECTIONS_KEY);
         } catch (Exception e) {
             return false;
         }

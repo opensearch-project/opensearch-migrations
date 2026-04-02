@@ -37,6 +37,8 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 public class SolrBackupSource implements DocumentSource {
 
+    private static final String INDEX_DIR_NAME = "index";
+
     private final Path backupDir;
     private final String collectionName;
     private final JsonNode solrSchema;
@@ -97,7 +99,7 @@ public class SolrBackupSource implements DocumentSource {
         }
 
         // Check for S3 backup structure: index/ directory at top level
-        var indexDir = backupDir.resolve("index");
+        var indexDir = backupDir.resolve(INDEX_DIR_NAME);
         if (hasSegmentsFile(indexDir)) {
             return List.of(indexDir);
         }
@@ -113,7 +115,7 @@ public class SolrBackupSource implements DocumentSource {
                         return java.util.stream.Stream.of(shardDir);
                     }
                     // SolrCloud: shardN/data/index/ contains segments_N
-                    var indexPath = shardDir.resolve("data").resolve("index");
+                    var indexPath = shardDir.resolve("data").resolve(INDEX_DIR_NAME);
                     if (hasSegmentsFile(indexPath)) {
                         return java.util.stream.Stream.of(indexPath);
                     }
@@ -224,7 +226,7 @@ public class SolrBackupSource implements DocumentSource {
             mdFiles.filter(p -> p.getFileName().toString().endsWith(".json")).forEach(mdFile -> {
                 try {
                     var tree = mapper.readTree(mdFile.toFile());
-                    var indexDir = backupDir.resolve("index");
+                    var indexDir = backupDir.resolve(INDEX_DIR_NAME);
                     tree.fields().forEachRemaining(entry -> {
                         var uuid = entry.getKey();
                         var fileName = entry.getValue().path("fileName").asText(null);

@@ -107,7 +107,7 @@ public class ClusterReaderExtractor {
                 schemas.put(name, SolrSchemaXmlParser.findAndParse(backupDir.resolve(name)));
             }
         } catch (IOException e) {
-            throw new RuntimeException("Failed to list backup directory: " + backupDir, e);
+            throw new ParameterException("Failed to list backup directory: " + backupDir + ": " + e.getMessage());
         }
 
         if (!arguments.dataFilterArgs.indexAllowlist.isEmpty()) {

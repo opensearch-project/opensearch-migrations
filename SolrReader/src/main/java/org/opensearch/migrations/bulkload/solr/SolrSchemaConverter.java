@@ -5,6 +5,7 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 
@@ -26,6 +27,7 @@ public final class SolrSchemaConverter {
     private static final String OS_BOOLEAN = "boolean";
     private static final String OS_KEYWORD = "keyword";
     private static final String OS_TEXT = "text";
+    private static final String OS_BINARY = "binary";
 
     /** Maps Solr field type names to OpenSearch types. */
     private static final Map<String, String> SOLR_TO_OS_TYPE = Map.ofEntries(
@@ -52,7 +54,7 @@ public final class SolrSchemaConverter {
         Map.entry("date", OS_DATE),
         Map.entry(OS_BOOLEAN, OS_BOOLEAN),
         Map.entry("booleans", OS_BOOLEAN),
-        Map.entry("binary", "binary")
+        Map.entry("binary", OS_BINARY)
     );
 
     /** Maps Solr fieldType Java class names to OpenSearch types (fallback when type name isn't in SOLR_TO_OS_TYPE). */
@@ -70,7 +72,7 @@ public final class SolrSchemaConverter {
         Map.entry("solr.TrieFloatField", OS_FLOAT),
         Map.entry("solr.TrieDoubleField", OS_DOUBLE),
         Map.entry("solr.TrieDateField", OS_DATE),
-        Map.entry("solr.BinaryField", "binary"),
+        Map.entry("solr.BinaryField", OS_BINARY),
         Map.entry("solr.UUIDField", OS_KEYWORD)
     );
 
@@ -99,60 +101,68 @@ public final class SolrSchemaConverter {
     public static ObjectNode convertToOpenSearchMappings(
         JsonNode solrFields, JsonNode dynamicFields, JsonNode copyFields, JsonNode fieldTypes
     ) {
-        // Build fieldType name → class lookup
         var typeClassMap = buildFieldTypeClassMap(fieldTypes);
 
         ObjectNode mappings = MAPPER.createObjectNode();
         ObjectNode properties = MAPPER.createObjectNode();
 
-        // 1. Explicit fields
-        if (solrFields != null && solrFields.isArray()) {
-            for (var field : solrFields) {
-                var name = field.path("name").asText();
-                var type = field.path("type").asText();
-                if (isInternalField(name)) {
-                    continue;
-                }
-                var fieldMapping = resolveFieldMapping(type, typeClassMap);
-                properties.set(name, fieldMapping);
-            }
-        }
-
-        // 2. Dynamic fields → dynamic_templates
-        var dynamicTemplates = MAPPER.createArrayNode();
-        if (dynamicFields != null && dynamicFields.isArray()) {
-            for (var dynField : dynamicFields) {
-                var pattern = dynField.path("name").asText();
-                var type = dynField.path("type").asText();
-                if (pattern.isEmpty() || type.isEmpty()) {
-                    continue;
-                }
-                var osType = resolveOsType(type, typeClassMap);
-                var template = buildDynamicTemplate(pattern, osType);
-                if (template != null) {
-                    dynamicTemplates.add(template);
-                }
-            }
-        }
-
-        // 3. CopyFields → add destination fields if not already present
-        if (copyFields != null && copyFields.isArray()) {
-            for (var cf : copyFields) {
-                var dest = cf.path("dest").asText();
-                if (!dest.isEmpty() && !properties.has(dest) && !isInternalField(dest)) {
-                    // copyField destinations are typically catch-all text fields
-                    var fieldMapping = MAPPER.createObjectNode();
-                    fieldMapping.put("type", OS_TEXT);
-                    properties.set(dest, fieldMapping);
-                }
-            }
-        }
+        processExplicitFields(solrFields, typeClassMap, properties);
+        var dynamicTemplates = processDynamicFields(dynamicFields, typeClassMap);
+        processCopyFields(copyFields, properties);
 
         mappings.set("properties", properties);
         if (!dynamicTemplates.isEmpty()) {
             mappings.set("dynamic_templates", dynamicTemplates);
         }
         return mappings;
+    }
+
+    private static void processExplicitFields(JsonNode solrFields, Map<String, String> typeClassMap, ObjectNode properties) {
+        if (solrFields == null || !solrFields.isArray()) {
+            return;
+        }
+        for (var field : solrFields) {
+            var name = field.path("name").asText();
+            var type = field.path("type").asText();
+            if (isInternalField(name)) {
+                continue;
+            }
+            properties.set(name, resolveFieldMapping(type, typeClassMap));
+        }
+    }
+
+    private static ArrayNode processDynamicFields(JsonNode dynamicFields, Map<String, String> typeClassMap) {
+        var dynamicTemplates = MAPPER.createArrayNode();
+        if (dynamicFields == null || !dynamicFields.isArray()) {
+            return dynamicTemplates;
+        }
+        for (var dynField : dynamicFields) {
+            var pattern = dynField.path("name").asText();
+            var type = dynField.path("type").asText();
+            if (pattern.isEmpty() || type.isEmpty()) {
+                continue;
+            }
+            var osType = resolveOsType(type, typeClassMap);
+            var template = buildDynamicTemplate(pattern, osType);
+            if (template != null) {
+                dynamicTemplates.add(template);
+            }
+        }
+        return dynamicTemplates;
+    }
+
+    private static void processCopyFields(JsonNode copyFields, ObjectNode properties) {
+        if (copyFields == null || !copyFields.isArray()) {
+            return;
+        }
+        for (var cf : copyFields) {
+            var dest = cf.path("dest").asText();
+            if (!dest.isEmpty() && !properties.has(dest) && !isInternalField(dest)) {
+                var fieldMapping = MAPPER.createObjectNode();
+                fieldMapping.put("type", OS_TEXT);
+                properties.set(dest, fieldMapping);
+            }
+        }
     }
 
     private static ObjectNode resolveFieldMapping(String solrType, Map<String, String> typeClassMap) {

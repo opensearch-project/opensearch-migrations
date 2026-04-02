@@ -270,10 +270,7 @@ public class S3Repo implements SourceRepo {
 
             String finalPrefixKey = prefixKey;
             for (S3Object obj : response.contents()) {
-                String relativePath = obj.key().substring(finalPrefixKey.length());
-                if (relativePath.isEmpty() || relativePath.endsWith("/")) continue;
-                Path localPath = s3LocalDir.resolve(relativePath);
-                ensureFileExistsLocally(new S3Uri("s3://" + s3RepoUri.bucketName + "/" + obj.key()), localPath);
+                downloadS3Object(obj, finalPrefixKey);
             }
 
             continuationToken = response.isTruncated() ? response.nextContinuationToken() : null;
@@ -281,6 +278,13 @@ public class S3Repo implements SourceRepo {
 
         log.info("Downloaded all files from {} to {}", s3RepoUri, s3LocalDir);
         return s3LocalDir;
+    }
+
+    private void downloadS3Object(S3Object obj, String prefixKey) {
+        String relativePath = obj.key().substring(prefixKey.length());
+        if (relativePath.isEmpty() || relativePath.endsWith("/")) return;
+        Path localPath = s3LocalDir.resolve(relativePath);
+        ensureFileExistsLocally(new S3Uri("s3://" + s3RepoUri.bucketName + "/" + obj.key()), localPath);
     }
 
     /**

@@ -22,6 +22,8 @@ public class SolrSchemaXmlParser {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    private SolrSchemaXmlParser() {}
+
     /**
      * Parse a managed-schema.xml file and return a JSON node matching the Solr Schema API format:
      * { "schema": { "fields": [...], "dynamicFields": [...], "copyFields": [...], "fieldTypes": [...] } }

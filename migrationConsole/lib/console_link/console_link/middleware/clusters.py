@@ -120,6 +120,17 @@ def _solr_collection_doc_count(cluster: Cluster, collection: str) -> int:
         return 0
 
 
+def _solr_connection_check(cluster: Cluster, r, caught_exception) -> ConnectionResult:
+    if caught_exception is None and r is not None:
+        response_json = r.json()
+        version = response_json.get("lucene", {}).get("solr-spec-version", "unknown")
+        return ConnectionResult(connection_message="Successfully connected!",
+                                connection_established=True,
+                                cluster_version=version)
+    return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {caught_exception}",
+                            connection_established=False)
+
+
 def connection_check(cluster: Cluster) -> ConnectionResult:
     # Probe GET / — mirrors Java getClusterVersion logic.
     # For non-serverless: returns the response directly (avoids a second GET /).
@@ -134,16 +145,8 @@ def connection_check(cluster: Cluster) -> ConnectionResult:
     except Exception as e:
         caught_exception = e
 
-    # Solr path
     if _is_solr(cluster):
-        if caught_exception is None and r is not None:
-            response_json = r.json()
-            version = response_json.get("lucene", {}).get("solr-spec-version", "unknown")
-            return ConnectionResult(connection_message="Successfully connected!",
-                                    connection_established=True,
-                                    cluster_version=version)
-        return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {caught_exception}",
-                                connection_established=False)
+        return _solr_connection_check(cluster, r, caught_exception)
 
     if caught_exception is None and r is not None and r.status_code == 404:
         # Serverless — detect collection type (skip root probe, we already know it's 404)
