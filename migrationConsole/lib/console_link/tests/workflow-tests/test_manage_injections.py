@@ -337,7 +337,41 @@ class TestArgoServiceFiltering:
     @patch('console_link.workflow.tui.manage_injections.requests.get')
     def test_filters_output_parameters_to_allowed_list(self, mock_get, mock_service_class):
         """Verify only statusOutput and overriddenPhase are kept in outputs."""
+        _bloated = self._make_bloated_workflow_response()  # noqa: F841
+
+    @patch('console_link.workflow.tui.manage_injections.WorkflowService')
+    @patch('console_link.workflow.tui.manage_injections.requests.get')
+    def test_preserves_status_output_artifact_and_filters_others(self, mock_get, mock_service_class):
+        """Verify statusOutput artifacts are kept but other artifacts are filtered out."""
         bloated = self._make_bloated_workflow_response()
+        # Add a statusOutput artifact alongside the existing main-logs artifact
+        bloated["status"]["nodes"]["node-1"]["outputs"]["artifacts"].append(
+            {"name": "statusOutput", "path": "/tmp/status-output.txt",
+             "s3": {"key": "argo-artifacts/wf/node-1/statusOutput"},
+             "archive": {"none": {}}}
+        )
+
+        mock_service = MagicMock()
+        mock_service.get_workflow_status.return_value = {
+            'workflow': {'metadata': {'resourceVersion': '12345'}},
+            'started_at': '2024-01-01T00:00:00Z'
+        }
+        mock_service_class.return_value = mock_service
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raw = io.BytesIO(json.dumps(bloated).encode())
+        mock_get.return_value = mock_response
+
+        argo = make_argo_service("http://argo:2746", False, "token")
+        _, slim_data = argo.get_workflow("my-workflow", "default")
+
+        node1_artifacts = slim_data["status"]["nodes"]["node-1"]["outputs"]["artifacts"]
+        artifact_names = {a["name"] for a in node1_artifacts}
+
+        assert "statusOutput" in artifact_names, "statusOutput artifact should be preserved"
+        assert "main-logs" not in artifact_names, "non-statusOutput artifacts should be filtered"
+        assert len(node1_artifacts) == 1
 
         mock_service = MagicMock()
         mock_service.get_workflow_status.return_value = {

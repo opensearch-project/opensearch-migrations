@@ -355,7 +355,8 @@ def get_node_phase(node: dict) -> str:
 
 
 def get_step_rich_label(
-    node: dict, status_output: Optional[Union[str, ArtifactRef]], show_approval_name: bool = True
+    node: dict, status_output: Optional[Union[str, ArtifactRef]],
+    show_approval_name: bool = True
 ) -> str:
     """Get rich-formatted label for a workflow step node.
 

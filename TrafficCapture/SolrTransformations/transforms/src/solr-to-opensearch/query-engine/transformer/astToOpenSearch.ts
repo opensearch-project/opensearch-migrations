@@ -17,7 +17,7 @@
  *     MatchAllNode → Map{"match_all" → Map{}}
  *
  *   `title:java`
- *     FieldNode(title, java) → Map{"term" → Map{"title" → "java"}}
+ *     FieldNode(title, java) → Map{"match" → Map{"title" → "java"}}
  *
  *   `"hello world"` (with df="content")
  *     PhraseNode(hello world) → Map{"match_phrase" → Map{"content" → "hello world"}}
@@ -29,7 +29,7 @@
  *     RangeNode(price, 10, 100) → Map{"range" → Map{"price" → Map{"gte" → "10", "lte" → "100"}}}
  *
  *   `title:java^2`
- *     BoostNode(FieldNode, 2) → Map{"term" → Map{"title" → "java", "boost" → 2}}
+ *     BoostNode(FieldNode, 2) → Map{"match" → Map{"title" → Map{"query" → "java", "boost" → 2}}}
  *
  *   `(a OR b)`
  *     GroupNode → transparent, recurses into child
@@ -39,6 +39,8 @@ import type { ASTNode } from '../ast/nodes';
 import type { TransformRuleFn } from './types';
 import { bareRule } from './rules/bareRule';
 import { boolRule } from './rules/boolRule';
+import { fieldRule } from './rules/fieldRule';
+import { matchAllRule } from './rules/matchAllRule';
 import { phraseRule } from './rules/phraseRule';
 import { rangeRule } from './rules/rangeRule';
 
@@ -53,6 +55,8 @@ const rules: Record<string, TransformRuleFn> = {
   // TODO: register remaining rules as they are implemented
   bare: bareRule,
   bool: boolRule,
+  field: fieldRule,
+  matchAll: matchAllRule,
   phrase: phraseRule,
   range: rangeRule,
 };

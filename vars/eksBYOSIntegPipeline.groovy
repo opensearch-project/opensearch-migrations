@@ -203,7 +203,8 @@ def call(Map config = [:]) {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                     sh """
-                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                        ./deployment/k8s/aws/assemble-bootstrap.sh
+                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                           --deploy-create-vpc-cfn \
                                           --build-cfn \
                                           --stack-name "${env.MA_STACK_NAME}" \

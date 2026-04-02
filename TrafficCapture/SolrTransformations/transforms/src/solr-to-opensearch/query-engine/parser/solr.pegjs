@@ -176,8 +176,9 @@ rangeVal
 
 // Unquoted value characters: letters, digits, and common special chars.
 // Determines what can appear in unquoted field values.
+// Includes ~ to parse fuzzy syntax (roam~, roam~1) so we can throw a clear error.
 valueChars
-  = $[a-zA-Z0-9._\-*#$@?+/]+
+  = $[a-zA-Z0-9._\-*#$@?+/~]+
 
 // Field name identifier: starts with a letter or underscore, followed by
 // value characters. More restrictive first character prevents numbers from
