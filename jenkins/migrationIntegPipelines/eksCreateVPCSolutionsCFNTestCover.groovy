@@ -9,7 +9,7 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
 def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
 eksSolutionsCFNTest(
     vpcMode: 'create',
-    defaultStage: 'ekscreatevpc',
+    defaultStage: 'eks-crtvpc',
     defaultGitUrl: 'https://github.com/opensearch-project/opensearch-migrations.git',
     defaultGitBranch: 'main',
     jobName: jobNameOverride ?: null

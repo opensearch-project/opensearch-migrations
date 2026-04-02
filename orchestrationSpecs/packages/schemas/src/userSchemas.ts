@@ -709,6 +709,8 @@ export const SNAPSHOT_INFO = z.object({
         .describe("Snapshots to use or create for this source cluster.")
 }).describe("Snapshot repository and snapshot configuration for a source cluster.");
 
+const AWS_MANAGED_ENDPOINT_PATTERN = /(?:\.es\.amazonaws\.com|\.aos\.[a-z0-9-]+\.on\.aws)(?::\d+)?(?:\/)?$/i;
+
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING,
     snapshotInfo: SNAPSHOT_INFO.optional()
@@ -731,6 +733,34 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
                     message: `Snapshot '${snapName}' references unknown repoName '${repoName}'. Available: ${Object.keys(repos).join(', ')}`,
                     path: ['snapshotInfo', 'snapshots', snapName, 'repoName']
                 });
+            }
+        }
+    }
+
+    // AWS managed clusters require SigV4 auth when triggering snapshot creation
+    if (data.endpoint && AWS_MANAGED_ENDPOINT_PATTERN.test(data.endpoint)) {
+        const hasCreateSnapshot = Object.values(snapshots).some(s => "createSnapshotConfig" in s.config);
+        if (hasCreateSnapshot && (!data.authConfig || !HTTP_AUTH_SIGV4.safeParse(data.authConfig).success)) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "SigV4 auth is required for Amazon OpenSearch domains when the workflow creates snapshot",
+                path: ['authConfig']
+            });
+        }
+    }
+
+    // SigV4 auth + createSnapshotConfig requires s3RoleArn on the referenced repo
+    if (data.authConfig && HTTP_AUTH_SIGV4.safeParse(data.authConfig).success) {
+        for (const [snapName, snapConfig] of Object.entries(snapshots)) {
+            if ("createSnapshotConfig" in snapConfig.config) {
+                const repo = repos?.[snapConfig.repoName];
+                if (repo && !repo.s3RoleArn) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `Snapshot '${snapName}' uses SigV4 auth with createSnapshotConfig but repo '${snapConfig.repoName}' is missing s3RoleArn`,
+                        path: ['snapshotInfo', 'repos', snapConfig.repoName, 's3RoleArn']
+                    });
+                }
             }
         }
     }

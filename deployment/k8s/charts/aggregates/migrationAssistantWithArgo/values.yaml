@@ -244,8 +244,8 @@ charts:
           limits:   { cpu: 250m, memory: 128Mi }
       webhook:
         resources:
-          requests: { cpu: 50m, memory: 32Mi }
-          limits:   { cpu: 100m, memory: 64Mi }
+          requests: { cpu: 50m, memory: 64Mi }
+          limits:   { cpu: 100m, memory: 128Mi }
 
   aws-privateca-issuer:
     version: "1.4.0"
@@ -255,8 +255,8 @@ charts:
       serviceAccount:
         name: aws-pca-issuer
       resources:
-        requests: { cpu: 25m, memory: 32Mi }
-        limits:   { cpu: 100m, memory: 64Mi }
+        requests: { cpu: 25m, memory: 64Mi }
+        limits:   { cpu: 100m, memory: 128Mi }
 
   ack-acmpca-controller:
     version: "1.2.2"
@@ -309,7 +309,7 @@ charts:
 
 
   argo-workflows:
-    version: "0.47.1"
+    version: "1.0.5"
     repository: "https://argoproj.github.io/argo-helm"
     values:
       fullnameOverride: "argo"
@@ -323,10 +323,10 @@ charts:
           insecure: false
           keyFormat: "argo-artifacts/{{workflow.name}}/{{pod.name}}"
       images:
-        # Override appVersion v3.7.8 to v3.7.9 to incorporate retry delay overflow fix
-        # https://github.com/argoproj/argo-workflows/pull/15277
-        tag: v3.7.9
         pullPolicy: IfNotPresent
+      crds:
+        # Full CRDs enable Validating Admission Policy support and kubectl explain on Argo CRDs
+        full: true
       controller:
         pdb:
           enabled: true
@@ -334,7 +334,7 @@ charts:
         resources:
           requests: { cpu: 100m, memory: 128Mi }
           limits:   { cpu: 500m, memory: 256Mi }
-        containerSecurityContext:
+        securityContext:
           runAsNonRoot: true
           allowPrivilegeEscalation: false
         clusterWorkflowTemplates:
@@ -343,6 +343,11 @@ charts:
           enabled: true
         resourceRateLimit: { "limit": 10.0, "burst": 25 }
         workflowWorkers: 16
+        # Auto-restart pods that fail before entering Running state (e.g. DiskPressure, MemoryPressure evictions)
+        # Avoids needing retryStrategy on every template for transient infrastructure issues
+        failedPodRestart:
+          enabled: true
+          maxRestarts: 3
 
         replicas: 2
         affinity:
@@ -365,8 +370,8 @@ charts:
       server:
         replicas: 2
         resources:
-          requests: { cpu: 100m, memory: 128Mi }
-          limits:   { cpu: 500m, memory: 256Mi }
+          requests: { cpu: 100m, memory: 512Mi }
+          limits:   { cpu: 500m, memory: 512Mi }
         pdb:
           enabled: true
           minAvailable: 1  # Ensures at least 1 pod always running
@@ -568,8 +573,8 @@ charts:
         enabled: true
       prometheusOperator:
         resources:
-          requests: { cpu: 50m, memory: 64Mi }
-          limits:   { cpu: 250m, memory: 128Mi }
+          requests: { cpu: 50m, memory: 128Mi }
+          limits:   { cpu: 250m, memory: 256Mi }
       kube-state-metrics:
         resources:
           requests: { cpu: 50m, memory: 64Mi }

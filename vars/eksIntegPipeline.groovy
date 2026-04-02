@@ -79,7 +79,10 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    script { env.maStageName = "${params.STAGE}-${currentBuild.number}" }
+                    script {
+                        def pool = jobName.startsWith("main-") ? "m" : "p"
+                        env.maStageName = "${params.STAGE}-${pool}${currentBuild.number}"
+                    }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }

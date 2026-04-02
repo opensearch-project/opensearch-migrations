@@ -58,7 +58,11 @@ charts:
     repository: "oci://${ECR}/charts/argo-workflows"
     values:
       images:
-        tag: v3.7.9
+        tag: v4.0.3
+      crds:
+        upgradeJob:
+          image:
+            repository: "${M}/registry.k8s.io/kubectl"
       controller:
         image:
           registry: "${M}/quay.io"

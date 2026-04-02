@@ -1,0 +1,29 @@
+{
+  "sourceClusters": {
+    "source": {
+      "version": "ES 7.10.2",
+      "endpoint": "https://my-domain.us-east-1.es.amazonaws.com",
+      "authConfig": { "basic": { "secretName": "source-creds" } },
+      "snapshotInfo": {
+        "snapshots": {
+          "snap1": {
+            "repoName": "",
+            "config": { "externallyManagedSnapshotName": "my-snapshot" }
+          }
+        }
+      }
+    }
+  },
+  "targetClusters": {
+    "target": { "endpoint": "http://target:9200" }
+  },
+  "snapshotMigrationConfigs": [
+    {
+      "fromSource": "source",
+      "toTarget": "target",
+      "perSnapshotConfig": {
+        "snap1": [{ "metadataMigrationConfig": {} }]
+      }
+    }
+  ]
+}

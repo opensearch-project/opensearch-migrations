@@ -289,16 +289,18 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b => b
-            .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c =>
-                c.register({
+            .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c => {
+                const snapshotNameRes = expr.get(
+                    expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                    "snapshotNameResolution");
+                return c.register({
                     ...selectInputsForRegister(b, c),
-                    resourceName: expr.getLoose(
-                        expr.get(
-                            expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
-                            "snapshotNameResolution"
-                        ),
-                        "dataSnapshotResourceName")
-                }), {
+                    resourceName: expr.ternary(
+                        expr.hasKey(snapshotNameRes, "dataSnapshotResourceName"),
+                        expr.getLoose(snapshotNameRes, "dataSnapshotResourceName"),
+                        expr.literal(""))
+                });
+            }, {
                     when: {
                         templateExp: expr.hasKey(
                             expr.get(
@@ -309,15 +311,17 @@ export const FullMigration = WorkflowBuilder.create({
                     }
                 }
             )
-            .addStep("readSnapshotName", ResourceManagement, "readDataSnapshotName", c =>
-                    c.register({
-                        resourceName: expr.getLoose(
-                            expr.get(
-                                expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
-                                "snapshotNameResolution"
-                            ),
-                            "dataSnapshotResourceName")
-                    }), {
+            .addStep("readSnapshotName", ResourceManagement, "readDataSnapshotName", c => {
+                    const snapshotNameRes = expr.get(
+                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                        "snapshotNameResolution");
+                    return c.register({
+                        resourceName: expr.ternary(
+                            expr.hasKey(snapshotNameRes, "dataSnapshotResourceName"),
+                            expr.getLoose(snapshotNameRes, "dataSnapshotResourceName"),
+                            expr.literal(""))
+                    });
+                }, {
                     when: {
                         templateExp: expr.hasKey(
                             expr.get(
