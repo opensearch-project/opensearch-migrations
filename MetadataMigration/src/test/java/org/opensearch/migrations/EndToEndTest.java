@@ -397,24 +397,23 @@ class EndToEndTest extends BaseMigrationTest {
     private void verifyAlreadyExistsBehavior(MigrationItemResult result, String indexName, String templateName) {
         var items = result.getItems();
 
-        // Index already exists should be fatal
-        var indexFailures = getFailedResultsByType(items.getIndexes(), CreationFailureType.INDEX_ALREADY_EXISTS);
-        assertThat("Index should be reported as INDEX_ALREADY_EXISTS",
-            getNames(indexFailures), hasItems(indexName));
-        assertThat("INDEX_ALREADY_EXISTS should be fatal",
-            indexFailures.stream().allMatch(CreationResult::wasFatal), equalTo(true));
+        // Exactly 1 index, failed with INDEX_ALREADY_EXISTS (fatal)
+        assertThat(items.getIndexes().size(), equalTo(1));
+        assertThat(items.getIndexes().get(0).getName(), equalTo(indexName));
+        assertThat(items.getIndexes().get(0).getFailureType(), equalTo(CreationFailureType.INDEX_ALREADY_EXISTS));
+        assertThat(items.getIndexes().get(0).wasFatal(), equalTo(true));
 
-        // Template already exists should be non-fatal
-        var templateFailures = items.getIndexTemplates().stream()
-            .filter(r -> CreationFailureType.TEMPLATE_ALREADY_EXISTS.equals(r.getFailureType()))
-            .collect(Collectors.toList());
-        assertThat("Template should be reported as TEMPLATE_ALREADY_EXISTS",
-            getNames(templateFailures), hasItems(templateName));
-        assertThat("TEMPLATE_ALREADY_EXISTS should not be fatal",
-            templateFailures.stream().noneMatch(CreationResult::wasFatal), equalTo(true));
+        // Exactly 1 template, failed with TEMPLATE_ALREADY_EXISTS (non-fatal)
+        assertThat(items.getIndexTemplates().size(), equalTo(1));
+        assertThat(items.getIndexTemplates().get(0).getName(), equalTo(templateName));
+        assertThat(items.getIndexTemplates().get(0).getFailureType(), equalTo(CreationFailureType.TEMPLATE_ALREADY_EXISTS));
+        assertThat(items.getIndexTemplates().get(0).wasFatal(), equalTo(false));
 
-        // Exit code should be 1 due to fatal index failure
-        assertThat("Exit code should be 1 due to INDEX_ALREADY_EXISTS",
-            result.getExitCode(), equalTo(1));
+        // No component templates, no aliases
+        assertThat(items.getComponentTemplates().size(), equalTo(0));
+        assertThat(items.getAliases().size(), equalTo(0));
+
+        // Exit code is exactly 1 (1 fatal INDEX_ALREADY_EXISTS error)
+        assertThat(result.getExitCode(), equalTo(1));
     }
 }
