@@ -271,7 +271,7 @@ class EndToEndTest extends BaseMigrationTest {
             hasItems(Stream.concat(testData.blogIndexNames.stream(),
                 Stream.of(testData.movieIndexName)).toArray(String[]::new)));
         assertThat(getNames(getFailedResultsByType(migratedItems.getIndexes(),
-                CreationResult.CreationFailureType.ALREADY_EXISTS)),
+                CreationResult.CreationFailureType.INDEX_ALREADY_EXISTS)),
             hasItems(testData.indexThatAlreadyExists));
         assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())),
             hasItems(testData.aliasNames.toArray(new String[0])));

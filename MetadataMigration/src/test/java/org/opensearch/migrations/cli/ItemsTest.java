@@ -122,7 +122,7 @@ public class ItemsTest {
     void testIndexTemplatesFailures() throws Exception {
         var items = createEmptyItemsBuilder()
             .indexTemplates(List.of(
-                CreationResult.builder().name("it1").failureType(CreationFailureType.ALREADY_EXISTS).build(),
+                CreationResult.builder().name("it1").failureType(CreationFailureType.METADATA_ALREADY_EXISTS).build(),
                 CreationResult.builder().name("it2").failureType(CreationFailureType.TARGET_CLUSTER_FAILURE).exception(new RuntimeException("403 Forbidden")).build()
             ))
             .build();
@@ -148,7 +148,7 @@ public class ItemsTest {
         assertThat(jsonOutput.toPrettyString(), it1.get("name").asText(), equalTo("it1"));
         assertThat(jsonOutput.toPrettyString(), it1.get("successful").asBoolean(), is(false));
         var failure1 = it1.get("failure");
-        assertThat(jsonOutput.toPrettyString(), failure1.get("type").asText(), equalTo("ALREADY_EXISTS"));
+        assertThat(jsonOutput.toPrettyString(), failure1.get("type").asText(), equalTo("METADATA_ALREADY_EXISTS"));
         assertThat(jsonOutput.toPrettyString(), failure1.get("fatal").asBoolean(), is(false));
         var it2 = indexTemplates.get(1);
         assertThat(jsonOutput.toPrettyString(), it2.get("name").asText(), equalTo("it2"));
@@ -234,7 +234,7 @@ public class ItemsTest {
         var items = createEmptyItemsBuilder()
             .failureMessage("Overall failure message")
             .indexTemplates(List.of(
-                CreationResult.builder().name("it1").failureType(CreationFailureType.ALREADY_EXISTS).build(),
+                CreationResult.builder().name("it1").failureType(CreationFailureType.METADATA_ALREADY_EXISTS).build(),
                 CreationResult.builder().name("it2").failureType(CreationFailureType.TARGET_CLUSTER_FAILURE).exception(new RuntimeException("403 Forbidden")).build()
             ))
             .build();
