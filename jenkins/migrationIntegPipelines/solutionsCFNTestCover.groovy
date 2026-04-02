@@ -5,6 +5,8 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-// Allow job name override for webhook routing (e.g., pr-* vs main-*)
-def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
+// Use JOB_NAME_OVERRIDE if set, otherwise derive from the Jenkins job name.
+// This ensures the GenericTrigger regex stays in sync with the actual job name
+// (e.g., main-* vs pr-*) across runs.
+def jobNameOverride = params.JOB_NAME_OVERRIDE ?: env.JOB_BASE_NAME ?: ''
 solutionsCFNTest(jobName: jobNameOverride ?: null)
