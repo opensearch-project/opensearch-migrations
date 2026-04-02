@@ -34,12 +34,22 @@ public class SolrSnapshotReader implements ClusterReader {
         var collections = new ArrayList<String>();
         try (var dirs = Files.list(backupDir)) {
             dirs.filter(Files::isDirectory)
-                .filter(d -> Files.exists(d.resolve("backup_0.properties")) || Files.exists(d.resolve("index")))
+                .filter(d -> Files.exists(d.resolve("backup_0.properties"))
+                    || Files.exists(d.resolve("index"))
+                    || hasSegmentsFile(d))
                 .map(p -> p.getFileName().toString())
                 .forEach(collections::add);
         }
         log.info("Discovered {} collection(s) in backup dir {}: {}", collections.size(), backupDir, collections);
         return collections;
+    }
+
+    private static boolean hasSegmentsFile(Path dir) {
+        try (var stream = Files.list(dir)) {
+            return stream.anyMatch(p -> p.getFileName().toString().startsWith("segments_"));
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     public SolrSnapshotReader(Version version, Path backupDir, Map<String, JsonNode> schemas) {

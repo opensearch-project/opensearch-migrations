@@ -54,7 +54,7 @@ public final class SolrSchemaConverter {
         Map.entry("date", OS_DATE),
         Map.entry(OS_BOOLEAN, OS_BOOLEAN),
         Map.entry("booleans", OS_BOOLEAN),
-        Map.entry("binary", OS_BINARY)
+        Map.entry(OS_BINARY, OS_BINARY)
     );
 
     /** Maps Solr fieldType Java class names to OpenSearch types (fallback when type name isn't in SOLR_TO_OS_TYPE). */
