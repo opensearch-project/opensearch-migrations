@@ -23,7 +23,7 @@ export type TransformChild = (child: ASTNode) => Map<string, any>;
  *
  * Example (leaf rule):
  *   (FieldNode { field: "title", value: "java" }, _)
- *   → Map{"term" → Map{"title" → "java"}}
+ *   → Map{"match" → Map{"title" → "java"}}
  *
  * Example (composite rule):
  *   (BoolNode { and: [FieldNode, RangeNode], ... }, transformChild)
