@@ -59,7 +59,7 @@ export function getApprovalMap<T extends PlainObject & Partial<Record<string, bo
         skipApprovalMap: defineParam({
             from: configMapKey(approvalConfigMapName, "autoApprove", true),
             type: tt,
-            expression: {} as const as T
+            expression: expr.cast(expr.literal("{}")).to<T>()
         })
     };
 }
