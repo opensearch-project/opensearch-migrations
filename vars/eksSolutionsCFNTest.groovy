@@ -48,7 +48,8 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     script {
-                        env.maStageName = "${params.STAGE}-${currentBuild.number}"
+                        def buildPrefix = jobName.startsWith("main-") ? "m" : "s"
+                        env.maStageName = "${params.STAGE}-${buildPrefix}${currentBuild.number}"
                         env.TEST_VPC_STACK_NAME = "test-vpc-${env.maStageName}-${params.REGION}"
                     }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)

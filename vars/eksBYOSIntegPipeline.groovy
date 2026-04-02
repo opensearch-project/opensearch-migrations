@@ -28,7 +28,7 @@ static def expandVersionString(String input) {
 }
 
 def call(Map config = [:]) {
-    def defaultStageId = config.defaultStageId ?: "eksbyos"
+    def defaultStageId = config.defaultStageId ?: "eb"
     def jobName = config.jobName ?: "eks-byos-integ-test"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
     def clusterContextFilePath = "tmp/cluster-context-byos-${currentBuild.number}.json"
@@ -121,7 +121,8 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
-                        env.maStageName = "${params.STAGE}-${currentBuild.number}"
+                        def buildPrefix = jobName.startsWith("main-") ? "m" : "s"
+                        env.maStageName = "${params.STAGE}-${buildPrefix}${currentBuild.number}"
                         // Resolve TEST_PRESET → effective parameter values
                         def testPresets = [
                             'large-es7x-24B': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es7x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_7.10', rfsWorkers: '90', targetClusterSize: 'large'],
