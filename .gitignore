@@ -54,3 +54,4 @@ frontend/
 .settings/
 .factorypath
 deployment/k8s/aws/dist/
+.scannerwork/
