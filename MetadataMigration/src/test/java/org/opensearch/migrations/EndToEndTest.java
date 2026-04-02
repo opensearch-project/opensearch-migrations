@@ -262,6 +262,7 @@ class EndToEndTest extends BaseMigrationTest {
                                       List<TemplateType> templateTypes,
                                       TestData testData) {
         log.info(result.asCliOutput());
+        assertThat(result.getExitCode(), equalTo(1));
 
         var migratedItems = result.getItems();
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexTemplates())),
@@ -276,10 +277,6 @@ class EndToEndTest extends BaseMigrationTest {
             hasItems(testData.indexThatAlreadyExists));
         assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())),
             hasItems(testData.aliasNames.toArray(new String[0])));
-
-        // INDEX_ALREADY_EXISTS is fatal, so exit code should be non-zero
-        assertThat("Exit code should be non-zero due to INDEX_ALREADY_EXISTS",
-            result.getExitCode(), Matchers.greaterThan(0));
     }
 
     private List<CreationResult> getSuccessfulResults(List<CreationResult> results) {
@@ -415,8 +412,8 @@ class EndToEndTest extends BaseMigrationTest {
         assertThat("TEMPLATE_ALREADY_EXISTS should not be fatal",
             templateFailures.stream().noneMatch(CreationResult::wasFatal), equalTo(true));
 
-        // Exit code should be non-zero due to fatal index failure
-        assertThat("Exit code should be non-zero due to INDEX_ALREADY_EXISTS",
-            result.getExitCode(), Matchers.greaterThan(0));
+        // Exit code should be 1 due to fatal index failure
+        assertThat("Exit code should be 1 due to INDEX_ALREADY_EXISTS",
+            result.getExitCode(), equalTo(1));
     }
 }
