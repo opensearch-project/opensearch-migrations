@@ -1130,27 +1130,6 @@ fi
 
 check_existing_ma_release "$namespace" "$namespace"
 
-# Install Mountpoint S3 CSI Driver v2 addon (required for S3-backed PVs)
-if aws eks describe-addon --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" --addon-name aws-mountpoint-s3-csi-driver --region "${AWS_CFN_REGION}" >/dev/null 2>&1; then
-  echo "S3 CSI Driver addon already installed, skipping"
-else
-  echo "Installing Mountpoint S3 CSI Driver v2 addon..."
-  aws eks create-addon \
-    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
-    --addon-name aws-mountpoint-s3-csi-driver \
-    --region "${AWS_CFN_REGION}" \
-    --resolve-conflicts OVERWRITE
-  echo "Waiting for S3 CSI Driver addon to become active..."
-  if aws eks wait addon-active \
-    --cluster-name "${MIGRATIONS_EKS_CLUSTER_NAME}" \
-    --addon-name aws-mountpoint-s3-csi-driver \
-    --region "${AWS_CFN_REGION}"; then
-    echo "✅  S3 CSI Driver v2 addon installed"
-  else
-    echo "⚠️  S3 CSI Driver addon did not become active — S3-backed volumes may not work"
-  fi
-fi
-
 # Build TLS-related helm --set flags and create Pod Identity Associations
 TLS_HELM_FLAGS=""
 
