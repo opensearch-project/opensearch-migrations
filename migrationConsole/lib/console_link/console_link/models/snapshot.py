@@ -17,6 +17,8 @@ from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
 
 logger = logging.getLogger(__name__)
 
+SOLR_NO_DELETE_MSG = "Solr backups are managed as files; no delete API available."
+
 
 # Define the models first to avoid forward reference issues
 class SnapshotIndex(BaseModel):
@@ -108,6 +110,19 @@ class Snapshot(ABC):
         """Delete a snapshot repository."""
         pass
 
+    def _get_solr_collections(self) -> list:
+        """Fetch collection/core names. Tries SolrCloud first, falls back to standalone."""
+        try:
+            r = self.source_cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+            if r.status_code == 200:
+                collections = r.json().get("collections", [])
+                if collections:
+                    return collections
+        except Exception:
+            pass
+        r = self.source_cluster.call_api("/solr/admin/cores?action=STATUS&wt=json")
+        return list(r.json().get("status", {}).keys())
+
     def get_snapshot_indexes(self, index_patterns: Optional[List[str]] = None) -> SnapshotIndexes:
         """
         Fetch all indexes that will be included in the snapshot with accurate document count and size information.
@@ -131,6 +146,11 @@ class Snapshot(ABC):
             logger.error(f"Failed to get snapshot indexes: {str(e)}")
             raise
 
+    def _is_solr_source(self) -> bool:
+        return (self.source_cluster is not None and
+                isinstance(self.source_cluster.version, str) and
+                self.source_cluster.version.upper().startswith("SOLR"))
+
     def _collect_universal_command_args(self) -> Dict:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
@@ -140,6 +160,9 @@ class Snapshot(ABC):
             "--snapshot-repo-name": self.snapshot_repo_name,
             "--source-host": self.source_cluster.endpoint
         }
+
+        if self._is_solr_source():
+            command_args["--source-type"] = "solr"
 
         if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
@@ -191,6 +214,10 @@ class S3Snapshot(Snapshot):
         command_args = self._collect_universal_command_args()
         command_args.update(s3_command_args)
 
+        if self._is_solr_source():
+            collections = self._get_solr_collections()
+            command_args["--solr-collections"] = ",".join(collections)
+
         wait = kwargs.get('wait', False)
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
         extra_args = kwargs.get('extra_args')
@@ -219,25 +246,29 @@ class S3Snapshot(Snapshot):
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return SOLR_NO_DELETE_MSG
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete_all_snapshots(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return SOLR_NO_DELETE_MSG
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return "Solr does not use snapshot repositories."
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 
@@ -253,6 +284,10 @@ class FileSystemSnapshot(Snapshot):
 
         command_args = self._collect_universal_command_args()
         command_args["--file-system-repo-path"] = self.repo_path
+
+        if self._is_solr_source():
+            collections = self._get_solr_collections()
+            command_args["--solr-collections"] = ",".join(collections)
 
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
         extra_args = kwargs.get('extra_args')
@@ -277,25 +312,29 @@ class FileSystemSnapshot(Snapshot):
     def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check)
         return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
 
     def delete(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return SOLR_NO_DELETE_MSG
         return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
 
     def delete_all_snapshots(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return SOLR_NO_DELETE_MSG
         return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
 
     def delete_snapshot_repo(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError()
-
+        if self._is_solr_source():
+            return "Solr does not use snapshot repositories."
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 
@@ -590,6 +629,181 @@ def get_latest_snapshot_status_raw(cluster: Cluster,
     
     # Use the basic snapshot info we already have
     return SnapshotStateAndDetails(state, snapshot_info)
+
+
+def _solr_backup_status(cluster: Cluster, snapshot_name: str, deep_check: bool = False) -> CommandResult:
+    """Check SolrCloud backup status via Collections API REQUESTSTATUS."""
+    try:
+        status_obj = _get_solr_snapshot_status(cluster, snapshot_name)
+
+        if not deep_check:
+            # Return SUCCESS/IN_PROGRESS/FAILED to match ES snapshot status format
+            state_map = {StepState.COMPLETED: "SUCCESS", StepState.RUNNING: "IN_PROGRESS", StepState.FAILED: "FAILED"}
+            return CommandResult(success=True, value=state_map.get(status_obj.status, status_obj.status.value))
+
+        start_time = status_obj.started.strftime('%Y-%m-%d %H:%M:%S') if status_obj.started else ''
+        finish_time = status_obj.finished.strftime('%Y-%m-%d %H:%M:%S') if status_obj.finished else ''
+        eta_str = format_duration(int(status_obj.eta_ms)) if status_obj.eta_ms else "0h 0m 0s"
+        data_mb = (status_obj.data_total_bytes or 0) / (1024 ** 2)
+
+        # Use same field names as ES snapshot status for compatibility with workflow checkScript
+        message = (
+            f"Snapshot status: {status_obj.status.value}\n"
+            f"Start time: {start_time}\n"
+            f"Finished time: {finish_time}\n"
+            f"Percent completed: {status_obj.percentage_completed:.2f}%\n"
+            f"Estimated time to completion: {eta_str}\n"
+            f"Data processed: {data_mb:.3f}/{data_mb:.3f} MiB\n"
+            f"Total shards: {status_obj.shard_total}\n"
+            f"Successful shards: {status_obj.shard_complete}\n"
+        )
+        return CommandResult(success=True, value=message)
+    except Exception as e:
+        return CommandResult(success=False, value=f"Failed to get Solr backup status: {e}")
+
+
+def _determine_solr_step_state(all_completed: bool, any_failed: bool) -> StepState:
+    """Map Solr backup flags to a StepState."""
+    if all_completed:
+        return StepState.COMPLETED
+    if any_failed:
+        return StepState.FAILED
+    return StepState.RUNNING
+
+
+def _parse_collection_response(resp: dict) -> dict:
+    """Parse a single collection's REQUESTSTATUS response into normalized metrics."""
+    response_data = resp.get("response", [])
+    if isinstance(response_data, list):
+        num_shards = int(_get_named_list_value(response_data, "numShards") or 0)
+        size_mb = float(_get_named_list_value(response_data, "indexSizeMB") or 0.0)
+        start_time_str = _get_named_list_value(response_data, "startTime")
+    else:
+        num_shards = int(response_data.get("numShards", 0))
+        size_mb = float(response_data.get("indexSizeMB", 0.0))
+        start_time_str = response_data.get("startTime")
+
+    started_dt = None
+    if start_time_str:
+        try:
+            started_dt = datetime.fromisoformat(start_time_str.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            pass
+
+    return {
+        "num_shards": num_shards,
+        "size_bytes": int(size_mb * 1024 * 1024),
+        "started_dt": started_dt,
+    }
+
+
+def _poll_collection_status(cluster: Cluster, snapshot_name: str, coll: str) -> Optional[dict]:
+    """Poll a single collection's async backup status. Returns None if not found or on error."""
+    async_id = f"{snapshot_name}-{coll}"
+    try:
+        r = cluster.call_api(
+            f"/solr/admin/collections?action=REQUESTSTATUS&requestid={async_id}&wt=json",
+            timeout=30
+        )
+        resp = r.json()
+        state = resp.get("status", {}).get("state", "notfound")
+        if state == "notfound":
+            return None
+        parsed = _parse_collection_response(resp)
+        parsed["state"] = state
+        parsed["success_count"] = len(resp.get("success", {}))
+        return parsed
+    except Exception:
+        return {"state": "error", "num_shards": 0, "size_bytes": 0, "started_dt": None, "success_count": 0}
+
+
+def _compute_eta(started_dt: Optional[datetime], pct: float, step_state: StepState) -> tuple:
+    """Compute ETA and finished datetime from progress."""
+    if not started_dt:
+        return None, None
+    elapsed = datetime.now(started_dt.tzinfo) - started_dt
+    elapsed_ms = elapsed.total_seconds() * 1000
+    eta_ms = (elapsed_ms / pct) * (100 - pct) if 0 < pct < 100 else None
+    finished_dt = None
+    if step_state == StepState.COMPLETED:
+        finished_dt = started_dt + elapsed
+        eta_ms = 0.0
+    return eta_ms, finished_dt
+
+
+def _accumulate_collection_result(result: dict, accum: dict) -> None:
+    """Update accumulator with a single collection's poll result."""
+    state = result["state"]
+    accum["any_found"] = True
+    accum["total_shards"] += result["num_shards"]
+    accum["index_size_bytes"] += result["size_bytes"]
+    if result["started_dt"] and accum["started_dt"] is None:
+        accum["started_dt"] = result["started_dt"]
+    if state == "completed":
+        accum["completed_shards"] += result["num_shards"]
+    elif state == "failed":
+        accum["any_failed"] = True
+        accum["all_completed"] = False
+    else:
+        accum["all_completed"] = False
+        accum["completed_shards"] += result["success_count"]
+
+
+def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotStatus:
+    """Build a SnapshotStatus from SolrCloud REQUESTSTATUS responses."""
+    r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json", timeout=30)
+    collections = r.json().get("collections", [])
+    if not collections:
+        # Fall back to standalone cores
+        try:
+            r = cluster.call_api("/solr/admin/cores?action=STATUS&wt=json", timeout=30)
+            collections = list(r.json().get("status", {}).keys())
+        except Exception:
+            collections = []
+
+    accum = {
+        "total_shards": 0, "completed_shards": 0, "index_size_bytes": 0,
+        "started_dt": None, "all_completed": True, "any_failed": False, "any_found": False,
+    }
+
+    for coll in collections:
+        result = _poll_collection_status(cluster, snapshot_name, coll)
+        if result is None:
+            continue
+        if result["state"] == "error":
+            accum["all_completed"] = False
+            continue
+        _accumulate_collection_result(result, accum)
+
+    if not accum["any_found"]:
+        return SnapshotStatus(status=StepState.PENDING, percentage_completed=0.0)
+
+    pct = (accum["completed_shards"] / accum["total_shards"] * 100) if accum["total_shards"] else 0.0
+    step_state = _determine_solr_step_state(accum["all_completed"], accum["any_failed"])
+    if step_state == StepState.COMPLETED:
+        pct = 100.0
+
+    eta_ms, finished_dt = _compute_eta(accum["started_dt"], pct, step_state)
+
+    return SnapshotStatus(
+        status=step_state,
+        percentage_completed=pct,
+        eta_ms=eta_ms,
+        started=accum["started_dt"],
+        finished=finished_dt,
+        data_total_bytes=accum["index_size_bytes"],
+        data_processed_bytes=accum["index_size_bytes"] if accum["all_completed"] else None,
+        shard_total=accum["total_shards"],
+        shard_complete=accum["completed_shards"],
+    )
+
+
+def _get_named_list_value(named_list, key):
+    """Extract value from Solr NamedList format: ['key1','val1','key2','val2',...]."""
+    for i in range(0, len(named_list) - 1, 2):
+        if named_list[i] == key:
+            return named_list[i + 1]
+    return None
 
 
 def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str, deep_check: bool) -> CommandResult:
