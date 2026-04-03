@@ -1,5 +1,5 @@
 # Global ARGs (must be before first FROM to be usable in FROM lines)
-ARG BUILDER_IMAGE=docker.io/library/rust:1.83-slim
+ARG BUILDER_IMAGE=docker.io/library/rust:1.94.1-slim
 ARG RUNTIME_IMAGE=docker.io/library/amazonlinux:2023
 
 # Multi-stage build: compile Rust binary, then copy to minimal runtime image
