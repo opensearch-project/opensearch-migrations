@@ -142,7 +142,7 @@ def buildKitProjects = [
                 imageName:  "snapshot_fuse",
                 imageTag:   "latest",
                 buildArgs: [
-                        BUILDER_IMAGE: ptc.rewrite("docker.io/library/rust:1.83-slim"),
+                        BUILDER_IMAGE: ptc.rewrite("docker.io/library/rust:1.94.1-slim"),
                         RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
                 ]
         ]
