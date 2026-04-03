@@ -35,7 +35,7 @@ public class OpenSearchMetricsSink implements MetricsSink {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy.MM.dd");
     private static final String TEMPLATE_NAME_SUFFIX = "-template";
-    private static final long MAX_BULK_BYTES = 10 * 1024 * 1024; // 10MB max bulk request size
+    private static final long MAX_BULK_BYTES = 10L * 1024 * 1024; // 10MB max bulk request size
 
     private final String reportingClusterUri;
     private final String indexPrefix;
@@ -103,6 +103,9 @@ public class OpenSearchMetricsSink implements MetricsSink {
                 log.warn("Failed to create index template '{}', status {}: {}. Will use dynamic mapping.", 
                     templateName, response.statusCode(), truncate(response.body(), 200));
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Index template creation interrupted", e);
         } catch (Exception e) {
             log.error("Error creating index template (non-fatal, will use dynamic mapping): {}", 
                 e.getMessage(), e);
