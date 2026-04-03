@@ -1,4 +1,4 @@
-import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "../models/parameterSchemas";
+import {InputParamDef, InputParametersRecord, OutputArtifactsRecord, OutputParamDef, OutputParametersRecord} from "../models/parameterSchemas";
 import {
     REMOVE_NEXT_QUOTE_SENTINEL,
     REMOVE_PREVIOUS_QUOTE_SENTINEL,
@@ -59,7 +59,11 @@ function formatParameterDefinition<T extends PlainObject, P extends InputParamDe
     }
     if (isDefault(input)) {
         if (input.defaultValue.expression !== undefined) {
-            out.value = transformExpressionsDeep(input.defaultValue.expression);
+            const transformed = transformExpressionsDeep(input.defaultValue.expression);
+            // Argo parameter values must be strings; serialize object/array defaults as JSON
+            out.value = (typeof transformed === "object" && transformed !== null)
+                ? JSON.stringify(transformed)
+                : transformed;
         }
         if (input.defaultValue.from !== undefined) {
             const f = input.defaultValue.from;
@@ -296,6 +300,12 @@ function formatSynchronization(sync: SynchronizationConfig) {
 
 function formatTemplate(templates: GenericScope, templateName: string) {
     const template = templates[templateName];
+    const paramOutputs = formatOutputParameters(template.outputs);
+    const artifactOutputs = formatOutputArtifacts(template.outputArtifacts);
+    const outputs = {
+        ...paramOutputs,
+        ...(artifactOutputs ? { artifacts: artifactOutputs } : {})
+    };
     return {
         name: convertTemplateName(templateName),
         ...(template.inputs === undefined ? {} : {inputs: formatParameters(template.inputs)}),
@@ -303,8 +313,17 @@ function formatTemplate(templates: GenericScope, templateName: string) {
         ...(template.retryStrategy && Object.keys(template.retryStrategy).length > 0 ?
             {retryStrategy: template.retryStrategy} : {}),
         ...(template.synchronization && {synchronization: formatSynchronization(template.synchronization)}),
-        outputs: formatOutputParameters(template.outputs)
+        outputs
     }
+}
+
+function formatOutputArtifacts(artifacts: OutputArtifactsRecord | undefined) {
+    if (!artifacts || Object.keys(artifacts).length === 0) return undefined;
+    return Object.values(artifacts).map(a => ({
+        name: a.name,
+        path: a.path,
+        archive: a.archive ?? { none: {} }
+    }));
 }
 
 // Helper: detect plain objects (not class instances)

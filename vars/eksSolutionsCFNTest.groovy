@@ -16,7 +16,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: config.defaultGitUrl ?: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: config.defaultGitBranch ?: 'main', description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
-            string(name: 'STAGE', defaultValue: config.defaultStage ?: "Eks${vpcMode}Vpc", description: 'Stage name for deployment environment')
+            string(name: 'STAGE', defaultValue: config.defaultStage ?: (isImportVpc ? "eksivpc" : "ekscvpc"), description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: "us-east-1", description: 'AWS region for deployment')
             booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source instead of using public images')
             booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
@@ -48,7 +48,8 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     script {
-                        env.maStageName = "${params.STAGE}-${currentBuild.number}"
+                        def pool = jobName.startsWith("main-") ? "m" : "p"
+                        env.maStageName = "${params.STAGE}-${pool}${currentBuild.number}"
                         env.TEST_VPC_STACK_NAME = "test-vpc-${env.maStageName}-${params.REGION}"
                     }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
@@ -87,9 +88,9 @@ def call(Map config = [:]) {
                 }
             }
 
-            // Use aws-bootstrap.sh (the production deployment path) which builds
-            // minified CFN templates via cdkSynthMinified to stay under the
-            // CloudFormation --template-body 51,200 byte limit.
+            // Use the assembled dist/aws-bootstrap.sh (the production deployment path)
+            // which is the self-contained script customers actually run.
+            // assemble-bootstrap.sh inlines all sourced helpers into a single file.
             stage('Deploy & Install') {
                 steps {
                     timeout(time: 90, unit: 'MINUTES') {
@@ -107,7 +108,8 @@ def call(Map config = [:]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 7200, roleSessionName: 'jenkins-session') {
                                     sh """
                                         set -euo pipefail
-                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                        ./deployment/k8s/aws/assemble-bootstrap.sh
+                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                           ${bootstrapArgs} \
                                           --build-cfn \
                                           ${buildImagesArg} \

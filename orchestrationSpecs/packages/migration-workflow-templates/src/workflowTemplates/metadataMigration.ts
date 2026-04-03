@@ -257,7 +257,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                 c.register({
                     "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("evaluateMetadata"))
                 }),
-                {when: expr.not(expr.cast(b.inputs.skipEvaluateApproval).to<boolean>())}
+                {when: expr.not(b.inputs.skipEvaluateApproval)}
             )
             .addStep("migrateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
@@ -273,7 +273,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                 c.register({
                     "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("migrateMetadata"))
                 }),
-                {when: {templateExp: expr.not(expr.deserializeRecord(b.inputs.skipMigrateApproval))}}
+                {when: expr.not(b.inputs.skipMigrateApproval)}
             )
         )
     )

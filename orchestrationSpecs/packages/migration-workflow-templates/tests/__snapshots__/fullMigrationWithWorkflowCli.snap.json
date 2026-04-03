@@ -136,6 +136,15 @@
                 "path": "/tmp/outputs/monitorResult"
               }
             }
+          ],
+          "artifacts": [
+            {
+              "name": "monitorResult",
+              "path": "/tmp/outputs/monitorResult",
+              "archive": {
+                "none": {}
+              }
+            }
           ]
         }
       },
@@ -300,7 +309,7 @@
           [
             {
               "template": "deletemigrationworkflow",
-              "when": "{{=!(fromJSON(inputs.parameters.keepMigrationWorkflow))}}",
+              "when": "!({{inputs.parameters.keepMigrationWorkflow}})",
               "arguments": {
                 "parameters": []
               },

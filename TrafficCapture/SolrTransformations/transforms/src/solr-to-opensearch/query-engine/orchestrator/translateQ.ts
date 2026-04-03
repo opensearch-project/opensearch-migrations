@@ -81,7 +81,7 @@ function passthroughDsl(query: string): Map<string, any> {
  *
  * Example:
  *   translateQ(new Map([['q', 'title:java'], ['df', 'content']]))
- *   → { dsl: Map{"term" → Map{"title" → "java"}}, warnings: [] }
+ *   → { dsl: Map{"match" → Map{"title" → "java"}}, warnings: [] }
  */
 export function translateQ(
   params: ReadonlyMap<string, string>,

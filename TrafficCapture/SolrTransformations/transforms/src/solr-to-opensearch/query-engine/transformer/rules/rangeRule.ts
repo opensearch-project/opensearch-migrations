@@ -25,11 +25,6 @@ export const rangeRule: TransformRuleFn = (
   // Range is a leaf node — transformChild not used
   _transformChild,
 ): Map<string, any> => {
-  if (node.type !== 'range') {
-    console.error(`rangeRule called with wrong node type: ${node.type}`);
-    throw new Error(`rangeRule called with wrong node type: ${node.type}`);
-  }
-
   const { field, lower, upper, lowerInclusive, upperInclusive } = node;
 
   // [* TO *] means "field exists" in Solr — convert to exists query

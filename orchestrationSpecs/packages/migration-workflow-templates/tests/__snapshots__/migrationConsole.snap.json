@@ -185,15 +185,18 @@
         "outputs": {
           "parameters": [
             {
-              "name": "statusOutput",
-              "valueFrom": {
-                "path": "/tmp/status-output.txt"
-              }
-            },
-            {
               "name": "overriddenPhase",
               "valueFrom": {
                 "path": "/tmp/phase-output.txt"
+              }
+            }
+          ],
+          "artifacts": [
+            {
+              "name": "statusOutput",
+              "path": "/tmp/status-output.txt",
+              "archive": {
+                "none": {}
               }
             }
           ]

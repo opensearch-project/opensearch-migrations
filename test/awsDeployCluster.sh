@@ -126,6 +126,45 @@ npm run build
 cd ..
 cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 
+# Wait for any leftover OpenSearch domains from a previous run to finish deleting.
+# The CDK VPC-validation Lambda will reject deployment if a domain with the same name
+# still exists in a different VPC (e.g. from a prior run whose cleanup is still in progress).
+cluster_ids=$(jq -r '.clusters[].clusterId' "$PROVIDED_CONTEXT_FILE_PATH")
+for cid in $cluster_ids; do
+  domain_name="cluster-${STAGE}-${cid}"
+  if aws opensearch describe-domain --domain-name "$domain_name" >/dev/null 2>&1; then
+    if aws opensearch describe-domain --domain-name "$domain_name" \
+         --query 'DomainStatus.Deleted' --output text 2>/dev/null | grep -qi true; then
+      echo "Domain '$domain_name' is still deleting — waiting up to 30 minutes..."
+      for i in $(seq 1 60); do
+        if ! aws opensearch describe-domain --domain-name "$domain_name" >/dev/null 2>&1; then
+          echo "Domain '$domain_name' has been fully deleted."
+          break
+        fi
+        sleep 30
+      done
+      # Final check
+      if aws opensearch describe-domain --domain-name "$domain_name" >/dev/null 2>&1; then
+        echo "ERROR: Domain '$domain_name' still exists after waiting. Aborting."
+        exit 1
+      fi
+    else
+      echo "WARNING: Domain '$domain_name' exists and is NOT being deleted. CDK deploy may fail if VPC differs."
+    fi
+  fi
+done
+
+# Delete any ROLLBACK_COMPLETE stacks from a prior failed deploy — CDK cannot update these.
+rollback_stacks=$(aws cloudformation list-stacks \
+  --stack-status-filter ROLLBACK_COMPLETE \
+  --query "StackSummaries[?contains(StackName, '${STAGE}')].StackName" \
+  --output text 2>/dev/null || true)
+for stack in $rollback_stacks; do
+  echo "Deleting ROLLBACK_COMPLETE stack: $stack"
+  aws cloudformation delete-stack --stack-name "$stack"
+  aws cloudformation wait stack-delete-complete --stack-name "$stack"
+done
+
 cd amazon-opensearch-service-sample-cdk
 
 if [[ "$DESTROY" == true ]]; then

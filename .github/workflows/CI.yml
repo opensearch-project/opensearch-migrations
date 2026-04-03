@@ -73,8 +73,9 @@ jobs:
           - migrationConsole/lib/console_link
           - migrationConsole/cluster_tools
           - k8sConfigMapUtilScripts
+          - AIAdvisor/skills/solr-opensearch-migration-advisor
     env:
-      WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
+      WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'AIAdvisor/') && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
@@ -97,21 +98,41 @@ jobs:
           kubectl get nodes
           kubectl get namespaces
 
-      - run: |
+      - name: Install dependencies (Pipfile)
+        if: matrix.py-project != 'AIAdvisor/skills/solr-opensearch-migration-advisor'
+        run: |
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy --dev
           pipenv graph
 
-      - run: |
+      # Install dependencies for pyproject.toml-based projects
+      - name: Install dependencies (pyproject.toml)
+        if: matrix.py-project == 'AIAdvisor/skills/solr-opensearch-migration-advisor'
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -e ".[dev]"
+          python3 -m pip list
+
+      # Run tests for Pipfile-based projects
+      - name: Run tests (Pipfile)
+        if: matrix.py-project != 'AIAdvisor/skills/solr-opensearch-migration-advisor'
+        run: |
           pipenv run test
           pipenv run coverage xml
+
+      # Run tests for pyproject.toml-based projects
+      - name: Run tests (pyproject.toml)
+        if: matrix.py-project == 'AIAdvisor/skills/solr-opensearch-migration-advisor'
+        run: |
+          python3 -m pytest --cov=scripts --cov-report=xml
+
       - name: Get Sanitized Name
         env:
           PY_PROJECT: ${{ matrix.py-project }}
         run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT//\//-}" >> $GITHUB_ENV
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
         with:
           fail_ci_if_error: true
           flags: python
@@ -201,7 +222,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
         with:
           fail_ci_if_error: true
           flags: gradle
@@ -304,7 +325,7 @@ jobs:
         run: npm run test
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@1af58845a975a7985b0beb0cbe6fbbb71a41dbad
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
         with:
           fail_ci_if_error: true
           flags: node
