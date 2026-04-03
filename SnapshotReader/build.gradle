@@ -10,6 +10,7 @@ dependencies {
     implementation project(':RfsHttp')
     implementation project(':RfsPipeline')
     implementation project(':SearchSnapshotExtractor')
+    implementation project(':SolrReader')
 
     implementation libs.jackson.databind
     implementation libs.jackson.core

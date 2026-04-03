@@ -100,6 +100,10 @@ public class TransformerMapper {
                 || VersionMatchers.anyOS.test(sourceVersion))) {
             return List.of();
         }
+        // Solr — no type removal needed
+        if (UnboundVersionMatchers.anySolr.test(sourceVersion)) {
+            return List.of();
+        }
         throw new IllegalArgumentException(
             "Unsupported source version: " + sourceVersion + "." + VersionStrictness.REMEDIATION_MESSAGE);
     }
