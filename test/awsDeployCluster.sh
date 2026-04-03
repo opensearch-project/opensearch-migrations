@@ -125,6 +125,14 @@ npm run build
 
 cd ..
 
+if [[ "$DESTROY" == true ]]; then
+  if [[ ! -f "$PROVIDED_CONTEXT_FILE_PATH" ]]; then
+    echo "Context file '$PROVIDED_CONTEXT_FILE_PATH' not found — nothing to destroy. Skipping."
+    exit 0
+  fi
+  cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
+fi
+
 if [[ "$DESTROY" != true ]]; then
   cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 
