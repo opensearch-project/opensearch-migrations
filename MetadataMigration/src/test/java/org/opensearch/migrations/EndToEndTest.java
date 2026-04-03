@@ -294,9 +294,10 @@ class EndToEndTest extends BaseMigrationTest {
         return items.stream().map(CreationResult::getName).collect(Collectors.toList());
     }
 
-    @ParameterizedTest(name = "From version {0} to version {1}: index already exists produces fatal error with suggestions")
+    @SneakyThrows
+    @ParameterizedTest(name = "From version {0} to version {1}: already exists handling for index and template")
     @MethodSource(value = "scenarios")
-    void indexAlreadyExists_isFatalWithSuggestions(
+    void alreadyExists_indexFatalTemplatNonFatal(
             SearchClusterContainer.ContainerVersion sourceVersion,
             SearchClusterContainer.ContainerVersion targetVersion,
             TransferMedium medium,
@@ -310,10 +311,16 @@ class EndToEndTest extends BaseMigrationTest {
             startClusters();
 
             var indexName = "preexisting_index";
+            var templateName = "preexisting_template";
+            var templatePattern = "preexisting_*";
 
-            // Create the same index on both source and target
+            // Create index on source and pre-create on target
             sourceOperations.createDocument(indexName, "doc1", "{}");
             targetOperations.createDocument(indexName, "doc2", "{}");
+
+            // Create legacy template on source and pre-create on target
+            sourceOperations.createLegacyTemplate(templateName, templatePattern);
+            targetOperations.createLegacyTemplate(templateName, templatePattern);
 
             MigrateOrEvaluateArgs arguments;
             switch (medium) {
@@ -338,24 +345,45 @@ class EndToEndTest extends BaseMigrationTest {
                 arguments.versionStrictness.allowLooseVersionMatches = true;
             }
 
-            // Only migrate the specific index to isolate the test
             arguments.dataFilterArgs.indexAllowlist = List.of(indexName);
+            arguments.dataFilterArgs.indexTemplateAllowlist = List.of(templateName);
 
-            var result = executeMigration(arguments, MetadataCommands.MIGRATE);
-            log.info(result.asCliOutput());
+            // Run EVALUATE — should detect conflicts without making changes
+            var evalResult = executeMigration(arguments, MetadataCommands.EVALUATE);
+            log.info("EVALUATE output:\n{}", evalResult.asCliOutput());
 
-            // Verify exit code is non-zero due to fatal INDEX_ALREADY_EXISTS
-            assertThat("Exit code should be non-zero for fatal index conflict",
-                result.getExitCode(), not(equalTo(0)));
-
-            // Verify the failure type
-            var indexResults = result.getItems().getIndexes();
-            assertThat(getNames(getFailedResultsByType(indexResults,
+            assertThat("Evaluate exit code should be exactly 1 (one fatal index conflict)",
+                evalResult.getExitCode(), equalTo(1));
+            assertThat(getNames(getFailedResultsByType(evalResult.getItems().getIndexes(),
                     CreationResult.CreationFailureType.INDEX_ALREADY_EXISTS)),
                 hasItems(indexName));
+            assertThat(getNames(getFailedResultsByType(evalResult.getItems().getIndexTemplates(),
+                    CreationResult.CreationFailureType.METADATA_ALREADY_EXISTS)),
+                hasItems(templateName));
+
+            // Run MIGRATE — should report the same conflicts
+            var migrateResult = executeMigration(arguments, MetadataCommands.MIGRATE);
+            log.info("MIGRATE output:\n{}", migrateResult.asCliOutput());
+
+            assertThat("Migrate exit code should be exactly 1 (one fatal index conflict)",
+                migrateResult.getExitCode(), equalTo(1));
+
+            // Verify INDEX_ALREADY_EXISTS is fatal
+            var indexResults = migrateResult.getItems().getIndexes();
+            var indexFailures = getFailedResultsByType(indexResults, CreationResult.CreationFailureType.INDEX_ALREADY_EXISTS);
+            assertThat(getNames(indexFailures), hasItems(indexName));
+            assertThat("INDEX_ALREADY_EXISTS should be fatal",
+                indexFailures.get(0).wasFatal(), equalTo(true));
+
+            // Verify METADATA_ALREADY_EXISTS is non-fatal
+            var templateResults = migrateResult.getItems().getIndexTemplates();
+            var templateFailures = getFailedResultsByType(templateResults, CreationResult.CreationFailureType.METADATA_ALREADY_EXISTS);
+            assertThat(getNames(templateFailures), hasItems(templateName));
+            assertThat("METADATA_ALREADY_EXISTS should be non-fatal",
+                templateFailures.get(0).wasFatal(), equalTo(false));
 
             // Verify suggestion text in CLI output
-            var cliOutput = result.asCliOutput();
+            var cliOutput = migrateResult.asCliOutput();
             assertThat(cliOutput, containsString("console clusters clear-indices --cluster target"));
             assertThat(cliOutput, containsString("--index-allowlist"));
         }
