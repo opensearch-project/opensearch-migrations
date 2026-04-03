@@ -294,6 +294,73 @@ class EndToEndTest extends BaseMigrationTest {
         return items.stream().map(CreationResult::getName).collect(Collectors.toList());
     }
 
+    @ParameterizedTest(name = "From version {0} to version {1}: index already exists produces fatal error with suggestions")
+    @MethodSource(value = "scenarios")
+    void indexAlreadyExists_isFatalWithSuggestions(
+            SearchClusterContainer.ContainerVersion sourceVersion,
+            SearchClusterContainer.ContainerVersion targetVersion,
+            TransferMedium medium,
+            List<TemplateType> templateTypes) {
+        try (
+            final var sourceCluster = new SearchClusterContainer(sourceVersion);
+            final var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            this.sourceCluster = sourceCluster;
+            this.targetCluster = targetCluster;
+            startClusters();
+
+            var indexName = "preexisting_index";
+
+            // Create the same index on both source and target
+            sourceOperations.createDocument(indexName, "doc1", "{}");
+            targetOperations.createDocument(indexName, "doc2", "{}");
+
+            MigrateOrEvaluateArgs arguments;
+            switch (medium) {
+                case SnapshotImage:
+                    var snapshotName = "snap_already_exists";
+                    var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+                    createSnapshot(sourceCluster, snapshotName, testSnapshotContext);
+                    sourceCluster.copySnapshotData(localDirectory.toString());
+                    arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
+                    break;
+                case Http:
+                    arguments = new MigrateOrEvaluateArgs();
+                    arguments.sourceArgs.host = sourceCluster.getUrl();
+                    arguments.targetArgs.host = targetCluster.getUrl();
+                    break;
+                default:
+                    throw new RuntimeException("Invalid Option");
+            }
+
+            if (!(SupportedClusters.supportedTargets(false).stream()
+                .anyMatch(v -> v.equals(targetCluster.getContainerVersion().getVersion())))) {
+                arguments.versionStrictness.allowLooseVersionMatches = true;
+            }
+
+            // Only migrate the specific index to isolate the test
+            arguments.dataFilterArgs.indexAllowlist = List.of(indexName);
+
+            var result = executeMigration(arguments, MetadataCommands.MIGRATE);
+            log.info(result.asCliOutput());
+
+            // Verify exit code is non-zero due to fatal INDEX_ALREADY_EXISTS
+            assertThat("Exit code should be non-zero for fatal index conflict",
+                result.getExitCode(), not(equalTo(0)));
+
+            // Verify the failure type
+            var indexResults = result.getItems().getIndexes();
+            assertThat(getNames(getFailedResultsByType(indexResults,
+                    CreationResult.CreationFailureType.INDEX_ALREADY_EXISTS)),
+                hasItems(indexName));
+
+            // Verify suggestion text in CLI output
+            var cliOutput = result.asCliOutput();
+            assertThat(cliOutput, containsString("console clusters clear-indices --cluster target"));
+            assertThat(cliOutput, containsString("--index-allowlist"));
+        }
+    }
+
     private void verifyTargetCluster(MetadataCommands command,
                                      List<TemplateType> templateTypes,
                                      TestData testData) {
