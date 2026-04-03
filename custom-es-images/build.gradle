@@ -29,7 +29,7 @@ def correttoVersion = { String minor ->
 // Single source of truth for Corretto version, base image, and JAVA_HOME
 // Corretto 8: amazoncorretto:8-alpine (small, no JavaFX/GTK bloat)
 // Corretto 11+: amazoncorretto headless images on AL2023
-def baseImage = { String corretto -> corretto == '8' ? "amazoncorretto:8-alpine" : "amazoncorretto:${corretto}-al2023-headless" }
+def baseImage = { String corretto -> corretto == '8' ? ptc.rewrite("docker.io/library/amazoncorretto:8-alpine") : ptc.rewrite("docker.io/library/amazoncorretto:${corretto}-al2023-headless") }
 def javaHomePath = { String corretto -> corretto == '8' ? '/usr/lib/jvm/java-8-amazon-corretto' : "/usr/lib/jvm/java-${corretto}-amazon-corretto" }
 
 versions.each { minor, info ->
