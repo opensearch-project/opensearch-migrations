@@ -1,11 +1,12 @@
 # Global ARGs (must be before first FROM to be usable in FROM lines)
-ARG BUILDER_IMAGE=docker.io/library/rust:1.94.1-slim
+ARG BUILDER_IMAGE=docker.io/library/rust:1.94.1-alpine
 ARG RUNTIME_IMAGE=docker.io/library/amazonlinux:2023
 
-# Multi-stage build: compile Rust binary, then copy to minimal runtime image
+# Multi-stage build: compile statically-linked Rust binary via musl,
+# then copy to AL2023 runtime (avoids glibc version mismatch).
 FROM ${BUILDER_IMAGE} AS builder
 
-RUN apt-get update && apt-get install -y pkg-config libfuse-dev && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache musl-dev fuse-dev pkgconf
 
 WORKDIR /build
 COPY Cargo.toml Cargo.lock* ./
