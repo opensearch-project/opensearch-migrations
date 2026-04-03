@@ -61,4 +61,9 @@ public class ShimRequestContext extends BaseSpanContext<RootShimProxyContext>
             .put(HTTP_METHOD_ATTR, httpMethod)
             .put(HTTP_URL_ATTR, httpUrl);
     }
+
+    @Override
+    public IShimProxyContexts.ITargetDispatchContext createTargetDispatchContext(String targetName) {
+        return new TargetDispatchContext(this, targetName);
+    }
 }

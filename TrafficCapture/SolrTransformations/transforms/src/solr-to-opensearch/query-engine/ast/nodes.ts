@@ -31,6 +31,9 @@ export interface BoolNode {
  * Field-value query node — a `field:value` expression in Solr syntax.
  *
  * Example: `title:java` → field="title", value="java"
+ *
+ * Only used for explicit field:value syntax. Bare values like `java`
+ * produce a BareNode instead.
  */
 export interface FieldNode {
   type: 'field';
@@ -39,21 +42,44 @@ export interface FieldNode {
 }
 
 /**
- * Phrase query node — a quoted phrase search.
+ * Phrase query node — a quoted phrase search with explicit field.
  *
- * Examples:
- *   `title:"hello world"` → text="hello world", field="title"
- *   `"hello world"` with df="content" → text="hello world", field="content"
+ * Example: `title:"hello world"` → text="hello world", field="title"
+ *
+ * Only used for explicit field:"phrase" syntax. Bare phrases like `"hello world"`
+ * produce a BareNode instead.
  */
 export interface PhraseNode {
   type: 'phrase';
   /** The phrase text without quotes. */
   text: string;
-  /**
-   * The target field. The parser sets this to the explicit field (e.g., `title:"..."`)
-   * or the default field (df) for bare phrases like `"hello world"`.
-   */
+  /** The target field (always explicit, e.g., `title:"..."`). */
   field: string;
+}
+
+/**
+ * Bare query node — a term or phrase without explicit field prefix.
+ *
+ * Used for queries like `java` or `"hello world"` where no field is specified.
+ * The transformer converts this to OpenSearch's query_string query, which
+ * searches across the default field (or all fields if df is not set).
+ *
+ * For phrases (isPhrase=true), the transformer wraps the query in quotes
+ * so OpenSearch's query_string treats it as a phrase search.
+ *
+ * Examples:
+ *   `java` → BareNode { query: "java", isPhrase: false }
+ *   `"hello world"` → BareNode { query: "hello world", isPhrase: true }
+ *   `java` with df="content" → BareNode { query: "java", isPhrase: false, defaultField: "content" }
+ */
+export interface BareNode {
+  type: 'bare';
+  /** The search value (term or phrase text, without quotes). */
+  value: string;
+  /** Whether this is a phrase query (originally quoted). */
+  isPhrase: boolean;
+  /** The default field from df parameter, or undefined if not set. */
+  defaultField?: string;
 }
 
 /**
@@ -107,6 +133,7 @@ export interface BoostNode {
 
 /** Union of all AST node types. Every node in the parsed Solr query tree is one of these variants. */
 export type ASTNode =
+  | BareNode
   | BoolNode
   | FieldNode
   | PhraseNode

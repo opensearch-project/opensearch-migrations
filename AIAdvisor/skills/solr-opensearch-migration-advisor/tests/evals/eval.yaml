@@ -1,0 +1,63 @@
+
+description: "Config for claude agent based migration advisor tests"
+
+providers:
+  - id: 'file://claude_requests.py'
+    label: 'Claude agent invocation'
+    config:
+      timeout: 3000000
+
+defaultTest:
+  options:
+    provider:
+      id: bedrock:us.anthropic.claude-3-5-sonnet-20241022-v2:0
+      config:
+        region: us-east-1
+        max_tokens: 256
+
+prompts:
+  - id: migration-advisor-prompt
+    label: "Migration advisor requests"
+    raw: "{{query}}"
+
+
+tests:
+  # Note the sequence of continue: False to start new session, and continue: True if building on the previous prompts
+  - description: "Ensure the agent asks for the specific role of the user."
+    metadata:
+      continue: false # flag on / off if the last used session should be picked up or not
+    vars:
+      query: |
+        Help me migrate my solr system to opensearch.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response clarifies the actual role of the user. Provides at least 6 explicit role examples to choose from,
+          which distinguish engineers / developers, platform / ops engineers, data engineers, architects and product manager roles.
+        metric: clarify-role
+  - description: "Ask for schema"
+    metadata:
+      continue: true # flag on / off if the last used session should be picked up or not
+    vars:
+      query: |
+        To your previous question: Search Engineer is the correct role.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response asks for schema to be migrated.
+        metric: clarify-schema
+  - description: "Create migration plan"
+    metadata:
+      continue: true # flag on / off if the last used session should be picked up or not
+    vars:
+      query: |
+        To your previous question: you can find the corresponding schema here: 
+        https://github.com/apache/solr/blob/main/solr/server/solr/configsets/sample_techproducts_configs/conf/managed-schema.xml.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response contains a migration plan including the migrated schema with plausible opensearch schema.
+        metric: clarify-migration-steps
+
+
+    

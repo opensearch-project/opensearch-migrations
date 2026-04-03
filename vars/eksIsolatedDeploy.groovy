@@ -37,7 +37,8 @@ def call(Map config = [:]) {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
                             sh """
-                                ./deployment/k8s/aws/aws-bootstrap.sh \
+                                ./deployment/k8s/aws/assemble-bootstrap.sh
+                                ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                   --deploy-create-vpc-cfn \
                                   --build-cfn \
                                   --build-images \
@@ -71,7 +72,7 @@ def call(Map config = [:]) {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
                             sh """
-                                ./deployment/k8s/aws/aws-bootstrap.sh \
+                                ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                   --deploy-import-vpc-cfn \
                                   --build-cfn \
                                   --build-chart-and-dashboards \

@@ -55,12 +55,17 @@
           "resources": {
             "limits": {
               "cpu": "50m",
-              "memory": "32Mi"
+              "memory": "64Mi"
             },
             "requests": {
               "cpu": "50m",
-              "memory": "32Mi"
+              "memory": "64Mi"
             }
+          }
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
           }
         },
         "activeDeadlineSeconds": "31536000",
@@ -197,12 +202,17 @@
           "resources": {
             "limits": {
               "cpu": "50m",
-              "memory": "32Mi"
+              "memory": "64Mi"
             },
             "requests": {
               "cpu": "50m",
-              "memory": "32Mi"
+              "memory": "64Mi"
             }
+          }
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
           }
         },
         "activeDeadlineSeconds": "31536000",

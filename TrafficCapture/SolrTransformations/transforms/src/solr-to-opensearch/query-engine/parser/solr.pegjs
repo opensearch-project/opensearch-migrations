@@ -141,28 +141,28 @@ fieldExpr
     }
 
 // ─── Bare expressions (no field prefix) ──────────────────────────────────────
-// These produce nodes with field=''. The parser.ts wrapper resolves the
-// empty field to the default field (df) from the params map after parsing.
+// These produce BareNode. The parser.ts wrapper sets the defaultField
+// property based on the df parameter.
 
-// PhraseNode (bare): "hello world" without a field prefix.
-// `"hello world"` → PhraseNode { text: "hello world", field: "" }
-// field is resolved to df by parser.ts after parsing.
+// BareNode (bare phrase): "hello world" without a field prefix.
+// `"hello world"` → BareNode { query: "hello world", isPhrase: true }
+// defaultField is set by parser.ts based on df parameter.
 barePhrase
   = "\"" text:$[^"]* "\"" boost:boost? {
-      const node = { type: 'phrase', text: text, field: '' };
+      const node = { type: 'bare', value: text, isPhrase: true };
       if (boost !== null) return { type: 'boost', child: node, value: boost };
       return node;
     }
 
-// FieldNode (bare): a search term without a field prefix.
-// `java` → FieldNode { field: "", value: "java" }
-// field is resolved to df by parser.ts after parsing.
+// BareNode (bare term): a search term without a field prefix.
+// `java` → BareNode { query: "java", isPhrase: false }
+// defaultField is set by parser.ts based on df parameter.
 // Keywords (AND, OR, NOT, TO) are excluded to prevent them from being
 // consumed as values — they return undefined so peggy backtracks.
 bareValue
   = val:valueChars boost:boost? {
       if (['AND','OR','NOT','TO'].includes(val)) return undefined;
-      const node = { type: 'field', field: '', value: val };
+      const node = { type: 'bare', value: val, isPhrase: false };
       if (boost !== null) return { type: 'boost', child: node, value: boost };
       return node;
     }
@@ -176,8 +176,9 @@ rangeVal
 
 // Unquoted value characters: letters, digits, and common special chars.
 // Determines what can appear in unquoted field values.
+// Includes ~ to parse fuzzy syntax (roam~, roam~1) so we can throw a clear error.
 valueChars
-  = $[a-zA-Z0-9._\-*#$@?+/]+
+  = $[a-zA-Z0-9._\-*#$@?+/~]+
 
 // Field name identifier: starts with a letter or underscore, followed by
 // value characters. More restrictive first character prevents numbers from

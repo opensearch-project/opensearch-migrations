@@ -452,7 +452,7 @@ get_cfn_export() {
   # export MIGRATIONS_ECR_REGISTRY=123456789012.dkr.ecr.us-east-2.amazonaws.com/migration-ecr-dev-us-east-2;...
   while read -r name value; do
     # If stage_filter is set, only include exports that contain the stage name
-    if [[ -n "$stage_filter" && ! "$name" =~ $stage_filter ]]; then
+    if [[ -n "$stage_filter" && "$name" != *"-${stage_filter}-"* ]]; then
       continue
     fi
     names+=("$name")
@@ -937,18 +937,35 @@ fi
 
 
 
+# --- source helper scripts (inlined by assemble-bootstrap.sh for release) ---
+# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh
+# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcr.sh
+# @source deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/generatePrivateEcrValues.sh
+_bootstrap_source_helpers() {
+  local scripts_dir="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
+  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh
+  . "$scripts_dir/privateEcrManifest.sh"
+  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/mirrorToEcr.sh
+  . "$scripts_dir/mirrorToEcr.sh"
+  # shellcheck source=../../../charts/aggregates/migrationAssistantWithArgo/scripts/generatePrivateEcrValues.sh
+  . "$scripts_dir/generatePrivateEcrValues.sh"
+}
+# Only source if functions aren't already defined (i.e., not assembled)
+if ! type mirror_images_to_ecr &>/dev/null; then
+  _bootstrap_source_helpers
+fi
+
 # --- mirror public images to private ECR (optional) ---
 # Run before build so that buildkit image is available in ECR for isolated clusters.
 if [[ "$push_images_to_ecr" == "true" ]]; then
   echo "Mirroring public images and helm charts to private ECR..."
   ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
-  SCRIPTS_DIR="${base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts"
-  MIRROR_FLAGS="--region ${AWS_CFN_REGION}"
-  "$SCRIPTS_DIR/mirrorToEcr.sh" "$ECR_HOST" $MIRROR_FLAGS
+  mirror_images_to_ecr "$ECR_HOST" "${AWS_CFN_REGION}" "$IMAGES"
+  mirror_charts_to_ecr "$ECR_HOST" "${AWS_CFN_REGION}" "$CHARTS"
 
   echo "Generating private ECR helm values override..."
   ecr_values_file=$(mktemp)
-  "$SCRIPTS_DIR/generatePrivateEcrValues.sh" "$ECR_HOST" > "$ecr_values_file"
+  generate_private_ecr_values "$ECR_HOST" > "$ecr_values_file"
   if [[ -n "$extra_helm_values" ]]; then
     extra_helm_values="$extra_helm_values,$ecr_values_file"
   else
@@ -989,14 +1006,21 @@ migration_console|console"
         crane_copy_retry "$src" "$dst"
       done
     else
-      # Copy from public ECR using release image names
-      aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
-        crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
+      # Copy from public ECR, trying pull-through cache first when available
+      _ecr_public_authed=false
       echo "$MA_IMAGES" | while IFS='|' read -r build_name public_suffix; do
-        src="public.ecr.aws/opensearchproject/opensearch-migrations-${public_suffix}:${RELEASE_VERSION}"
         dst="${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_latest"
         echo "  $public_suffix → $dst"
-        crane_copy_retry "$src" "$dst"
+        if [[ -n "${ECR_PULL_THROUGH_ENDPOINT:-}" ]] && \
+           crane_copy_retry "${ECR_PULL_THROUGH_ENDPOINT}/ecr-public/opensearchproject/opensearch-migrations-${public_suffix}:${RELEASE_VERSION}" "$dst" 2>/dev/null; then
+          continue
+        fi
+        if [[ "$_ecr_public_authed" != "true" ]]; then
+          aws ecr-public get-login-password --region us-east-1 2>/dev/null | \
+            crane auth login public.ecr.aws -u AWS --password-stdin 2>/dev/null || true
+          _ecr_public_authed=true
+        fi
+        crane_copy_retry "public.ecr.aws/opensearchproject/opensearch-migrations-${public_suffix}:${RELEASE_VERSION}" "$dst"
       done
     fi
     # Tag mirrored images with the immutable IMAGE_TAG

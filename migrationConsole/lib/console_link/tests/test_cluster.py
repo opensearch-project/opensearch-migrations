@@ -352,11 +352,21 @@ def test_run_benchmark_executes_correctly_no_auth(mocker):
                                  "--client-options=verify_certs:false", shell=True)
 
 
-def test_run_benchmark_raises_error_sigv4_auth():
+def test_run_benchmark_executes_correctly_sigv4_auth(mocker):
     cluster = create_valid_cluster(auth_type=AuthMethod.SIGV4, details={"region": "eu-west-1", "service": "aoss"})
+    mock = mocker.patch("subprocess.run", autospec=True)
     workload = "nyctaxis"
-    with pytest.raises(NotImplementedError):
-        cluster.execute_benchmark_workload(workload=workload)
+    cluster.execute_benchmark_workload(workload=workload)
+    mock.assert_called_once_with("opensearch-benchmark run"
+                                 " --exclude-tasks=check-cluster-health"
+                                 f" --target-host={cluster.endpoint} --workload={workload}"
+                                 " --pipeline=benchmark-only"
+                                 " --test-mode --kill-running-processes --workload-params="
+                                 "bulk_size:10,bulk_indexing_clients:1 "
+                                 "--client-options=verify_certs:false,"
+                                 "amazon_aws_log_in:session,"
+                                 "service:aoss,"
+                                 "region:eu-west-1", shell=True)
 
 
 def test_run_benchmark_executes_correctly_basic_auth_and_https(mocker):

@@ -124,6 +124,12 @@ otelConfiguration:
           exporters: [awsemf, prometheus]
 
 charts:
+  argo-workflows:
+    values:
+      artifactRepository:
+        s3:
+          useSDKCreds: true
+
   fluent-bit:
     values:
       env:
@@ -181,3 +187,4 @@ charts:
         value: "120000" # 2 minutes (slows down background chatter)
       - name: KUBERNETES_CLIENT_READ_TIMEOUT_MS
         value: "30000"  # Avoid timing out on heavy K8s API responses
+

@@ -13,7 +13,7 @@ static def expandVersionString(String input) {
 }
 
 def call(Map config = [:]) {
-    def defaultStageId = config.defaultStageId ?: "eks-integ"
+    def defaultStageId = config.defaultStageId ?: "eksint"
     def jobName = config.jobName ?: "eks-integ-test"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
     def sourceVersion = config.sourceVersion ?: ""
@@ -79,7 +79,10 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    script { env.maStageName = "${params.STAGE}-${currentBuild.number}" }
+                    script {
+                        def pool = jobName.startsWith("main-") ? "m" : "p"
+                        env.maStageName = "${params.STAGE}-${pool}${currentBuild.number}"
+                    }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }
@@ -143,7 +146,8 @@ def call(Map config = [:]) {
                                         echo "Resolved VPC ID from subnet: ${vpcId}"
                                     }
                                     sh """
-                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                        ./deployment/k8s/aws/assemble-bootstrap.sh
+                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                           --deploy-import-vpc-cfn \
                                           --build-cfn \
                                           --stack-name "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}" \

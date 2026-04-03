@@ -54,6 +54,7 @@ function convertTermsFacet(def: JavaMap): JavaMap {
     'prefix',
     'missing',
     'sort',
+    'facet',
   ]);
   warnUnknownKeys(def, knownKeys, 'terms');
 
@@ -204,7 +205,7 @@ function convertArbitraryRangeFacet(def: JavaMap, ranges: any): JavaMap {
 
   rangeInner.set('ranges', osRanges);
 
-  const knownKeys = new Set(['type', 'field', 'ranges', 'mincount', 'hardend', 'include', 'other']);
+  const knownKeys = new Set(['type', 'field', 'ranges', 'mincount', 'hardend', 'include', 'other', 'facet']);
   warnUnknownKeys(def, knownKeys, 'arbitrary range');
 
   return new Map<string, any>([['range', rangeInner]]);
@@ -348,6 +349,7 @@ function warnUnknownRangeKeys(def: JavaMap): void {
     'hardend',
     'include',
     'other',
+    'facet',
   ]);
   warnUnknownKeys(def, knownKeys, 'range');
 }
@@ -376,7 +378,7 @@ function convertQueryFacet(def: JavaMap): JavaMap {
     ? new Map([['match_all', new Map()]])
     : new Map([['query_string', new Map([['query', q]])]]);
 
-  const knownKeys = new Set(['type', 'q']);
+  const knownKeys = new Set(['type', 'q', 'facet']);
   warnUnknownKeys(def, knownKeys, 'query');
 
   return new Map<string, any>([['filter', query]]);
@@ -401,6 +403,10 @@ function warnUnknownKeys(def: JavaMap, knownKeys: Set<string>, facetType: string
 
 /**
  * Convert a single Solr facet definition to an OpenSearch agg Map.
+ *
+ * If the definition contains a `facet` key with nested sub-facets,
+ * they are recursively converted and attached as a sibling `aggs` key
+ * on the returned aggregation Map.
  */
 function convertSingleFacet(facetDef: any): JavaMap {
   if (!isMapLike(facetDef)) {
@@ -409,16 +415,28 @@ function convertSingleFacet(facetDef: any): JavaMap {
 
   const type = (facetDef.get('type') || '').toString().toLowerCase();
 
+  let result: JavaMap;
   switch (type) {
     case 'terms':
-      return convertTermsFacet(facetDef);
+      result = convertTermsFacet(facetDef);
+      break;
     case 'range':
-      return convertRangeFacet(facetDef);
+      result = convertRangeFacet(facetDef);
+      break;
     case 'query':
-      return convertQueryFacet(facetDef);
+      result = convertQueryFacet(facetDef);
+      break;
     default:
       throw new Error(`Facet type '${type}' is not implemented`);
   }
+
+  // Handle nested sub-facets: Solr's `facet` key → OpenSearch's `aggs` key
+  const subFacets = facetDef.get('facet');
+  if (subFacets && isMapLike(subFacets) && subFacets.size > 0) {
+    result.set('aggs', convertJsonFacets(subFacets));
+  }
+
+  return result;
 }
 
 /**

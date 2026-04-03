@@ -9,11 +9,11 @@ import {z} from "zod";
 const SIMPLE_CONSOLE_CLI_RESOURCES = {
     limits: {
         cpu: "500m",
-            memory: "500Mi",
+        memory: "500Mi",
     },
     requests: {
         cpu: "500m",
-            memory: "500Mi",
+        memory: "500Mi",
     }
 };
 

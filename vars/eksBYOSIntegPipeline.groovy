@@ -29,7 +29,7 @@ static def expandVersionString(String input) {
 
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksbyos"
-    def jobName = config.jobName ?: "byos-eks-integ-test"
+    def jobName = config.jobName ?: "eks-byos-integ-test"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
     def clusterContextFilePath = "tmp/cluster-context-byos-${currentBuild.number}.json"
     def testIds = config.testIds ?: "0010"
@@ -121,7 +121,8 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
-                        env.maStageName = "${params.STAGE}-${currentBuild.number}"
+                        def pool = jobName.startsWith("main-") ? "m" : "p"
+                        env.maStageName = "${params.STAGE}-${pool}${currentBuild.number}"
                         // Resolve TEST_PRESET → effective parameter values
                         def testPresets = [
                             'large-es7x-24B': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es7x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_7.10', rfsWorkers: '90', targetClusterSize: 'large'],
@@ -203,7 +204,8 @@ def call(Map config = [:]) {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                     sh """
-                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                        ./deployment/k8s/aws/assemble-bootstrap.sh
+                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                           --deploy-create-vpc-cfn \
                                           --build-cfn \
                                           --stack-name "${env.MA_STACK_NAME}" \
