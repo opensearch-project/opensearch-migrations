@@ -4,11 +4,15 @@ import java.util.List;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
+import org.opensearch.migrations.bulkload.common.ClusterVersionDetector;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrClient;
+import org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator;
+import org.opensearch.migrations.bulkload.solr.SolrStandaloneBackupCreator;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
@@ -118,6 +122,18 @@ public class CreateSnapshot {
                 description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
+
+        @Parameter(
+                names = {"--source-type"},
+                required = false,
+                description = "Source cluster type: 'elasticsearch' (default) or 'solr'")
+        public String sourceType = "elasticsearch";
+
+        @Parameter(
+                names = {"--solr-collections"},
+                required = false,
+                description = "Comma-separated list of Solr collection names to back up (required when source-type=solr)")
+        public List<String> solrCollections = List.of();
     }
 
     @Getter
@@ -162,6 +178,102 @@ public class CreateSnapshot {
     private ICreateSnapshotContext context;
 
     public void run() {
+        if ("solr".equalsIgnoreCase(arguments.sourceType)) {
+            runSolrBackup();
+            return;
+        }
+        // Auto-detect Solr from the source cluster
+        boolean isSolr = false;
+        try {
+            var version = ClusterVersionDetector.detect(arguments.sourceArgs.toConnectionContext());
+            if (version.getFlavor() == Flavor.SOLR) {
+                log.info("Detected Solr source ({}), using Solr backup path", version);
+                isSolr = true;
+            }
+        } catch (Exception e) {
+            log.debug("Version detection failed, assuming Elasticsearch: {}", e.getMessage());
+        }
+        if (isSolr) {
+            runSolrBackup();
+            return;
+        }
+        runElasticsearchSnapshot();
+    }
+
+    private void runSolrBackup() {
+        var backupLocation = arguments.fileSystemRepoPath != null
+            ? arguments.fileSystemRepoPath : arguments.s3RepoUri;
+        var solrUrl = arguments.sourceArgs.toConnectionContext().getUri().toString();
+        var username = arguments.sourceArgs.getUsername();
+        var password = arguments.sourceArgs.getPassword();
+
+        // Auto-discover collections if not specified
+        if (arguments.solrCollections.isEmpty()) {
+            var client = new SolrClient(solrUrl, username, password);
+            try {
+                arguments.solrCollections = client.listCollections();
+                log.info("Auto-discovered {} Solr collection(s): {}", arguments.solrCollections.size(), arguments.solrCollections);
+            } catch (Exception e) {
+                throw new ParameterException("Failed to discover Solr collections: " + e.getMessage());
+            }
+        }
+
+        if (isSolrCloud(solrUrl, username, password)) {
+            runSolrCloudBackup(solrUrl, backupLocation, username, password);
+        } else {
+            runSolrStandaloneBackup(solrUrl, backupLocation, username, password);
+        }
+    }
+
+    private boolean isSolrCloud(String solrUrl, String username, String password) {
+        try {
+            var client = new SolrClient(solrUrl, username, password, 1);
+            return client.isSolrCloud();
+        } catch (Exception e) {
+            log.info("SolrCloud detection failed, assuming standalone: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private void runSolrCloudBackup(String solrUrl, String backupLocation, String username, String password) {
+        log.info("Detected SolrCloud — using Collections API backup");
+        var solrCreator = new SolrSnapshotCreator(
+            solrUrl, arguments.snapshotName, backupLocation,
+            arguments.solrCollections, username, password
+        );
+        solrCreator.registerRepo();
+        solrCreator.createSnapshot();
+        waitForCompletion(solrCreator::isSnapshotFinished);
+    }
+
+    private void runSolrStandaloneBackup(String solrUrl, String backupLocation, String username, String password) {
+        log.info("Detected standalone Solr — using replication API backup");
+        var creator = new SolrStandaloneBackupCreator(
+            solrUrl, arguments.snapshotName, backupLocation,
+            arguments.solrCollections, username, password
+        );
+        creator.createBackup();
+        waitForCompletion(creator::isBackupFinished);
+    }
+
+    private void waitForCompletion(java.util.function.BooleanSupplier isFinished) {
+        if (!arguments.noWait) {
+            log.info("Waiting for Solr backup to complete...");
+            while (!isFinished.getAsBoolean()) {
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new SolrSnapshotCreator.SolrBackupFailed("Interrupted while waiting for backup");
+                }
+            }
+            log.info("Solr backup '{}' completed", arguments.snapshotName);
+        } else {
+            log.info("Solr backup '{}' initiated (no-wait mode)", arguments.snapshotName);
+        }
+    }
+
+    private void runElasticsearchSnapshot() {
         var clientFactory = new OpenSearchClientFactory(arguments.sourceArgs.toConnectionContext());
         var client = clientFactory.determineVersionAndCreate();
         SnapshotCreator snapshotCreator;

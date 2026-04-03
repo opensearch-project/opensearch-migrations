@@ -7,7 +7,8 @@ from console_link.api.sessions import http_safe_find_session
 from console_link.models.factories import get_snapshot
 from console_link.models.snapshot import (
     FailedToCreateSnapshot, FailedToDeleteSnapshot, Snapshot, SnapshotConfig, SnapshotNotStarted, SnapshotStatus,
-    SnapshotStatusUnavailable, get_latest_snapshot_status_raw, S3Snapshot, FileSystemSnapshot, SnapshotSourceType,
+    SnapshotStatusUnavailable, get_latest_snapshot_status_raw, _get_solr_snapshot_status,
+    S3Snapshot, FileSystemSnapshot, SnapshotSourceType,
     S3SnapshotSource, FileSystemSnapshotSource, SnapshotIndexes,
 )
 from console_link.models.step_state import StepState
@@ -50,7 +51,11 @@ def _get_snapshot_from_session(session_name):
 def get_snapshot_status(session_name: str):
     snapshot_obj = _get_snapshot_from_session(session_name)
     try:
-        # Get the snapshot status details
+        # Solr path: use Collections API REQUESTSTATUS
+        if snapshot_obj._is_solr_source():
+            return _get_solr_snapshot_status(snapshot_obj.source_cluster, snapshot_obj.snapshot_name)
+
+        # ES/OS path: use snapshot status API
         latest_status = get_latest_snapshot_status_raw(snapshot_obj.source_cluster,  # type: ignore
                                                        snapshot_obj.snapshot_name,
                                                        snapshot_obj.snapshot_repo_name,

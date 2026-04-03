@@ -270,8 +270,8 @@ class TestMapFromWorkflowConfig:
         }
         assert result == expected
 
-    def test_version_field_is_ignored(self):
-        """Test that version field in workflow config is ignored in mapping."""
+    def test_version_field_is_mapped(self):
+        """Test that version field in workflow config is passed through in mapping."""
         workflow_config = {
             "endpoint": "https://elasticsearch-master-headless:9200",
             "version": "ES 7.10",
@@ -288,6 +288,7 @@ class TestMapFromWorkflowConfig:
 
         expected = {
             "endpoint": "https://elasticsearch-master-headless:9200",
+            "version": "ES 7.10",
             "allow_insecure": True,
             "basic_auth": {
                 "username": "admin",
@@ -295,7 +296,6 @@ class TestMapFromWorkflowConfig:
             }
         }
         assert result == expected
-        assert "version" not in result
 
     def test_additional_fields_are_ignored(self):
         """Test that additional fields like snapshotRepo and proxy are ignored."""
