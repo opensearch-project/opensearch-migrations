@@ -451,7 +451,7 @@ get_cfn_export() {
   # export MIGRATIONS_ECR_REGISTRY=123456789012.dkr.ecr.us-east-2.amazonaws.com/migration-ecr-dev-us-east-2;...
   while read -r name value; do
     # If stage_filter is set, only include exports that contain the stage name
-    if [[ -n "$stage_filter" && ! "$name" =~ $stage_filter ]]; then
+    if [[ -n "$stage_filter" && "$name" != *"-${stage_filter}-"* ]]; then
       continue
     fi
     names+=("$name")

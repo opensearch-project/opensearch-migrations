@@ -12,6 +12,8 @@ the root cause, and provides a workaround where one exists.
 |-----------|---------|
 | [TERMS-OFFSET](#terms-offset) | Terms facet `offset` not natively supported in OpenSearch |
 | [DATE-RANGE-GAP](#date-range-gap) | Multi-unit date range gaps approximated as fixed intervals |
+| [CURSOR-UNIQUEKEY](#cursor-uniquekey) | Cursor pagination assumes `id` as Solr's uniqueKey field |
+| [CURSOR-REPLAY](#cursor-replay) | Traffic replay with cursorMark not supported |
 
 ---
 
@@ -117,3 +119,48 @@ always use `fixed_interval` since they cannot be expressed as a single
 * **Compound gap drift** — Compound gaps combining calendar and fixed units
   (e.g. `+1MONTH+2DAYS`) accumulate approximation error from each calendar
   component.
+
+---
+
+## CURSOR-UNIQUEKEY
+
+**Feature:** Cursor pagination with custom `uniqueKey` field
+
+**Solr behaviour:**
+Solr requires `cursorMark` queries to include the `uniqueKey` field
+(configured in `schema.xml`) in the sort clause. The default is `id`, but
+deployments can configure any field. Solr rejects the query if the
+`uniqueKey` is missing from the sort.
+
+**OpenSearch behaviour:**
+OpenSearch uses `_id` as the document identifier. The `search_after`
+pagination mechanism requires the sort to include a tiebreaker field.
+
+**Cause:**
+The cursor pagination transform hardcodes `id` as the Solr `uniqueKey`
+and maps it to OpenSearch's `_id`. Deployments using a custom `uniqueKey`
+(e.g., `doc_id`) may see a redundant `id asc` tiebreaker added, and the
+custom field will not be mapped to `_id`.
+
+**Current workaround:**
+None. The vast majority of Solr deployments use the default `id`. A
+configurable `uniqueKey` option can be added in a future iteration.
+
+---
+
+## CURSOR-REPLAY
+
+**Feature:** Replaying captured Solr traffic containing `cursorMark`
+
+**Solr behaviour:**
+Solr's `cursorMark` tokens are opaque, binary-encoded values derived from
+sort values. They are only meaningful to the Solr instance that generated them.
+
+**Cause:**
+The traffic replayer cannot decode Solr's native cursor tokens into
+OpenSearch `search_after` values. Only the initial page (`cursorMark=*`)
+works during replay.
+
+**Current workaround:**
+This applies only to offline traffic replay. The live shim proxy handles
+cursor pagination correctly using its own base64-encoded tokens.

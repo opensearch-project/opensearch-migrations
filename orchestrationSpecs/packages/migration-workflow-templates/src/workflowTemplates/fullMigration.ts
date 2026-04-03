@@ -250,6 +250,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("groupName_view", typeToken<string>())
+        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addOptionalInput("metadataMigrationConfig", c =>
             expr.empty<z.infer<typeof ARGO_METADATA_OPTIONS>>())
         .addOptionalInput("documentBackfillConfig", c =>
@@ -289,16 +290,18 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b => b
-            .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c =>
-                c.register({
+            .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c => {
+                const snapshotNameRes = expr.get(
+                    expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                    "snapshotNameResolution");
+                return c.register({
                     ...selectInputsForRegister(b, c),
-                    resourceName: expr.getLoose(
-                        expr.get(
-                            expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
-                            "snapshotNameResolution"
-                        ),
-                        "dataSnapshotResourceName")
-                }), {
+                    resourceName: expr.ternary(
+                        expr.hasKey(snapshotNameRes, "dataSnapshotResourceName"),
+                        expr.getLoose(snapshotNameRes, "dataSnapshotResourceName"),
+                        expr.literal(""))
+                });
+            }, {
                     when: {
                         templateExp: expr.hasKey(
                             expr.get(
@@ -309,15 +312,17 @@ export const FullMigration = WorkflowBuilder.create({
                     }
                 }
             )
-            .addStep("readSnapshotName", ResourceManagement, "readDataSnapshotName", c =>
-                    c.register({
-                        resourceName: expr.getLoose(
-                            expr.get(
-                                expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
-                                "snapshotNameResolution"
-                            ),
-                            "dataSnapshotResourceName")
-                    }), {
+            .addStep("readSnapshotName", ResourceManagement, "readDataSnapshotName", c => {
+                    const snapshotNameRes = expr.get(
+                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                        "snapshotNameResolution");
+                    return c.register({
+                        resourceName: expr.ternary(
+                            expr.hasKey(snapshotNameRes, "dataSnapshotResourceName"),
+                            expr.getLoose(snapshotNameRes, "dataSnapshotResourceName"),
+                            expr.literal(""))
+                    });
+                }, {
                     when: {
                         templateExp: expr.hasKey(
                             expr.get(
@@ -351,7 +356,8 @@ export const FullMigration = WorkflowBuilder.create({
                             repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
                         })),
                         migrationLabel: expr.get(c.item, "label"),
-                        groupName_view: expr.get(c.item, "label")
+                        groupName_view: expr.get(c.item, "label"),
+                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], "")
                     });
                 }, {
                     loopWith: makeParameterLoop(
@@ -546,7 +552,8 @@ export const FullMigration = WorkflowBuilder.create({
                         sourceVersion: expr.get(c.item, "sourceVersion"),
                         sourceLabel: expr.get(c.item, "sourceLabel"),
                         targetConfig: expr.deserializeRecord(expr.get(c.item, "targetConfig")),
-                        snapshotConfig: expr.deserializeRecord(expr.get(c.item, "snapshotConfig"))
+                        snapshotConfig: expr.deserializeRecord(expr.get(c.item, "snapshotConfig")),
+                        sourceEndpoint: expr.dig(c.item, ["sourceEndpoint"], "")
                     })),
 //                    snapshotMigrationConfig: expr.cast(c.item).to<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>()
                     sortOrder_view: expr.literal(4),

@@ -520,6 +520,10 @@
               "name": "groupName_view"
             },
             {
+              "name": "sourceEndpoint",
+              "value": ""
+            },
+            {
               "name": "metadataMigrationConfig",
               "value": ""
             },
@@ -588,6 +592,10 @@
                     "value": "{{inputs.parameters.metadataMigrationConfig}}"
                   },
                   {
+                    "name": "sourceEndpoint",
+                    "value": "{{inputs.parameters.sourceEndpoint}}"
+                  },
+                  {
                     "name": "snapshotConfig",
                     "value": "{{inputs.parameters.snapshotConfig}}"
                   },
@@ -652,6 +660,10 @@
                   {
                     "name": "migrationLabel",
                     "value": "{{inputs.parameters.migrationLabel}}"
+                  },
+                  {
+                    "name": "sourceEndpoint",
+                    "value": "{{inputs.parameters.sourceEndpoint}}"
                   },
                   {
                     "name": "imageReindexFromSnapshotLocation",
@@ -758,7 +770,7 @@
                 "parameters": [
                   {
                     "name": "resourceName",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['dataSnapshotResourceName']}}"
+                    "value": "{{=(('dataSnapshotResourceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']) ? (fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['dataSnapshotResourceName']) : (''))}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -784,7 +796,7 @@
                 "parameters": [
                   {
                     "name": "resourceName",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['dataSnapshotResourceName']}}"
+                    "value": "{{=(('dataSnapshotResourceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']) ? (fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['dataSnapshotResourceName']) : (''))}}"
                   }
                 ]
               },
@@ -876,6 +888,10 @@
                   {
                     "name": "migrationLabel",
                     "value": "{{=item['label']}}"
+                  },
+                  {
+                    "name": "sourceEndpoint",
+                    "value": "{{=sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
                   }
                 ]
               },
@@ -1388,7 +1404,7 @@
                   },
                   {
                     "name": "snapshotMigrationConfig",
-                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotNameResolution\", fromJSON(item['snapshotNameResolution']), \"migrations\", fromJSON(item['migrations']), \"sourceVersion\", item['sourceVersion'], \"sourceLabel\", item['sourceLabel'], \"targetConfig\", fromJSON(item['targetConfig']), \"snapshotConfig\", fromJSON(item['snapshotConfig'])))}}"
+                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotNameResolution\", fromJSON(item['snapshotNameResolution']), \"migrations\", fromJSON(item['migrations']), \"sourceVersion\", item['sourceVersion'], \"sourceLabel\", item['sourceLabel'], \"targetConfig\", fromJSON(item['targetConfig']), \"snapshotConfig\", fromJSON(item['snapshotConfig']), \"sourceEndpoint\", sprig.dig('sourceEndpoint', '', item)))}}"
                   },
                   {
                     "name": "sortOrder_view",
