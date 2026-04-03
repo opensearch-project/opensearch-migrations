@@ -1,27 +1,25 @@
 /// FUSE filesystem that presents virtual Lucene files from ES/OS snapshot blobs.
 ///
-/// Uses fuse3's async Filesystem trait (`&self` + `async fn`) so the tokio
-/// multi-threaded runtime can serve many FUSE read requests concurrently —
-/// critical when the underlying I/O goes through mount-s3.
+/// Uses fuser 0.17's multi-threaded dispatch (`&self` + `n_threads` + `clone_fd`)
+/// so multiple FUSE read requests are served concurrently — critical when the
+/// underlying I/O goes through mount-s3.
 use crate::metadata::{self, ShardFileEntry};
 use crate::repo::ResolvedRepo;
-use bytes::Bytes;
-use fuse3::raw::prelude::*;
-use fuse3::raw::reply::{DirectoryEntry, ReplyDirectory};
-use fuse3::{Errno, Inode, MountOptions, Result, Timestamp};
-use futures_util::stream;
+use fuser::{
+    Config, Errno, FileAttr, FileType, Filesystem, INodeNo, MountOption, ReplyAttr, ReplyData,
+    ReplyDirectory, ReplyEmpty, ReplyEntry, Request, SessionACL,
+};
 use log::{debug, error, info};
 use std::collections::HashMap;
-use std::ffi::{OsStr, OsString};
-use std::num::NonZeroU32;
+use std::ffi::OsStr;
+use std::fs;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use std::time::{Duration, UNIX_EPOCH};
 
 const TTL: Duration = Duration::from_secs(3600);
 const BLOCK_SIZE: u32 = 512;
-const ZERO_TS: Timestamp = Timestamp { sec: 0, nsec: 0 };
 
 #[derive(Debug, Clone)]
 enum InodeEntry {
@@ -71,47 +69,42 @@ impl SnapshotFs {
         }
     }
 
-    pub async fn mount(self, mountpoint: &Path) -> std::io::Result<()> {
-        let mut opts = MountOptions::default();
-        opts.fs_name("snapshot-fuse")
-            .allow_other(true)
-            .default_permissions(true)
-            .read_only(true);
-
-        info!("Mounting snapshot FUSE at {:?}", mountpoint);
-        let handle = Session::new(opts)
-            .mount(self, mountpoint)
-            .await?;
-
-        // Wait for SIGTERM/SIGINT then unmount cleanly
-        tokio::signal::ctrl_c().await.ok();
-        info!("Received shutdown signal, unmounting");
-        handle.unmount().await?;
-        Ok(())
+    /// Mount with multi-threaded FUSE dispatch.
+    /// Each thread gets its own /dev/fuse fd via clone_fd, enabling true parallel
+    /// request processing — multiple concurrent reads from the bulk-loader are
+    /// served simultaneously instead of being serialized.
+    pub fn mount(self, mountpoint: &Path, num_threads: usize) -> io::Result<()> {
+        let mut config = Config::default();
+        config.mount_options = vec![
+            MountOption::FSName("snapshot-fuse".to_string()),
+            MountOption::RO,
+            MountOption::DefaultPermissions,
+        ];
+        config.acl = SessionACL::All;
+        config.n_threads = Some(num_threads);
+        config.clone_fd = true;
+        info!("Mounting snapshot FUSE at {:?} with {} threads", mountpoint, num_threads);
+        fuser::mount2(self, mountpoint, &config)
     }
 
-    fn ino_to_idx(ino: Inode) -> usize {
-        (ino - 1) as usize
-    }
-    fn idx_to_ino(idx: usize) -> Inode {
-        (idx + 1) as Inode
+    fn ino(idx: usize) -> INodeNo { INodeNo((idx + 1) as u64) }
+    fn idx(ino: INodeNo) -> usize { (u64::from(ino) - 1) as usize }
+
+    fn get_entry(&self, ino: INodeNo) -> Option<InodeEntry> {
+        self.inodes.read().unwrap().get(Self::idx(ino)).cloned()
     }
 
-    fn get_entry(&self, ino: Inode) -> Option<InodeEntry> {
-        self.inodes.read().unwrap().get(Self::ino_to_idx(ino)).cloned()
-    }
-
-    fn find_child_inode(&self, parent: Inode, name: &str) -> Option<Inode> {
+    fn find_child_inode(&self, parent: INodeNo, name: &str) -> Option<INodeNo> {
         let parent_entry = {
             let inodes = self.inodes.read().unwrap();
-            inodes.get(Self::ino_to_idx(parent))?.clone()
+            inodes.get(Self::idx(parent))?.clone()
         };
         match &parent_entry {
             InodeEntry::Root => {
                 let inodes = self.inodes.read().unwrap();
                 for (i, e) in inodes.iter().enumerate() {
                     if let InodeEntry::IndexDir { name: n } = e {
-                        if n == name { return Some(Self::idx_to_ino(i)); }
+                        if n == name { return Some(Self::ino(i)); }
                     }
                 }
                 None
@@ -122,7 +115,7 @@ impl SnapshotFs {
                     for (i, e) in inodes.iter().enumerate() {
                         if let InodeEntry::ShardDir { index_name, shard_id: sid } = e {
                             if index_name == idx_name && *sid == shard_id {
-                                return Some(Self::idx_to_ino(i));
+                                return Some(Self::ino(i));
                             }
                         }
                     }
@@ -130,12 +123,12 @@ impl SnapshotFs {
                 None
             }
             InodeEntry::ShardDir { index_name, shard_id } => {
-                self.ensure_shard_loaded(&index_name, *shard_id);
+                self.ensure_shard_loaded(index_name, *shard_id);
                 let inodes = self.inodes.read().unwrap();
                 for (i, e) in inodes.iter().enumerate() {
                     if let InodeEntry::LuceneFile { index_name: iname, shard_id: sid, file_entry } = e {
                         if iname == index_name && *sid == *shard_id && file_entry.physical_name == name {
-                            return Some(Self::idx_to_ino(i));
+                            return Some(Self::ino(i));
                         }
                     }
                 }
@@ -164,7 +157,7 @@ impl SnapshotFs {
 
         info!("Loading shard metadata: {:?}", shard_meta_path);
 
-        let raw = match std::fs::read(&shard_meta_path) {
+        let raw = match fs::read(&shard_meta_path) {
             Ok(data) => data,
             Err(e) => { error!("Failed to read shard metadata {:?}: {}", shard_meta_path, e); return; }
         };
@@ -179,6 +172,11 @@ impl SnapshotFs {
 
         let mut inodes = self.inodes.write().unwrap();
         let mut shard_files = self.shard_file_inodes.write().unwrap();
+        let mut loaded = self.loaded_shards.write().unwrap();
+
+        // Re-check under write lock to avoid duplicate entries from concurrent threads
+        if loaded.contains_key(&key) { return; }
+
         let mut file_inos = Vec::new();
         for file_entry in files {
             let ino_idx = inodes.len();
@@ -187,23 +185,21 @@ impl SnapshotFs {
                 shard_id,
                 file_entry,
             });
-            file_inos.push(Self::idx_to_ino(ino_idx));
+            file_inos.push(u64::from(Self::ino(ino_idx)));
         }
         shard_files.insert(key.clone(), file_inos);
-        drop(inodes);
-        drop(shard_files);
-
-        self.loaded_shards.write().unwrap().insert(key, true);
+        loaded.insert(key, true);
     }
 
-    fn make_dir_attr(&self, ino: Inode) -> FileAttr {
+    fn make_dir_attr(&self, ino: INodeNo) -> FileAttr {
         FileAttr {
             ino,
             size: 0,
             blocks: 0,
-            atime: ZERO_TS,
-            mtime: ZERO_TS,
-            ctime: ZERO_TS,
+            atime: UNIX_EPOCH,
+            mtime: UNIX_EPOCH,
+            ctime: UNIX_EPOCH,
+            crtime: UNIX_EPOCH,
             kind: FileType::Directory,
             perm: 0o555,
             nlink: 2,
@@ -211,17 +207,19 @@ impl SnapshotFs {
             gid: 0,
             rdev: 0,
             blksize: BLOCK_SIZE,
+            flags: 0,
         }
     }
 
-    fn make_file_attr(&self, ino: Inode, size: u64) -> FileAttr {
+    fn make_file_attr(&self, ino: INodeNo, size: u64) -> FileAttr {
         FileAttr {
             ino,
             size,
-            blocks: (size + BLOCK_SIZE as u64 - 1) / BLOCK_SIZE as u64,
-            atime: ZERO_TS,
-            mtime: ZERO_TS,
-            ctime: ZERO_TS,
+            blocks: size.div_ceil(BLOCK_SIZE as u64),
+            atime: UNIX_EPOCH,
+            mtime: UNIX_EPOCH,
+            ctime: UNIX_EPOCH,
+            crtime: UNIX_EPOCH,
             kind: FileType::RegularFile,
             perm: 0o444,
             nlink: 1,
@@ -229,11 +227,11 @@ impl SnapshotFs {
             gid: 0,
             rdev: 0,
             blksize: BLOCK_SIZE,
+            flags: 0,
         }
     }
 
-    /// Read file data using async I/O — allows concurrent reads across tokio tasks.
-    async fn read_file_data(&self, entry: &ShardFileEntry, index_name: &str, shard_id: u32, offset: u64, size: u32) -> Vec<u8> {
+    fn read_file_data(&self, entry: &ShardFileEntry, index_name: &str, shard_id: u32, offset: u64, size: u32) -> Vec<u8> {
         let index_info = match self.resolved.indices.get(index_name) {
             Some(info) => info,
             None => return vec![],
@@ -253,7 +251,6 @@ impl SnapshotFs {
         let mut result = Vec::with_capacity(size as usize);
         let mut remaining = size as u64;
         let mut file_offset = offset;
-
         let part_size = if entry.part_size == u64::MAX { entry.length } else { entry.part_size };
 
         while remaining > 0 && file_offset < entry.length {
@@ -269,15 +266,16 @@ impl SnapshotFs {
             let available = this_part_len.saturating_sub(offset_in_part);
             let to_read = std::cmp::min(remaining, available) as usize;
 
-            match tokio::fs::File::open(&blob_path).await {
+            match fs::File::open(&blob_path) {
                 Ok(mut f) => {
-                    if let Err(e) = f.seek(std::io::SeekFrom::Start(offset_in_part)).await {
+                    use std::io::Seek;
+                    if let Err(e) = f.seek(io::SeekFrom::Start(offset_in_part)) {
                         error!("Failed to seek in blob {:?}: {}", blob_path, e);
                         break;
                     }
                     let mut buf = vec![0u8; to_read];
-                    match f.read_exact(&mut buf).await {
-                        Ok(_) => result.extend_from_slice(&buf),
+                    match f.read_exact(&mut buf) {
+                        Ok(()) => result.extend_from_slice(&buf),
                         Err(e) => { error!("Failed to read blob {:?}: {}", blob_path, e); break; }
                     }
                 }
@@ -291,7 +289,7 @@ impl SnapshotFs {
         result
     }
 
-    fn attr_for_entry(&self, ino: Inode, entry: &InodeEntry) -> FileAttr {
+    fn attr_for_entry(&self, ino: INodeNo, entry: &InodeEntry) -> FileAttr {
         match entry {
             InodeEntry::Root | InodeEntry::IndexDir { .. } | InodeEntry::ShardDir { .. } => {
                 self.make_dir_attr(ino)
@@ -304,86 +302,38 @@ impl SnapshotFs {
 }
 
 impl Filesystem for SnapshotFs {
-    async fn init(&self, _req: Request) -> Result<ReplyInit> {
-        Ok(ReplyInit {
-            max_write: NonZeroU32::new(1024 * 1024).unwrap(),
-        })
-    }
-
-    async fn destroy(&self, _req: Request) {}
-
-    async fn lookup(&self, _req: Request, parent: Inode, name: &OsStr) -> Result<ReplyEntry> {
+    fn lookup(&self, _req: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         let name_str = name.to_string_lossy();
-        debug!("lookup: parent={}, name={}", parent, name_str);
+        debug!("lookup: parent={:?}, name={}", parent, name_str);
 
-        let ino = self.find_child_inode(parent, &name_str)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
-        let entry = self.get_entry(ino)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
-
-        Ok(ReplyEntry {
-            ttl: TTL,
-            attr: self.attr_for_entry(ino, &entry),
-            generation: 0,
-        })
-    }
-
-    async fn getattr(
-        &self,
-        _req: Request,
-        inode: Inode,
-        _fh: Option<u64>,
-        _flags: u32,
-    ) -> Result<ReplyAttr> {
-        debug!("getattr: ino={}", inode);
-        let entry = self.get_entry(inode)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
-        Ok(ReplyAttr {
-            ttl: TTL,
-            attr: self.attr_for_entry(inode, &entry),
-        })
-    }
-
-    async fn read(
-        &self,
-        _req: Request,
-        inode: Inode,
-        _fh: u64,
-        offset: u64,
-        size: u32,
-    ) -> Result<ReplyData> {
-        debug!("read: ino={}, offset={}, size={}", inode, offset, size);
-
-        let entry = self.get_entry(inode)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
-
-        match entry {
-            InodeEntry::LuceneFile { index_name, shard_id, file_entry } => {
-                if offset >= file_entry.length {
-                    return Ok(ReplyData { data: Bytes::new() });
-                }
-                let data = self.read_file_data(&file_entry, &index_name, shard_id, offset, size).await;
-                Ok(ReplyData { data: Bytes::from(data) })
+        match self.find_child_inode(parent, &name_str) {
+            Some(ino) => {
+                let entry = self.get_entry(ino).unwrap();
+                reply.entry(&TTL, &self.attr_for_entry(ino, &entry), fuser::Generation(0));
             }
-            _ => Err(Errno::from(libc::EISDIR)),
+            None => reply.error(Errno::ENOENT),
         }
     }
 
-    async fn readdir(
-        &self,
-        _req: Request,
-        inode: Inode,
-        _fh: u64,
-        offset: i64,
-    ) -> Result<ReplyDirectory<impl futures_util::Stream<Item = fuse3::Result<DirectoryEntry>> + Send>> {
-        debug!("readdir: ino={}, offset={}", inode, offset);
+    fn getattr(&self, _req: &Request, ino: INodeNo, _fh: Option<fuser::FileHandle>, reply: ReplyAttr) {
+        debug!("getattr: ino={:?}", ino);
+        match self.get_entry(ino) {
+            Some(entry) => reply.attr(&TTL, &self.attr_for_entry(ino, &entry)),
+            None => reply.error(Errno::ENOENT),
+        }
+    }
 
-        let entry = self.get_entry(inode)
-            .ok_or_else(|| Errno::from(libc::ENOENT))?;
+    fn readdir(&self, _req: &Request, ino: INodeNo, _fh: fuser::FileHandle, offset: u64, mut reply: ReplyDirectory) {
+        debug!("readdir: ino={:?}, offset={}", ino, offset);
 
-        let mut entries: Vec<(Inode, FileType, String)> = vec![
-            (inode, FileType::Directory, ".".to_string()),
-            (1, FileType::Directory, "..".to_string()),
+        let entry = match self.get_entry(ino) {
+            Some(e) => e,
+            None => { reply.error(Errno::ENOENT); return; }
+        };
+
+        let mut entries: Vec<(INodeNo, FileType, String)> = vec![
+            (ino, FileType::Directory, ".".to_string()),
+            (INodeNo(1), FileType::Directory, "..".to_string()),
         ];
 
         match entry {
@@ -391,7 +341,7 @@ impl Filesystem for SnapshotFs {
                 let inodes = self.inodes.read().unwrap();
                 for (i, e) in inodes.iter().enumerate() {
                     if let InodeEntry::IndexDir { name } = e {
-                        entries.push((Self::idx_to_ino(i), FileType::Directory, name.clone()));
+                        entries.push((Self::ino(i), FileType::Directory, name.clone()));
                     }
                 }
             }
@@ -400,7 +350,7 @@ impl Filesystem for SnapshotFs {
                 for (i, e) in inodes.iter().enumerate() {
                     if let InodeEntry::ShardDir { index_name, shard_id } = e {
                         if index_name == &name {
-                            entries.push((Self::idx_to_ino(i), FileType::Directory, shard_id.to_string()));
+                            entries.push((Self::ino(i), FileType::Directory, shard_id.to_string()));
                         }
                     }
                 }
@@ -411,43 +361,45 @@ impl Filesystem for SnapshotFs {
                 for (i, e) in inodes.iter().enumerate() {
                     if let InodeEntry::LuceneFile { index_name: iname, shard_id: s, file_entry } = e {
                         if iname == &index_name && *s == shard_id {
-                            entries.push((Self::idx_to_ino(i), FileType::RegularFile, file_entry.physical_name.clone()));
+                            entries.push((Self::ino(i), FileType::RegularFile, file_entry.physical_name.clone()));
                         }
                     }
                 }
             }
-            _ => return Err(Errno::from(libc::ENOTDIR)),
+            _ => { reply.error(Errno::ENOTDIR); return; }
         }
 
-        let dir_entries: Vec<fuse3::Result<DirectoryEntry>> = entries
-            .into_iter()
-            .enumerate()
-            .skip(offset as usize)
-            .map(|(i, (ino, kind, name))| {
-                Ok(DirectoryEntry {
-                    inode: ino,
-                    kind,
-                    name: OsString::from(name),
-                    offset: (i + 1) as i64,
-                })
-            })
-            .collect();
+        for (i, (ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
+            if reply.add(*ino, (i + 1) as u64, *kind, name) {
+                break;
+            }
+        }
+        reply.ok();
+    }
 
-        Ok(ReplyDirectory {
-            entries: stream::iter(dir_entries),
-        })
+    fn read(&self, _req: &Request, ino: INodeNo, _fh: fuser::FileHandle, offset: u64, size: u32, _flags: fuser::OpenFlags, _lock_owner: Option<fuser::LockOwner>, reply: ReplyData) {
+        debug!("read: ino={:?}, offset={}, size={}", ino, offset, size);
+
+        let entry = match self.get_entry(ino) {
+            Some(e) => e,
+            None => { reply.error(Errno::ENOENT); return; }
+        };
+
+        match entry {
+            InodeEntry::LuceneFile { index_name, shard_id, file_entry } => {
+                if offset >= file_entry.length {
+                    reply.data(&[]);
+                    return;
+                }
+                let data = self.read_file_data(&file_entry, &index_name, shard_id, offset, size);
+                reply.data(&data);
+            }
+            _ => reply.error(Errno::EISDIR),
+        }
     }
 
     /// Accept setxattr as a no-op — required for SELinux relabeling in K8s.
-    async fn setxattr(
-        &self,
-        _req: Request,
-        _inode: Inode,
-        _name: &OsStr,
-        _value: &[u8],
-        _flags: u32,
-        _position: u32,
-    ) -> Result<()> {
-        Ok(())
+    fn setxattr(&self, _req: &Request, _ino: INodeNo, _name: &OsStr, _value: &[u8], _flags: i32, _position: u32, reply: ReplyEmpty) {
+        reply.ok();
     }
 }

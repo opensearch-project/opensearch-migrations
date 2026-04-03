@@ -16,10 +16,13 @@ struct Args {
     /// Mount point for the virtual Lucene filesystem
     #[arg(long)]
     mount_point: PathBuf,
+
+    /// Number of FUSE worker threads (default: 4)
+    #[arg(long, default_value = "4")]
+    threads: usize,
 }
 
-#[tokio::main]
-async fn main() -> std::io::Result<()> {
+fn main() -> std::io::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let args = Args::parse();
@@ -42,5 +45,5 @@ async fn main() -> std::io::Result<()> {
 
     let filesystem = snapshot_fuse::fs::SnapshotFs::new(args.repo_root, resolved);
     info!("Starting FUSE mount at {:?}", args.mount_point);
-    filesystem.mount(&args.mount_point).await
+    filesystem.mount(&args.mount_point, args.threads)
 }
