@@ -52,6 +52,11 @@ full-migration workflow, run
 
 `npm run schema`
 
+For the end-to-end validation and transformation flow, including how the
+console entrypoint, `MigrationConfigTransformer`, unified schema loading, and
+Kafka/Strimzi validation fit together, see
+[ConfigValidationFile.md](/Users/schohn/dev/m3/orchestrationSpecs/ConfigValidationFile.md).
+
 The migration config is validated against a single unified JSON Schema.  That
 schema starts with the orchestration config shape from
 `packages/schemas/src/userSchemas.ts`, then splices in selected Strimzi schema

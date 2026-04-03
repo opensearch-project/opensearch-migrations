@@ -1,4 +1,5 @@
-import { MigrationConfigTransformer } from '../src/migrationConfigTransformer';
+import { MigrationConfigTransformer, normalizeUserConfig } from '../src/migrationConfigTransformer';
+import { OVERALL_MIGRATION_CONFIG } from '@opensearch-migrations/schemas';
 
 describe('MigrationConfigTransformer validation', () => {
     let transformer: MigrationConfigTransformer;
@@ -148,6 +149,20 @@ describe('MigrationConfigTransformer validation', () => {
         expect(() => {
             transformer.validateInput(baseConfig);
         }).not.toThrow();
+    });
+
+    it('should normalize workflow-managed Kafka auth and drop empty kafkaTopic placeholders before AJV validation', () => {
+        const parsed = OVERALL_MIGRATION_CONFIG.parse(baseConfig);
+        const normalized = normalizeUserConfig(parsed);
+
+        expect(normalized.kafkaClusterConfiguration.default).toMatchObject({
+            autoCreate: {
+                auth: {
+                    type: "scram-sha-512"
+                }
+            }
+        });
+        expect(normalized.traffic?.proxies?.proxy1).not.toHaveProperty("kafkaTopic");
     });
 
     it('should derive managed Kafka auth profile for auto-created SCRAM clusters', async () => {
