@@ -162,7 +162,8 @@ public class DeltaLuceneReader {
                 LuceneReader.readDocsFromSegment(c,
                     startDocId,
                     Path.of(c.getReader().getSegmentName()),
-                    DocumentChangeType.INDEX)
+                    DocumentChangeType.INDEX,
+                    null)
             ).subscribeOn(Schedulers.boundedElastic());
 
         // Create deletions stream - these are documents that were removed between snapshots
@@ -171,7 +172,8 @@ public class DeltaLuceneReader {
                 LuceneReader.readDocsFromSegment(c,
                     startDocId,
                     Path.of(c.getReader().getSegmentName()),
-                    DocumentChangeType.DELETE)
+                    DocumentChangeType.DELETE,
+                    null)
             ).subscribeOn(Schedulers.boundedElastic());
 
         return new DeltaResult(additionsStream, deletionsStream);

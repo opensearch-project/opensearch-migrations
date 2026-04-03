@@ -1,7 +1,7 @@
 from .cluster_version import (
     ClusterVersion, ElasticsearchV1_X, ElasticsearchV2_X, ElasticsearchV5_X,
     ElasticsearchV6_X, ElasticsearchV7_X, ElasticsearchV8_X, OpensearchV1_X,
-    OpensearchV2_X, OpensearchV3_X, is_incoming_version_supported
+    OpensearchV2_X, OpensearchV3_X, SolrV8_X, is_incoming_version_supported
 )
 from .elasticsearch_operations import (
     ElasticsearchV1_XOperationsLibrary, ElasticsearchV2_XOperationsLibrary,
@@ -11,6 +11,7 @@ from .elasticsearch_operations import (
 from .opensearch_operations import (
     OpensearchV1_XOperationsLibrary, OpensearchV2_XOperationsLibrary, OpensearchV3_XOperationsLibrary
 )
+from .solr_operations import SolrOperationsLibrary
 
 
 def get_operations_library_by_version(version: ClusterVersion):
@@ -32,5 +33,7 @@ def get_operations_library_by_version(version: ClusterVersion):
         return OpensearchV2_XOperationsLibrary()
     elif is_incoming_version_supported(limiting_version=OpensearchV3_X, incoming_version=version):
         return OpensearchV3_XOperationsLibrary()
+    elif is_incoming_version_supported(limiting_version=SolrV8_X, incoming_version=version):
+        return SolrOperationsLibrary()
     else:
         raise Exception(f"Unsupported cluster version: {version}")

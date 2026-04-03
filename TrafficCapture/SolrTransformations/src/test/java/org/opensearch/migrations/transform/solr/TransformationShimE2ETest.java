@@ -100,8 +100,8 @@ class TransformationShimE2ETest {
             for (var tc : testCases) {
                 try {
                     executeTestCase(fixture, tc, solrImage);
-                } catch (Exception e) {
-                    log.error("FAILED: {} [{}]: {}", tc.name(), solrImage, e.getMessage(), e);
+                } catch (Throwable e) {
+                    log.error("FAILED: {} [{}]: {}", tc.name(), solrImage, e.getMessage());
                     failures.add(tc.name() + ": " + e.getMessage());
                 } finally {
                     cleanupData(fixture, tc);
@@ -122,6 +122,11 @@ class TransformationShimE2ETest {
         var proxyJson = MAPPER.readValue(proxyResponse, new TypeReference<Map<String, Object>>() {});
 
         compareWithSolr(fixture, tc, proxyJson);
+
+        // Execute request sequence if defined (multi-step tests like cursor pagination)
+        if (tc.requestSequence() != null && !tc.requestSequence().isEmpty()) {
+            executeRequestSequence(fixture, tc, proxyJson);
+        }
 
         log.info("PASSED: {} [{}]", tc.name(), solrImage);
     }
@@ -150,6 +155,51 @@ class TransformationShimE2ETest {
         var solrJson = MAPPER.readValue(solrResponse, new TypeReference<Map<String, Object>>() {});
 
         var rules = tc.assertionRules() != null ? tc.assertionRules() : List.<TestCaseDefinition.AssertionRule>of();
+        compareResponses(tc.name(), solrJson, proxyJson, rules);
+    }
+
+    /**
+     * Execute a sequence of follow-up requests, substituting {{nextCursorMark}} from each response.
+     * Each step is compared against real Solr with the same substitution.
+     */
+    private void executeRequestSequence(
+        ShimTestFixture fixture, TestCaseDefinition tc, Map<String, Object> previousProxyJson
+    ) throws Exception {
+        var previousSolrResponse = sendRequest(fixture, fixture.getSolrBaseUrl() + tc.requestPath(), tc);
+        var previousSolrJson = MAPPER.readValue(previousSolrResponse, new TypeReference<Map<String, Object>>() {});
+
+        for (int i = 0; i < tc.requestSequence().size(); i++) {
+            var step = tc.requestSequence().get(i);
+            var stepName = tc.name() + " [step " + (i + 2) + "]";
+
+            // Substitute {{nextCursorMark}} from previous responses
+            var proxyCursorMark = String.valueOf(previousProxyJson.get("nextCursorMark"));
+            var solrCursorMark = String.valueOf(previousSolrJson.get("nextCursorMark"));
+
+            var proxyPath = step.requestPath().replace("{{nextCursorMark}}", proxyCursorMark);
+            var solrPath = step.requestPath().replace("{{nextCursorMark}}", solrCursorMark);
+
+            log.info("{}: proxy cursorMark={}, solr cursorMark={}", stepName, proxyCursorMark, solrCursorMark);
+
+            var proxyResponse = fixture.httpGet(fixture.getProxyBaseUrl() + proxyPath);
+            var proxyJson = MAPPER.readValue(proxyResponse, new TypeReference<Map<String, Object>>() {});
+
+            var solrResponse = fixture.httpGet(fixture.getSolrBaseUrl() + solrPath);
+            var solrJson = MAPPER.readValue(solrResponse, new TypeReference<Map<String, Object>>() {});
+
+            var rules = step.assertionRules() != null ? step.assertionRules()
+                : (tc.assertionRules() != null ? tc.assertionRules() : List.<TestCaseDefinition.AssertionRule>of());
+            compareResponses(stepName, solrJson, proxyJson, rules);
+
+            previousProxyJson = proxyJson;
+            previousSolrJson = solrJson;
+        }
+    }
+
+    private void compareResponses(
+        String testName, Map<String, Object> solrJson, Map<String, Object> proxyJson,
+        List<TestCaseDefinition.AssertionRule> rules
+    ) throws Exception {
         var diffs = JsonDiff.diff(solrJson, proxyJson, rules);
 
         // Separate unexpected diffs (no rule or non-expect-diff rule) from expected ones
@@ -162,12 +212,12 @@ class TransformationShimE2ETest {
 
         if (!expectedDiffs.isEmpty()) {
             log.info("'{}': {} expected difference(s) covered by rules:\n{}",
-                tc.name(), expectedDiffs.size(), JsonDiff.formatReport(expectedDiffs));
+                testName, expectedDiffs.size(), JsonDiff.formatReport(expectedDiffs));
         }
 
         if (!unexpectedDiffs.isEmpty()) {
             var report = JsonDiff.formatReport(unexpectedDiffs);
-            log.error("Solr vs Proxy diff for '{}':\n{}", tc.name(), report);
+            log.error("Solr vs Proxy diff for '{}':\n{}", testName, report);
             log.info("Full Solr response:\n{}", MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(solrJson));
             log.info("Full Proxy response:\n{}", MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(proxyJson));
             fail("Proxy response differs from Solr response (" + unexpectedDiffs.size() + " unexpected differences):\n" + report);

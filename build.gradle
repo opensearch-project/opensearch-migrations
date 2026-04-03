@@ -261,6 +261,9 @@ subprojects {
                 useJUnitPlatform {
                     includeTags 'isolatedTest'
                 }
+                testLogging {
+                    showStandardStreams = true
+                }
             }
 
             tasks.register('fullTest') {

@@ -1,0 +1,14 @@
+{
+  "sourceClusters": {
+    "solr-source": {
+      "version": "SOLR 8.11.4",
+      "endpoint": "http://solr:8983"
+    }
+  },
+  "targetClusters": {
+    "target": {
+      "endpoint": "http://target:9200"
+    }
+  },
+  "snapshotMigrationConfigs": []
+}

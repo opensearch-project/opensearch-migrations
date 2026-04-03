@@ -48,7 +48,13 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
         ObjectNode settings = indexMetadata.getSettings();
 
-        ObjectNode mappings = indexMetadata.getMappings();
+        ObjectNode mappings = (ObjectNode) indexMetadata.getMappings();
+        if (mappings != null) {
+            String[] problemMappingFields = { "_all" };
+            for (var field : problemMappingFields) {
+                ObjectNodeUtils.removeFieldsByPath(mappings, field);
+            }
+        }
 
         // Copy top-level metadata fields into settings.
         // The source snapshot stores these at the top level of the index metadata JSON,

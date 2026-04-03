@@ -140,8 +140,18 @@ if docker image inspect migrations/transformation_shim &>/dev/null; then
 else
   echo "=== Step 2: Building translation shim ==="
   cd ..
-  JAVA_HOME="${JAVA_HOME:-/Library/Java/JavaVirtualMachines/amazon-corretto-17.jdk/Contents/Home}" \
-    ./gradlew :TrafficCapture:transformationShim:jibDockerBuild 2>&1 | tail -5
+  mkdir -p TrafficCapture/transformationShim/build/versionDir
+  # Requires Java 17 — override JAVA_HOME if current version is too old
+  SHIM_JAVA_HOME="${JAVA_HOME:-}"
+  if [[ -d "/Library/Java/JavaVirtualMachines/amazon-corretto-17.jdk/Contents/Home" ]]; then
+    SHIM_JAVA_HOME="/Library/Java/JavaVirtualMachines/amazon-corretto-17.jdk/Contents/Home"
+  fi
+  set +e
+  JAVA_HOME="$SHIM_JAVA_HOME" \
+    ./gradlew :TrafficCapture:transformationShim:assemble :TrafficCapture:transformationShim:jibDockerBuild
+  set -e
+  # Jib tags to localhost:5001/..., re-tag for local use
+  docker tag localhost:5001/migrations/transformation_shim:latest migrations/transformation_shim:latest 2>/dev/null || true
   cd "$SCRIPT_DIR"
 fi
 echo ""
