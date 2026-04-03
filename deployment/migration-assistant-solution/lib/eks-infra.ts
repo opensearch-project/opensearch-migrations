@@ -257,8 +257,7 @@ export class EKSInfra extends Construct {
                 resources: [`arn:${Aws.PARTITION}:iam::${Stack.of(this).account}:role/*`]
             }),
             // CloudWatch dashboard management for Helm post-install/pre-delete hooks
-            // Note: TagResource does not support dashboard resource type for resource-level
-            // scoping in IAM; PutDashboard/GetDashboard/DeleteDashboards are scoped to MA-*
+            // Note: dashboard resource type has no condition keys in IAM; scoped by ARN prefix MA-*
             new PolicyStatement({
                 effect: Effect.ALLOW,
                 actions: [
@@ -269,11 +268,6 @@ export class EKSInfra extends Construct {
                 resources: [
                     `arn:${Aws.PARTITION}:cloudwatch::${Stack.of(this).account}:dashboard/MA-*`
                 ],
-            }),
-            new PolicyStatement({
-                effect: Effect.ALLOW,
-                actions: ['cloudwatch:TagResource'],
-                resources: ['*'],
             }),
             // ACM PCA permissions for TLS certificate issuance via cert-manager
             new PolicyStatement({

@@ -1165,11 +1165,6 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
               },
             },
             {
-              "Action": "cloudwatch:TagResource",
-              "Effect": "Allow",
-              "Resource": "*",
-            },
-            {
               "Action": [
                 "acm-pca:IssueCertificate",
                 "acm-pca:GetCertificate",
@@ -2342,11 +2337,6 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                   ],
                 ],
               },
-            },
-            {
-              "Action": "cloudwatch:TagResource",
-              "Effect": "Allow",
-              "Resource": "*",
             },
             {
               "Action": [
