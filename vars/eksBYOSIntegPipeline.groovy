@@ -246,6 +246,21 @@ def call(Map config = [:]) {
                                     env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
                                     env.maVpcId = exportsMap['VPC_ID']
                                     env.eksKubeContext = "migration-eks-cluster-${maStageName}-${params.REGION}"
+
+                                    // Grant additional EKS access for debugging
+                                    sh """
+                                        aws eks create-access-entry \
+                                          --cluster-name ${env.eksClusterName} \
+                                          --principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/Admin" \
+                                          --type STANDARD \
+                                          --region ${params.REGION} || true
+                                        aws eks associate-access-policy \
+                                          --cluster-name ${env.eksClusterName} \
+                                          --principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/Admin" \
+                                          --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+                                          --access-scope type=cluster \
+                                          --region ${params.REGION} || true
+                                    """
                                 }
                             }
                         }
