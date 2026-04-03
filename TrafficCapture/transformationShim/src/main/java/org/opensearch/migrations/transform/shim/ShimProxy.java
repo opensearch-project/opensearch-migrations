@@ -16,7 +16,6 @@ import org.opensearch.migrations.transform.shim.reporting.MetricsReceiver;
 import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.migrations.transform.shim.validation.ValidationRule;
-import org.opensearch.migrations.transform.shim.reporting.MetricsReceiver;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.Unpooled;
