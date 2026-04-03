@@ -139,7 +139,7 @@
           ]
         ],
         "retryStrategy": {
-          "limit": "200",
+          "limit": "0",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "5",

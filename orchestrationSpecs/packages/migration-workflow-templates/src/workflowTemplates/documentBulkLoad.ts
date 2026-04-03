@@ -284,7 +284,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 }))
         )
         .addRetryParameters({
-            limit: "200",
+            limit: "0",
             retryPolicy: "Always",
             backoff: {duration: "5", factor: "2", cap: "300"}
         })
