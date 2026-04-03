@@ -7,7 +7,7 @@ set -e
 
 S3_MOUNT="${S3_MOUNT_PATH:-/mnt/s3}"
 CACHE_DIR="${CACHE_DIR:-/cache}"
-MAX_CACHE_MB="${MAX_CACHE_MB:-5000}"
+MAX_CACHE_MB="${MAX_CACHE_MB:-10000}"
 
 if [ -n "${S3_BUCKET:-}" ]; then
     echo "Mounting S3 bucket '${S3_BUCKET}' at ${S3_MOUNT} (cache: ${CACHE_DIR}, max ${MAX_CACHE_MB}MB)"

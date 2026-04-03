@@ -18,7 +18,8 @@ struct Args {
     mount_point: PathBuf,
 }
 
-fn main() -> std::io::Result<()> {
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let args = Args::parse();
@@ -32,15 +33,14 @@ fn main() -> std::io::Result<()> {
         info!("  Index '{}' (id={}, {} shards)", name, idx.id, idx.num_shards);
     }
 
-    // Create mount point if it doesn't exist
     std::fs::create_dir_all(&args.mount_point)?;
 
-    // Clean up stale FUSE mount if present (e.g., from a previous pod on the same hostPath)
+    // Clean up stale FUSE mount if present
     let _ = std::process::Command::new("fusermount")
         .args(["-uz", args.mount_point.to_str().unwrap_or("")])
         .output();
 
     let filesystem = snapshot_fuse::fs::SnapshotFs::new(args.repo_root, resolved);
     info!("Starting FUSE mount at {:?}", args.mount_point);
-    filesystem.mount(&args.mount_point)
+    filesystem.mount(&args.mount_point).await
 }

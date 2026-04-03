@@ -170,8 +170,12 @@ export function setupSnapshotFuseSidecar(
         volumes: [
             ...def.volumes,
             { name: SHARED_MNT_VOLUME_NAME, emptyDir: {} },
-            { name: S3_CACHE_VOLUME_NAME, emptyDir: { sizeLimit: "5Gi" } }
+            { name: S3_CACHE_VOLUME_NAME, emptyDir: { sizeLimit: "10Gi" } }
         ],
+        // Disable SELinux relabeling on the shared FUSE volume — the FUSE mount
+        // does not support lsetxattr and relabeling causes CreateContainerError
+        // on Bottlerocket/SELinux-enabled nodes.
+        securityContext: { seLinuxOptions: { type: "spc_t" } },
         container: {
             ...restOfContainer,
             volumeMounts: [
