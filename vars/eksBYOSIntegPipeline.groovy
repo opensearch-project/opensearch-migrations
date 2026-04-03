@@ -336,7 +336,11 @@ def call(Map config = [:]) {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                     // Install QEMU for cross-architecture builds (arm64 on x86_64 host)
-                                    sh "docker run --privileged --rm tonistiigi/binfmt --install all"
+                                    // Use ECR pull-through cache to avoid Docker Hub rate limits
+                                    def binfmtImage = env.registryEndpoint ?
+                                        "${env.registryEndpoint.split('/')[0]}/docker-hub/tonistiigi/binfmt" :
+                                        "tonistiigi/binfmt"
+                                    sh "docker run --privileged --rm ${binfmtImage} --install all"
                                     def builderExists = sh(
                                         script: "docker buildx ls | grep -q '^ecr-builder'",
                                         returnStatus: true
