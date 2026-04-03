@@ -215,6 +215,10 @@ function getRfsDeploymentManifest
                 },
                 spec: {
                     serviceAccountName: "argo-workflow-executor",
+                    // Disable SELinux relabeling on volumes — the FUSE mount in the
+                    // shared emptyDir does not support lsetxattr and relabeling causes
+                    // CreateContainerError on Bottlerocket/SELinux-enabled nodes.
+                    securityContext: { seLinuxOptions: { type: "spc_t" } },
                     initContainers: [...finalContainerDefinition.initContainers],
                     containers: [finalContainerDefinition.container, ...finalContainerDefinition.sidecars],
                     volumes: [...finalContainerDefinition.volumes]
