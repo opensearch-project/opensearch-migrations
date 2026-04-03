@@ -2,12 +2,11 @@
 
 import json
 import time
-from unittest.mock import patch, Mock, MagicMock
+from unittest.mock import patch, Mock
 
 from console_link.workflow.commands.autocomplete_deployments import (
     _fetch_deployment_names,
     _get_cached_names,
-    _get_cache_file,
     get_running_deployment_completions,
     get_paused_deployment_completions,
     get_all_deployment_completions,
