@@ -77,8 +77,8 @@ impl SnapshotFs {
         let mut config = Config::default();
         config.mount_options = vec![
             MountOption::FSName("snapshot-fuse".to_string()),
-            MountOption::RO,
             MountOption::DefaultPermissions,
+            MountOption::CUSTOM("seclabel".to_string()),
         ];
         config.acl = SessionACL::All;
         config.n_threads = Some(num_threads);
@@ -401,5 +401,15 @@ impl Filesystem for SnapshotFs {
     /// Accept setxattr as a no-op — required for SELinux relabeling in K8s.
     fn setxattr(&self, _req: &Request, _ino: INodeNo, _name: &OsStr, _value: &[u8], _flags: i32, _position: u32, reply: ReplyEmpty) {
         reply.ok();
+    }
+
+    /// Return empty data for getxattr — no xattrs stored.
+    fn getxattr(&self, _req: &Request, _ino: INodeNo, _name: &OsStr, _size: u32, reply: fuser::ReplyXattr) {
+        reply.error(Errno::ENODATA);
+    }
+
+    /// Return empty list for listxattr.
+    fn listxattr(&self, _req: &Request, _ino: INodeNo, _size: u32, reply: fuser::ReplyXattr) {
+        reply.size(0);
     }
 }
