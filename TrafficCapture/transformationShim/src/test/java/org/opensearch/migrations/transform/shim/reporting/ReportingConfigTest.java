@@ -107,4 +107,39 @@ class ReportingConfigTest {
         assertTrue(config.hasSink());
         assertEquals("http://localhost:9200", config.getUri());
     }
+
+    @Test
+    void sinkConfigSettersWork() {
+        var osConfig = new ReportingConfig.OpenSearchSinkConfig();
+        osConfig.setUri("http://test:9200");
+        osConfig.setIndexPrefix("my-prefix");
+        osConfig.setBulkSize(50);
+        osConfig.setFlushIntervalMs(1000);
+        assertEquals("http://test:9200", osConfig.getUri());
+        assertEquals("my-prefix", osConfig.getIndexPrefix());
+        assertEquals(50, osConfig.getBulkSize());
+        assertEquals(1000, osConfig.getFlushIntervalMs());
+
+        var authConfig = new ReportingConfig.AuthConfig();
+        authConfig.setUsername("user");
+        authConfig.setPassword("pass");
+        assertEquals("user", authConfig.getUsername());
+        assertEquals("pass", authConfig.getPassword());
+
+        var tlsConfig = new ReportingConfig.TlsConfig();
+        tlsConfig.setInsecure(true);
+        assertTrue(tlsConfig.isInsecure());
+
+        authConfig.setTls(tlsConfig);
+        assertNotNull(authConfig.getTls());
+
+        osConfig.setAuth(authConfig);
+        assertNotNull(osConfig.getAuth());
+
+        var sinkConfig = new ReportingConfig.SinkConfig();
+        sinkConfig.setType("opensearch");
+        sinkConfig.setOpensearch(osConfig);
+        assertEquals("opensearch", sinkConfig.getType());
+        assertNotNull(sinkConfig.getOpensearch());
+    }
 }

@@ -31,7 +31,7 @@ services:
       start_period: 15s
 
   opensearch:
-    image: opensearchproject/opensearch:3.3.0
+    image: opensearchproject/opensearch:3.5.0
     environment:
       - discovery.type=single-node
       - DISABLE_SECURITY_PLUGIN=true
@@ -45,12 +45,12 @@ services:
       retries: 30
 
   opensearch-reporting:
-    image: opensearchproject/opensearch:3.3.0
+    image: opensearchproject/opensearch:3.5.0
     environment:
       - discovery.type=single-node
       - DISABLE_SECURITY_PLUGIN=true
       - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Admin_1234!
-      - OPENSEARCH_JAVA_OPTS=-Xms256m -Xmx256m
+      - OPENSEARCH_JAVA_OPTS=-Xms256m -Xmx1g
       - cluster.name=reporting
       - node.name=reporting-node
     ports:
@@ -62,7 +62,7 @@ services:
       retries: 30
 
   dashboards:
-    image: opensearchproject/opensearch-dashboards:3.3.0
+    image: opensearchproject/opensearch-dashboards:3.5.0
     environment:
       - OPENSEARCH_HOSTS=["http://opensearch-reporting:9200"]
       - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true

@@ -35,12 +35,14 @@ public class OpenSearchMetricsSink implements MetricsSink {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy.MM.dd");
     private static final String TEMPLATE_NAME_SUFFIX = "-template";
+    private static final long MAX_BULK_BYTES = 10 * 1024 * 1024; // 10MB max bulk request size
 
     private final String reportingClusterUri;
     private final String indexPrefix;
     private final int bulkSize;
     private final HttpClient httpClient;
     private final List<ValidationDocument> buffer = new ArrayList<>();
+    private long bufferBytes;
     private final ScheduledExecutorService scheduler;
     private final String authHeader;
 
@@ -63,10 +65,7 @@ public class OpenSearchMetricsSink implements MetricsSink {
         var builder = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10));
         this.httpClient = builder.build();
 
-        // Create index template with explicit mappings on initialization
-        createIndexTemplate();
-
-        this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        this.scheduler = Executors.newScheduledThreadPool(2, r -> {
             Thread t = new Thread(r, "metrics-sink-flush");
             t.setDaemon(true);
             return t;
@@ -77,8 +76,9 @@ public class OpenSearchMetricsSink implements MetricsSink {
     /**
      * Creates an index template with explicit field mappings.
      * This ensures all shim-metrics-* indices have consistent, optimized mappings.
+     * Called as a preflight step before the shim starts accepting traffic.
      */
-    private void createIndexTemplate() {
+    public void createIndexTemplate() {
         try {
             String templateName = indexPrefix + TEMPLATE_NAME_SUFFIX;
             String templateJson = buildIndexTemplateJson();
@@ -247,14 +247,24 @@ public class OpenSearchMetricsSink implements MetricsSink {
         try {
             synchronized (buffer) {
                 buffer.add(document);
-                if (buffer.size() >= bulkSize) {
+                bufferBytes += estimateDocSize(document);
+                if (buffer.size() >= bulkSize || bufferBytes >= MAX_BULK_BYTES) {
                     List<ValidationDocument> batch = new ArrayList<>(buffer);
                     buffer.clear();
+                    bufferBytes = 0;
                     scheduler.execute(() -> sendBulk(batch));
                 }
             }
         } catch (Exception e) {
             log.error("Error in MetricsSink.submit()", e);
+        }
+    }
+
+    private long estimateDocSize(ValidationDocument document) {
+        try {
+            return MAPPER.writeValueAsBytes(document).length;
+        } catch (Exception e) {
+            return 4096; // conservative estimate on serialization failure
         }
     }
 
@@ -266,6 +276,7 @@ public class OpenSearchMetricsSink implements MetricsSink {
                 if (buffer.isEmpty()) return;
                 batch = new ArrayList<>(buffer);
                 buffer.clear();
+                bufferBytes = 0;
             }
             sendBulk(batch);
         } catch (Exception e) {
@@ -292,11 +303,9 @@ public class OpenSearchMetricsSink implements MetricsSink {
         try {
             String indexName = generateIndexName();
             StringBuilder ndjson = new StringBuilder();
-            
+
             for (ValidationDocument doc : batch) {
-                // Action line: specifies index operation
                 ndjson.append("{\"index\":{\"_index\":\"").append(indexName).append("\"}}\n");
-                // Document line: the actual ValidationDocument as JSON
                 ndjson.append(MAPPER.writeValueAsString(doc)).append("\n");
             }
 
@@ -310,20 +319,22 @@ public class OpenSearchMetricsSink implements MetricsSink {
                 requestBuilder.header("Authorization", authHeader);
             }
 
-            HttpResponse<String> response = httpClient.send(requestBuilder.build(),
-                    HttpResponse.BodyHandlers.ofString());
-
-            if (response.statusCode() >= 300) {
-                log.warn("Bulk index to {} returned status {}: {}", 
-                    indexName, response.statusCode(), truncate(response.body(), 500));
-            } else {
-                log.debug("Successfully indexed {} documents to {}", batch.size(), indexName);
-                checkPartialFailures(response.body(), batch.size());
-            }
+            httpClient.sendAsync(requestBuilder.build(), HttpResponse.BodyHandlers.ofString())
+                .thenAccept(response -> {
+                    if (response.statusCode() >= 300) {
+                        log.warn("Bulk index to {} returned status {}: {}",
+                            indexName, response.statusCode(), truncate(response.body(), 500));
+                    } else {
+                        log.debug("Successfully indexed {} documents to {}", batch.size(), indexName);
+                        checkPartialFailures(response.body(), batch.size());
+                    }
+                })
+                .exceptionally(ex -> {
+                    log.error("Failed to send bulk index request to reporting cluster", ex);
+                    return null;
+                });
         } catch (JsonProcessingException e) {
             log.error("Failed to serialize ValidationDocument batch", e);
-        } catch (Exception e) {
-            log.error("Failed to send bulk index request to reporting cluster", e);
         }
     }
 

@@ -20,6 +20,10 @@ public class ReportingConfig {
         return YAML_MAPPER.readValue(path.toFile(), ReportingConfig.class);
     }
 
+    public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public void setIncludeRequestBody(boolean includeRequestBody) { this.includeRequestBody = includeRequestBody; }
+    public void setSink(SinkConfig sink) { this.sink = sink; }
+
     public boolean isEnabled() { return enabled; }
     public boolean isIncludeRequestBody() { return includeRequestBody; }
     public boolean hasSink() { return sink != null && sink.getOpensearch() != null; }

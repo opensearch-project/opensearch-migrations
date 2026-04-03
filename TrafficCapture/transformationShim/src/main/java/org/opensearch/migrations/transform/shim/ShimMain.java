@@ -23,6 +23,10 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JavascriptTransformer;
 import org.opensearch.migrations.transform.shim.netty.BasicAuthSigningHandler;
 import org.opensearch.migrations.transform.shim.netty.SigV4SigningHandler;
+import org.opensearch.migrations.transform.shim.reporting.MetricsReceiver;
+import org.opensearch.migrations.transform.shim.reporting.OpenSearchMetricsSink;
+import org.opensearch.migrations.transform.shim.reporting.ReportingConfig;
+import org.opensearch.migrations.transform.shim.reporting.SolrMetricsExtractor;
 import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
 import org.opensearch.migrations.transform.shim.validation.DocCountValidator;
 import org.opensearch.migrations.transform.shim.validation.DocIdValidator;
@@ -30,10 +34,6 @@ import org.opensearch.migrations.transform.shim.validation.FieldIgnoringEquality
 import org.opensearch.migrations.transform.shim.validation.JavascriptValidator;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.migrations.transform.shim.validation.ValidationRule;
-import org.opensearch.migrations.transform.shim.reporting.MetricsReceiver;
-import org.opensearch.migrations.transform.shim.reporting.OpenSearchMetricsSink;
-import org.opensearch.migrations.transform.shim.reporting.ReportingConfig;
-import org.opensearch.migrations.transform.shim.reporting.SolrMetricsExtractor;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
@@ -220,6 +220,8 @@ public class ShimMain {
                 );
                 var metricsReceiver = new MetricsReceiver(metricsSink, new SolrMetricsExtractor(),
                     reportingConfig.isIncludeRequestBody());
+                // Preflight: create index template before shim starts
+                metricsSink.createIndexTemplate();
                 log.info("Validation reporting enabled, sink: {} index prefix: {}",
                     reportingConfig.getUri(), reportingConfig.getIndexPrefix());
                 return new Object[]{metricsReceiver, metricsSink};

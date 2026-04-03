@@ -3,9 +3,6 @@ package org.opensearch.migrations.transform.shim.reporting;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 
@@ -139,13 +136,57 @@ class OpenSearchMetricsSinkTest {
     @Test
     void bulkSizeOneTriggersImmediateFlush() {
         var sink = createSink(NON_ROUTABLE, "test", 1, 60000);
-        // Each submit should trigger a bulk send immediately
         assertDoesNotThrow(() -> {
             sink.submit(minimalDoc());
             sink.submit(minimalDoc());
             sink.submit(minimalDoc());
         });
         sink.close();
+    }
+
+    @Test
+    void createIndexTemplateDoesNotThrow() {
+        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
+        assertDoesNotThrow(sink::createIndexTemplate);
+        sink.close();
+    }
+
+    @Test
+    void createIndexTemplateWithCredentials() {
+        var sink = new OpenSearchMetricsSink(NON_ROUTABLE, "test", 100, 60000,
+            "admin", "password", false);
+        assertDoesNotThrow(sink::createIndexTemplate);
+        sink.close();
+    }
+
+    @Test
+    void largeBatchOfDocumentsHandledGracefully() {
+        var sink = createSink(NON_ROUTABLE, "test", 5, 60000);
+        assertDoesNotThrow(() -> {
+            for (int i = 0; i < 20; i++) {
+                sink.submit(minimalDoc());
+            }
+        });
+        sink.close();
+    }
+
+    @Test
+    void concurrentSubmitsDoNotThrow() throws InterruptedException {
+        var sink = createSink(NON_ROUTABLE, "test", 3, 60000);
+        var threads = new ArrayList<Thread>();
+        for (int i = 0; i < 5; i++) {
+            var t = new Thread(() -> {
+                for (int j = 0; j < 10; j++) {
+                    sink.submit(minimalDoc());
+                }
+            });
+            threads.add(t);
+            t.start();
+        }
+        for (var t : threads) {
+            t.join(5000);
+        }
+        assertDoesNotThrow(sink::close);
     }
 
     private static ValidationDocument minimalDoc() {
