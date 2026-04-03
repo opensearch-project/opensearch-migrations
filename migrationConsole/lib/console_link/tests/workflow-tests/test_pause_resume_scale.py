@@ -7,15 +7,16 @@ from console_link.workflow.cli import workflow_cli
 from console_link.workflow.services.deployment_service import DeploymentInfo
 
 
-def _make_dep(name, replicas, task_name, pre_pause=None):
+def _make_dep(name, replicas, task_name, pre_pause=None, max_replicas=0):
     return DeploymentInfo(name=name, namespace="ma", replicas=replicas,
-                          task_name=task_name, pre_pause_replicas=pre_pause)
+                          task_name=task_name, pre_pause_replicas=pre_pause,
+                          max_replicas=max_replicas)
 
 
-RUNNING_BACKFILL = _make_dep("test-rfs", 5, "src.tgt.backfill")
-RUNNING_REPLAYER = _make_dep("test-replayer", 3, "src.tgt.replayer")
-PAUSED_BACKFILL = _make_dep("test-rfs", 0, "src.tgt.backfill", pre_pause=5)
-PAUSED_REPLAYER = _make_dep("test-replayer", 0, "src.tgt.replayer", pre_pause=3)
+RUNNING_BACKFILL = _make_dep("test-rfs", 5, "src.tgt.backfill", max_replicas=0)
+RUNNING_REPLAYER = _make_dep("test-replayer", 3, "src.tgt.replayer", max_replicas=1)
+PAUSED_BACKFILL = _make_dep("test-rfs", 0, "src.tgt.backfill", pre_pause=5, max_replicas=0)
+PAUSED_REPLAYER = _make_dep("test-replayer", 0, "src.tgt.replayer", pre_pause=3, max_replicas=1)
 
 
 class TestDeploymentInfo:
@@ -149,9 +150,43 @@ class TestDeploymentService:
         assert body["spec"]["replicas"] == 10
         assert "metadata" not in body
 
+    def test_scale_rejects_over_max_replicas(self):
+        from console_link.workflow.services.deployment_service import DeploymentService
+        service = DeploymentService.__new__(DeploymentService)
+        service.apps_api = Mock()
+        result = service.scale_deployment(RUNNING_REPLAYER, 5)
+        assert result["success"] is False
+        assert "cannot scale to 5" in result["message"]
+        assert "max: 1" in result["message"]
+        service.apps_api.patch_namespaced_deployment.assert_not_called()
+
+    def test_scale_allows_within_max_replicas(self):
+        from console_link.workflow.services.deployment_service import DeploymentService
+        service = DeploymentService.__new__(DeploymentService)
+        service.apps_api = Mock()
+        result = service.scale_deployment(RUNNING_REPLAYER, 1)
+        assert result["success"] is True
+
+    def test_scale_unlimited_allows_any_count(self):
+        from console_link.workflow.services.deployment_service import DeploymentService
+        service = DeploymentService.__new__(DeploymentService)
+        service.apps_api = Mock()
+        result = service.scale_deployment(RUNNING_BACKFILL, 100)
+        assert result["success"] is True
+
+    def test_scale_to_zero_bypasses_max_check(self):
+        from console_link.workflow.services.deployment_service import DeploymentService
+        service = DeploymentService.__new__(DeploymentService)
+        service.apps_api = Mock()
+        result = service.scale_deployment(RUNNING_REPLAYER, 0)
+        assert result["success"] is True
+
+
+HELPERS_SVC = 'console_link.workflow.commands.deployment_helpers.DeploymentService'
+
 
 class TestPauseCommand:
-    @patch('console_link.workflow.commands.pause.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_pause_all_with_yes(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
@@ -164,7 +199,7 @@ class TestPauseCommand:
         assert "Paused 2 of 2" in result.output
         assert mock_svc.pause_deployment.call_count == 2
 
-    @patch('console_link.workflow.commands.pause.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_pause_with_glob(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
@@ -176,7 +211,7 @@ class TestPauseCommand:
         assert result.exit_code == 0
         assert "Paused 1 of 1" in result.output
 
-    @patch('console_link.workflow.commands.pause.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_pause_no_deployments(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
@@ -185,7 +220,7 @@ class TestPauseCommand:
         result = CliRunner().invoke(workflow_cli, ['pause', '--yes'])
         assert "No pausable Deployments found" in result.output
 
-    @patch('console_link.workflow.commands.pause.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_pause_no_match_shows_available(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
@@ -196,7 +231,7 @@ class TestPauseCommand:
         assert "No matching running Deployments found" in result.output
         assert "src.tgt.backfill" in result.output
 
-    @patch('console_link.workflow.commands.pause.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_pause_skips_already_paused_in_no_args_mode(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
@@ -206,7 +241,7 @@ class TestPauseCommand:
         result = CliRunner().invoke(workflow_cli, ['pause', '--yes'])
         assert "No matching running Deployments found" in result.output
 
-    @patch('console_link.workflow.commands.pause.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_pause_confirmation_abort(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
@@ -217,7 +252,7 @@ class TestPauseCommand:
         assert "Aborted" in result.output
         mock_svc.pause_deployment.assert_not_called()
 
-    @patch('console_link.workflow.commands.pause.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_pause_displays_targets(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
@@ -231,7 +266,7 @@ class TestPauseCommand:
 
 
 class TestResumeCommand:
-    @patch('console_link.workflow.commands.resume.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_resume_all_with_yes(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
@@ -243,7 +278,7 @@ class TestResumeCommand:
         assert result.exit_code == 0
         assert "Resumed 2 of 2" in result.output
 
-    @patch('console_link.workflow.commands.resume.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_resume_with_exact_name(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
@@ -255,7 +290,7 @@ class TestResumeCommand:
         assert result.exit_code == 0
         assert "Resumed 1 of 1" in result.output
 
-    @patch('console_link.workflow.commands.resume.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_resume_skips_running_in_no_args_mode(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
@@ -265,7 +300,7 @@ class TestResumeCommand:
         result = CliRunner().invoke(workflow_cli, ['resume', '--yes'])
         assert "No matching paused Deployments found" in result.output
 
-    @patch('console_link.workflow.commands.resume.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_resume_displays_restore_count(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
@@ -278,37 +313,37 @@ class TestResumeCommand:
 
 
 class TestScaleCommand:
-    @patch('console_link.workflow.commands.scale.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_scale_with_glob(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
         mock_svc.discover_pausable_deployments.return_value = [RUNNING_BACKFILL, RUNNING_REPLAYER]
-        mock_svc.filter_by_task_names.return_value = [RUNNING_REPLAYER]
+        mock_svc.filter_by_task_names.return_value = [RUNNING_BACKFILL]
         mock_svc.scale_deployment.return_value = {"success": True, "message": "Scaled"}
 
-        result = CliRunner().invoke(workflow_cli, ['scale', '*.replayer', '--replicas', '10'])
+        result = CliRunner().invoke(workflow_cli, ['scale', '*.backfill', '--replicas', '10'])
         assert result.exit_code == 0
         assert "Scaled 1 of 1" in result.output
 
-    @patch('console_link.workflow.commands.scale.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_scale_requires_replicas(self, mock_cls):
         result = CliRunner().invoke(workflow_cli, ['scale'])
         assert result.exit_code != 0
         assert "Missing option '--replicas'" in result.output
 
-    @patch('console_link.workflow.commands.scale.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_scale_all_with_yes(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
-        mock_svc.discover_pausable_deployments.return_value = [RUNNING_BACKFILL, RUNNING_REPLAYER]
-        mock_svc.filter_by_task_names.return_value = [RUNNING_BACKFILL, RUNNING_REPLAYER]
+        mock_svc.discover_pausable_deployments.return_value = [RUNNING_BACKFILL]
+        mock_svc.filter_by_task_names.return_value = [RUNNING_BACKFILL]
         mock_svc.scale_deployment.return_value = {"success": True, "message": "Scaled"}
 
         result = CliRunner().invoke(workflow_cli, ['scale', '--replicas', '7', '--yes'])
         assert result.exit_code == 0
-        assert "Scaled 2 of 2" in result.output
+        assert "Scaled 1 of 1" in result.output
 
-    @patch('console_link.workflow.commands.scale.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_scale_displays_current_replicas(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
@@ -319,12 +354,13 @@ class TestScaleCommand:
         result = CliRunner().invoke(workflow_cli, ['scale', 'src.tgt.backfill', '--replicas', '3'])
         assert "currently 5 replicas" in result.output
 
-    @patch('console_link.workflow.commands.scale.DeploymentService')
+    @patch(HELPERS_SVC)
     def test_scale_partial_failure_counts_correctly(self, mock_cls):
         mock_svc = Mock()
         mock_cls.return_value = mock_svc
-        mock_svc.discover_pausable_deployments.return_value = [RUNNING_BACKFILL, RUNNING_REPLAYER]
-        mock_svc.filter_by_task_names.return_value = [RUNNING_BACKFILL, RUNNING_REPLAYER]
+        backfill2 = _make_dep("test-rfs-2", 3, "src2.tgt.backfill", max_replicas=0)
+        mock_svc.discover_pausable_deployments.return_value = [RUNNING_BACKFILL, backfill2]
+        mock_svc.filter_by_task_names.return_value = [RUNNING_BACKFILL, backfill2]
         mock_svc.scale_deployment.side_effect = [
             {"success": True, "message": "Scaled"},
             {"success": False, "message": "Failed"},
@@ -332,3 +368,15 @@ class TestScaleCommand:
 
         result = CliRunner().invoke(workflow_cli, ['scale', '--replicas', '3', '--yes'])
         assert "Scaled 1 of 2" in result.output
+
+    @patch(HELPERS_SVC)
+    def test_scale_rejects_over_limit_before_confirm(self, mock_cls):
+        mock_svc = Mock()
+        mock_cls.return_value = mock_svc
+        mock_svc.discover_pausable_deployments.return_value = [RUNNING_REPLAYER]
+        mock_svc.filter_by_task_names.return_value = [RUNNING_REPLAYER]
+
+        result = CliRunner().invoke(workflow_cli, ['scale', '*.replayer', '--replicas', '5'])
+        assert "cannot scale to 5" in result.output
+        assert "max: 1" in result.output
+        mock_svc.scale_deployment.assert_not_called()

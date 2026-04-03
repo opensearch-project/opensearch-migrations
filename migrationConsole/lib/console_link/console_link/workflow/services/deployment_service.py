@@ -10,7 +10,11 @@ from ..models.utils import load_k8s_config
 
 logger = logging.getLogger(__name__)
 
-PAUSABLE_LABEL = "migrations.opensearch.org/pausable"
+# Deployments with this label are discoverable for pause/resume/scale operations.
+# The label value encodes the max replica count: "0" for unlimited, or a positive
+# integer (e.g. "1") to cap scaling. Presence of the label implies the Deployment
+# is both pausable and scaleable.
+SCALEABLE_LABEL = "migrations.opensearch.org/scaleable"
 TASK_LABEL = "migrations.opensearch.org/task"
 WORKFLOW_LABEL = "workflows.argoproj.io/workflow"
 PRE_PAUSE_ANNOTATION = "migrations.opensearch.org/pre-pause-replicas"
@@ -19,12 +23,13 @@ PRE_PAUSE_ANNOTATION = "migrations.opensearch.org/pre-pause-replicas"
 class DeploymentInfo:
     """Lightweight representation of a pausable Deployment."""
     def __init__(self, name: str, namespace: str, replicas: int, task_name: Optional[str],
-                 pre_pause_replicas: Optional[int]):
+                 pre_pause_replicas: Optional[int], max_replicas: int = 0):
         self.name = name
         self.namespace = namespace
         self.replicas = replicas
         self.task_name = task_name
         self.pre_pause_replicas = pre_pause_replicas
+        self.max_replicas = max_replicas
 
     @property
     def is_paused(self) -> bool:
@@ -43,8 +48,8 @@ class DeploymentService:
         self.apps_api = client.AppsV1Api()
 
     def discover_pausable_deployments(self, workflow_name: str, namespace: str) -> List[DeploymentInfo]:
-        """Find all Deployments with the pausable label owned by the given workflow."""
-        label_selector = f"{PAUSABLE_LABEL}=true,{WORKFLOW_LABEL}={workflow_name}"
+        """Find all Deployments with the scaleable label owned by the given workflow."""
+        label_selector = f"{SCALEABLE_LABEL},{WORKFLOW_LABEL}={workflow_name}"
         result = self.apps_api.list_namespaced_deployment(namespace=namespace, label_selector=label_selector)
         return [self._to_info(d) for d in result.items]
 
@@ -95,6 +100,9 @@ class DeploymentService:
 
     def scale_deployment(self, dep: DeploymentInfo, replicas: int) -> dict:
         """Set replica count for a Deployment. Manages the pre-pause annotation for consistency."""
+        if replicas > 0 and dep.max_replicas > 0 and replicas > dep.max_replicas:
+            return {"success": False,
+                    "message": f"{dep.display_name}: cannot scale to {replicas} replicas (max: {dep.max_replicas})"}
         body: dict = {"spec": {"replicas": replicas}}
         if replicas == 0 and dep.replicas > 0:
             # Scaling to 0 behaves like pause — store current count
@@ -109,10 +117,16 @@ class DeploymentService:
         labels = deployment.metadata.labels or {}
         annotations = deployment.metadata.annotations or {}
         pre_pause = annotations.get(PRE_PAUSE_ANNOTATION)
+        scaleable_val = labels.get(SCALEABLE_LABEL, "0")
+        try:
+            max_replicas = int(scaleable_val)
+        except (ValueError, TypeError):
+            max_replicas = 0
         return DeploymentInfo(
             name=deployment.metadata.name,
             namespace=deployment.metadata.namespace,
             replicas=deployment.spec.replicas or 0,
             task_name=labels.get(TASK_LABEL),
             pre_pause_replicas=int(pre_pause) if pre_pause is not None else None,
+            max_replicas=max_replicas,
         )

@@ -5,9 +5,9 @@ import logging
 import click
 
 from ..models.utils import ExitCode
-from ..services.deployment_service import DeploymentService
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from .autocomplete_deployments import get_all_deployment_completions
+from .deployment_helpers import resolve_targets, confirm_if_needed, execute_and_report
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ def scale_command(ctx, task_names, replicas, workflow_name, namespace, yes):
     """Set replica count for backfill and replay Deployments.
 
     TASK_NAMES are optional glob patterns to select specific pipelines.
-    With no arguments, all pausable Deployments are scaled (with confirmation).
+    With no arguments, all scaleable Deployments are scaled (with confirmation).
 
     Example:
         workflow scale --replicas 3
@@ -31,45 +31,29 @@ def scale_command(ctx, task_names, replicas, workflow_name, namespace, yes):
         workflow scale source1.target1.backfill --replicas 0
     """
     try:
-        service = DeploymentService()
-        deployments = service.discover_pausable_deployments(workflow_name, namespace)
-
-        if not deployments:
-            click.echo("No pausable Deployments found.")
-            ctx.exit(ExitCode.FAILURE.value)
+        result = resolve_targets(
+            ctx, workflow_name, namespace, task_names,
+            empty_message="No scaleable Deployments found.",
+            no_match_message="No matching Deployments found.",
+        )
+        if not result:
             return
-
-        targets = service.filter_by_task_names(deployments, task_names)
-
-        if not targets:
-            click.echo("No matching Deployments found.")
-            if task_names:
-                click.echo("Available Deployments:")
-                for d in deployments:
-                    status = "paused" if d.is_paused else f"running ({d.replicas} replicas)"
-                    click.echo(f"  - {d.display_name} ({status})")
-            ctx.exit(ExitCode.FAILURE.value)
-            return
+        service, targets = result
 
         click.echo(f"The following Deployments will be scaled to {replicas} replicas:")
         for d in targets:
             click.echo(f"  - {d.display_name} (currently {d.replicas} replicas)")
 
-        if not task_names and not yes:
-            click.confirm("Proceed?", abort=True)
+        if replicas > 0:
+            over_limit = [d for d in targets if 0 < d.max_replicas < replicas]
+            if over_limit:
+                for d in over_limit:
+                    click.echo(f"Error: {d.display_name} cannot scale to {replicas} replicas (max: {d.max_replicas})")
+                ctx.exit(ExitCode.FAILURE.value)
+                return
 
-        succeeded = 0
-        for dep in targets:
-            result = service.scale_deployment(dep, replicas)
-            symbol = "✓" if result["success"] else "✗"
-            click.echo(f"  {symbol} {result['message']}")
-            if result["success"]:
-                succeeded += 1
-
-        click.echo(f"\nScaled {succeeded} of {len(targets)} Deployment(s).")
+        confirm_if_needed(task_names, yes)
+        execute_and_report(targets, lambda dep: service.scale_deployment(dep, replicas), "Scaled")
 
     except click.Abort:
         click.echo("Aborted.")
-    except Exception as e:
-        click.echo(f"Error: {str(e)}", err=True)
-        ctx.exit(ExitCode.FAILURE.value)
