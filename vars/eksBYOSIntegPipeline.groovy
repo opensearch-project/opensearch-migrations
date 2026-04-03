@@ -336,7 +336,9 @@ def call(Map config = [:]) {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
                                     // Install QEMU for cross-architecture builds (arm64 on x86_64 host)
-                                    sh "docker run --privileged --rm tonistiigi/binfmt --install all"
+                                    def ptcEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
+                                    def binfmtImage = ptcEndpoint ? "${ptcEndpoint}/docker-hub/tonistiigi/binfmt" : "tonistiigi/binfmt"
+                                    sh "docker run --privileged --rm ${binfmtImage} --install all"
                                     def builderExists = sh(
                                         script: "docker buildx ls | grep -q '^ecr-builder'",
                                         returnStatus: true
