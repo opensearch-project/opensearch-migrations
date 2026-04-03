@@ -3,6 +3,7 @@ import path from "node:path";
 import childProcess from "node:child_process";
 import {OVERALL_MIGRATION_CONFIG} from "./userSchemas";
 import {zodSchemaToJsonSchema} from "./getSchemaFromZod";
+import {injectKafkaBrokerConfigSchema} from "./kafkaBrokerConfigSchema";
 
 export const STRIMZI_OPENAPI_API_PATH = "/openapi/v3/apis/kafka.strimzi.io/v1";
 export const UNIFIED_SCHEMA_PATH_ENV = "MIGRATION_UNIFIED_SCHEMA_PATH";
@@ -199,6 +200,7 @@ function extractStrimziDefsFromOpenApi(openApi: any) {
 
 function injectStrimziRefs(schema: Record<string, unknown>, defs: Record<string, unknown>) {
     const enriched = clone(schema) as any;
+    injectKafkaBrokerConfigSchema(defs);
     enriched.$defs = {
         ...(enriched.$defs ?? {}),
         ...defs,

@@ -170,7 +170,6 @@ export const DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES = {
 // even though some workflow templates currently unpack pieces of the resolved
 // Strimzi objects into explicit fields for Argo rendering safety.
 const DEFAULT_AUTO_CREATE_KAFKA = {
-    auth: {type: "none" as const},
     clusterSpecOverrides: {
         kafka: {
             readinessProbe: {
@@ -498,9 +497,12 @@ export const USER_RFS_OPTIONS = z.object({
 export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
     (value) => deepmerge(DEFAULT_AUTO_CREATE_KAFKA, (value ?? {}), {arrayMerge: replaceArrayMerge}),
     z.object({
-        auth: KAFKA_AUTO_CREATE_AUTH_CONFIG.default({type: "none"}).optional()
+        auth: KAFKA_AUTO_CREATE_AUTH_CONFIG.optional()
             .describe("Workflow-owned Kafka client auth for auto-created Strimzi clusters. "
-                + "This controls the managed listener/auth contract used by migration applications."),
+                + "If omitted, transform-time resolution currently defaults workflow-managed Kafka to "
+                + "`scram-sha-512` as the secure-by-default policy. This default is intentionally "
+                + "resolved outside the deep-merged Strimzi object defaults so auth policy can change "
+                + "without being hidden inside the structural Kafka/NodePool/Topic default merge."),
         // Intended contract: users provide Strimzi-shaped partial Kafka.spec values and
         // initialization deep-merges them with the baseline defaults above.
         //
@@ -521,7 +523,7 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
                 "Workflow-managed fields such as cluster labels may be overwritten by the workflow."),
         topicSpecOverrides: GENERIC_JSON_OBJECT.optional()
             .describe("Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics."),
-    })
+    }).describe("Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application.")
 );
 
 export const KAFKA_CLUSTER_CONFIG = z.union([

@@ -181,7 +181,7 @@ describe('MigrationConfigTransformer validation', () => {
         expect(result.kafkaClusters?.[0]).toMatchObject({
             name: "default",
             config: {
-                auth: {type: "none"},
+                auth: {type: "scram-sha-512"},
                 nodePoolSpecOverrides: {
                     replicas: 1,
                     roles: ["controller", "broker"],

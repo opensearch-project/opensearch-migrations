@@ -35,7 +35,7 @@ const validConfig = {
                     kafka: {
                         config: {
                             "offsets.topic.replication.factor": 1,
-                            "log.message.format.version": "3.7",
+                            "compression.type": "producer",
                         },
                         listeners: [
                             {

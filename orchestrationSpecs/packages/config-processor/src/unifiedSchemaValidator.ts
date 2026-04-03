@@ -1,6 +1,8 @@
 import Ajv, {ErrorObject} from "ajv";
 import {
     assertUnifiedSchemaIsUsable,
+    classifyKafkaBrokerConfigKey,
+    isWorkflowManagedKafkaBrokerConfigPath,
     loadUnifiedSchema,
 } from "@opensearch-migrations/schemas";
 import {
@@ -24,6 +26,12 @@ function formatAjvMessage(error: ErrorObject) {
     const keyword = error.keyword;
     if (keyword === "additionalProperties") {
         const extra = (error.params as any).additionalProperty;
+        const instancePath = (error as any).instancePath ?? (error as any).dataPath ?? "";
+        if (typeof extra === "string" && isWorkflowManagedKafkaBrokerConfigPath(instancePath)) {
+            return classifyKafkaBrokerConfigKey(extra) === "disallowed-by-strimzi"
+                ? `Kafka broker config '${extra}' is valid Kafka syntax but is managed by Strimzi and cannot be set in workflow-managed clusters`
+                : `Kafka broker config '${extra}' is not part of the pinned Kafka 4.2.0 broker config catalog for workflow-managed clusters`;
+        }
         return `Unrecognized key '${extra}'`;
     }
     return error.message ?? `Schema validation failed (${keyword})`;

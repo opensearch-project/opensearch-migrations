@@ -5,7 +5,7 @@ import {
     OVERALL_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
-    ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, CAPTURE_CONFIG,
+    ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
     GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
@@ -174,6 +174,13 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
 }
 
 const DEFAULT_AUTO_CREATE_CONFIG: z.infer<typeof KAFKA_CLUSTER_CONFIG> = { autoCreate: {} };
+const DEFAULT_WORKFLOW_MANAGED_KAFKA_AUTH = {type: "scram-sha-512" as const};
+
+function resolveWorkflowManagedKafkaAuth(
+    cluster: z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>}
+) {
+    return cluster.autoCreate.auth ?? DEFAULT_WORKFLOW_MANAGED_KAFKA_AUTH;
+}
 
 /** Resolve kafkaClusterConfiguration, auto-injecting autoCreate entries only when no explicit kafka config was provided. */
 function resolveKafkaClusters(userConfig: { kafkaClusterConfiguration?: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>, traffic?: { proxies?: Record<string, { kafka?: string }> } }) {
@@ -217,7 +224,7 @@ function buildKafkaClientConfig(
             label: kafkaClusterKey
         };
     }
-    const auth = cluster.autoCreate.auth ?? {type: "none" as const};
+    const auth = resolveWorkflowManagedKafkaAuth(cluster as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>});
     const listenerName = auth.type === "scram-sha-512" ? "tls" : "plain";
     const listenerPort = auth.type === "scram-sha-512" ? 9093 : 9092;
     // autoCreate — Strimzi creates a deterministic bootstrap service for the selected internal listener.
@@ -323,7 +330,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             .map(([name, config]) => ({
                 name,
                 version: KAFKA_VERSION,
-                config: (config as any).autoCreate,
+                config: {
+                    ...(config as any).autoCreate,
+                    auth: resolveWorkflowManagedKafkaAuth(config as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>}),
+                },
                 topics: [...(topicsByCluster.get(name) ?? [])]
             }));
     }
