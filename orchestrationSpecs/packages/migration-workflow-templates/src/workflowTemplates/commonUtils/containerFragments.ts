@@ -210,6 +210,10 @@ export function setupSnapshotFuseSidecar(
                     failureThreshold: 60
                 },
                 env: [
+                    {
+                        name: "POD_NAME",
+                        valueFrom: { fieldRef: { fieldPath: "metadata.name" } }
+                    },
                     { name: "RUST_LOG", value: "info" },
                     { name: "S3_BUCKET", value: makeStringTypeProxy(s3Bucket) },
                     { name: "AWS_REGION", value: makeStringTypeProxy(s3Region) },
