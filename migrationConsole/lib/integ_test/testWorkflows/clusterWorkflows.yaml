@@ -442,7 +442,7 @@ spec:
             cluster.name: __CLUSTER_NAME__
             network.host: 0.0.0.0
             bootstrap.system_call_filter: false
-            discovery.zen.minimum_master_nodes: 1
+            discovery.type: single-node
             cloud.aws.access_key: test
             cloud.aws.secret_key: test
             cloud.aws.region: us-east-2
