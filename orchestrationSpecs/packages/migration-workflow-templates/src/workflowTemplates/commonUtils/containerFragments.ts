@@ -2,6 +2,8 @@ import {
     BaseExpression,
     Container,
     expr,
+    ExpressionType,
+    FunctionExpression,
     IMAGE_PULL_POLICY,
     makeDirectTypeProxy,
     makeStringTypeProxy,
@@ -139,12 +141,11 @@ export function setupLog4jConfigForContainer(
 const S3_MOUNT_VOLUME_NAME = "snapshot-s3";
 const LUCENE_FUSE_VOLUME_NAME = "lucene-fuse";
 const S3_CACHE_VOLUME_NAME = "s3-cache";
-const SHARED_MNT_VOLUME_NAME = "shared-mnt";
 
 /**
  * Add a snapshot-fuse native sidecar (init container with restartPolicy: Always) that:
- * 1. Runs mount-s3 to mount the S3 bucket at /mnt/s3 (with 5GB emptyDir cache)
- * 2. Runs snapshot-fuse FUSE to translate ES/OS snapshot blobs into virtual Lucene files at /mnt/lucene
+ * 1. Runs mount-s3 to mount the S3 bucket at /mnt-s3/s3 (with 5GB emptyDir cache)
+ * 2. Runs snapshot-fuse FUSE to translate ES/OS snapshot blobs into virtual Lucene files at /mnt-fuse/lucene
  *
  * As a native sidecar (K8s 1.29+), kubelet guarantees it starts and passes its
  * startupProbe before any regular containers start — eliminating race conditions.
@@ -152,8 +153,11 @@ const SHARED_MNT_VOLUME_NAME = "shared-mnt";
  * Each pod independently mounts S3 and caches hot blocks locally. No PV/PVC or CSI driver required.
  * This enables horizontal scaling — each pod gets its own mount-s3 process and cache.
  *
- * Uses a single shared emptyDir at /mnt so mount-s3 and snapshot-fuse can create
- * subdirectories (/mnt/s3, /mnt/lucene) as FUSE mount points inside it.
+ * Uses hostPath volumes with subPathExpr for the FUSE and S3 mount points.
+ * This avoids SELinux relabeling failures — containerd tries to lsetxattr on
+ * emptyDir contents when starting subsequent containers, which fails on FUSE
+ * mount points. hostPath volumes are not subject to SELinux relabeling.
+ * subPathExpr with POD_NAME ensures per-pod isolation on shared nodes.
  */
 export function setupSnapshotFuseSidecar(
     snapshotLocalDir: BaseExpression<string>,
@@ -165,20 +169,36 @@ export function setupSnapshotFuseSidecar(
     sidecarImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     def: ContainerVolumePair): ContainerVolumePair {
 
-    const {volumeMounts, ...restOfContainer} = def.container;
+    const {volumeMounts, env, ...restOfContainer} = def.container;
+    const podNameEnv = {
+        name: "POD_NAME",
+        valueFrom: { fieldRef: { fieldPath: "metadata.name" } }
+    };
     return {
         volumes: [
             ...def.volumes,
-            { name: SHARED_MNT_VOLUME_NAME, emptyDir: {} },
+            { name: LUCENE_FUSE_VOLUME_NAME, hostPath: { path: "/var/tmp/snapshot-fuse-mnt", type: "DirectoryOrCreate" } },
+            { name: S3_MOUNT_VOLUME_NAME, hostPath: { path: "/var/tmp/snapshot-s3-mnt", type: "DirectoryOrCreate" } },
             { name: S3_CACHE_VOLUME_NAME, emptyDir: { sizeLimit: "10Gi" } }
         ],
         container: {
             ...restOfContainer,
+            env: [
+                ...(env === undefined ? [] : env),
+                podNameEnv
+            ],
             volumeMounts: [
                 ...(volumeMounts === undefined ? [] : volumeMounts),
                 {
-                    name: SHARED_MNT_VOLUME_NAME,
-                    mountPath: "/mnt",
+                    name: LUCENE_FUSE_VOLUME_NAME,
+                    mountPath: "/mnt/lucene",
+                    subPathExpr: "$(POD_NAME)",
+                    mountPropagation: "HostToContainer"
+                },
+                {
+                    name: S3_MOUNT_VOLUME_NAME,
+                    mountPath: "/mnt/s3",
+                    subPathExpr: "$(POD_NAME)",
                     mountPropagation: "HostToContainer"
                 }
             ]
@@ -192,21 +212,28 @@ export function setupSnapshotFuseSidecar(
                 image: makeStringTypeProxy(sidecarImage),
                 imagePullPolicy: makeStringTypeProxy(sidecarImagePullPolicy),
                 args: [
-                    makeStringTypeProxy(expr.concat(expr.literal("--repo-root="), snapshotLocalDir)),
+                    makeStringTypeProxy(
+                        new FunctionExpression<string, string, ExpressionType, "complicatedExpression">(
+                            "sprig.regexReplaceAll",
+                            [expr.literal("^/mnt/s3/"), snapshotLocalDir,
+                             expr.literal("--repo-root=/mnt-s3/s3/")] as any)
+                    ),
                     makeStringTypeProxy(expr.concat(expr.literal("--snapshot-name="), snapshotName)),
-                    "--mount-point=/mnt/lucene"
+                    "--mount-point=/mnt-fuse/lucene"
                 ],
                 startupProbe: {
                     exec: {
-                        command: ["mountpoint", "-q", "/mnt/lucene"]
+                        command: ["mountpoint", "-q", "/mnt-fuse/lucene"]
                     },
                     initialDelaySeconds: 1,
                     periodSeconds: 2,
                     failureThreshold: 60
                 },
                 env: [
+                    podNameEnv,
                     { name: "RUST_LOG", value: "info" },
                     { name: "S3_BUCKET", value: makeStringTypeProxy(s3Bucket) },
+                    { name: "S3_MOUNT_PATH", value: "/mnt-s3/s3" },
                     { name: "AWS_REGION", value: makeStringTypeProxy(s3Region) },
                     {
                         name: "S3_ENDPOINT_URL",
@@ -236,8 +263,15 @@ export function setupSnapshotFuseSidecar(
                 securityContext: { privileged: true },
                 volumeMounts: [
                     {
-                        name: SHARED_MNT_VOLUME_NAME,
-                        mountPath: "/mnt",
+                        name: LUCENE_FUSE_VOLUME_NAME,
+                        mountPath: "/mnt-fuse",
+                        subPathExpr: "$(POD_NAME)",
+                        mountPropagation: "Bidirectional"
+                    },
+                    {
+                        name: S3_MOUNT_VOLUME_NAME,
+                        mountPath: "/mnt-s3",
+                        subPathExpr: "$(POD_NAME)",
                         mountPropagation: "Bidirectional"
                     },
                     {
