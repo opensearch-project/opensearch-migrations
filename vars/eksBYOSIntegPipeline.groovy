@@ -355,6 +355,11 @@ def call(Map config = [:]) {
                                     def binfmtImage = env.registryEndpoint ?
                                         "${env.registryEndpoint.split('/')[0]}/docker-hub/tonistiigi/binfmt" :
                                         "tonistiigi/binfmt"
+                                    def binfmtPulled = sh(script: "docker pull ${binfmtImage}", returnStatus: true) == 0
+                                    if (!binfmtPulled) {
+                                        echo "Pull-through cache failed, falling back to Docker Hub"
+                                        binfmtImage = "tonistiigi/binfmt"
+                                    }
                                     sh "docker run --privileged --rm ${binfmtImage} --install all"
                                     def builderExists = sh(
                                         script: "docker buildx ls | grep -q '^ecr-builder'",
