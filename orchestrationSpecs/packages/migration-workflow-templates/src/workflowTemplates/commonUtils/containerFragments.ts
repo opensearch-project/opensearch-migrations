@@ -2,8 +2,6 @@ import {
     BaseExpression,
     Container,
     expr,
-    ExpressionType,
-    FunctionExpression,
     IMAGE_PULL_POLICY,
     makeDirectTypeProxy,
     makeStringTypeProxy,
@@ -138,8 +136,6 @@ export function setupLog4jConfigForContainer(
     } as const;
 }
 
-const S3_MOUNT_VOLUME_NAME = "snapshot-s3";
-const LUCENE_FUSE_VOLUME_NAME = "lucene-fuse";
 const S3_CACHE_VOLUME_NAME = "s3-cache";
 
 /**
@@ -153,11 +149,15 @@ const S3_CACHE_VOLUME_NAME = "s3-cache";
  * Each pod independently mounts S3 and caches hot blocks locally. No PV/PVC or CSI driver required.
  * This enables horizontal scaling — each pod gets its own mount-s3 process and cache.
  *
- * Uses hostPath volumes with subPathExpr for the FUSE and S3 mount points.
+ * Uses a hostPath volume for the FUSE and S3 mount points.
  * This avoids SELinux relabeling failures — containerd tries to lsetxattr on
  * emptyDir contents when starting subsequent containers, which fails on FUSE
  * mount points. hostPath volumes are not subject to SELinux relabeling.
- * subPathExpr with POD_NAME ensures per-pod isolation on shared nodes.
+ *
+ * The init container creates per-pod subdirectories (using POD_NAME) inside
+ * the hostPath and mounts FUSE/S3 there, then creates symlinks at the
+ * well-known paths (/mnt/lucene, /mnt/s3) pointing to the pod-specific mounts.
+ * The bulk-loader sees these symlinks via HostToContainer mount propagation.
  */
 export function setupSnapshotFuseSidecar(
     snapshotLocalDir: BaseExpression<string>,
@@ -169,36 +169,21 @@ export function setupSnapshotFuseSidecar(
     sidecarImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     def: ContainerVolumePair): ContainerVolumePair {
 
-    const {volumeMounts, env, ...restOfContainer} = def.container;
-    const podNameEnv = {
-        name: "POD_NAME",
-        valueFrom: { fieldRef: { fieldPath: "metadata.name" } }
-    };
+    const SHARED_HOSTPATH_VOLUME = "snapshot-mnt";
+    const {volumeMounts, ...restOfContainer} = def.container;
     return {
         volumes: [
             ...def.volumes,
-            { name: LUCENE_FUSE_VOLUME_NAME, hostPath: { path: "/var/tmp/snapshot-fuse-mnt", type: "DirectoryOrCreate" } },
-            { name: S3_MOUNT_VOLUME_NAME, hostPath: { path: "/var/tmp/snapshot-s3-mnt", type: "DirectoryOrCreate" } },
+            { name: SHARED_HOSTPATH_VOLUME, hostPath: { path: "/var/tmp/snapshot-mnt", type: "DirectoryOrCreate" } },
             { name: S3_CACHE_VOLUME_NAME, emptyDir: { sizeLimit: "10Gi" } }
         ],
         container: {
             ...restOfContainer,
-            env: [
-                ...(env === undefined ? [] : env),
-                podNameEnv
-            ],
             volumeMounts: [
                 ...(volumeMounts === undefined ? [] : volumeMounts),
                 {
-                    name: LUCENE_FUSE_VOLUME_NAME,
-                    mountPath: "/mnt/lucene",
-                    subPathExpr: "$(POD_NAME)",
-                    mountPropagation: "HostToContainer"
-                },
-                {
-                    name: S3_MOUNT_VOLUME_NAME,
-                    mountPath: "/mnt/s3",
-                    subPathExpr: "$(POD_NAME)",
+                    name: SHARED_HOSTPATH_VOLUME,
+                    mountPath: "/mnt",
                     mountPropagation: "HostToContainer"
                 }
             ]
@@ -212,28 +197,21 @@ export function setupSnapshotFuseSidecar(
                 image: makeStringTypeProxy(sidecarImage),
                 imagePullPolicy: makeStringTypeProxy(sidecarImagePullPolicy),
                 args: [
-                    makeStringTypeProxy(
-                        new FunctionExpression<string, string, ExpressionType, "complicatedExpression">(
-                            "sprig.regexReplaceAll",
-                            [expr.literal("^/mnt/s3/"), snapshotLocalDir,
-                             expr.literal("--repo-root=/mnt-s3/s3/")] as any)
-                    ),
+                    makeStringTypeProxy(expr.concat(expr.literal("--repo-root="), snapshotLocalDir)),
                     makeStringTypeProxy(expr.concat(expr.literal("--snapshot-name="), snapshotName)),
-                    "--mount-point=/mnt-fuse/lucene"
+                    "--mount-point=/mnt/lucene"
                 ],
                 startupProbe: {
                     exec: {
-                        command: ["mountpoint", "-q", "/mnt-fuse/lucene"]
+                        command: ["mountpoint", "-q", "/mnt/lucene"]
                     },
                     initialDelaySeconds: 1,
                     periodSeconds: 2,
                     failureThreshold: 60
                 },
                 env: [
-                    podNameEnv,
                     { name: "RUST_LOG", value: "info" },
                     { name: "S3_BUCKET", value: makeStringTypeProxy(s3Bucket) },
-                    { name: "S3_MOUNT_PATH", value: "/mnt-s3/s3" },
                     { name: "AWS_REGION", value: makeStringTypeProxy(s3Region) },
                     {
                         name: "S3_ENDPOINT_URL",
@@ -263,15 +241,8 @@ export function setupSnapshotFuseSidecar(
                 securityContext: { privileged: true },
                 volumeMounts: [
                     {
-                        name: LUCENE_FUSE_VOLUME_NAME,
-                        mountPath: "/mnt-fuse",
-                        subPathExpr: "$(POD_NAME)",
-                        mountPropagation: "Bidirectional"
-                    },
-                    {
-                        name: S3_MOUNT_VOLUME_NAME,
-                        mountPath: "/mnt-s3",
-                        subPathExpr: "$(POD_NAME)",
+                        name: SHARED_HOSTPATH_VOLUME,
+                        mountPath: "/mnt",
                         mountPropagation: "Bidirectional"
                     },
                     {
