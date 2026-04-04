@@ -621,18 +621,23 @@ describe('date uniform range facet conversion (date_histogram)', () => {
     expect(agg.has('histogram')).toBe(false);
   });
 
-  it('should set extended_bounds.min from start and omit max (end is exclusive)', () => {
+  it('should set extended_bounds with min and max (end - 1s) and hard_bounds with original start/end', () => {
     const inner = applyBodyDateHistogram({
       field: 'created_at',
       start: '2024-01-01T00:00:00Z',
       end: '2024-12-31T00:00:00Z',
       gap: '+1MONTH',
     });
-    const bounds = inner.get('extended_bounds');
-    expect(bounds).toBeDefined();
-    expect(bounds.get('min')).toBe('2024-01-01T00:00:00Z');
-    // Solr's end is exclusive — setting max=end would create an extra bucket
-    expect(bounds.has('max')).toBe(false);
+    const extBounds = inner.get('extended_bounds');
+    expect(extBounds).toBeDefined();
+    expect(extBounds.get('min')).toBe('2024-01-01T00:00:00Z');
+    // Solr's end is exclusive — max is set to end - 1s to avoid an extra bucket
+    expect(extBounds.get('max')).toBe('2024-12-30T23:59:59Z');
+
+    const hardBounds = inner.get('hard_bounds');
+    expect(hardBounds).toBeDefined();
+    expect(hardBounds.get('min')).toBe('2024-01-01T00:00:00Z');
+    expect(hardBounds.get('max')).toBe('2024-12-31T00:00:00Z');
   });
 
   it('should set format to strict_date_time_no_millis for ISO date output', () => {
@@ -645,23 +650,28 @@ describe('date uniform range facet conversion (date_histogram)', () => {
     expect(inner.get('format')).toBe('strict_date_time_no_millis');
   });
 
-  it('should set only extended_bounds.min when end is absent', () => {
+  it('should set only min on extended_bounds and hard_bounds when end is absent', () => {
     const inner = applyBodyDateHistogram({
       field: 'created_at',
       start: '2024-01-01T00:00:00Z',
       gap: '+1MONTH',
     });
-    const bounds = inner.get('extended_bounds');
-    expect(bounds.get('min')).toBe('2024-01-01T00:00:00Z');
-    expect(bounds.has('max')).toBe(false);
+    const extBounds = inner.get('extended_bounds');
+    expect(extBounds.get('min')).toBe('2024-01-01T00:00:00Z');
+    expect(extBounds.has('max')).toBe(false);
+
+    const hardBounds = inner.get('hard_bounds');
+    expect(hardBounds.get('min')).toBe('2024-01-01T00:00:00Z');
+    expect(hardBounds.has('max')).toBe(false);
   });
 
-  it('should not set extended_bounds when start and end are both absent', () => {
+  it('should not set extended_bounds or hard_bounds when start and end are both absent', () => {
     const inner = applyBodyDateHistogram({
       field: 'created_at',
       gap: '+1MONTH',
     });
     expect(inner.has('extended_bounds')).toBe(false);
+    expect(inner.has('hard_bounds')).toBe(false);
   });
 
   it('should map mincount to min_doc_count', () => {
