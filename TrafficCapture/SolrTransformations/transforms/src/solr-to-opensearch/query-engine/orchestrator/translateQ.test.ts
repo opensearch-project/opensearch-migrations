@@ -56,7 +56,7 @@ describe('translateQ', () => {
         errors: [{ message: 'Unexpected )', position: 16 }],
       });
 
-      const result = translateQ(params(['q', 'title:java AND )']));
+      const result = translateQ(params(['q', 'title:java AND )']), 'passthrough-on-error');
 
       expect(mockTransform).not.toHaveBeenCalled();
       expect(result.dsl.has('query_string')).toBe(true);
@@ -66,18 +66,6 @@ describe('translateQ', () => {
         { construct: 'parse_error', position: 16, message: 'Unexpected )' },
       ]);
     });
-
-    it('returns passthrough in partial mode on parse failure', () => {
-      mockParse.mockReturnValue({
-        ast: null,
-        errors: [{ message: 'Parse error', position: 0 }],
-      });
-
-      const result = translateQ(params(['q', ')']), 'partial');
-
-      expect(result.dsl.has('query_string')).toBe(true);
-      expect(result.warnings[0].construct).toBe('parse_error');
-    });
   });
 
   describe('transform failure', () => {
@@ -85,7 +73,7 @@ describe('translateQ', () => {
       mockParse.mockReturnValue({ ast: { type: 'field', field: 'title', value: 'java' }, errors: [] });
       mockTransform.mockImplementation(() => { throw new Error('No transform rule registered for node type: field'); });
 
-      const result = translateQ(params(['q', 'title:java']));
+      const result = translateQ(params(['q', 'title:java']), 'passthrough-on-error');
 
       expect(result.dsl.has('query_string')).toBe(true);
       expect((result.dsl.get('query_string') as Map<string, any>).get('query'))
@@ -94,16 +82,35 @@ describe('translateQ', () => {
         { construct: 'transform_error', message: 'No transform rule registered for node type: field' },
       ]);
     });
+  });
 
-    it('returns passthrough in partial mode', () => {
-      mockParse.mockReturnValue({ ast: { type: 'field', field: 'title', value: 'java' }, errors: [] });
-      mockTransform.mockImplementation(() => { throw new Error('No rule'); });
+  describe('fail-fast mode', () => {
+    it('throws on parse failure', () => {
+      mockParse.mockReturnValue({
+        ast: null,
+        errors: [{ message: 'Unexpected )', position: 16 }],
+      });
 
-      const result = translateQ(params(['q', 'title:java']), 'partial');
-
-      expect(result.dsl.has('query_string')).toBe(true);
-      expect(result.warnings[0].construct).toBe('transform_error');
+      expect(() => translateQ(params(['q', 'title:java AND )']), 'fail-fast'))
+        .toThrow('Failed to parse Solr query: title:java AND )');
     });
 
+    it('re-throws on transform failure', () => {
+      mockParse.mockReturnValue({ ast: { type: 'field', field: 'title', value: 'java' }, errors: [] });
+      mockTransform.mockImplementation(() => { throw new Error('No rule for field'); });
+
+      expect(() => translateQ(params(['q', 'title:java']), 'fail-fast'))
+        .toThrow('Failed to transform Solr query: title:java');
+    });
+
+    it('returns normally on successful translation', () => {
+      const fakeDsl = new Map([['match_all', new Map()]]);
+      mockParse.mockReturnValue({ ast: { type: 'matchAll' }, errors: [] });
+      mockTransform.mockReturnValue(fakeDsl);
+
+      const result = translateQ(params(['q', '*:*']), 'fail-fast');
+      expect(result.dsl).toBe(fakeDsl);
+      expect(result.warnings).toEqual([]);
+    });
   });
 });
