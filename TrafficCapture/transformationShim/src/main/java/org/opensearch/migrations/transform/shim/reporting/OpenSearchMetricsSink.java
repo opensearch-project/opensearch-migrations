@@ -124,7 +124,7 @@ public class OpenSearchMetricsSink implements MetricsSink {
      * - headers use dynamic mapping since HTTP header values are always strings
      *   and individual headers vary per request
      */
-    private String buildIndexTemplateJson() {
+    String buildIndexTemplateJson() {
         return String.format("""
             {
               "index_patterns": ["%s-*"],
@@ -345,7 +345,7 @@ public class OpenSearchMetricsSink implements MetricsSink {
      * Checks for partial failures in bulk response.
      * Even if HTTP status is 200, individual documents may have failed.
      */
-    private void checkPartialFailures(String responseBody, int totalDocs) {
+    void checkPartialFailures(String responseBody, int totalDocs) {
         try {
             var tree = MAPPER.readTree(responseBody);
             if (tree.has("errors") && tree.get("errors").asBoolean()) {
@@ -357,7 +357,7 @@ public class OpenSearchMetricsSink implements MetricsSink {
         }
     }
 
-    private int countAndLogFailures(com.fasterxml.jackson.databind.JsonNode tree) {
+    int countAndLogFailures(com.fasterxml.jackson.databind.JsonNode tree) {
         int failedCount = 0;
         var items = tree.get("items");
         if (items != null && items.isArray()) {

@@ -189,6 +189,120 @@ class OpenSearchMetricsSinkTest {
         assertDoesNotThrow(sink::close);
     }
 
+    @Test
+    void generateIndexNameContainsPrefix() {
+        var sink = createSink(NON_ROUTABLE, "my-metrics", 100, 60000);
+        String name = sink.generateIndexName();
+        assertTrue(name.startsWith("my-metrics-"));
+        assertTrue(name.matches("my-metrics-\\d{4}\\.\\d{2}\\.\\d{2}"));
+        sink.close();
+    }
+
+    @Test
+    void submitAndFlushCycle() {
+        var sink = createSink(NON_ROUTABLE, "test", 1000, 60000);
+        sink.submit(minimalDoc());
+        sink.submit(minimalDoc());
+        sink.submit(minimalDoc());
+        assertDoesNotThrow(sink::flush);
+        // Buffer should be empty after flush
+        assertDoesNotThrow(sink::flush); // second flush on empty buffer
+        sink.close();
+    }
+
+    @Test
+    void multipleFlushesAfterClose() {
+        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
+        sink.submit(minimalDoc());
+        sink.close();
+        // flush after close should not throw
+        assertDoesNotThrow(sink::flush);
+    }
+
+    @Test
+    void submitWithFullDocument() {
+        var sink = createSink(NON_ROUTABLE, "test", 1000, 60000);
+        var doc = new ValidationDocument(
+            "2025-03-17T10:00:00Z", "full-doc-test",
+            new ValidationDocument.RequestRecord("GET", "/solr/test/select?q=*:*", null, null),
+            new ValidationDocument.RequestRecord("GET", "/test/_search?q=*:*", null, null),
+            "test-collection", "/solr/{collection}/select",
+            100L, 95L, 5.0,
+            12L, 15L, 3L,
+            null, null
+        );
+        assertDoesNotThrow(() -> sink.submit(doc));
+        assertDoesNotThrow(sink::flush);
+        sink.close();
+    }
+
+    @Test
+    void buildIndexTemplateJsonIsValidJson() throws Exception {
+        var sink = createSink(NON_ROUTABLE, "test-prefix", 100, 60000);
+        String json = sink.buildIndexTemplateJson();
+        assertNotNull(json);
+        // Verify it's valid JSON
+        var tree = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+        assertTrue(tree.has("index_patterns"));
+        assertTrue(tree.get("index_patterns").get(0).asText().startsWith("test-prefix-"));
+        assertTrue(tree.has("template"));
+        assertTrue(tree.get("template").has("mappings"));
+        sink.close();
+    }
+
+    @Test
+    void checkPartialFailuresNoErrors() {
+        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
+        String response = "{\"errors\":false,\"items\":[{\"index\":{\"status\":201}}]}";
+        assertDoesNotThrow(() -> sink.checkPartialFailures(response, 1));
+        sink.close();
+    }
+
+    @Test
+    void checkPartialFailuresWithErrors() {
+        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
+        String response = "{\"errors\":true,\"items\":[{\"index\":{\"error\":{\"type\":\"mapper_parsing_exception\",\"reason\":\"failed\"}}}]}";
+        assertDoesNotThrow(() -> sink.checkPartialFailures(response, 1));
+        sink.close();
+    }
+
+    @Test
+    void checkPartialFailuresInvalidJson() {
+        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
+        assertDoesNotThrow(() -> sink.checkPartialFailures("not json", 1));
+        sink.close();
+    }
+
+    @Test
+    void countAndLogFailuresReturnsCount() throws Exception {
+        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var tree = mapper.readTree("{\"items\":[{\"index\":{\"error\":{\"type\":\"err\"}}},{\"index\":{\"status\":201}},{\"index\":{\"error\":{\"type\":\"err2\"}}}]}");
+        int count = sink.countAndLogFailures(tree);
+        assertEquals(2, count);
+        sink.close();
+    }
+
+    @Test
+    void countAndLogFailuresNoFailures() throws Exception {
+        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var tree = mapper.readTree("{\"items\":[{\"index\":{\"status\":201}},{\"index\":{\"status\":201}}]}");
+        int count = sink.countAndLogFailures(tree);
+        assertEquals(0, count);
+        sink.close();
+    }
+
+    @Test
+    void countAndLogFailuresNullItems() throws Exception {
+        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var tree = mapper.readTree("{}");
+        int count = sink.countAndLogFailures(tree);
+        assertEquals(0, count);
+        sink.close();
+    }
+
     private static ValidationDocument minimalDoc() {
         return new ValidationDocument(
             "2025-03-17T10:00:00Z", "test-" + System.nanoTime(),
