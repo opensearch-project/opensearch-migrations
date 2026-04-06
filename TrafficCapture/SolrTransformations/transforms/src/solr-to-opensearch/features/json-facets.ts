@@ -319,7 +319,7 @@ function convertDateHistogramFacet(def: JavaMap): JavaMap {
   // In OpenSearch we need both to replicate this behaviour.
   //
   // Solr's `end` is exclusive — no bucket starts AT `end`.
-  // For extended_bounds.max we subtract 1 ms so the last *forced*
+  // For extended_bounds.max we subtract 1 s so the last *forced*
   // bucket is the one just before `end`, matching Solr's semantics.
   // hard_bounds.max keeps the original `end` to clip any overshoot.
   if (start != null || end != null) {
