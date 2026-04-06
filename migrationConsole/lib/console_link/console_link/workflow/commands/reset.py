@@ -199,6 +199,18 @@ def _delete_and_wait(namespace, plural, name):
     return (name, ok)
 
 
+def _build_child_map(targets):
+    """Build reverse dependency map: name → set of children that must be deleted first."""
+    target_names = {t[1] for t in targets}
+    children = {name: set() for name in target_names}
+    for item in targets:
+        name, deps = item[1], item[3] if len(item) > 3 else []
+        for dep in deps:
+            if dep in children:
+                children[dep].add(name)
+    return children
+
+
 def _delete_targets(targets, namespace):
     """Delete targets respecting dependencies, with maximum concurrency.
 
@@ -209,34 +221,23 @@ def _delete_targets(targets, namespace):
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     target_map = {t[1]: t for t in targets}
-    # Build reverse deps: for each name, which targets in the set depend on it
-    # (i.e., which children must be deleted before this one)
-    children = {name: set() for name in target_map}
-    for item in targets:
-        name, deps = item[1], item[3] if len(item) > 3 else []
-        for dep in deps:
-            if dep in children:
-                children[dep].add(name)
-
-    pending_children = {n: set(c) for n, c in children.items()}
+    pending_children = {n: set(c) for n, c in _build_child_map(targets).items()}
     failed = False
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         in_flight = {}
 
         def submit_ready():
-            for name in list(pending_children):
-                if name not in in_flight and not pending_children[name]:
+            for name, kids in pending_children.items():
+                if name not in in_flight and not kids:
                     item = target_map[name]
-                    fut = pool.submit(_delete_and_wait, namespace, item[0], name)
-                    in_flight[name] = fut
+                    in_flight[name] = pool.submit(
+                        _delete_and_wait, namespace, item[0], name)
 
         submit_ready()
 
         while in_flight:
-            # Wait for any one to complete
             done = next(as_completed(in_flight.values()))
-            # Find which name completed
             name = next(n for n, f in in_flight.items() if f is done)
             del in_flight[name]
             del pending_children[name]
@@ -248,13 +249,45 @@ def _delete_targets(targets, namespace):
                 click.echo(f"  ✗ Failed to delete {name}", err=True)
                 failed = True
 
-            # Unblock parents that were waiting on this child
-            for parent, kids in pending_children.items():
+            for kids in pending_children.values():
                 kids.discard(name)
 
             submit_ready()
 
     return not failed
+
+
+def _resolve_cascade_targets(targets, namespace, cascade):
+    """Check for dependents. Returns expanded targets or None if blocked."""
+    target_names = {t[1] for t in targets}
+    all_crds = _list_migration_resources(namespace)
+    dep_names = _find_dependents(target_names, all_crds)
+    if not dep_names:
+        return targets
+
+    if cascade:
+        target_names.update(dep_names)
+        return [r for r in all_crds if r[1] in target_names]
+
+    blocking = [r for r in all_crds if r[1] in dep_names]
+    click.echo("Cannot delete — dependent resources exist:")
+    for p, n, _, _ in blocking:
+        click.echo(f"  {DISPLAY_NAMES.get(p, p)}: {n}")
+    click.echo()
+    click.echo("Use --cascade to delete them too.")
+    return None
+
+
+def _show_resource_list(crds):
+    """Display migration resources and their dependencies."""
+    click.echo("Migration resources:")
+    for plural, name, phase, deps in crds:
+        display = DISPLAY_NAMES.get(plural, plural)
+        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+        click.echo(f"  {display}: {name:<35} ({phase}){dep_str}")
+    click.echo()
+    click.echo("Use 'workflow reset <name>' to delete a resource.")
+    click.echo("Use 'workflow reset --all' to delete everything.")
 
 
 @click.command(name="reset")
@@ -296,28 +329,10 @@ def reset_command(ctx, path, reset_all, cascade, namespace):
             if not targets:
                 click.echo(f"No resources matching '{path}'.")
                 return
-            # Check for live dependents via spec.dependsOn
-            target_names = {t[1] for t in targets}
-            all_crds = _list_migration_resources(namespace)
-            dep_names = _find_dependents(target_names, all_crds)
-            if dep_names:
-                blocking = [
-                    r for r in all_crds if r[1] in dep_names
-                ]
-                if cascade:
-                    # Merge dependents into targets — topo delete handles order
-                    target_names.update(dep_names)
-                    targets = [r for r in all_crds if r[1] in target_names]
-                else:
-                    click.echo("Cannot delete — dependent resources exist:")
-                    for p, n, _, _ in blocking:
-                        click.echo(
-                            f"  {DISPLAY_NAMES.get(p, p)}: {n}"
-                        )
-                    click.echo()
-                    click.echo("Use --cascade to delete them too.")
-                    ctx.exit(ExitCode.FAILURE.value)
-                    return
+            targets = _resolve_cascade_targets(targets, namespace, cascade)
+            if targets is None:
+                ctx.exit(ExitCode.FAILURE.value)
+                return
             if not _delete_targets(targets, namespace):
                 ctx.exit(ExitCode.FAILURE.value)
             return
@@ -329,17 +344,9 @@ def reset_command(ctx, path, reset_all, cascade, namespace):
             return
 
         if not reset_all:
-            click.echo("Migration resources:")
-            for plural, name, phase, deps in crds:
-                display = DISPLAY_NAMES.get(plural, plural)
-                dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
-                click.echo(f"  {display}: {name:<35} ({phase}){dep_str}")
-            click.echo()
-            click.echo("Use 'workflow reset <name>' to delete a resource.")
-            click.echo("Use 'workflow reset --all' to delete everything.")
+            _show_resource_list(crds)
             return
 
-        # --all: delete all CRDs, then stop/delete workflows
         if crds:
             click.echo("Deleting migration resources...")
             _delete_targets(crds, namespace)
