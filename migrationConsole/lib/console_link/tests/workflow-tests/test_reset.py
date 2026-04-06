@@ -33,6 +33,7 @@ class TestListMigrationCrds:
             ],
             'snapshotmigrations': [],
             'kafkaclusters': [],
+            'approvalgates': [],
         })
         mock_client.CustomObjectsApi.return_value = mock_custom
 
@@ -48,6 +49,7 @@ class TestListMigrationCrds:
             'trafficreplays': [],
             'snapshotmigrations': [],
             'kafkaclusters': [],
+            'approvalgates': [],
         })
         mock_client.CustomObjectsApi.return_value = mock_custom
 
@@ -109,35 +111,25 @@ class TestResetCommandDelete:
         assert '✓ Deleted source-proxy' in result.output
         mock_delete.assert_called_once_with('ma', 'capturedtraffics', 'source-proxy')
 
-    @patch('console_link.workflow.commands.reset.delete_workflow')
-    @patch('console_link.workflow.commands.reset.argo_stop')
+    @patch('console_link.workflow.commands.reset._stop_and_delete_workflows')
+    @patch('console_link.workflow.commands.reset._wait_until_gone')
+    @patch('console_link.workflow.commands.reset._delete_crd')
     @patch('console_link.workflow.commands.reset.load_k8s_config')
-    @patch('console_link.workflow.commands.reset._delete_crds_and_wait')
     @patch('console_link.workflow.commands.reset._list_migration_resources')
-    def test_reset_all_ordered(self, mock_list, mock_delete_wait, mock_k8s, mock_stop, mock_delete_wf):
+    def test_reset_all(self, mock_list, mock_k8s, mock_delete, mock_wait, mock_wf):
         mock_list.return_value = [
             ('capturedtraffics', 'source-proxy', 'Ready'),
             ('trafficreplays', 'src-tgt-replayer', 'Ready'),
         ]
-        mock_stop.return_value = True
-        mock_delete_wf.return_value = True
+        mock_delete.return_value = True
 
         runner = CliRunner()
         result = runner.invoke(workflow_cli, ['reset', '--all'])
         assert result.exit_code == 0
-        # Verify ordered deletion phases
-        assert mock_delete_wait.call_count == 5  # 5 phases
-        phase_order = [c.args[1] for c in mock_delete_wait.call_args_list]
-        assert phase_order == [
-            'trafficreplays',
-            'snapshotmigrations',
-            'kafkaclusters',
-            'capturedtraffics',
-            'approvalgates',
-        ]
-        assert 'Stopped workflow' in result.output
-        assert 'Deleted workflow' in result.output
-        assert 'Ready for resubmit' in result.output
+        assert '✓ Deleted source-proxy' in result.output
+        assert '✓ Deleted src-tgt-replayer' in result.output
+        mock_wf.assert_called_once_with('ma')
+        assert 'Done.' in result.output
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._find_resource_by_name')

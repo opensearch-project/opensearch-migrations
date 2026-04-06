@@ -29,9 +29,9 @@ from testcontainers.k3s import K3SContainer
 
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.commands.reset import (
-    CRD_GROUP, CRD_VERSION,
     _list_migration_resources, _delete_crd,
 )
+from console_link.workflow.commands.crd_utils import CRD_GROUP, CRD_VERSION
 from console_link.workflow.commands.approve import list_approval_gates, approve_gate
 
 logger = logging.getLogger(__name__)
@@ -330,15 +330,13 @@ class TestResetSingleIntegration:
 class TestResetAllIntegration:
 
     def test_reset_all_deletes_all_crds(self, runner, reset_ns):
-        """--all deletes all CRDs with foreground cascading. Workflow deletion will fail
-        (no Argo workflow exists) but CRD deletion should succeed."""
+        """--all deletes all CRDs with foreground cascading."""
         _create_crd_instance(reset_ns, "capturedtraffics", "proxy-f", phase="Ready")
         _create_crd_instance(reset_ns, "snapshotmigrations", "snap-f", phase="Ready")
         _create_crd_instance(reset_ns, "trafficreplays", "replay-f", phase="Ready")
 
         result = runner.invoke(workflow_cli, [
             "reset", "--all", "--namespace", reset_ns,
-            "--argo-server", "http://localhost:9999",  # intentionally wrong — no workflow to delete
         ])
 
         # All CRDs should be deleted (404)
@@ -359,10 +357,9 @@ class TestResetAllIntegration:
 
         result = runner.invoke(workflow_cli, [
             "reset", "--all", "--namespace", reset_ns,
-            "--argo-server", "http://localhost:9999",
         ])
-        # Should not fail — proceeds to workflow deletion step
-        assert "proxy-g" not in result.output or "Patched" not in result.output
+        # Should not fail — proceeds to workflow cleanup
+        assert result.exit_code == 0
 
 
 # ============================================================================
