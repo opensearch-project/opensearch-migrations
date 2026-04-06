@@ -251,6 +251,34 @@ describe('MigrationConfigTransformer validation', () => {
         }).toThrow(/existing/);
     });
 
+    it('should report an unknown Kafka broker key without union noise', () => {
+        const configWithBogusKafkaKey = {
+            ...baseConfig,
+            kafkaClusterConfiguration: {
+                default: {
+                    autoCreate: {
+                        clusterSpecOverrides: {
+                            kafka: {
+                                config: {
+                                    "auto.create.topics.enable": false,
+                                    "bogus.inner.key": true,
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        expect(() => {
+            transformer.validateInput(configWithBogusKafkaKey);
+        }).toThrow(/Kafka broker config 'bogus\.inner\.key' is not part of the pinned Kafka 4\.2\.0 broker config catalog/);
+
+        expect(() => {
+            transformer.validateInput(configWithBogusKafkaKey);
+        }).not.toThrow(/must have required property 'existing'|must match a schema in anyOf/);
+    });
+
     it('should attach a derived proxy route onto the transformed source config', async () => {
         const result = await transformer.processFromObject(baseConfig);
         expect(result.snapshots?.[0]?.sourceConfig).toMatchObject({
