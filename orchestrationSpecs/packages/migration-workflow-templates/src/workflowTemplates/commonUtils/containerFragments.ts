@@ -245,6 +245,7 @@ export function setupSnapshotFuseSidecar(
                         valueFrom: { fieldRef: { fieldPath: "metadata.name" } }
                     },
                     { name: "RUST_LOG", value: "info" },
+                    { name: "FUSE_THREADS", value: "16" },
                     { name: "S3_BUCKET", value: makeStringTypeProxy(s3Bucket) },
                     { name: "AWS_REGION", value: makeStringTypeProxy(s3Region) },
                     {

@@ -219,6 +219,23 @@ function getRfsDeploymentManifest
                     // shared emptyDir does not support lsetxattr and relabeling causes
                     // CreateContainerError on Bottlerocket/SELinux-enabled nodes.
                     securityContext: { seLinuxOptions: { type: "spc_t" } },
+                    // Spread RFS pods across nodes to avoid CPU/memory oversubscription.
+                    // Each pod runs a Java bulk-loader (~3.5 cores), mount-s3 (~400 threads),
+                    // and a FUSE sidecar. Packing too many on one node causes CPU contention.
+                    topologySpreadConstraints: [{
+                        maxSkew: 1,
+                        topologyKey: "kubernetes.io/hostname",
+                        whenUnsatisfiable: "ScheduleAnyway",
+                        labelSelector: {
+                            matchLabels: {
+                                app: "bulk-loader",
+                                "deployment-name": makeStringTypeProxy(deploymentName)
+                            }
+                        },
+                        // With maxSkew=1 and ScheduleAnyway, the scheduler strongly
+                        // prefers even distribution. Combined with resource requests,
+                        // this effectively limits ~5 pods per node on typical instances.
+                    }],
                     initContainers: [...finalContainerDefinition.initContainers],
                     containers: [finalContainerDefinition.container, ...finalContainerDefinition.sidecars],
                     volumes: [...finalContainerDefinition.volumes]
