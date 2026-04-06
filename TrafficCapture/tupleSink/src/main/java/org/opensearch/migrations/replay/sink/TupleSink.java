@@ -8,7 +8,7 @@ import java.util.concurrent.CompletableFuture;
  * both serialization and future lifecycle. Batch sinks complete all futures at once
  * on commit; streaming sinks complete per-item as acks arrive.
  *
- * <p>All methods are called on the LMAX Disruptor consumer thread.</p>
+ * <p>Each instance is single-threaded — one per Netty event loop thread.</p>
  */
 public interface TupleSink extends AutoCloseable {
     /** Accept one tuple. The sink owns the future and must complete it when durability is confirmed. */

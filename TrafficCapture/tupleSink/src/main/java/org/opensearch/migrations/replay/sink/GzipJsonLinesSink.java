@@ -26,6 +26,9 @@ import lombok.extern.slf4j.Slf4j;
  * compressed data durable on disk/S3 so Kafka offsets can be committed immediately,
  * while preserving the deflate dictionary across flushes for good compression.</p>
  *
+ * <p>Each instance is single-threaded (one per Netty event loop). The {@code threadIndex}
+ * is embedded in filenames to avoid collisions between concurrent writers.</p>
+ *
  * <p>Files are rotated (finish + close + open new) when size or age thresholds are
  * exceeded. The file is only readable as valid gzip after {@code finish()} is called
  * (on rotation or close), but durability for Kafka commit safety only requires fsync.</p>
@@ -39,6 +42,7 @@ public class GzipJsonLinesSink implements TupleSink {
     private final Path outputDir;
     private final long maxFileSizeBytes;
     private final Duration maxFileAge;
+    private final int threadIndex;
     private final AtomicLong sequenceCounter = new AtomicLong();
 
     private GZIPOutputStream gzipOut;
@@ -47,16 +51,22 @@ public class GzipJsonLinesSink implements TupleSink {
     private Instant fileOpenedAt;
     private final List<CompletableFuture<Void>> pendingFutures = new ArrayList<>();
 
-    public GzipJsonLinesSink(Path outputDir, long maxFileSizeBytes, Duration maxFileAge) {
+    public GzipJsonLinesSink(Path outputDir, long maxFileSizeBytes, Duration maxFileAge, int threadIndex) {
         this.outputDir = outputDir;
         this.maxFileSizeBytes = maxFileSizeBytes;
         this.maxFileAge = maxFileAge;
+        this.threadIndex = threadIndex;
         try {
             java.nio.file.Files.createDirectories(outputDir);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to create tuple output directory: " + outputDir, e);
         }
         openNewFile();
+    }
+
+    /** Convenience constructor for single-threaded use (thread index 0). */
+    public GzipJsonLinesSink(Path outputDir, long maxFileSizeBytes, Duration maxFileAge) {
+        this(outputDir, maxFileSizeBytes, maxFileAge, 0);
     }
 
     @Override
@@ -143,7 +153,7 @@ public class GzipJsonLinesSink implements TupleSink {
     private void openNewFile() {
         var timestamp = TIMESTAMP_FORMAT.format(Instant.now());
         var seq = sequenceCounter.getAndIncrement();
-        var filename = String.format("tuples-%s-%d.log.gz", timestamp, seq);
+        var filename = String.format("tuples-%d-%s-%d.log.gz", threadIndex, timestamp, seq);
         var path = outputDir.resolve(filename);
         try {
             fileOut = new FileOutputStream(path.toFile());

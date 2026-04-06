@@ -21,7 +21,7 @@ import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
-import org.opensearch.migrations.replay.sink.TupleWriter;
+import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
@@ -163,7 +163,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        TupleWriter tupleWriter,
+        ThreadLocalTupleWriter tupleWriter,
         Duration quiescentDuration
     ) throws InterruptedException, ExecutionException {
         setupRunAndWaitForReplayToFinish(observedPacketConnectionTimeout, targetServerResponseTimeout,
@@ -188,7 +188,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        TupleWriter tupleWriter,
+        ThreadLocalTupleWriter tupleWriter,
         Consumer<SourceTargetCaptureTuple> tupleObserver,
         Duration quiescentDuration
     ) throws InterruptedException, ExecutionException {
@@ -201,7 +201,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        TupleWriter tupleWriter,
+        ThreadLocalTupleWriter tupleWriter,
         Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
         Consumer<SourceTargetCaptureTuple> tupleObserver,
         Duration quiescentDuration
@@ -304,7 +304,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        TupleWriter tupleWriter,
+        ThreadLocalTupleWriter tupleWriter,
         Duration quiescentDuration
     ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
         setupRunAndWaitForReplayWithShutdownChecks(observedPacketConnectionTimeout, targetServerResponseTimeout,
@@ -329,7 +329,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        TupleWriter tupleWriter,
+        ThreadLocalTupleWriter tupleWriter,
         Consumer<SourceTargetCaptureTuple> tupleObserver,
         Duration quiescentDuration
     ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
@@ -342,7 +342,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        TupleWriter tupleWriter,
+        ThreadLocalTupleWriter tupleWriter,
         Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
         Consumer<SourceTargetCaptureTuple> tupleObserver,
         Duration quiescentDuration

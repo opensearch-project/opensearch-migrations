@@ -16,8 +16,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
+import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.sink.TupleSink;
-import org.opensearch.migrations.replay.sink.TupleWriter;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -40,7 +40,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Verifies that the TupleWriter + Disruptor architecture correctly:
+ * Verifies that the ThreadLocalTupleWriter architecture correctly:
  * <ol>
  *   <li>Blocks Kafka commits until tuple futures are completed (durability confirmed)</li>
  *   <li>Does NOT block subsequent requests while tuple writes are pending</li>
@@ -152,7 +152,7 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                     RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
                     10 * 1024);
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
-                 var tupleWriter = new TupleWriter(latchedSink)) {
+                 var tupleWriter = new ThreadLocalTupleWriter(i -> latchedSink)) {
 
                 // Run the replayer in a background thread since it blocks
                 var replayThread = new Thread(() -> {
@@ -223,7 +223,7 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                     RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
                     10 * 1024);
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
-                 var tupleWriter = new TupleWriter(latchedSink)) {
+                 var tupleWriter = new ThreadLocalTupleWriter(i -> latchedSink)) {
 
                 var replayThread = new Thread(() -> {
                     try {

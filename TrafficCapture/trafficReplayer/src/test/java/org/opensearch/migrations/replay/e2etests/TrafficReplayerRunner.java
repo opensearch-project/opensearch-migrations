@@ -24,7 +24,7 @@ import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.sink.CallbackTupleSink;
-import org.opensearch.migrations.replay.sink.TupleWriter;
+import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
@@ -223,7 +223,7 @@ public class TrafficReplayerRunner {
     ) throws Exception {
         log.info("Starting a new replayer and running it");
         try (var trafficSource = new BlockingTrafficSource(captureSourceSupplier.get(), Duration.ofMinutes(2));
-             var tupleWriter = new TupleWriter(new CallbackTupleSink(m -> {}))) {
+             var tupleWriter = new ThreadLocalTupleWriter(i -> new CallbackTupleSink(m -> {}))) {
             trafficReplayer.setupRunAndWaitForReplayWithShutdownChecks(
                 Duration.ofSeconds(70),
                 Duration.ofSeconds(30),

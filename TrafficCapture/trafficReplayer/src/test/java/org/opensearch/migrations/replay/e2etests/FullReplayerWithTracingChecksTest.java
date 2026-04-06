@@ -14,7 +14,7 @@ import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.sink.CallbackTupleSink;
-import org.opensearch.migrations.replay.sink.TupleWriter;
+import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -133,7 +133,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                     10 * 1024
                 );
                 var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
-                var tupleWriter = new TupleWriter(new CallbackTupleSink(m -> {}))
+                var tupleWriter = new ThreadLocalTupleWriter(i -> new CallbackTupleSink(m -> {}))
             ) {
                 tr.setupRunAndWaitForReplayToFinish(
                     Duration.ofSeconds(70),

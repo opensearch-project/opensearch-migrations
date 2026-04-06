@@ -18,8 +18,7 @@ import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
-import org.opensearch.migrations.replay.sink.GzipJsonLinesSink;
-import org.opensearch.migrations.replay.sink.TupleWriter;
+import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -193,7 +192,7 @@ public class TrafficReplayer {
             required = false,
             names = { "--enable-sync-tuples", "--enableSyncTuples" },
             arity = 0,
-            description = "Enable the new synchronous tuple writing infrastructure (Disruptor + GzipJsonLinesSink). "
+            description = "Enable per-thread tuple writing to gzip files (GzipJsonLinesSink). "
                 + "When not set, tuples are written via the legacy Log4J2 async appender path.")
         boolean enableSyncTuples;
 
@@ -322,12 +321,6 @@ public class TrafficReplayer {
             description = "Maximum uncompressed size in MB before rotating a tuple file")
         int tupleMaxFileSizeMb = 256;
 
-        @Parameter(
-            required = false,
-            names = { "--tuple-ring-buffer-size", "--tupleRingBufferSize" },
-            arity = 1,
-            description = "LMAX Disruptor ring buffer size for tuple writing (must be power of 2)")
-        int tupleRingBufferSize = 8192;
     }
 
     @Getter
@@ -611,14 +604,11 @@ public class TrafficReplayer {
 
             setupShutdownHookForReplayer(tr);
             if (params.enableSyncTuples) {
-                log.info("Sync tuple writing enabled — using Disruptor + GzipJsonLinesSink");
-                var tupleWriter = new TupleWriter(
-                    new GzipJsonLinesSink(
-                        Path.of(params.tupleOutputDir),
-                        params.tupleMaxFileSizeMb * 1024L * 1024L,
-                        Duration.ofSeconds(params.tupleMaxLagSeconds)
-                    ),
-                    params.tupleRingBufferSize
+                log.info("Sync tuple writing enabled — using per-thread GzipJsonLinesSink");
+                var tupleWriter = new ThreadLocalTupleWriter(
+                    Path.of(params.tupleOutputDir),
+                    params.tupleMaxFileSizeMb * 1024L * 1024L,
+                    Duration.ofSeconds(params.tupleMaxLagSeconds)
                 );
                 tr.setupRunAndWaitForReplayWithShutdownChecks(
                     Duration.ofSeconds(params.observedPacketConnectionTimeout),

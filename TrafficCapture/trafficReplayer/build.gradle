@@ -18,6 +18,7 @@ plugins {
 
 dependencies {
     implementation project(':TrafficCapture:captureProtobufs')
+    implementation project(':TrafficCapture:tupleSink')
     implementation project(':coreUtilities')
     implementation project(':awsUtilities')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
@@ -38,10 +39,10 @@ dependencies {
     implementation libs.log4j.slf4j2.impl
     implementation libs.slf4j.api
     implementation libs.disruptor
+    implementation libs.commons.compress
     implementation libs.aws.auth
     implementation libs.aws.sdk.core
     implementation libs.aws.msk.iam.auth
-    implementation libs.commons.compress
 
     testFixturesImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     testFixturesImplementation project(':TrafficCapture:captureOffloader')

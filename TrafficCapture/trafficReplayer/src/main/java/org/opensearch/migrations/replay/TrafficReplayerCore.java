@@ -20,7 +20,7 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
-import org.opensearch.migrations.replay.sink.TupleWriter;
+import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
@@ -97,7 +97,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     @AllArgsConstructor
     class TrafficReplayerAccumulationCallbacks implements AccumulationCallbacks {
         private final ReplayEngine replayEngine;
-        private final TupleWriter tupleWriter;
+        private final ThreadLocalTupleWriter tupleWriter;
         /** Legacy synchronous tuple consumer (Log4J path). Mutually exclusive with tupleWriter. */
         private final Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
         @lombok.Setter
@@ -354,7 +354,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
 
         private CompletableFuture<Void> packageAndWriteTuple(
             IReplayContexts.ITupleHandlingContext tupleHandlingContext,
-            TupleWriter tupleWriter,
+            ThreadLocalTupleWriter tupleWriter,
             RequestResponsePacketPair rrPair,
             TransformedTargetRequestAndResponseList summary,
             Exception t
