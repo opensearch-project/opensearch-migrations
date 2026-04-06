@@ -322,8 +322,6 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
         .describe("Maximum seconds before rotating/committing a tuple file (used with enableSyncTuples)."),
     tupleMaxFileSizeMb: z.number().default(256).optional()
         .describe("Maximum uncompressed size in MB before rotating a tuple file (used with enableSyncTuples)."),
-    tupleRingBufferSize: z.number().default(8192).optional()
-        .describe("LMAX Disruptor ring buffer size for tuple writing, must be power of 2 (used with enableSyncTuples)."),
     userAgent: z.string().optional()
         .describe("String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."),
 }).describe("Process-level configuration options for the traffic replayer application. These control how captured traffic is read from Kafka and replayed to the target cluster.");

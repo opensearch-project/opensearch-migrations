@@ -1316,10 +1316,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 256
                     },
-                    "tupleRingBufferSize": {
-                      "type": "number",
-                      "default": 8192
-                    },
                     "userAgent": {
                       "type": "string",
                       "description": "String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."
@@ -2751,11 +2747,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "number",
                     "default": 256,
                     "description": "Maximum uncompressed size in MB before rotating a tuple file (used with enableSyncTuples)."
-                  },
-                  "tupleRingBufferSize": {
-                    "type": "number",
-                    "default": 8192,
-                    "description": "LMAX Disruptor ring buffer size for tuple writing, must be power of 2 (used with enableSyncTuples)."
                   },
                   "userAgent": {
                     "type": "string",
