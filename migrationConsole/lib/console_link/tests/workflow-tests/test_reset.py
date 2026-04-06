@@ -7,6 +7,7 @@ from console_link.workflow.cli import workflow_cli
 from console_link.workflow.commands.reset import (
     _list_migration_resources,
     _delete_crd,
+    _find_dependents,
 )
 
 
@@ -23,13 +24,15 @@ def _mock_crd_list(items_by_plural):
 
 class TestListMigrationCrds:
     @patch('console_link.workflow.commands.reset.client')
-    def test_lists_crds_with_phases(self, mock_client):
+    def test_lists_crds_with_phases_and_deps(self, mock_client):
         mock_custom = _mock_crd_list({
             'capturedtraffics': [
-                {'metadata': {'name': 'source-proxy'}, 'status': {'phase': 'Ready'}},
+                {'metadata': {'name': 'source-proxy'}, 'spec': {'dependsOn': ['kafka1']}, 'status': {'phase': 'Ready'}},
             ],
             'trafficreplays': [
-                {'metadata': {'name': 'src-tgt-replayer'}, 'status': {'phase': 'Running'}},
+                {'metadata': {'name': 'src-tgt-replayer'},
+                 'spec': {'dependsOn': ['source-proxy']},
+                 'status': {'phase': 'Running'}},
             ],
             'snapshotmigrations': [],
             'kafkaclusters': [],
@@ -40,13 +43,13 @@ class TestListMigrationCrds:
 
         result = _list_migration_resources('ma')
         assert len(result) == 2
-        assert ('capturedtraffics', 'source-proxy', 'Ready') in result
-        assert ('trafficreplays', 'src-tgt-replayer', 'Running') in result
+        assert ('capturedtraffics', 'source-proxy', 'Ready', ['kafka1']) in result
+        assert ('trafficreplays', 'src-tgt-replayer', 'Running', ['source-proxy']) in result
 
     @patch('console_link.workflow.commands.reset.client')
-    def test_handles_missing_status(self, mock_client):
+    def test_handles_missing_status_and_deps(self, mock_client):
         mock_custom = _mock_crd_list({
-            'capturedtraffics': [{'metadata': {'name': 'x'}}],
+            'capturedtraffics': [{'metadata': {'name': 'x'}, 'spec': {}}],
             'trafficreplays': [],
             'snapshotmigrations': [],
             'kafkaclusters': [],
@@ -56,7 +59,35 @@ class TestListMigrationCrds:
         mock_client.CustomObjectsApi.return_value = mock_custom
 
         result = _list_migration_resources('ma')
-        assert result == [('capturedtraffics', 'x', 'Unknown')]
+        assert result == [('capturedtraffics', 'x', 'Unknown', [])]
+
+
+class TestFindDependents:
+    def test_finds_direct_dependents(self):
+        resources = [
+            ('kafkaclusters', 'kafka1', 'Ready', []),
+            ('capturedtraffics', 'proxy1', 'Ready', ['kafka1']),
+            ('trafficreplays', 'replay1', 'Ready', ['proxy1']),
+        ]
+        deps = _find_dependents({'kafka1'}, resources)
+        assert set(deps) == {'proxy1', 'replay1'}
+
+    def test_no_dependents(self):
+        resources = [
+            ('trafficreplays', 'replay1', 'Ready', ['proxy1']),
+        ]
+        assert _find_dependents({'replay1'}, resources) == []
+
+    def test_parallel_migrations_only_affect_own_deps(self):
+        resources = [
+            ('datasnapshots', 'snap-a', 'Ready', ['proxy1']),
+            ('datasnapshots', 'snap-b', 'Ready', ['proxy1']),
+            ('snapshotmigrations', 'mig-a', 'Ready', ['snap-a']),
+            ('snapshotmigrations', 'mig-b', 'Ready', ['snap-b']),
+        ]
+        # Deleting snap-a should only affect mig-a, not mig-b
+        deps = _find_dependents({'snap-a'}, resources)
+        assert deps == ['mig-a']
 
 
 class TestDeleteCrd:
@@ -76,18 +107,17 @@ class TestDeleteCrd:
 class TestResetCommandList:
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._list_migration_resources')
-    def test_list_mode(self, mock_list, mock_k8s):
+    def test_list_mode_shows_deps(self, mock_list, mock_k8s):
         mock_list.return_value = [
-            ('capturedtraffics', 'source-proxy', 'Ready'),
-            ('trafficreplays', 'src-tgt-replayer', 'Ready'),
+            ('capturedtraffics', 'source-proxy', 'Ready', ['kafka1']),
+            ('trafficreplays', 'src-tgt-replayer', 'Ready', ['source-proxy']),
         ]
         runner = CliRunner()
         result = runner.invoke(workflow_cli, ['reset'])
         assert result.exit_code == 0
         assert 'source-proxy' in result.output
-        assert 'src-tgt-replayer' in result.output
-        assert 'Capture Proxy' in result.output
-        assert 'Ready' in result.output
+        assert 'depends on: kafka1' in result.output
+        assert 'depends on: source-proxy' in result.output
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._list_migration_resources')
@@ -104,16 +134,30 @@ class TestResetCommandDelete:
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._delete_crd')
     @patch('console_link.workflow.commands.reset._find_resource_by_name')
-    def test_delete_specific_resource(self, mock_find, mock_delete, mock_k8s, mock_wait, mock_list):
-        mock_find.return_value = ('capturedtraffics', 'source-proxy', 'Ready')
+    def test_delete_leaf_resource(self, mock_find, mock_delete, mock_k8s, mock_wait, mock_list):
+        mock_find.return_value = ('trafficreplays', 'replayer1', 'Ready', [])
         mock_delete.return_value = True
-        mock_list.return_value = []  # no live dependents
+        mock_list.return_value = []  # no other resources
 
         runner = CliRunner()
-        result = runner.invoke(workflow_cli, ['reset', 'source-proxy'])
+        result = runner.invoke(workflow_cli, ['reset', 'replayer1'])
         assert result.exit_code == 0
-        assert '✓ Deleted source-proxy' in result.output
-        mock_delete.assert_called_once_with('ma', 'capturedtraffics', 'source-proxy')
+        assert '✓ Deleted replayer1' in result.output
+
+    @patch('console_link.workflow.commands.reset._list_migration_resources')
+    @patch('console_link.workflow.commands.reset.load_k8s_config')
+    @patch('console_link.workflow.commands.reset._find_resource_by_name')
+    def test_blocked_when_dependents_exist(self, mock_find, mock_k8s, mock_list):
+        mock_find.return_value = ('datasnapshots', 'snap1', 'Ready', [])
+        mock_list.return_value = [
+            ('snapshotmigrations', 'mig1', 'Ready', ['snap1']),
+        ]
+
+        runner = CliRunner()
+        result = runner.invoke(workflow_cli, ['reset', 'snap1'])
+        assert result.exit_code != 0
+        assert 'Cannot delete' in result.output
+        assert 'mig1' in result.output
 
     @patch('console_link.workflow.commands.reset._stop_and_delete_workflows')
     @patch('console_link.workflow.commands.reset._wait_until_gone')
@@ -122,8 +166,8 @@ class TestResetCommandDelete:
     @patch('console_link.workflow.commands.reset._list_migration_resources')
     def test_reset_all(self, mock_list, mock_k8s, mock_delete, mock_wait, mock_wf):
         mock_list.return_value = [
-            ('capturedtraffics', 'source-proxy', 'Ready'),
-            ('trafficreplays', 'src-tgt-replayer', 'Ready'),
+            ('capturedtraffics', 'source-proxy', 'Ready', []),
+            ('trafficreplays', 'src-tgt-replayer', 'Ready', ['source-proxy']),
         ]
         mock_delete.return_value = True
 

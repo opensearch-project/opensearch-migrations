@@ -207,7 +207,10 @@ export const FullMigration = WorkflowBuilder.create({
                 })
             )
             .addStep("createCrd", ResourceManagement, "createCapturedTraffic", c =>
-                c.register({resourceName: b.inputs.proxyName})
+                c.register({
+                    resourceName: b.inputs.proxyName,
+                    dependsOn: expr.literal([b.inputs.kafkaClusterName]),
+                })
             )
             .addStep("getCrdUid", ResourceManagement, "getResourceUid", c =>
                 c.register({
@@ -451,6 +454,7 @@ export const FullMigration = WorkflowBuilder.create({
     .addTemplate("runSingleSnapshotMigration", t => t
         .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("resourceName", typeToken<string>())
+        .addOptionalInput("dependsOn", c => expr.literal([] as string[]))
         .addOptionalInput("groupName_view", c => "Snapshot Migration")
         .addOptionalInput("sortOrder_view", c => 999)
         .addInputsFromRecord(uniqueRunNonceParam)
@@ -458,7 +462,10 @@ export const FullMigration = WorkflowBuilder.create({
 
         .addSteps(b => b
             .addStep("createCrd", ResourceManagement, "createSnapshotMigration", c =>
-                c.register({resourceName: b.inputs.resourceName})
+                c.register({
+                    resourceName: b.inputs.resourceName,
+                    dependsOn: b.inputs.dependsOn,
+                })
             )
             .addStep("getCrdUid", ResourceManagement, "getResourceUid", c =>
                 c.register({
@@ -601,6 +608,7 @@ export const FullMigration = WorkflowBuilder.create({
                     c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: replayerName,
+                        dependsOn: expr.literal([b.inputs.fromProxy]),
                     })
                 )
                 .addStep("getCrdUid", ResourceManagement, "getResourceUid", c =>
@@ -740,6 +748,19 @@ export const FullMigration = WorkflowBuilder.create({
                         // expr.get(expr.get(c.item, "targetConfig"), "label"),
                         expr.literal("-"),
                         expr.get(c.item, "label")
+                    ),
+                    dependsOn: expr.ternary(
+                        expr.hasKey(
+                            expr.deserializeRecord(expr.get(c.item, "snapshotNameResolution")),
+                            "dataSnapshotResourceName"
+                        ),
+                        expr.literal([
+                            expr.getLoose(
+                                expr.deserializeRecord(expr.get(c.item, "snapshotNameResolution")),
+                                "dataSnapshotResourceName"
+                            )
+                        ]),
+                        expr.literal([] as string[])
                     ),
                     groupName_view: expr.concat(
                         expr.get(c.item, "sourceLabel"),

@@ -222,7 +222,7 @@ class TestListMigrationCrdsIntegration:
         _create_crd_instance(reset_ns, "trafficreplays", "replay-a", phase="Ready")
 
         results = _list_migration_resources(reset_ns)
-        names = {n for _, n, _ in results}
+        names = {n for _, n, _, _ in results}
         assert names == {"proxy-a", "snap-a", "replay-a"}
 
     def test_empty_namespace(self, reset_ns):
@@ -231,7 +231,7 @@ class TestListMigrationCrdsIntegration:
     def test_shows_unknown_when_no_status(self, reset_ns):
         _create_crd_instance(reset_ns, "capturedtraffics", "no-status")
         results = _list_migration_resources(reset_ns)
-        assert results == [("capturedtraffics", "no-status", "Unknown")]
+        assert results == [("capturedtraffics", "no-status", "Unknown", [])]
 
 
 # ============================================================================

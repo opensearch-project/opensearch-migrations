@@ -3,6 +3,9 @@
 Deletes migration CRDs with foreground propagation. Kubernetes ownerReferences
 ensure dependents (Deployments, Pods) are cleaned up automatically.
 After CRDs are gone, stops and deletes any Argo workflow in the namespace.
+
+Dependencies are read from spec.dependsOn on each CRD instance, so the CLI
+does not hardcode any dependency order.
 """
 
 import logging
@@ -20,40 +23,24 @@ logger = logging.getLogger(__name__)
 ARGO_GROUP = 'argoproj.io'
 ARGO_VERSION = 'v1alpha1'
 
-# Resource types in dependency order (upstream → downstream).
-# Resetting a resource requires redoing everything after it.
-# Adding a new CRD type only requires inserting it at the right position.
-DEPENDENCY_CHAIN = [
-    ('kafkaclusters', 'Kafka Cluster'),
-    ('capturedtraffics', 'Capture Proxy'),
-    ('datasnapshots', 'Data Snapshot'),
-    ('snapshotmigrations', 'Snapshot Migration'),
-    ('trafficreplays', 'Traffic Replay'),
+# All resettable resource types
+RESETTABLE_PLURALS = [
+    'kafkaclusters', 'capturedtraffics', 'datasnapshots',
+    'snapshotmigrations', 'trafficreplays', 'approvalgates',
 ]
 
-# Resources with no dependency relationships
-INDEPENDENT_RESOURCES = [
-    ('approvalgates', 'Approval Gate'),
-]
-
-RESOURCE_ORDER = DEPENDENCY_CHAIN + INDEPENDENT_RESOURCES
-RESETTABLE_PLURALS = [p for p, _ in RESOURCE_ORDER]
-DISPLAY_NAMES = dict(RESOURCE_ORDER)
-
-# Derived: for each plural in the chain, the set of plurals after it.
-_chain_index = {p: i for i, (p, _) in enumerate(DEPENDENCY_CHAIN)}
-
-
-def _get_dependents(plural):
-    """Return plurals that depend on the given resource type."""
-    idx = _chain_index.get(plural)
-    if idx is None:
-        return set()
-    return {p for p, i in _chain_index.items() if i > idx}
+DISPLAY_NAMES = {
+    'kafkaclusters': 'Kafka Cluster',
+    'capturedtraffics': 'Capture Proxy',
+    'datasnapshots': 'Data Snapshot',
+    'snapshotmigrations': 'Snapshot Migration',
+    'trafficreplays': 'Traffic Replay',
+    'approvalgates': 'Approval Gate',
+}
 
 
 def _list_migration_resources(namespace):
-    """List all migration resources. Returns list of (plural, name, phase)."""
+    """List all migration resources. Returns list of (plural, name, phase, dependsOn)."""
     custom = client.CustomObjectsApi()
     results = []
     for plural in RESETTABLE_PLURALS:
@@ -65,10 +52,27 @@ def _list_migration_resources(namespace):
             for item in items:
                 name = item['metadata']['name']
                 phase = item.get('status', {}).get('phase', 'Unknown')
-                results.append((plural, name, phase))
+                deps = item.get('spec', {}).get('dependsOn', []) or []
+                results.append((plural, name, phase, deps))
         except ApiException:
             pass
     return results
+
+
+def _find_dependents(target_names, all_resources):
+    """Find all resources that transitively depend on any of target_names."""
+    dependents = []
+    found = set(target_names)
+    # Iterate until no new dependents are found
+    changed = True
+    while changed:
+        changed = False
+        for _, name, _, deps in all_resources:
+            if name not in found and any(d in found for d in deps):
+                dependents.append(name)
+                found.add(name)
+                changed = True
+    return dependents
 
 
 def _delete_crd(namespace, plural, name):
@@ -125,7 +129,6 @@ def _stop_and_delete_workflows(namespace):
     for wf in items:
         name = wf['metadata']['name']
         try:
-            # Patch to stop (prevents new steps)
             custom.patch_namespaced_custom_object(
                 group=ARGO_GROUP, version=ARGO_VERSION,
                 namespace=namespace, plural='workflows', name=name,
@@ -150,7 +153,7 @@ def _stop_and_delete_workflows(namespace):
 
 
 def _find_resource_by_name(namespace, name):
-    """Find a resource by name across all types. Returns (plural, name, phase) or None."""
+    """Find a resource by name across all types."""
     custom = client.CustomObjectsApi()
     for plural in RESETTABLE_PLURALS:
         try:
@@ -159,7 +162,8 @@ def _find_resource_by_name(namespace, name):
                 namespace=namespace, plural=plural, name=name
             )
             phase = item.get('status', {}).get('phase', 'Unknown')
-            return (plural, name, phase)
+            deps = item.get('spec', {}).get('dependsOn', []) or []
+            return (plural, name, phase, deps)
         except ApiException:
             pass
     return None
@@ -170,7 +174,7 @@ def _get_resource_completions(ctx, param, incomplete):
         load_k8s_config()
         crds = _list_migration_resources(ctx.params.get('namespace', 'ma'))
         return [
-            n for _, n, phase in crds
+            n for _, n, phase, _ in crds
             if n.startswith(incomplete) and phase != 'Teardown'
         ]
     except Exception:
@@ -181,16 +185,17 @@ def _resolve_targets(namespace, path):
     """Resolve a name or glob to matching resources."""
     if has_glob(path):
         crds = _list_migration_resources(namespace)
-        matched = set(match_names([n for _, n, _ in crds], path))
-        return [(p, n, ph) for p, n, ph in crds if n in matched]
+        matched = set(match_names([n for _, n, _, _ in crds], path))
+        return [(p, n, ph, d) for p, n, ph, d in crds if n in matched]
     match = _find_resource_by_name(namespace, path)
     return [match] if match else []
 
 
 def _delete_targets(targets, namespace):
-    """Delete a list of (plural, name, phase) targets and wait."""
+    """Delete a list of targets and wait. Targets are (plural, name, ...)."""
     failed = False
-    for plural, name, _ in targets:
+    for item in targets:
+        plural, name = item[0], item[1]
         if _delete_crd(namespace, plural, name):
             click.echo(f"  ✓ Deleted {name}")
         else:
@@ -198,8 +203,8 @@ def _delete_targets(targets, namespace):
             failed = True
 
     by_plural = {}
-    for plural, name, _ in targets:
-        by_plural.setdefault(plural, []).append(name)
+    for item in targets:
+        by_plural.setdefault(item[0], []).append(item[1])
     for plural, names in by_plural.items():
         _wait_until_gone(namespace, plural, names)
 
@@ -228,10 +233,13 @@ def reset_command(ctx, path, reset_all, cascade, namespace):
     With a NAME or glob, deletes matching resources.
     With --all, deletes all resources and workflows.
 
+    Dependencies are read from spec.dependsOn on each CRD. Deleting a
+    resource that others depend on is blocked unless --cascade is used.
+
     Example:
         workflow reset                     # list resources
         workflow reset source-proxy        # delete one resource
-        workflow reset "source-*"          # delete matching resources
+        workflow reset --cascade snap1     # delete snap1 + its dependents
         workflow reset --all               # delete everything
     """
     try:
@@ -242,31 +250,27 @@ def reset_command(ctx, path, reset_all, cascade, namespace):
             if not targets:
                 click.echo(f"No resources matching '{path}'.")
                 return
-            # Check for live dependents
-            target_plurals = {p for p, _, _ in targets}
-            dep_plurals = set()
-            for p in target_plurals:
-                dep_plurals.update(_get_dependents(p))
-            dep_plurals -= target_plurals
-            if dep_plurals:
-                all_crds = _list_migration_resources(namespace)
+            # Check for live dependents via spec.dependsOn
+            target_names = {t[1] for t in targets}
+            all_crds = _list_migration_resources(namespace)
+            dep_names = _find_dependents(target_names, all_crds)
+            if dep_names:
                 blocking = [
-                    (p, n, ph) for p, n, ph in all_crds
-                    if p in dep_plurals
+                    r for r in all_crds if r[1] in dep_names
                 ]
-                if blocking:
-                    if cascade:
-                        targets = blocking + targets
-                    else:
-                        click.echo("Cannot delete — dependent resources exist:")
-                        for p, n, _ in blocking:
-                            click.echo(
-                                f"  {DISPLAY_NAMES.get(p, p)}: {n}"
-                            )
-                        click.echo()
-                        click.echo("Use --cascade to delete them too.")
-                        ctx.exit(ExitCode.FAILURE.value)
-                        return
+                if cascade:
+                    # Delete dependents first, then targets
+                    targets = blocking + list(targets)
+                else:
+                    click.echo("Cannot delete — dependent resources exist:")
+                    for p, n, _, _ in blocking:
+                        click.echo(
+                            f"  {DISPLAY_NAMES.get(p, p)}: {n}"
+                        )
+                    click.echo()
+                    click.echo("Use --cascade to delete them too.")
+                    ctx.exit(ExitCode.FAILURE.value)
+                    return
             if not _delete_targets(targets, namespace):
                 ctx.exit(ExitCode.FAILURE.value)
             return
@@ -279,13 +283,10 @@ def reset_command(ctx, path, reset_all, cascade, namespace):
 
         if not reset_all:
             click.echo("Migration resources:")
-            for plural, name, phase in crds:
+            for plural, name, phase, deps in crds:
                 display = DISPLAY_NAMES.get(plural, plural)
-                click.echo(f"  {display}: {name:<35} ({phase})")
-            click.echo()
-            click.echo("Dependency order (resetting a resource requires redoing those below it):")
-            chain = ' → '.join(d for _, d in DEPENDENCY_CHAIN)
-            click.echo(f"  {chain}")
+                dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+                click.echo(f"  {display}: {name:<35} ({phase}){dep_str}")
             click.echo()
             click.echo("Use 'workflow reset <name>' to delete a resource.")
             click.echo("Use 'workflow reset --all' to delete everything.")

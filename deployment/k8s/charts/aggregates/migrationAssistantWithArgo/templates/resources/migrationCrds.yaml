@@ -30,6 +30,12 @@ spec:
           properties:
             spec:
               type: object
+              properties:
+                dependsOn:
+                  type: array
+                  items:
+                    type: string
+                  description: "Names of CRD instances this resource depends on"
               x-kubernetes-preserve-unknown-fields: true
             status:
               type: object

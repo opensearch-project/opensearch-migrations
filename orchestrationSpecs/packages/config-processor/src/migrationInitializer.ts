@@ -138,11 +138,12 @@ export class MigrationInitializer {
 
         // CapturedTraffic resources from proxies
         for (const proxy of workflows.proxies ?? []) {
+            const kafkaDep = proxy.kafkaConfig?.label ? [proxy.kafkaConfig.label] : [];
             items.push({
                 apiVersion: CRD_API_VERSION,
                 kind: 'CapturedTraffic',
                 metadata: { name: proxy.name },
-                spec: {},
+                spec: { dependsOn: kafkaDep },
                 status: { phase: 'Initialized' }
             });
         }
@@ -154,7 +155,7 @@ export class MigrationInitializer {
                     apiVersion: CRD_API_VERSION,
                     kind: 'DataSnapshot',
                     metadata: { name: this.makeCrdName(snapshot.sourceConfig.label, item.label) },
-                    spec: {},
+                    spec: { dependsOn: item.dependsOnProxySetups ?? [] },
                     status: { phase: 'Initialized' }
                 });
             }
@@ -162,11 +163,15 @@ export class MigrationInitializer {
 
         // SnapshotMigration resources from snapshotMigrations
         for (const migration of workflows.snapshotMigrations ?? []) {
+            const snapshotDep = migration.snapshotNameResolution &&
+                'dataSnapshotResourceName' in migration.snapshotNameResolution
+                ? [migration.snapshotNameResolution.dataSnapshotResourceName]
+                : [];
             items.push({
                 apiVersion: CRD_API_VERSION,
                 kind: 'SnapshotMigration',
                 metadata: { name: this.makeCrdName(migration.sourceLabel, migration.targetConfig.label, migration.label) },
-                spec: {},
+                spec: { dependsOn: snapshotDep },
                 status: { phase: 'Initialized' }
             });
         }
