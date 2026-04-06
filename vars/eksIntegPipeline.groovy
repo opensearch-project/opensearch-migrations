@@ -13,7 +13,7 @@ static def expandVersionString(String input) {
 }
 
 def call(Map config = [:]) {
-    def defaultStageId = config.defaultStageId ?: "eks-integ"
+    def defaultStageId = config.defaultStageId ?: "eksint"
     def jobName = config.jobName ?: "eks-integ-test"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
     def sourceVersion = config.sourceVersion ?: ""
@@ -79,7 +79,10 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    script { env.maStageName = "${params.STAGE}-${currentBuild.number}" }
+                    script {
+                        def pool = jobName.startsWith("main-") ? "m" : "p"
+                        env.maStageName = "${params.STAGE}-${pool}${currentBuild.number}"
+                    }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
             }
@@ -96,7 +99,7 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
-                            sh './gradlew clean build --no-daemon --stacktrace'
+                            sh './gradlew clean build -x test --no-daemon --stacktrace'
                         }
                     }
                 }
@@ -132,13 +135,19 @@ def call(Map config = [:]) {
                             env.STACK_NAME_SUFFIX = "${maStageName}-${params.REGION}"
                             def clusterDetails = readJSON text: env.clusterDetailsJson
                             def targetCluster = clusterDetails.target
-                            def vpcId = targetCluster.vpcId
+                            def vpcId = targetCluster.vpcId ?: ''
                             def subnetIds = "${targetCluster.subnetIds}"
 
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                    if (!vpcId) {
+                                        def firstSubnet = subnetIds.split(',')[0]
+                                        vpcId = sh(script: "aws ec2 describe-subnets --subnet-ids ${firstSubnet} --region ${params.REGION} --query 'Subnets[0].VpcId' --output text", returnStdout: true).trim()
+                                        echo "Resolved VPC ID from subnet: ${vpcId}"
+                                    }
                                     sh """
-                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                        ./deployment/k8s/aws/assemble-bootstrap.sh
+                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                           --deploy-import-vpc-cfn \
                                           --build-cfn \
                                           --stack-name "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}" \
@@ -152,7 +161,7 @@ def call(Map config = [:]) {
                                           --skip-console-exec \
                                           --skip-setting-k8s-context \
                                           --region ${params.REGION} \
-                                          2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
+                                          2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
                                     """
 
                                     // Capture env vars for later stages and cleanup
@@ -220,8 +229,7 @@ def call(Map config = [:]) {
                                             sigv4: [
                                                     region: params.REGION,
                                                     service: "es"
-                                            ],
-                                            version: env.targetVer
+                                            ]
                                     ]
                                     sh """
                                       kubectl --context=${env.eksKubeContext} create configmap target-${targetVersionExpanded}-migration-config \

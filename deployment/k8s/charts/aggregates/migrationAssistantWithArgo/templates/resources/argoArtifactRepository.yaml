@@ -1,0 +1,14 @@
+{{- if and (get .Values.conditionalPackageInstalls "argo-workflows") .Values.defaultBucketConfiguration.useLocalStack }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argo-artifact-s3-creds
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-1"
+type: Opaque
+stringData:
+  accessKey: "test"
+  secretKey: "test"
+{{- end }}

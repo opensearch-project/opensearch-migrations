@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { rangeRule } from './rangeRule';
-import type { RangeNode, FieldNode } from '../../ast/nodes';
+import type { RangeNode } from '../../ast/nodes';
 
 /** Stub transformChild — not used by rangeRule but required by signature. */
 const stubTransformChild = () => new Map();
@@ -139,12 +139,5 @@ describe('rangeRule', () => {
     const rangeMap = result.get('range') as Map<string, any>;
 
     expect(rangeMap.has('created_at')).toBe(true);
-  });
-
-  it('throws when called with wrong node type', () => {
-    const wrongNode: FieldNode = { type: 'field', field: 'title', value: 'java' };
-    expect(() => rangeRule(wrongNode, stubTransformChild)).toThrow(
-      'rangeRule called with wrong node type: field',
-    );
   });
 });

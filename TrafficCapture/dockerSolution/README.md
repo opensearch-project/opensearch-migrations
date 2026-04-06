@@ -116,7 +116,10 @@ A problem occurred evaluating project ':trafficCaptureProxyServer'.
 
 ### Updating Pipfile
 
-When updating Pipfiles, run the following command to update all Pipfile.lock in subdirectories
+When updating Pipfiles, ensure your local pipenv version matches the version pinned in the Dockerfiles, then regenerate all lock files:
 ```bash
+  EXPECTED_VERSION=$(grep -o 'pipenv==[0-9.]*' src/main/docker/elasticsearchTestConsole/Dockerfile | head -1 | sed 's/pipenv==//') && \
+  ACTUAL_VERSION=$(pipenv --version | sed 's/[^0-9.]//g') && \
+  if [ "$EXPECTED_VERSION" != "$ACTUAL_VERSION" ]; then echo "ERROR: pipenv version mismatch - expected $EXPECTED_VERSION, got $ACTUAL_VERSION. Run: pip install pipenv==$EXPECTED_VERSION" && exit 1; fi && \
   find . -type f -name Pipfile -execdir bash -c 'PIPENV_IGNORE_VIRTUALENVS=true pipenv lock --python 3.11' \;
 ```

@@ -48,7 +48,10 @@ orchestrationSpecs/packages/migration-workflow-templates/workflowTemplates
 orchestrationSpecs/packages/argo-workflow-builders/k8sSchemas
 capture-replay-dashboard.json
 reindex-from-snapshot-dashboard.json
+frontend/
 
 # IDE / Java tooling
 .settings/
 .factorypath
+deployment/k8s/aws/dist/
+.scannerwork/

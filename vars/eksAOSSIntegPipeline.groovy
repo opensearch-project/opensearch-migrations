@@ -4,7 +4,7 @@ def call(Map config = [:]) {
     def envVarMap = ['SEARCH': 'AOSS_SEARCH_ENDPOINT', 'TIMESERIES': 'AOSS_TIMESERIES_ENDPOINT', 'VECTORSEARCH': 'AOSS_VECTOR_ENDPOINT']
     def testId = testIdMap[collectionType]
     def endpointEnvVar = envVarMap[collectionType]
-    def defaultStageId = config.defaultStageId ?: "aosssrch"
+    def defaultStageId = config.defaultStageId ?: "aosss"
     def jobName = config.jobName ?: "eks-aoss-${collectionType.toLowerCase()}-integ-test"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
     def clusterContextFilePath = "tmp/cluster-context-aoss-${currentBuild.number}.json"
@@ -13,8 +13,8 @@ def call(Map config = [:]) {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         parameters {
-            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'jenkins-target-aoss-collection', description: 'Git branch to use for repository')
+            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
+            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
             choice(name: 'SOURCE_VERSION', choices: ['OS_1.3'], description: 'Version of the cluster that created the snapshot')
@@ -51,7 +51,8 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
                     script {
-                        env.maStageName = "${params.STAGE ?: defaultStageId}-${currentBuild.number}"
+                        def pool = jobName.startsWith("main-") ? "m" : "p"
+                        env.maStageName = "${params.STAGE ?: defaultStageId}-${pool}${currentBuild.number}"
                         env.STACK_NAME = "MA-Serverless-${maStageName}-${params.REGION}"
                         env.eksClusterName = "migration-eks-cluster-${maStageName}-${params.REGION}"
                         env.eksKubeContext = env.eksClusterName
@@ -99,7 +100,8 @@ def call(Map config = [:]) {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 7200, roleSessionName: 'jenkins-session') {
                                     sh """
-                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                        ./deployment/k8s/aws/assemble-bootstrap.sh
+                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                           --deploy-create-vpc-cfn \
                                           --build-cfn \
                                           --build-images \

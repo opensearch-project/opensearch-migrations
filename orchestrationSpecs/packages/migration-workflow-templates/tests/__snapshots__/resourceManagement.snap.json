@@ -63,6 +63,11 @@
             }
           }
         },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
         "activeDeadlineSeconds": "31536000",
         "outputs": {
           "parameters": []
@@ -248,6 +253,11 @@
               "cpu": "50m",
               "memory": "32Mi"
             }
+          }
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
           }
         },
         "activeDeadlineSeconds": "31536000",

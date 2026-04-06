@@ -177,20 +177,26 @@
             "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
             "migrations.opensearch.org/from-snapshot-migration": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}",
             "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}"
+          },
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
           }
         },
         "outputs": {
           "parameters": [
             {
-              "name": "statusOutput",
-              "valueFrom": {
-                "path": "/tmp/status-output.txt"
-              }
-            },
-            {
               "name": "overriddenPhase",
               "valueFrom": {
                 "path": "/tmp/phase-output.txt"
+              }
+            }
+          ],
+          "artifacts": [
+            {
+              "name": "statusOutput",
+              "path": "/tmp/status-output.txt",
+              "archive": {
+                "none": {}
               }
             }
           ]

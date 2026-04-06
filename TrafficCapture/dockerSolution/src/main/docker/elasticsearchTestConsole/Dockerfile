@@ -33,7 +33,7 @@ ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
 
 # Pipenv & project install into a project-local venv we can copy out
-RUN python3.11 -m pip install pipenv
+RUN python3.11 -m pip install pipenv==2026.5.0
 WORKDIR /
 RUN python3.11 -m venv .venv
 COPY Pipfile Pipfile.lock ./
@@ -82,7 +82,7 @@ ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
 ENV PATH="/.venv/bin:${PATH}"
 
-RUN python3.11 -m pip install pipenv
+RUN python3.11 -m pip install pipenv==2026.5.0
 WORKDIR /
 COPY --from=builder /.venv /.venv
 

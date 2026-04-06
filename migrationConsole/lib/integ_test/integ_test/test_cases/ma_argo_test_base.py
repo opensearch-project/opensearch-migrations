@@ -1,5 +1,6 @@
 from enum import Enum
 import logging
+import subprocess
 
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
@@ -22,12 +23,13 @@ class ClusterVersionCombinationUnsupported(Exception):
 
 class MATestUserArguments:
     def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool,
-                 target_type: str = "OS"):
+                 target_type: str = "OS", image_registry_prefix: str = ""):
         self.source_version = source_version
         self.target_version = target_version
         self.target_type = target_type
         self.unique_id = unique_id
         self.reuse_clusters = reuse_clusters
+        self.image_registry_prefix = image_registry_prefix
 
 
 class MATestBase:
@@ -74,6 +76,7 @@ class MATestBase:
         )
 
         self.parameters = {}
+        self.image_registry_prefix = user_args.image_registry_prefix
         self.workflow_template = "full-migration-with-clusters"
         self.workflow_snapshot_and_migration_config = None
         self.source_operations = get_operations_library_by_version(self.source_version)
@@ -169,8 +172,29 @@ class MATestBase:
             self.parameters["source-cluster-template"] = self.source_argo_cluster_template
             self.parameters["target-cluster-template"] = self.target_argo_cluster_template
             self.parameters["skip-cleanup"] = "true" if self.reuse_clusters else "false"
+            if self.image_registry_prefix:
+                self.parameters["image-registry-prefix"] = self.image_registry_prefix
+
+    def _ensure_approval_configmap(self):
+        """Ensure the approval configmap exists for Argo v4.0+ (requires configmap-type label).
+        In production, the config-processor creates this. In tests, we create a default."""
+        kubectl_cmd = [
+            "kubectl", "apply", "-n", self.argo_service.namespace, "-f", "-"
+        ]
+        configmap_yaml = (
+            'apiVersion: v1\n'
+            'kind: ConfigMap\n'
+            'metadata:\n'
+            '  name: approval-config\n'
+            '  labels:\n'
+            '    workflows.argoproj.io/configmap-type: Parameter\n'
+            'data:\n'
+            '  autoApprove: "{}"\n'
+        )
+        subprocess.run(kubectl_cmd, input=configmap_yaml, text=True, check=True)
 
     def workflow_start(self):
+        self._ensure_approval_configmap()
         start_result = self.argo_service.start_workflow(workflow_template_name=self.workflow_template,
                                                         parameters=self.parameters)
         assert start_result.success is True

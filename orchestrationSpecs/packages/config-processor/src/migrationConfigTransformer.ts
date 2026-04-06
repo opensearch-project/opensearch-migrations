@@ -469,7 +469,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
 
             if (createConfigs.length > 0) {
-                const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
+                const { snapshotInfo: _si, ...restOfSource } = sourceCluster;
                 const proxy = this.getSourceAttachedProxy(userConfig, sourceName);
                 results.push({
                     createSnapshotConfig: createConfigs,
@@ -498,8 +498,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Migration references unknown target cluster '${toTarget}'`);
             }
 
-            const { enabled: _e2, ...restOfTarget } = targetCluster;
-            const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
+            const { snapshotInfo: _si, ...restOfSource } = sourceCluster;
 
             for (const [snapshotName, migrations] of Object.entries(perSnapshotConfig)) {
                 const snapshotDef = sourceCluster.snapshotInfo?.snapshots[snapshotName];
@@ -521,7 +520,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     migrations: autoLabelMigrations(migrations),
                     sourceVersion: sourceCluster.version || "",
                     sourceLabel: fromSource,
-                    targetConfig: { ...restOfTarget, label: toTarget },
+                    targetConfig: { ...targetCluster, label: toTarget },
                     snapshotConfig: {
                         label: snapshotName,
                         ...(repoConfig ? {
@@ -554,14 +553,13 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
 
             const topic = proxy.kafkaTopic || replayer.fromProxy;
-            const { enabled: _e3, ...restOfTarget } = targetCluster;
             const replayerConfig = ARGO_REPLAYER_OPTIONS.parse(replayer.replayerConfig ?? {});
 
             return {
                 fromProxy: replayer.fromProxy,
                 kafkaClusterName: proxy.kafka ?? "default",
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
-                toTarget: { ...restOfTarget, label: replayer.toTarget },
+                toTarget: { ...targetCluster, label: replayer.toTarget },
                 replayerConfig,
                 ...(replayer.dependsOnSnapshotMigrations ? { dependsOnSnapshotMigrations: replayer.dependsOnSnapshotMigrations } : {}),
             };

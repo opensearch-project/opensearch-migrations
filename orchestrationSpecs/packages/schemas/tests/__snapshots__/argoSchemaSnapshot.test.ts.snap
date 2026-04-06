@@ -118,7 +118,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "kafkaTopic": {
                       "type": "string",
                       "default": "",
-                      "description": "Empty defaults to the name of the target label"
+                      "description": "Default Kafka topic name for this cluster. Can be overridden per-proxy via the capture config's kafkaTopic field."
                     },
                     "managedByWorkflow": {
                       "type": "boolean",
@@ -219,24 +219,24 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "cpu": {
                               "type": "string",
                               "pattern": "^[0-9]+m$",
-                              "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                              "description": "CPU allocation for the container in Kubernetes millicores."
                             },
                             "memory": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                              "description": "Memory allocation for the container."
                             },
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
                             }
                           },
                           "required": [
                             "cpu",
                             "memory"
                           ],
-                          "description": "Resource upper bound for a container"
+                          "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
                         },
                         "requests": {
                           "type": "object",
@@ -244,24 +244,24 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "cpu": {
                               "type": "string",
                               "pattern": "^[0-9]+m$",
-                              "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                              "description": "CPU allocation for the container in Kubernetes millicores."
                             },
                             "memory": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                              "description": "Memory allocation for the container."
                             },
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
                             }
                           },
                           "required": [
                             "cpu",
                             "memory"
                           ],
-                          "description": "Resource lower bound for a container"
+                          "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
                         }
                       },
                       "default": {
@@ -278,7 +278,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "limits",
                         "requests"
                       ],
-                      "description": "Resource limits and requests for proxy container."
+                      "description": "Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                     },
                     "otelCollectorEndpoint": {
                       "type": "string",
@@ -288,7 +288,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "array",
                       "items": {
                         "type": "string"
-                      }
+                      },
+                      "description": "List of static headers to add to proxied requests, each in 'Header-Name: value' format."
                     },
                     "destinationConnectionPoolSize": {
                       "type": "number",
@@ -304,10 +305,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": "HttpCaptureProxyProducer"
                     },
                     "listenPort": {
-                      "type": "number"
+                      "type": "number",
+                      "description": "TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL."
                     },
                     "maxTrafficBufferSize": {
                       "type": "number",
+                      "minimum": 1,
+                      "maximum": 1048576,
                       "default": 1048576
                     },
                     "noCapture": {
@@ -320,7 +324,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "sslConfigFile": {
                       "type": "string",
-                      "description": "Legacy: YAML config for OpenSearch security SSL. Prefer tls config for K8s deployments."
+                      "description": "[Expert] Path to a YAML file with OpenSearch security SSL configuration (plugins.security.ssl.http.* keys). The file must be mounted into the container by the user. For Kubernetes deployments, prefer the 'tls' option instead."
                     },
                     "tls": {
                       "oneOf": [
@@ -331,14 +335,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "string",
                               "enum": [
                                 "certManager"
-                              ]
+                              ],
+                              "description": "Use cert-manager to automatically provision and renew a TLS certificate."
                             },
                             "issuerRef": {
                               "type": "object",
                               "properties": {
                                 "name": {
                                   "type": "string",
-                                  "description": "Name of the cert-manager Issuer or ClusterIssuer."
+                                  "description": "Name of the cert-manager Issuer or ClusterIssuer resource that will sign the certificate."
                                 },
                                 "kind": {
                                   "type": "string",
@@ -347,20 +352,22 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                     "ClusterIssuer"
                                   ],
                                   "default": "ClusterIssuer",
-                                  "description": "Kind of the issuer resource."
+                                  "description": "Kind of the cert-manager issuer resource. 'ClusterIssuer' is cluster-scoped; 'Issuer' is namespace-scoped."
                                 },
                                 "group": {
                                   "type": "string",
                                   "default": "cert-manager.io",
-                                  "description": "API group of the issuer. Use 'awspca.cert-manager.io' for AWS PCA issuers."
+                                  "description": "API group of the issuer. Use 'cert-manager.io' for standard issuers or 'awspca.cert-manager.io' for AWS Private CA issuers."
                                 }
                               },
                               "required": [
                                 "name"
-                              ]
+                              ],
+                              "description": "Reference to a cert-manager issuer that will sign TLS certificates for the proxy."
                             },
                             "commonName": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "Optional common name (CN) for the TLS certificate subject."
                             },
                             "dnsNames": {
                               "type": "array",
@@ -368,17 +375,17 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                 "type": "string"
                               },
                               "minItems": 1,
-                              "description": "DNS names for the certificate. Must include the proxy's service DNS name."
+                              "description": "DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name (e.g. 'my-proxy.default.svc.cluster.local')."
                             },
                             "duration": {
                               "type": "string",
                               "default": "2160h",
-                              "description": "Requested certificate validity duration (default: 90 days)."
+                              "description": "Requested certificate validity duration in Go duration format (e.g. '2160h' = 90 days)."
                             },
                             "renewBefore": {
                               "type": "string",
                               "default": "360h",
-                              "description": "How long before expiry to renew (default: 15 days)."
+                              "description": "How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."
                             }
                           },
                           "required": [
@@ -386,7 +393,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "issuerRef",
                             "dnsNames"
                           ],
-                          "description": "Use cert-manager to provision a TLS certificate for the proxy."
+                          "description": "Provision a TLS certificate via cert-manager. A Certificate resource is created and the resulting secret is mounted into the proxy pod."
                         },
                         {
                           "type": "object",
@@ -395,21 +402,22 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "string",
                               "enum": [
                                 "existingSecret"
-                              ]
+                              ],
+                              "description": "Use a pre-existing Kubernetes TLS secret."
                             },
                             "secretName": {
                               "type": "string",
-                              "description": "Name of an existing K8s TLS secret with tls.crt and tls.key."
+                              "description": "Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/."
                             }
                           },
                           "required": [
                             "mode",
                             "secretName"
                           ],
-                          "description": "Use a pre-existing K8s TLS secret."
+                          "description": "Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."
                         }
                       ],
-                      "description": "TLS certificate configuration for the proxy. Mutually exclusive with sslConfigFile."
+                      "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile."
                     },
                     "enableMSKAuth": {
                       "type": "boolean",
@@ -486,6 +494,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "maxSnapshotRateMbPerNode": {
                             "type": "number",
                             "default": 0
+                          },
+                          "compressionEnabled": {
+                            "type": "boolean",
+                            "default": true
+                          },
+                          "includeGlobalState": {
+                            "type": "boolean",
+                            "default": true
                           }
                         }
                       },
@@ -494,7 +510,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "properties": {
                           "awsRegion": {
                             "type": "string",
-                            "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                            "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
                           },
                           "endpoint": {
                             "type": "string",
@@ -504,7 +520,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "s3RepoPathUri": {
                             "type": "string",
                             "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                            "description": "s3://BUCKETNAME/PATH"
+                            "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
                           },
                           "s3RoleArn": {
                             "type": "string",
@@ -572,7 +588,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "properties": {
                                 "secretName": {
                                   "type": "string",
-                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
                                 }
                               },
                               "required": [
@@ -582,7 +599,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "required": [
                             "basic"
-                          ]
+                          ],
+                          "description": "HTTP Basic authentication using credentials from a Kubernetes Secret."
                         },
                         {
                           "type": "object",
@@ -591,11 +609,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "object",
                               "properties": {
                                 "region": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "description": "AWS region for SigV4 request signing (e.g. 'us-east-1')."
                                 },
                                 "service": {
                                   "type": "string",
-                                  "default": "es"
+                                  "default": "es",
+                                  "description": "AWS service name for SigV4 signing. Use 'es' for Amazon OpenSearch Service or 'aoss' for OpenSearch Serverless."
                                 }
                               },
                               "required": [
@@ -605,7 +625,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "required": [
                             "sigv4"
-                          ]
+                          ],
+                          "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
                         },
                         {
                           "type": "object",
@@ -614,10 +635,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "object",
                               "properties": {
                                 "caCert": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "description": "PEM-encoded CA certificate or path to CA certificate file for verifying the server's TLS certificate."
                                 },
                                 "clientSecretName": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
                                 }
                               },
                               "required": [
@@ -628,13 +651,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "required": [
                             "mtls"
-                          ]
+                          ],
+                          "description": "Mutual TLS (mTLS) authentication using client certificates."
                         }
-                      ]
+                      ],
+                      "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
                     },
                     "version": {
                       "type": "string",
-                      "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
+                      "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$",
+                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3. Examples: 'ES 7.10.2', 'OS 2.11.0'."
                     },
                     "label": {
                       "type": "string"
@@ -756,25 +782,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "default": 1
                           },
                           "multiTypeBehavior": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "NONE"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "UNION"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "SPLIT"
-                                ]
-                              }
+                            "type": "string",
+                            "enum": [
+                              "NONE",
+                              "UNION",
+                              "SPLIT"
                             ],
                             "default": "NONE"
                           },
@@ -783,25 +795,24 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "default": "http://otel-collector:4317"
                           },
                           "output": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "HUMAN_READABLE"
-                                ]
-                              },
-                              {
-                                "type": "string",
-                                "enum": [
-                                  "JSON"
-                                ]
-                              }
+                            "type": "string",
+                            "enum": [
+                              "HUMAN_READABLE",
+                              "JSON"
                             ],
                             "default": "HUMAN_READABLE"
                           },
                           "transformerConfigBase64": {
                             "type": "string",
                             "default": ""
+                          },
+                          "transformerConfig": {
+                            "type": "string",
+                            "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
+                          },
+                          "transformerConfigFile": {
+                            "type": "string",
+                            "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                           }
                         }
                       },
@@ -823,7 +834,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "useTargetClusterForWorkCoordination": {
                             "type": "boolean",
                             "default": false,
-                            "description": "When true, uses the target OpenSearch cluster for RFS work coordination. When false, a dedicated single-node OpenSearch coordinator cluster is deployed and managed for the lifetime of the migration, then torn down on completion."
+                            "description": "[Expert] When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). When false (default), a dedicated single-node OpenSearch coordinator cluster is automatically deployed within the Kubernetes cluster, used for the lifetime of the migration, then torn down on completion. Using a dedicated coordinator avoids adding coordination overhead to the target cluster."
                           },
                           "resources": {
                             "type": "object",
@@ -835,24 +846,24 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                   "cpu": {
                                     "type": "string",
                                     "pattern": "^[0-9]+m$",
-                                    "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                                    "description": "CPU allocation for the container in Kubernetes millicores."
                                   },
                                   "memory": {
                                     "type": "string",
                                     "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                    "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                                    "description": "Memory allocation for the container."
                                   },
                                   "ephemeral-storage": {
                                     "type": "string",
                                     "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                    "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                                    "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
                                   }
                                 },
                                 "required": [
                                   "cpu",
                                   "memory"
                                 ],
-                                "description": "Resource upper bound for a container"
+                                "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
                               },
                               "requests": {
                                 "type": "object",
@@ -860,31 +871,31 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                   "cpu": {
                                     "type": "string",
                                     "pattern": "^[0-9]+m$",
-                                    "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                                    "description": "CPU allocation for the container in Kubernetes millicores."
                                   },
                                   "memory": {
                                     "type": "string",
                                     "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                    "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                                    "description": "Memory allocation for the container."
                                   },
                                   "ephemeral-storage": {
                                     "type": "string",
                                     "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                    "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                                    "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
                                   }
                                 },
                                 "required": [
                                   "cpu",
                                   "memory"
                                 ],
-                                "description": "Resource lower bound for a container"
+                                "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
                               }
                             },
                             "required": [
                               "limits",
                               "requests"
                             ],
-                            "description": "Resource limits and requests for RFS container"
+                            "description": "Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
                           },
                           "indexAllowlist": {
                             "type": "array",
@@ -895,19 +906,31 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "allowLooseVersionMatching": {
                             "type": "boolean",
-                            "default": true,
-                            "description": ""
+                            "default": true
                           },
                           "docTransformerConfigBase64": {
                             "type": "string",
                             "default": ""
                           },
+                          "docTransformerConfig": {
+                            "type": "string",
+                            "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion)."
+                          },
+                          "docTransformerConfigFile": {
+                            "type": "string",
+                            "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                          },
                           "documentsPerBulkRequest": {
                             "type": "number",
                             "default": 2147483647
                           },
+                          "documentsSizePerBulkRequest": {
+                            "type": "number",
+                            "default": 10485760
+                          },
                           "initialLeaseDuration": {
                             "type": "string",
+                            "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
                             "default": "PT1H"
                           },
                           "maxConnections": {
@@ -921,6 +944,34 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "otelCollectorEndpoint": {
                             "type": "string",
                             "default": "http://otel-collector:4317"
+                          },
+                          "serverGeneratedIds": {
+                            "type": "string",
+                            "enum": [
+                              "AUTO",
+                              "ALWAYS",
+                              "NEVER"
+                            ],
+                            "default": "AUTO"
+                          },
+                          "allowedDocExceptionTypes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
+                          },
+                          "coordinatorRetryMaxRetries": {
+                            "type": "number",
+                            "default": 7
+                          },
+                          "coordinatorRetryInitialDelayMs": {
+                            "type": "number",
+                            "default": 1000
+                          },
+                          "coordinatorRetryMaxDelayMs": {
+                            "type": "number",
+                            "default": 64000
                           }
                         }
                       }
@@ -942,7 +993,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "properties": {
                     "endpoint": {
                       "type": "string",
-                      "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$"
+                      "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$",
+                      "description": "HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."
                     },
                     "allowInsecure": {
                       "type": "boolean",
@@ -958,7 +1010,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "properties": {
                                 "secretName": {
                                   "type": "string",
-                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
                                 }
                               },
                               "required": [
@@ -968,7 +1021,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "required": [
                             "basic"
-                          ]
+                          ],
+                          "description": "HTTP Basic authentication using credentials from a Kubernetes Secret."
                         },
                         {
                           "type": "object",
@@ -977,11 +1031,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "object",
                               "properties": {
                                 "region": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "description": "AWS region for SigV4 request signing (e.g. 'us-east-1')."
                                 },
                                 "service": {
                                   "type": "string",
-                                  "default": "es"
+                                  "default": "es",
+                                  "description": "AWS service name for SigV4 signing. Use 'es' for Amazon OpenSearch Service or 'aoss' for OpenSearch Serverless."
                                 }
                               },
                               "required": [
@@ -991,7 +1047,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "required": [
                             "sigv4"
-                          ]
+                          ],
+                          "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
                         },
                         {
                           "type": "object",
@@ -1000,10 +1057,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "object",
                               "properties": {
                                 "caCert": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "description": "PEM-encoded CA certificate or path to CA certificate file for verifying the server's TLS certificate."
                                 },
                                 "clientSecretName": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
                                 }
                               },
                               "required": [
@@ -1014,9 +1073,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "required": [
                             "mtls"
-                          ]
+                          ],
+                          "description": "Mutual TLS (mTLS) authentication using client certificates."
                         }
-                      ]
+                      ],
+                      "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
                     },
                     "label": {
                       "type": "string",
@@ -1039,7 +1100,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "properties": {
                         "awsRegion": {
                           "type": "string",
-                          "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                          "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
                         },
                         "endpoint": {
                           "type": "string",
@@ -1049,7 +1110,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "s3RepoPathUri": {
                           "type": "string",
                           "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                          "description": "s3://BUCKETNAME/PATH"
+                          "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
                         },
                         "s3RoleArn": {
                           "type": "string",
@@ -1100,16 +1161,19 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "type": "object",
                     "properties": {
                       "source": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Name of the source cluster. Must match a key in sourceClusters."
                       },
                       "snapshot": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots."
                       }
                     },
                     "required": [
                       "source",
                       "snapshot"
-                    ]
+                    ],
+                    "description": "Reference to a specific snapshot from a specific source cluster, used to express dependencies."
                   }
                 },
                 "fromProxy": {
@@ -1132,7 +1196,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "kafkaTopic": {
                       "type": "string",
                       "default": "",
-                      "description": "Empty defaults to the name of the target label"
+                      "description": "Default Kafka topic name for this cluster. Can be overridden per-proxy via the capture config's kafkaTopic field."
                     },
                     "managedByWorkflow": {
                       "type": "boolean",
@@ -1226,24 +1290,24 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "cpu": {
                               "type": "string",
                               "pattern": "^[0-9]+m$",
-                              "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                              "description": "CPU allocation for the container in Kubernetes millicores."
                             },
                             "memory": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                              "description": "Memory allocation for the container."
                             },
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
                             }
                           },
                           "required": [
                             "cpu",
                             "memory"
                           ],
-                          "description": "Resource upper bound for a container"
+                          "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
                         },
                         "requests": {
                           "type": "object",
@@ -1251,31 +1315,31 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "cpu": {
                               "type": "string",
                               "pattern": "^[0-9]+m$",
-                              "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                              "description": "CPU allocation for the container in Kubernetes millicores."
                             },
                             "memory": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                              "description": "Memory allocation for the container."
                             },
                             "ephemeral-storage": {
                               "type": "string",
                               "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                              "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
                             }
                           },
                           "required": [
                             "cpu",
                             "memory"
                           ],
-                          "description": "Resource lower bound for a container"
+                          "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
                         }
                       },
                       "required": [
                         "limits",
                         "requests"
                       ],
-                      "description": "Resource limits and requests for replayer container."
+                      "description": "Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                     },
                     "kafkaTrafficEnableMSKAuth": {
                       "type": "boolean",
@@ -1283,7 +1347,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "kafkaTrafficPropertyFile": {
                       "type": "string",
-                      "description": "File path for Kafka properties file for additional or overridden Kafka properties."
+                      "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                     },
                     "lookaheadTimeSeconds": {
                       "type": "number",
@@ -1323,31 +1387,31 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "transformerConfig": {
                       "type": "string",
-                      "description": "Request transformer configuration as a string or JSON."
+                      "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
                     },
                     "transformerConfigEncoded": {
                       "type": "string",
-                      "description": "Base64-encoded request transformer configuration."
+                      "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
                     },
                     "transformerConfigFile": {
                       "type": "string",
-                      "description": "Path to the JSON configuration file for request transformers."
+                      "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                     },
                     "tupleTransformerConfig": {
                       "type": "string",
-                      "description": "Tuple transformer configuration as a string or JSON."
+                      "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
                     },
                     "tupleTransformerConfigBase64": {
                       "type": "string",
-                      "description": "Base64-encoded tuple transformer configuration."
+                      "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
                     },
                     "tupleTransformerConfigFile": {
                       "type": "string",
-                      "description": "Path to the JSON configuration file for tuple transformers."
+                      "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                     },
                     "userAgent": {
                       "type": "string",
-                      "description": "String appended to the user-agent header for requests to the target cluster."
+                      "description": "String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."
                     }
                   }
                 },
@@ -1356,7 +1420,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "properties": {
                     "endpoint": {
                       "type": "string",
-                      "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$"
+                      "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$",
+                      "description": "HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."
                     },
                     "allowInsecure": {
                       "type": "boolean",
@@ -1372,7 +1437,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "properties": {
                                 "secretName": {
                                   "type": "string",
-                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
                                 }
                               },
                               "required": [
@@ -1382,7 +1448,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "required": [
                             "basic"
-                          ]
+                          ],
+                          "description": "HTTP Basic authentication using credentials from a Kubernetes Secret."
                         },
                         {
                           "type": "object",
@@ -1391,11 +1458,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "object",
                               "properties": {
                                 "region": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "description": "AWS region for SigV4 request signing (e.g. 'us-east-1')."
                                 },
                                 "service": {
                                   "type": "string",
-                                  "default": "es"
+                                  "default": "es",
+                                  "description": "AWS service name for SigV4 signing. Use 'es' for Amazon OpenSearch Service or 'aoss' for OpenSearch Serverless."
                                 }
                               },
                               "required": [
@@ -1405,7 +1474,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "required": [
                             "sigv4"
-                          ]
+                          ],
+                          "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
                         },
                         {
                           "type": "object",
@@ -1414,10 +1484,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "object",
                               "properties": {
                                 "caCert": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "description": "PEM-encoded CA certificate or path to CA certificate file for verifying the server's TLS certificate."
                                 },
                                 "clientSecretName": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
                                 }
                               },
                               "required": [
@@ -1428,9 +1500,11 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "required": [
                             "mtls"
-                          ]
+                          ],
+                          "description": "Mutual TLS (mTLS) authentication using client certificates."
                         }
-                      ]
+                      ],
+                      "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
                     },
                     "label": {
                       "type": "string",
@@ -1470,7 +1544,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
   "properties": {
     "skipApprovals": {
       "type": "boolean",
-      "default": false
+      "default": false,
+      "description": "Global flag to skip all manual approval gates across the entire migration. When true, overrides all per-component skipApproval settings."
     },
     "kafkaClusterConfiguration": {
       "type": "object",
@@ -1531,7 +1606,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
               }
-            }
+            },
+            "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."
           },
           {
             "type": "object",
@@ -1609,11 +1685,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             },
             "required": [
               "existing"
-            ]
+            ],
+            "description": "Use an existing Kafka cluster by providing connection details."
           }
-        ]
+        ],
+        "description": "Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one."
       },
-      "default": {}
+      "default": {},
+      "description": "Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."
     },
     "sourceClusters": {
       "type": "object",
@@ -1623,11 +1702,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "endpoint": {
             "type": "string",
             "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?)?$",
-            "default": ""
+            "default": "",
+            "description": "HTTP(S) endpoint URL for the cluster (e.g. 'https://my-cluster:9200/'). Leave empty if the cluster is not directly accessible or will be accessed through a proxy."
           },
           "allowInsecure": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "When true, disables TLS certificate verification when connecting to the cluster. Use only for development or self-signed certificates."
           },
           "authConfig": {
             "anyOf": [
@@ -1639,7 +1720,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "properties": {
                       "secretName": {
                         "type": "string",
-                        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                        "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
                       }
                     },
                     "required": [
@@ -1649,7 +1731,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "required": [
                   "basic"
-                ]
+                ],
+                "description": "HTTP Basic authentication using credentials from a Kubernetes Secret."
               },
               {
                 "type": "object",
@@ -1658,11 +1741,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "object",
                     "properties": {
                       "region": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "AWS region for SigV4 request signing (e.g. 'us-east-1')."
                       },
                       "service": {
                         "type": "string",
-                        "default": "es"
+                        "default": "es",
+                        "description": "AWS service name for SigV4 signing. Use 'es' for Amazon OpenSearch Service or 'aoss' for OpenSearch Serverless."
                       }
                     },
                     "required": [
@@ -1672,7 +1757,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "required": [
                   "sigv4"
-                ]
+                ],
+                "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
               },
               {
                 "type": "object",
@@ -1681,10 +1767,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "object",
                     "properties": {
                       "caCert": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "PEM-encoded CA certificate or path to CA certificate file for verifying the server's TLS certificate."
                       },
                       "clientSecretName": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
                       }
                     },
                     "required": [
@@ -1695,17 +1783,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "required": [
                   "mtls"
-                ]
+                ],
+                "description": "Mutual TLS (mTLS) authentication using client certificates."
               }
-            ]
+            ],
+            "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
           },
           "version": {
             "type": "string",
-            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$"
-          },
-          "enabled": {
-            "type": "boolean",
-            "default": true
+            "pattern": "^(?:ES [125678]|OS [123])(?:\\\\.[0-9]+)+$",
+            "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3. Examples: 'ES 7.10.2', 'OS 2.11.0'."
           },
           "snapshotInfo": {
             "type": "object",
@@ -1717,32 +1804,33 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "properties": {
                     "awsRegion": {
                       "type": "string",
-                      "description": "The AWS region that the bucket reside in (us-east-2, etc)"
+                      "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
                     },
                     "endpoint": {
                       "type": "string",
                       "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
                       "default": "",
-                      "description": "Override the default S3 endpoint for clients to connect to. Necessary for testing, when S3 isn't used, or when it's only accessible via another endpoint"
+                      "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
                     },
                     "s3RepoPathUri": {
                       "type": "string",
                       "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                      "description": "s3://BUCKETNAME/PATH"
+                      "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
                     },
                     "s3RoleArn": {
                       "type": "string",
                       "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                       "default": "",
-                      "description": "IAM role ARN to assume when accessing S3 for snapshot operations"
+                      "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. This is passed to the cluster when registering the snapshot repository. Leave empty if the cluster's own IAM role already has S3 access."
                     }
                   },
                   "required": [
                     "awsRegion",
                     "s3RepoPathUri"
-                  ]
+                  ],
+                  "description": "Configuration for an S3-backed snapshot repository used by the source cluster."
                 },
-                "description": "Keys are the repository names that are managed by the source cluster"
+                "description": "S3 snapshot repositories registered with the source cluster."
               },
               "snapshots": {
                 "type": "object",
@@ -1755,12 +1843,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "object",
                           "properties": {
                             "externallyManagedSnapshotName": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."
                             }
                           },
                           "required": [
                             "externallyManagedSnapshotName"
-                          ]
+                          ],
+                          "description": "Reference to a snapshot that was created outside of this migration workflow."
                         },
                         {
                           "type": "object",
@@ -1770,78 +1860,79 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "properties": {
                                 "snapshotPrefix": {
                                   "type": "string",
-                                  "default": ""
+                                  "default": "",
+                                  "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."
                                 },
                                 "jvmArgs": {
                                   "type": "string",
-                                  "default": ""
+                                  "default": "",
+                                  "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
                                 },
                                 "loggingConfigurationOverrideConfigMap": {
                                   "type": "string",
-                                  "default": ""
+                                  "default": "",
+                                  "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                                 },
                                 "indexAllowlist": {
                                   "type": "array",
                                   "items": {
                                     "type": "string"
                                   },
-                                  "default": []
+                                  "default": [],
+                                  "description": "List of index names to include in the snapshot. Each entry is either an exact index name (e.g. 'logs-2024-01') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*-2024'). An empty list includes all indices."
                                 },
                                 "maxSnapshotRateMbPerNode": {
                                   "type": "number",
-                                  "default": 0
-                                }
-                              }
-                            },
-                            "requiredForCompleteMigration": {
-                              "anyOf": [
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "toTargets": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "string"
-                                      }
-                                    }
-                                  },
-                                  "required": [
-                                    "toTargets"
-                                  ]
+                                  "default": 0,
+                                  "description": "Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."
                                 },
-                                {
+                                "compressionEnabled": {
                                   "type": "boolean",
-                                  "default": true
+                                  "default": true,
+                                  "description": "[Expert] Enables metadata compression for the snapshot. Can be turned off if issues are observed with snapshot configuration extraction."
+                                },
+                                "includeGlobalState": {
+                                  "type": "boolean",
+                                  "default": true,
+                                  "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist."
                                 }
-                              ]
+                              },
+                              "description": "Configuration for creating a new snapshot of the source cluster."
                             }
                           },
                           "required": [
                             "createSnapshotConfig"
-                          ]
+                          ],
+                          "description": "Configuration to create a new snapshot of the source cluster as part of the migration workflow."
                         }
-                      ]
+                      ],
+                      "description": "Snapshot configuration: either an externally managed snapshot name or settings to create a new snapshot."
                     },
                     "repoName": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Name of the S3 snapshot repository. Must match a key in the source cluster's snapshotInfo.repos."
                     }
                   },
                   "required": [
                     "config",
                     "repoName"
-                  ]
-                }
+                  ],
+                  "description": "A snapshot configuration bound to a specific repository."
+                },
+                "description": "Snapshots to use or create for this source cluster."
               }
             },
             "required": [
               "snapshots"
-            ]
+            ],
+            "description": "Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source."
           }
         },
         "required": [
           "version"
         ]
-      }
+      },
+      "description": "Source Elasticsearch or OpenSearch clusters to migrate from."
     },
     "targetClusters": {
       "type": "object",
@@ -1850,11 +1941,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "properties": {
           "endpoint": {
             "type": "string",
-            "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$"
+            "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$",
+            "description": "HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."
           },
           "allowInsecure": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "When true, disables TLS certificate verification when connecting to the cluster. Use only for development or self-signed certificates."
           },
           "authConfig": {
             "anyOf": [
@@ -1866,7 +1959,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "properties": {
                       "secretName": {
                         "type": "string",
-                        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                        "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
                       }
                     },
                     "required": [
@@ -1876,7 +1970,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "required": [
                   "basic"
-                ]
+                ],
+                "description": "HTTP Basic authentication using credentials from a Kubernetes Secret."
               },
               {
                 "type": "object",
@@ -1885,11 +1980,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "object",
                     "properties": {
                       "region": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "AWS region for SigV4 request signing (e.g. 'us-east-1')."
                       },
                       "service": {
                         "type": "string",
-                        "default": "es"
+                        "default": "es",
+                        "description": "AWS service name for SigV4 signing. Use 'es' for Amazon OpenSearch Service or 'aoss' for OpenSearch Serverless."
                       }
                     },
                     "required": [
@@ -1899,7 +1996,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "required": [
                   "sigv4"
-                ]
+                ],
+                "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
               },
               {
                 "type": "object",
@@ -1908,10 +2006,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "object",
                     "properties": {
                       "caCert": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "PEM-encoded CA certificate or path to CA certificate file for verifying the server's TLS certificate."
                       },
                       "clientSecretName": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
                       }
                     },
                     "required": [
@@ -1922,19 +2022,19 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 },
                 "required": [
                   "mtls"
-                ]
+                ],
+                "description": "Mutual TLS (mTLS) authentication using client certificates."
               }
-            ]
-          },
-          "enabled": {
-            "type": "boolean",
-            "default": true
+            ],
+            "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
           }
         },
         "required": [
           "endpoint"
-        ]
-      }
+        ],
+        "description": "Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint."
+      },
+      "description": "Target OpenSearch clusters to migrate to."
     },
     "snapshotMigrationConfigs": {
       "type": "array",
@@ -1943,13 +2043,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "properties": {
           "skipApprovals": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "When true, skips all manual approval gates for migrations in this configuration block."
           },
           "fromSource": {
-            "type": "string"
+            "type": "string",
+            "description": "Label of the source cluster to migrate from. Must match a key in sourceClusters."
           },
           "toTarget": {
-            "type": "string"
+            "type": "string",
+            "description": "Label of the target cluster to migrate to. Must match a key in targetClusters."
           },
           "perSnapshotConfig": {
             "type": "object",
@@ -1961,129 +2064,133 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "label": {
                     "type": "string",
                     "pattern": "^[a-zA-Z][a-zA-Z0-9]*",
-                    "default": ""
+                    "default": "",
+                    "description": "Unique label for this migration within its snapshot group. Auto-generated as 'migration-<index>' if not specified. Must start with a letter and contain only alphanumeric characters."
                   },
                   "metadataMigrationConfig": {
                     "type": "object",
                     "properties": {
                       "jvmArgs": {
                         "type": "string",
-                        "default": ""
+                        "default": "",
+                        "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
                       },
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
-                        "default": ""
+                        "default": "",
+                        "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                       },
                       "skipEvaluateApproval": {
                         "type": "boolean",
-                        "default": false
+                        "default": false,
+                        "description": "When true, skips the manual approval gate after the metadata evaluation step. The evaluation step analyzes what metadata changes would be applied without making changes."
                       },
                       "skipMigrateApproval": {
                         "type": "boolean",
-                        "default": false
+                        "default": false,
+                        "description": "When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster."
                       },
                       "componentTemplateAllowlist": {
                         "type": "array",
                         "items": {
                           "type": "string"
                         },
-                        "default": []
+                        "default": [],
+                        "description": "List of component template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system component templates."
                       },
                       "indexAllowlist": {
                         "type": "array",
                         "items": {
                           "type": "string"
                         },
-                        "default": []
+                        "default": [],
+                        "description": "List of index names to include in the metadata migration. Each entry is either an exact index name (e.g. 'my-index') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). An empty list includes all non-system indices."
                       },
                       "indexTemplateAllowlist": {
                         "type": "array",
                         "items": {
                           "type": "string"
                         },
-                        "default": []
+                        "default": [],
+                        "description": "List of index template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system index templates."
                       },
                       "allowLooseVersionMatching": {
                         "type": "boolean",
-                        "default": true
+                        "default": true,
+                        "description": "[Expert] Allows migration between clusters with non-exact version compatibility (e.g. ES 7.x to OS 2.x). Only disable if metadata has parsing issues on snapshots that require strict version matching."
                       },
                       "clusterAwarenessAttributes": {
                         "type": "number",
-                        "default": 1
+                        "default": 1,
+                        "description": "Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."
                       },
                       "multiTypeBehavior": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              "NONE"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "UNION"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "SPLIT"
-                            ]
-                          }
+                        "type": "string",
+                        "enum": [
+                          "NONE",
+                          "UNION",
+                          "SPLIT"
                         ],
-                        "default": "NONE"
+                        "default": "NONE",
+                        "description": "Strategy for handling Elasticsearch multi-type indices (ES 5.x and earlier). 'NONE': fail if multi-type indices are encountered. 'UNION': merge all types into a single mapping. 'SPLIT': create separate indices for each type."
                       },
                       "otelCollectorEndpoint": {
                         "type": "string",
-                        "default": "http://otel-collector:4317"
+                        "default": "http://otel-collector:4317",
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
                       },
                       "output": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              "HUMAN_READABLE"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "enum": [
-                              "JSON"
-                            ]
-                          }
+                        "type": "string",
+                        "enum": [
+                          "HUMAN_READABLE",
+                          "JSON"
                         ],
-                        "default": "HUMAN_READABLE"
+                        "default": "HUMAN_READABLE",
+                        "description": "Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."
                       },
                       "transformerConfigBase64": {
                         "type": "string",
-                        "default": ""
+                        "default": "",
+                        "description": "Base64-encoded JSON transformer configuration. Metadata transformers modify index mappings and settings during migration."
+                      },
+                      "transformerConfig": {
+                        "type": "string",
+                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
+                      },
+                      "transformerConfigFile": {
+                        "type": "string",
+                        "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                       }
-                    }
+                    },
+                    "description": "Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."
                   },
                   "documentBackfillConfig": {
                     "type": "object",
                     "properties": {
                       "podReplicas": {
                         "type": "number",
-                        "default": 1
+                        "default": 1,
+                        "description": "Number of RFS (Reindex From Snapshot) pod replicas. Each replica processes shards independently."
                       },
                       "jvmArgs": {
                         "type": "string",
-                        "default": ""
+                        "default": "",
+                        "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
                       },
                       "loggingConfigurationOverrideConfigMap": {
                         "type": "string",
-                        "default": ""
+                        "default": "",
+                        "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                       },
                       "skipApproval": {
                         "type": "boolean",
-                        "default": false
+                        "default": false,
+                        "description": "When true, skips the manual approval gate after the document backfill completes. Useful for automated pipelines where human approval is not needed."
                       },
                       "useTargetClusterForWorkCoordination": {
                         "type": "boolean",
                         "default": false,
-                        "description": "When true, uses the target OpenSearch cluster for RFS work coordination. When false, a dedicated single-node OpenSearch coordinator cluster is deployed and managed for the lifetime of the migration, then torn down on completion."
+                        "description": "[Expert] When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). When false (default), a dedicated single-node OpenSearch coordinator cluster is automatically deployed within the Kubernetes cluster, used for the lifetime of the migration, then torn down on completion. Using a dedicated coordinator avoids adding coordination overhead to the target cluster."
                       },
                       "resources": {
                         "type": "object",
@@ -2095,24 +2202,24 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "cpu": {
                                 "type": "string",
                                 "pattern": "^[0-9]+m$",
-                                "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                                "description": "CPU allocation for the container in Kubernetes millicores."
                               },
                               "memory": {
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                                "description": "Memory allocation for the container."
                               },
                               "ephemeral-storage": {
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                                "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
                               }
                             },
                             "required": [
                               "cpu",
                               "memory"
                             ],
-                            "description": "Resource upper bound for a container"
+                            "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
                           },
                           "requests": {
                             "type": "object",
@@ -2120,81 +2227,138 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "cpu": {
                                 "type": "string",
                                 "pattern": "^[0-9]+m$",
-                                "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                                "description": "CPU allocation for the container in Kubernetes millicores."
                               },
                               "memory": {
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                                "description": "Memory allocation for the container."
                               },
                               "ephemeral-storage": {
                                 "type": "string",
                                 "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                                "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
                               }
                             },
                             "required": [
                               "cpu",
                               "memory"
                             ],
-                            "description": "Resource lower bound for a container"
+                            "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
                           }
                         },
                         "required": [
                           "limits",
                           "requests"
                         ],
-                        "description": "Resource limits and requests for RFS container"
+                        "description": "Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
                       },
                       "indexAllowlist": {
                         "type": "array",
                         "items": {
                           "type": "string"
                         },
-                        "default": []
+                        "default": [],
+                        "description": "List of index names to include in the document backfill. Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). An empty list includes all non-system indices from the snapshot."
                       },
                       "allowLooseVersionMatching": {
                         "type": "boolean",
                         "default": true,
-                        "description": ""
+                        "description": "[Expert] Allows document migration between clusters with non-exact version compatibility. Only disable if snapshot parsing issues require strict version matching."
                       },
                       "docTransformerConfigBase64": {
                         "type": "string",
-                        "default": ""
+                        "default": "",
+                        "description": "Base64-encoded JSON transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion)."
+                      },
+                      "docTransformerConfig": {
+                        "type": "string",
+                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion)."
+                      },
+                      "docTransformerConfigFile": {
+                        "type": "string",
+                        "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                       },
                       "documentsPerBulkRequest": {
                         "type": "number",
-                        "default": 2147483647
+                        "default": 2147483647,
+                        "description": "Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."
+                      },
+                      "documentsSizePerBulkRequest": {
+                        "type": "number",
+                        "default": 10485760,
+                        "description": "Maximum aggregate document size in bytes per bulk indexing request. Individual documents larger than this limit are sent as single-document requests."
                       },
                       "initialLeaseDuration": {
                         "type": "string",
-                        "default": "PT1H"
+                        "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
+                        "default": "PT1H",
+                        "description": "ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration."
                       },
                       "maxConnections": {
                         "type": "number",
-                        "default": 10
+                        "default": 10,
+                        "description": "Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing."
                       },
                       "maxShardSizeBytes": {
                         "type": "number",
-                        "default": 85899345920
+                        "default": 85899345920,
+                        "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."
                       },
                       "otelCollectorEndpoint": {
                         "type": "string",
-                        "default": "http://otel-collector:4317"
+                        "default": "http://otel-collector:4317",
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
+                      },
+                      "serverGeneratedIds": {
+                        "type": "string",
+                        "enum": [
+                          "AUTO",
+                          "ALWAYS",
+                          "NEVER"
+                        ],
+                        "default": "AUTO",
+                        "description": "Controls document ID generation on the target. 'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. 'ALWAYS': always use server-generated IDs (discards source IDs). 'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."
+                      },
+                      "allowedDocExceptionTypes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "default": [],
+                        "description": "List of document-level exception types to treat as non-fatal during bulk migration. For example, set to ['version_conflict_engine_exception'] when migrating into a data stream, where backing index writes may conflict with existing documents."
+                      },
+                      "coordinatorRetryMaxRetries": {
+                        "type": "number",
+                        "default": 7,
+                        "description": "[Expert] Maximum number of retries when marking work items as completed on the coordinator."
+                      },
+                      "coordinatorRetryInitialDelayMs": {
+                        "type": "number",
+                        "default": 1000,
+                        "description": "[Expert] Initial delay in milliseconds for coordinator completion retries. Doubles with each attempt up to coordinatorRetryMaxDelayMs."
+                      },
+                      "coordinatorRetryMaxDelayMs": {
+                        "type": "number",
+                        "default": 64000,
+                        "description": "[Expert] Maximum delay in milliseconds for any single coordinator completion retry."
                       }
-                    }
+                    },
+                    "description": "Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."
                   }
                 }
               },
               "minItems": 1
-            }
+            },
+            "description": "Per-snapshot migration configurations. Each entry maps a snapshot name to one or more migration passes (metadata + document backfill)."
           }
         },
         "required": [
           "fromSource",
           "toTarget"
         ]
-      }
+      },
+      "description": "List of snapshot-based migration configurations. Each entry binds a source cluster to a target cluster and defines which snapshots to migrate with what settings."
     },
     "traffic": {
       "type": "object",
@@ -2207,32 +2371,36 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "kafka": {
                 "type": "string",
                 "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                "default": "default"
+                "default": "default",
+                "description": "Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration."
               },
               "kafkaTopic": {
                 "type": "string",
                 "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
                 "default": "",
-                "description": "Kafka topic for captured traffic. Empty defaults to the proxy name."
+                "description": "Kafka topic name for captured traffic. If empty, defaults to the proxy name (the key in the proxies record)."
               },
               "source": {
-                "type": "string"
+                "type": "string",
+                "description": "Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters."
               },
               "proxyConfig": {
                 "type": "object",
                 "properties": {
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
-                    "default": ""
+                    "default": "",
+                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                   },
                   "internetFacing": {
                     "type": "boolean",
                     "default": false,
-                    "description": "When true, configures the proxy Service load balancer scheme as internet-facing."
+                    "description": "When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC."
                   },
                   "podReplicas": {
                     "type": "number",
-                    "default": 1
+                    "default": 1,
+                    "description": "Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."
                   },
                   "resources": {
                     "type": "object",
@@ -2244,24 +2412,24 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "cpu": {
                             "type": "string",
                             "pattern": "^[0-9]+m$",
-                            "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                            "description": "CPU allocation for the container in Kubernetes millicores."
                           },
                           "memory": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                            "description": "Memory allocation for the container."
                           },
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
                           }
                         },
                         "required": [
                           "cpu",
                           "memory"
                         ],
-                        "description": "Resource upper bound for a container"
+                        "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
                       },
                       "requests": {
                         "type": "object",
@@ -2269,24 +2437,24 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "cpu": {
                             "type": "string",
                             "pattern": "^[0-9]+m$",
-                            "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                            "description": "CPU allocation for the container in Kubernetes millicores."
                           },
                           "memory": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                            "description": "Memory allocation for the container."
                           },
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
                           }
                         },
                         "required": [
                           "cpu",
                           "memory"
                         ],
-                        "description": "Resource lower bound for a container"
+                        "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
                       }
                     },
                     "default": {
@@ -2303,49 +2471,60 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "limits",
                       "requests"
                     ],
-                    "description": "Resource limits and requests for proxy container."
+                    "description": "Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                   },
                   "otelCollectorEndpoint": {
                     "type": "string",
-                    "default": "http://otel-collector:4317"
+                    "default": "http://otel-collector:4317",
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
                   },
                   "setHeader": {
                     "type": "array",
                     "items": {
                       "type": "string"
-                    }
+                    },
+                    "description": "List of static headers to add to proxied requests, each in 'Header-Name: value' format."
                   },
                   "destinationConnectionPoolSize": {
                     "type": "number",
-                    "default": 0
+                    "default": 0,
+                    "description": "Maximum number of persistent connections to the destination (source) cluster. 0 means unlimited connection pooling."
                   },
                   "destinationConnectionPoolTimeout": {
                     "type": "string",
                     "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
-                    "default": "PT30S"
+                    "default": "PT30S",
+                    "description": "ISO 8601 duration for how long idle connections in the destination pool are kept alive before being closed (e.g. 'PT30S' = 30 seconds, 'PT5M' = 5 minutes)."
                   },
                   "kafkaClientId": {
                     "type": "string",
-                    "default": "HttpCaptureProxyProducer"
+                    "default": "HttpCaptureProxyProducer",
+                    "description": "Kafka producer client ID used when publishing captured traffic to Kafka. Useful for identifying this proxy in Kafka broker logs and metrics."
                   },
                   "listenPort": {
-                    "type": "number"
+                    "type": "number",
+                    "description": "TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL."
                   },
                   "maxTrafficBufferSize": {
                     "type": "number",
-                    "default": 1048576
+                    "minimum": 1,
+                    "maximum": 1048576,
+                    "default": 1048576,
+                    "description": "Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka."
                   },
                   "noCapture": {
                     "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "description": "When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording."
                   },
                   "numThreads": {
                     "type": "number",
-                    "default": 1
+                    "default": 1,
+                    "description": "Number of Netty worker threads for the proxy to handle concurrent connections."
                   },
                   "sslConfigFile": {
                     "type": "string",
-                    "description": "Legacy: YAML config for OpenSearch security SSL. Prefer tls config for K8s deployments."
+                    "description": "[Expert] Path to a YAML file with OpenSearch security SSL configuration (plugins.security.ssl.http.* keys). The file must be mounted into the container by the user. For Kubernetes deployments, prefer the 'tls' option instead."
                   },
                   "tls": {
                     "oneOf": [
@@ -2356,14 +2535,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "string",
                             "enum": [
                               "certManager"
-                            ]
+                            ],
+                            "description": "Use cert-manager to automatically provision and renew a TLS certificate."
                           },
                           "issuerRef": {
                             "type": "object",
                             "properties": {
                               "name": {
                                 "type": "string",
-                                "description": "Name of the cert-manager Issuer or ClusterIssuer."
+                                "description": "Name of the cert-manager Issuer or ClusterIssuer resource that will sign the certificate."
                               },
                               "kind": {
                                 "type": "string",
@@ -2372,20 +2552,22 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "ClusterIssuer"
                                 ],
                                 "default": "ClusterIssuer",
-                                "description": "Kind of the issuer resource."
+                                "description": "Kind of the cert-manager issuer resource. 'ClusterIssuer' is cluster-scoped; 'Issuer' is namespace-scoped."
                               },
                               "group": {
                                 "type": "string",
                                 "default": "cert-manager.io",
-                                "description": "API group of the issuer. Use 'awspca.cert-manager.io' for AWS PCA issuers."
+                                "description": "API group of the issuer. Use 'cert-manager.io' for standard issuers or 'awspca.cert-manager.io' for AWS Private CA issuers."
                               }
                             },
                             "required": [
                               "name"
-                            ]
+                            ],
+                            "description": "Reference to a cert-manager issuer that will sign TLS certificates for the proxy."
                           },
                           "commonName": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "Optional common name (CN) for the TLS certificate subject."
                           },
                           "dnsNames": {
                             "type": "array",
@@ -2393,17 +2575,17 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                               "type": "string"
                             },
                             "minItems": 1,
-                            "description": "DNS names for the certificate. Must include the proxy's service DNS name."
+                            "description": "DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name (e.g. 'my-proxy.default.svc.cluster.local')."
                           },
                           "duration": {
                             "type": "string",
                             "default": "2160h",
-                            "description": "Requested certificate validity duration (default: 90 days)."
+                            "description": "Requested certificate validity duration in Go duration format (e.g. '2160h' = 90 days)."
                           },
                           "renewBefore": {
                             "type": "string",
                             "default": "360h",
-                            "description": "How long before expiry to renew (default: 15 days)."
+                            "description": "How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."
                           }
                         },
                         "required": [
@@ -2411,7 +2593,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "issuerRef",
                           "dnsNames"
                         ],
-                        "description": "Use cert-manager to provision a TLS certificate for the proxy."
+                        "description": "Provision a TLS certificate via cert-manager. A Certificate resource is created and the resulting secret is mounted into the proxy pod."
                       },
                       {
                         "type": "object",
@@ -2420,71 +2602,78 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "string",
                             "enum": [
                               "existingSecret"
-                            ]
+                            ],
+                            "description": "Use a pre-existing Kubernetes TLS secret."
                           },
                           "secretName": {
                             "type": "string",
-                            "description": "Name of an existing K8s TLS secret with tls.crt and tls.key."
+                            "description": "Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/."
                           }
                         },
                         "required": [
                           "mode",
                           "secretName"
                         ],
-                        "description": "Use a pre-existing K8s TLS secret."
+                        "description": "Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."
                       }
                     ],
-                    "description": "TLS certificate configuration for the proxy. Mutually exclusive with sslConfigFile."
+                    "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile."
                   },
                   "enableMSKAuth": {
                     "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "description": "Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity."
                   },
                   "suppressCaptureForHeaderMatch": {
                     "type": "array",
                     "items": {
                       "type": "string"
                     },
-                    "default": []
+                    "default": [],
+                    "description": "List of header patterns. Requests matching any of these header patterns will be forwarded but not captured to Kafka."
                   },
                   "suppressCaptureForMethod": {
                     "type": "string",
-                    "default": ""
+                    "default": "",
+                    "description": "HTTP method to suppress from capture (e.g. 'HEAD'). Requests with this method are forwarded but not recorded."
                   },
                   "suppressCaptureForUriPath": {
                     "type": "string",
-                    "default": ""
+                    "default": "",
+                    "description": "URI path pattern to suppress from capture. Requests matching this path are forwarded but not recorded."
                   },
                   "suppressMethodAndPath": {
                     "type": "string",
-                    "default": ""
+                    "default": "",
+                    "description": "Combined method and path pattern for capture suppression in 'METHOD /path' format."
                   }
                 },
                 "required": [
                   "listenPort"
-                ]
+                ],
+                "description": "Configuration for the capture proxy deployment and process options."
               }
             },
             "required": [
               "source",
               "proxyConfig"
-            ]
-          }
+            ],
+            "description": "Configuration for a single capture proxy instance, including its Kafka topic and source cluster binding."
+          },
+          "description": "Map of proxy names to their capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."
         },
         "replayers": {
           "type": "object",
           "additionalProperties": {
             "type": "object",
             "properties": {
-              "skipApprovals": {
-                "type": "boolean",
-                "default": false
-              },
               "fromProxy": {
-                "type": "string"
+                "type": "string",
+                "description": "Name of the capture proxy to replay traffic from. Must match a key in traffic.proxies."
               },
               "toTarget": {
-                "type": "string"
+                "type": "string",
+                "description": "Name of the target cluster to replay traffic to. Must match a key in targetClusters."
               },
               "dependsOnSnapshotMigrations": {
                 "type": "array",
@@ -2492,33 +2681,40 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "type": "object",
                   "properties": {
                     "source": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Name of the source cluster. Must match a key in sourceClusters."
                     },
                     "snapshot": {
-                      "type": "string"
+                      "type": "string",
+                      "description": "Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots."
                     }
                   },
                   "required": [
                     "source",
                     "snapshot"
-                  ]
+                  ],
+                  "description": "Reference to a specific snapshot from a specific source cluster, used to express dependencies."
                 },
-                "default": []
+                "default": [],
+                "description": "List of snapshot migrations that must complete before this replayer starts. Ensures data consistency when replaying traffic that depends on backfilled data."
               },
               "replayerConfig": {
                 "type": "object",
                 "properties": {
                   "jvmArgs": {
                     "type": "string",
-                    "default": ""
+                    "default": "",
+                    "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
                   },
                   "loggingConfigurationOverrideConfigMap": {
                     "type": "string",
-                    "default": ""
+                    "default": "",
+                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                   },
                   "podReplicas": {
                     "type": "number",
-                    "default": 1
+                    "default": 1,
+                    "description": "Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."
                   },
                   "resources": {
                     "type": "object",
@@ -2530,24 +2726,24 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "cpu": {
                             "type": "string",
                             "pattern": "^[0-9]+m$",
-                            "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                            "description": "CPU allocation for the container in Kubernetes millicores."
                           },
                           "memory": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                            "description": "Memory allocation for the container."
                           },
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
                           }
                         },
                         "required": [
                           "cpu",
                           "memory"
                         ],
-                        "description": "Resource upper bound for a container"
+                        "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
                       },
                       "requests": {
                         "type": "object",
@@ -2555,129 +2751,132 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "cpu": {
                             "type": "string",
                             "pattern": "^[0-9]+m$",
-                            "description": "CPU quantity in millicores (e.g., '100m', '500m')"
+                            "description": "CPU allocation for the container in Kubernetes millicores."
                           },
                           "memory": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Memory quantity with unit (e.g., '512Mi', '2G')"
+                            "description": "Memory allocation for the container."
                           },
                           "ephemeral-storage": {
                             "type": "string",
                             "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                            "description": "Storage quantity with unit (e.g., '10Gi', '5G')"
+                            "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
                           }
                         },
                         "required": [
                           "cpu",
                           "memory"
                         ],
-                        "description": "Resource lower bound for a container"
+                        "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
                       }
                     },
                     "required": [
                       "limits",
                       "requests"
                     ],
-                    "description": "Resource limits and requests for replayer container."
+                    "description": "Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                   },
                   "kafkaTrafficEnableMSKAuth": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Enables SASL properties required for connecting to MSK with IAM auth."
+                    "description": "Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity."
                   },
                   "kafkaTrafficPropertyFile": {
                     "type": "string",
-                    "description": "File path for Kafka properties file for additional or overridden Kafka properties."
+                    "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                   },
                   "lookaheadTimeSeconds": {
                     "type": "number",
                     "default": 400,
-                    "description": "Number of seconds of data that will be buffered."
+                    "description": "Number of seconds of captured traffic to buffer ahead of the current replay position. Must be strictly greater than observedPacketConnectionTimeout. Larger values improve throughput but increase memory usage."
                   },
                   "maxConcurrentRequests": {
                     "type": "number",
                     "default": 10000,
-                    "description": "Maximum number of requests that can be outstanding at a time."
+                    "description": "Maximum number of HTTP requests that can be in-flight simultaneously to the target cluster. Limits concurrency to prevent overwhelming the target."
                   },
                   "numClientThreads": {
                     "type": "number",
                     "default": 0,
-                    "description": "Number of threads to use to send requests from."
+                    "description": "Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."
                   },
                   "observedPacketConnectionTimeout": {
                     "type": "number",
                     "default": 360,
-                    "description": "Seconds of inactivity before assuming connections were terminated in the captured stream."
+                    "description": "Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."
                   },
                   "otelCollectorEndpoint": {
                     "type": "string",
                     "default": "http://otel-collector:4317",
-                    "description": "Endpoint (host:port) for the OpenTelemetry Collector for metrics forwarding."
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
                   },
                   "quiescentPeriodMs": {
                     "type": "number",
                     "default": 5000,
-                    "description": "Milliseconds to delay the first request on a resumed connection after Kafka partition reassignment."
+                    "description": "Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."
                   },
                   "removeAuthHeader": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Remove the authorization header if present without replacing it."
+                    "description": "Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately."
                   },
                   "speedupFactor": {
                     "type": "number",
                     "default": 1.1,
-                    "description": "Factor to accelerate replayed communications relative to original timing."
+                    "description": "Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed."
                   },
                   "targetServerResponseTimeoutSeconds": {
                     "type": "number",
                     "default": 150,
-                    "description": "Seconds to wait before timing out a replayed request to the target."
+                    "description": "Maximum seconds to wait for a response from the target cluster before timing out a replayed request."
                   },
                   "transformerConfig": {
                     "type": "string",
-                    "description": "Request transformer configuration as a string or JSON."
+                    "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
                   },
                   "transformerConfigEncoded": {
                     "type": "string",
-                    "description": "Base64-encoded request transformer configuration."
+                    "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
                   },
                   "transformerConfigFile": {
                     "type": "string",
-                    "description": "Path to the JSON configuration file for request transformers."
+                    "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                   },
                   "tupleTransformerConfig": {
                     "type": "string",
-                    "description": "Tuple transformer configuration as a string or JSON."
+                    "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
                   },
                   "tupleTransformerConfigBase64": {
                     "type": "string",
-                    "description": "Base64-encoded tuple transformer configuration."
+                    "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
                   },
                   "tupleTransformerConfigFile": {
                     "type": "string",
-                    "description": "Path to the JSON configuration file for tuple transformers."
+                    "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                   },
                   "userAgent": {
                     "type": "string",
-                    "description": "String appended to the user-agent header for requests to the target cluster."
+                    "description": "String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."
                   }
-                }
+                },
+                "description": "Optional replayer configuration overrides. If omitted, replayer runs with schema defaults."
               }
             },
             "required": [
               "fromProxy",
               "toTarget"
-            ]
-          }
+            ],
+            "description": "Configuration for a single traffic replayer instance, binding a proxy's captured traffic to a target cluster."
+          },
+          "description": "Map of replayer names to their replay configurations. Each replayer consumes from a proxy's Kafka topic and replays to a target cluster."
         }
       },
       "required": [
         "proxies",
         "replayers"
       ],
-      "description": "Top-level items are independent of each other but items in the inner-arrays require all snapshot activities across each of the items' sources to finish before any replays in this group can start."
+      "description": "Traffic capture and replay configuration. Proxies capture live traffic from source clusters to Kafka, and replayers consume from Kafka to replay against target clusters. All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency."
     }
   },
   "required": [
@@ -4856,5 +5055,435 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
   "title": "OpenSearch Migration Workflow Configuration",
   "x-orchestration-specs-strimzi-schema-mode": "full",
   "x-orchestration-specs-strimzi-schema-detail": "tests/fixtures/strimzi/minimal-openapi.json"
+}"
+`;
+
+exports[`test schemas matches expected union field schemas render as expected 1`] = `
+"{
+  "KAFKA_CLUSTER_CONFIG": {
+    "type": "object",
+    "properties": {
+      "kafkaCluster": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "autoCreate": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "auth": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "none"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "scram-sha-512"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      }
+                    ],
+                    "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge."
+                  },
+                  "clusterSpecOverrides": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "nullable": true
+                    },
+                    "description": "Optional overrides merged into the generated Strimzi Kafka.spec. Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."
+                  },
+                  "nodePoolSpecOverrides": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "nullable": true
+                    },
+                    "description": "Optional overrides merged into the generated Strimzi KafkaNodePool.spec. Workflow-managed fields such as cluster labels may be overwritten by the workflow."
+                  },
+                  "topicSpecOverrides": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "nullable": true
+                    },
+                    "description": "Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics."
+                  }
+                },
+                "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
+              }
+            },
+            "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "existing": {
+                "type": "object",
+                "properties": {
+                  "enableMSKAuth": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "kafkaConnection": {
+                    "type": "string",
+                    "pattern": "^(?:[a-z0-9][-a-z0-9.]*:(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5])(?:,(?!$)|$))*$"
+                  },
+                  "kafkaTopic": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Empty defaults to the name of the target label"
+                  },
+                  "auth": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "none"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "scram-sha-512"
+                            ]
+                          },
+                          "secretName": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                          },
+                          "caSecretName": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                          },
+                          "kafkaUserName": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "secretName",
+                          "caSecretName"
+                        ]
+                      }
+                    ],
+                    "default": {
+                      "type": "none"
+                    }
+                  }
+                },
+                "required": [
+                  "kafkaConnection"
+                ]
+              }
+            },
+            "required": [
+              "existing"
+            ],
+            "description": "Use an existing Kafka cluster by providing connection details."
+          }
+        ],
+        "description": "Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one."
+      }
+    },
+    "required": [
+      "kafkaCluster"
+    ]
+  },
+  "HTTP_AUTH": {
+    "type": "object",
+    "properties": {
+      "authConfig": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "basic": {
+                "type": "object",
+                "properties": {
+                  "secretName": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                    "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
+                  }
+                },
+                "required": [
+                  "secretName"
+                ]
+              }
+            },
+            "required": [
+              "basic"
+            ],
+            "description": "HTTP Basic authentication using credentials from a Kubernetes Secret."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sigv4": {
+                "type": "object",
+                "properties": {
+                  "region": {
+                    "type": "string",
+                    "description": "AWS region for SigV4 request signing (e.g. 'us-east-1')."
+                  },
+                  "service": {
+                    "type": "string",
+                    "default": "es",
+                    "description": "AWS service name for SigV4 signing. Use 'es' for Amazon OpenSearch Service or 'aoss' for OpenSearch Serverless."
+                  }
+                },
+                "required": [
+                  "region"
+                ]
+              }
+            },
+            "required": [
+              "sigv4"
+            ],
+            "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mtls": {
+                "type": "object",
+                "properties": {
+                  "caCert": {
+                    "type": "string",
+                    "description": "PEM-encoded CA certificate or path to CA certificate file for verifying the server's TLS certificate."
+                  },
+                  "clientSecretName": {
+                    "type": "string",
+                    "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
+                  }
+                },
+                "required": [
+                  "caCert",
+                  "clientSecretName"
+                ]
+              }
+            },
+            "required": [
+              "mtls"
+            ],
+            "description": "Mutual TLS (mTLS) authentication using client certificates."
+          }
+        ]
+      }
+    },
+    "required": [
+      "authConfig"
+    ]
+  },
+  "PROXY_TLS_CONFIG": {
+    "type": "object",
+    "properties": {
+      "tls": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "certManager"
+                ],
+                "description": "Use cert-manager to automatically provision and renew a TLS certificate."
+              },
+              "issuerRef": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Name of the cert-manager Issuer or ClusterIssuer resource that will sign the certificate."
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "Issuer",
+                      "ClusterIssuer"
+                    ],
+                    "default": "ClusterIssuer",
+                    "description": "Kind of the cert-manager issuer resource. 'ClusterIssuer' is cluster-scoped; 'Issuer' is namespace-scoped."
+                  },
+                  "group": {
+                    "type": "string",
+                    "default": "cert-manager.io",
+                    "description": "API group of the issuer. Use 'cert-manager.io' for standard issuers or 'awspca.cert-manager.io' for AWS Private CA issuers."
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "description": "Reference to a cert-manager issuer that will sign TLS certificates for the proxy."
+              },
+              "commonName": {
+                "type": "string",
+                "description": "Optional common name (CN) for the TLS certificate subject."
+              },
+              "dnsNames": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "description": "DNS Subject Alternative Names for the certificate. Must include the proxy's Kubernetes service DNS name (e.g. 'my-proxy.default.svc.cluster.local')."
+              },
+              "duration": {
+                "type": "string",
+                "default": "2160h",
+                "description": "Requested certificate validity duration in Go duration format (e.g. '2160h' = 90 days)."
+              },
+              "renewBefore": {
+                "type": "string",
+                "default": "360h",
+                "description": "How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."
+              }
+            },
+            "required": [
+              "mode",
+              "issuerRef",
+              "dnsNames"
+            ],
+            "description": "Provision a TLS certificate via cert-manager. A Certificate resource is created and the resulting secret is mounted into the proxy pod."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "existingSecret"
+                ],
+                "description": "Use a pre-existing Kubernetes TLS secret."
+              },
+              "secretName": {
+                "type": "string",
+                "description": "Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/."
+              }
+            },
+            "required": [
+              "mode",
+              "secretName"
+            ],
+            "description": "Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."
+          }
+        ],
+        "description": "TLS configuration for the capture proxy. Determines how the proxy obtains or provisions its TLS certificate for HTTPS termination."
+      }
+    },
+    "required": [
+      "tls"
+    ]
+  },
+  "SNAPSHOT_NAME_CONFIG": {
+    "type": "object",
+    "properties": {
+      "snapshot": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "externallyManagedSnapshotName": {
+                "type": "string",
+                "description": "Name of a pre-existing snapshot in the source cluster's repository. The workflow will use this snapshot directly without creating a new one."
+              }
+            },
+            "required": [
+              "externallyManagedSnapshotName"
+            ],
+            "description": "Reference to a snapshot that was created outside of this migration workflow."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "createSnapshotConfig": {
+                "type": "object",
+                "properties": {
+                  "snapshotPrefix": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Prefix for auto-generated snapshot names. When set, the snapshot name is '<snapshotPrefix>_<uniqueId>'. When empty, defaults to '<sourceLabel>_<uniqueId>'."
+                  },
+                  "jvmArgs": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Additional JVM arguments passed via JDK_JAVA_OPTIONS (e.g. '-Xmx4g -XX:+UseG1GC'). If setting -Xmx, ensure the heap size is smaller than the container's memory limit in resources to account for off-heap memory usage."
+                  },
+                  "loggingConfigurationOverrideConfigMap": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
+                  },
+                  "indexAllowlist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "default": [],
+                    "description": "List of index names to include in the snapshot. Each entry is either an exact index name (e.g. 'logs-2024-01') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*-2024'). An empty list includes all indices."
+                  },
+                  "maxSnapshotRateMbPerNode": {
+                    "type": "number",
+                    "default": 0,
+                    "description": "Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."
+                  },
+                  "compressionEnabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "[Expert] Enables metadata compression for the snapshot. Can be turned off if issues are observed with snapshot configuration extraction."
+                  },
+                  "includeGlobalState": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist."
+                  }
+                },
+                "description": "Configuration for creating a new snapshot of the source cluster."
+              }
+            },
+            "required": [
+              "createSnapshotConfig"
+            ],
+            "description": "Configuration to create a new snapshot of the source cluster as part of the migration workflow."
+          }
+        ],
+        "description": "Snapshot source: either reference an existing snapshot or configure creation of a new one."
+      }
+    },
+    "required": [
+      "snapshot"
+    ]
+  }
 }"
 `;

@@ -37,7 +37,8 @@ def call(Map config = [:]) {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
                             sh """
-                                ./deployment/k8s/aws/aws-bootstrap.sh \
+                                ./deployment/k8s/aws/assemble-bootstrap.sh
+                                ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                   --deploy-create-vpc-cfn \
                                   --build-cfn \
                                   --build-images \
@@ -47,7 +48,7 @@ def call(Map config = [:]) {
                                   --region "${params.REGION}" \
                                   --version latest \
                                   --skip-console-exec \
-                                  2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
+                                  2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
                             """
 
                             // Capture the build ECR registry
@@ -71,7 +72,7 @@ def call(Map config = [:]) {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
                             sh """
-                                ./deployment/k8s/aws/aws-bootstrap.sh \
+                                ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                   --deploy-import-vpc-cfn \
                                   --build-cfn \
                                   --build-chart-and-dashboards \
@@ -83,7 +84,7 @@ def call(Map config = [:]) {
                                   --subnet-ids "${params.ISOLATED_SUBNET_IDS}" \
                                   --region "${params.REGION}" \
                                   --skip-console-exec \
-                                  2>&1 | while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; exit \${PIPESTATUS[0]}
+                                  2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
                             """
                         }
                     }

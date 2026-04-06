@@ -11,6 +11,7 @@ metadata:
   annotations:
     "helm.sh/hook": test
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    karpenter.sh/do-not-disrupt: "true"
 spec:
   serviceAccountName: argo-workflow-executor
   restartPolicy: Never

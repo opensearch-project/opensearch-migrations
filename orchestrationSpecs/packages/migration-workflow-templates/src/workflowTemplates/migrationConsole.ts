@@ -165,7 +165,7 @@ export const MigrationConsole = WorkflowBuilder.create({
                 }
             }))
         )
-        .addPathOutput("statusOutput", "/tmp/status-output.txt", typeToken<string>())
+        .addArtifactOutput("statusOutput", "/tmp/status-output.txt")
         .addPathOutput("overriddenPhase", "/tmp/phase-output.txt", typeToken<string>())
     )
 

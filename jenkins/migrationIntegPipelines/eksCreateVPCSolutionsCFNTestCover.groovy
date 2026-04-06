@@ -6,10 +6,10 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
          remote: "${gitUrl}"])
 
 // Shared library function (location from root: vars/eksSolutionsCFNTest.groovy)
-def jobNameOverride = params.JOB_NAME_OVERRIDE ?: ''
+def jobNameOverride = params.JOB_NAME_OVERRIDE ?: env.JOB_BASE_NAME ?: ''
 eksSolutionsCFNTest(
     vpcMode: 'create',
-    defaultStage: 'ekscreatevpc',
+    defaultStage: 'ekscvpc',
     defaultGitUrl: 'https://github.com/opensearch-project/opensearch-migrations.git',
     defaultGitBranch: 'main',
     jobName: jobNameOverride ?: null

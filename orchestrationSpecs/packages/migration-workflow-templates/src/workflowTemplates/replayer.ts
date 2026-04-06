@@ -15,6 +15,8 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {setupLog4jConfigForContainer} from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
+import {getTargetHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
@@ -129,6 +131,8 @@ function getReplayerDeploymentManifest
     loggingConfigMap: BaseExpression<string>,
     jvmArgs: BaseExpression<string>,
 
+    basicAuthSecretName: BaseExpression<string>,
+
     podReplicas: BaseExpression<number>,
     replayerImageName: BaseExpression<string>,
     replayerImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
@@ -162,7 +166,8 @@ function getReplayerDeploymentManifest
                         optional: makeDirectTypeProxy(expr.not(isScramAuth))
                     }
                 }
-            }
+            },
+            ...getTargetHttpAuthCredsEnvVars(args.basicAuthSecretName)
         ],
         volumeMounts: [
             {
@@ -252,42 +257,36 @@ export const Replayer = WorkflowBuilder.create({
       .addRequiredInput("kafkaCaSecretName", typeToken<string>())
       .addRequiredInput("podReplicas", typeToken<number>())
       .addRequiredInput("jvmArgs", typeToken<string>())
-      .addRequiredInput(
-        "loggingConfigurationOverrideConfigMap",
-        typeToken<string>(),
-      )
-      .addInputsFromRecord(
-        makeRequiredImageParametersForKeys(["TrafficReplayer"]),
-      )
+      .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
+      .addRequiredInput("basicAuthSecretName", typeToken<string>())
+      .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
       .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
 
-      .addResourceTask((b) =>
-        b.setDefinition({
-          action: "apply",
-          setOwnerReference: true,
-          successCondition: "status.readyReplicas > 0",
-          manifest: getReplayerDeploymentManifest({
-            podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
-            useCustomLogging: expr.not(
-              expr.isEmpty(b.inputs.loggingConfigurationOverrideConfigMap),
-            ),
-            loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
-            jvmArgs: b.inputs.jvmArgs,
-            name: b.inputs.name,
-            replayerImageName: b.inputs.imageTrafficReplayerLocation,
-            replayerImagePullPolicy: b.inputs.imageTrafficReplayerPullPolicy,
-            workflowName: expr.getWorkflowValue("name"),
-            jsonConfig: expr.toBase64(b.inputs.jsonConfig),
-            resources: expr.deserializeRecord(b.inputs.resources),
-            kafkaAuthConfigMapName: b.inputs.kafkaAuthConfigMapName,
-            kafkaAuthType: b.inputs.kafkaAuthType,
-            kafkaSecretName: b.inputs.kafkaSecretName,
-            kafkaCaSecretName: b.inputs.kafkaCaSecretName,
-          }),
-        }),
-      )
-      .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY),
-  )
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                successCondition: "status.readyReplicas > 0",
+                manifest: getReplayerDeploymentManifest({
+                    podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
+                    useCustomLogging: expr.not(expr.isEmpty(b.inputs.loggingConfigurationOverrideConfigMap)),
+                    loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
+                    jvmArgs: b.inputs.jvmArgs,
+                    basicAuthSecretName: b.inputs.basicAuthSecretName,
+                    name: b.inputs.name,
+                    replayerImageName: b.inputs.imageTrafficReplayerLocation,
+                    replayerImagePullPolicy: b.inputs.imageTrafficReplayerPullPolicy,
+                    workflowName: expr.getWorkflowValue("name"),
+                    jsonConfig: expr.toBase64(b.inputs.jsonConfig),
+                    resources: expr.deserializeRecord(b.inputs.resources),
+                    kafkaAuthConfigMapName: b.inputs.kafkaAuthConfigMapName,
+                    kafkaAuthType: b.inputs.kafkaAuthType,
+                    kafkaSecretName: b.inputs.kafkaSecretName,
+                    kafkaCaSecretName: b.inputs.kafkaCaSecretName
+                })
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
 
   .addTemplate("createKafkaClientPropertiesConfigMap", (t) =>
     t
@@ -371,6 +370,7 @@ export const Replayer = WorkflowBuilder.create({
                 ["loggingConfigurationOverrideConfigMap"],
                 "",
               ),
+              basicAuthSecretName: getHttpAuthSecretName(b.inputs.targetConfig),
               jsonConfig: expr.asString(
                 expr.serialize(
                   makeReplayerParamsDict(
