@@ -49,7 +49,20 @@ export function setupTestCredsForContainer(
             ]
         },
         sidecars: def.sidecars,
-        initContainers: def.initContainers
+        initContainers: def.initContainers.map(ic => {
+            const {volumeMounts: icMounts, ...restOfIc} = ic as any;
+            return {
+                ...restOfIc,
+                volumeMounts: [
+                    ...(icMounts ?? []),
+                    {
+                        name: TEST_CREDS_VOLUME_NAME,
+                        mountPath: "/config/credentials",
+                        readOnly: true
+                    }
+                ]
+            };
+        })
     } as const;
 }
 
@@ -246,11 +259,6 @@ export function setupS3MountpointVolumeForContainer(
                         name: SHARED_HOSTPATH_VOLUME,
                         mountPath: "/mnt",
                         mountPropagation: "Bidirectional"
-                    },
-                    {
-                        name: "localstack-test-creds",
-                        mountPath: "/config/credentials",
-                        readOnly: true
                     }
                 ]
             }
