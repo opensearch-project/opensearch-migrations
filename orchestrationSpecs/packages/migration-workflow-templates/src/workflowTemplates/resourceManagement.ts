@@ -442,6 +442,7 @@ export const ResourceManagement = WorkflowBuilder.create({
             ])
             .addResources({limits: {cpu: "50m", memory: "64Mi"}, requests: {cpu: "50m", memory: "64Mi"}})
         )
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
