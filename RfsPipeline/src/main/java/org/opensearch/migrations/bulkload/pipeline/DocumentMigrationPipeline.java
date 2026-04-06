@@ -52,6 +52,12 @@ public class DocumentMigrationPipeline {
     private final AtomicInteger activeBatches = new AtomicInteger();
     private final AtomicReference<Partition> currentPartition = new AtomicReference<>();
 
+    // Timing instrumentation — tracks where time is spent
+    private final AtomicLong batchesProduced = new AtomicLong();
+    private final AtomicLong batchesWritten = new AtomicLong();
+    private final AtomicLong totalWriteNanos = new AtomicLong();
+    private final AtomicLong lastBatchProducedAt = new AtomicLong(System.nanoTime());
+
     /**
      * Create a pipeline with sequential partition processing and default batch concurrency.
      */
@@ -103,17 +109,25 @@ public class DocumentMigrationPipeline {
         long totalDocs,
         long totalBytes,
         int activeBatches,
-        int batchConcurrency
+        int batchConcurrency,
+        long batchesProduced,
+        long batchesWritten,
+        long avgWriteMs
     ) {}
 
     /** Returns a point-in-time snapshot of pipeline progress for external monitoring. */
     public ProgressSnapshot getProgressSnapshot() {
+        long written = batchesWritten.get();
+        long avgMs = written > 0 ? totalWriteNanos.get() / written / 1_000_000 : 0;
         return new ProgressSnapshot(
             currentPartition.get(),
             totalDocs.get(),
             totalBytes.get(),
             activeBatches.get(),
-            batchConcurrency
+            batchConcurrency,
+            batchesProduced.get(),
+            written,
+            avgMs
         );
     }
 
@@ -132,11 +146,15 @@ public class DocumentMigrationPipeline {
             return source.readDocuments(partition, startingDocOffset)
                 .subscribeOn(Schedulers.boundedElastic())
                 .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
+                .doOnNext(batch -> batchesProduced.incrementAndGet())
                 .publishOn(Schedulers.boundedElastic(), batchConcurrency * 2)
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
+                    long writeStart = System.nanoTime();
                     return sink.writeBatch(collectionName, batch)
                         .map(result -> {
+                            totalWriteNanos.addAndGet(System.nanoTime() - writeStart);
+                            batchesWritten.incrementAndGet();
                             cumulativeOffset[0] += result.docsInBatch();
                             totalDocs.addAndGet(result.docsInBatch());
                             totalBytes.addAndGet(result.bytesInBatch());
