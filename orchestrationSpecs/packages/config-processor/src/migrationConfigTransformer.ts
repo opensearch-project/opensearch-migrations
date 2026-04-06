@@ -228,7 +228,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
     async transform(input: InputConfig): Promise<OutputConfig> {
         const processedInput = await this.preprocessInput(input);
-        return this.transformSync(processedInput);
+        return await this.transformSync(processedInput);
     }
 
     private async preprocessInput(input: InputConfig): Promise<InputConfig> {
@@ -249,11 +249,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         return { ...input, sourceClusters: processedSourceClusters };
     }
 
-    private transformSync(userConfig: InputConfig): OutputConfig {
+    private async transformSync(userConfig: InputConfig): Promise<OutputConfig> {
         const kafkaClusters = this.buildKafkaClusters(userConfig);
         const proxies = this.buildProxies(userConfig);
         const snapshots = this.buildSnapshots(userConfig);
-        const snapshotMigrations = this.buildSnapshotMigrations(userConfig);
+        const snapshotMigrations = await this.buildSnapshotMigrations(userConfig);
         const trafficReplays = this.buildTrafficReplays(userConfig);
 
         const output = {
@@ -376,7 +376,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
 
             if (createConfigs.length > 0) {
-                const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
+                const { snapshotInfo: _si, ...restOfSource } = sourceCluster;
                 const proxy = this.getSourceAttachedProxy(userConfig, sourceName);
                 results.push({
                     createSnapshotConfig: createConfigs,
@@ -392,12 +392,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Build snapshot migration configs from snapshotMigrationConfigs + perSnapshotConfig. */
-    private buildSnapshotMigrations(userConfig: InputConfig) {
+    private async buildSnapshotMigrations(userConfig: InputConfig) {
         const results: any[] = [];
 
         for (const mc of userConfig.snapshotMigrationConfigs) {
             const { fromSource, toTarget, perSnapshotConfig } = mc;
-            if (!perSnapshotConfig) continue;
 
             const sourceCluster = userConfig.sourceClusters[fromSource];
             const targetCluster = userConfig.targetClusters[toTarget];
@@ -405,10 +404,27 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Migration references unknown target cluster '${toTarget}'`);
             }
 
-            const { enabled: _e2, ...restOfTarget } = targetCluster;
-            const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
+            // When perSnapshotConfig is not provided, auto-generate it from snapshotInfo.snapshots
+            // so the workflow creates/waits for snapshots the same way for both ES and Solr sources.
+            const effectivePerSnapshotConfig = perSnapshotConfig ?? (
+                sourceCluster.snapshotInfo?.snapshots
+                    ? Object.fromEntries(
+                        Object.keys(sourceCluster.snapshotInfo.snapshots).map(snapName => [
+                            snapName,
+                            [USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG.parse({
+                                metadataMigrationConfig: {},
+                                documentBackfillConfig: {},
+                            })]
+                        ])
+                    )
+                    : undefined
+            );
 
-            for (const [snapshotName, migrations] of Object.entries(perSnapshotConfig)) {
+            if (!effectivePerSnapshotConfig) continue;
+
+            const { snapshotInfo: _si, ...restOfSource } = sourceCluster;
+
+            for (const [snapshotName, migrations] of Object.entries(effectivePerSnapshotConfig)) {
                 const snapshotDef = sourceCluster.snapshotInfo?.snapshots[snapshotName];
                 if (!snapshotDef) {
                     throw new Error(`Migration references snapshot '${snapshotName}' not defined in source '${fromSource}'`);
@@ -428,7 +444,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     migrations: autoLabelMigrations(migrations),
                     sourceVersion: sourceCluster.version || "",
                     sourceLabel: fromSource,
-                    targetConfig: { ...restOfTarget, label: toTarget },
+                    targetConfig: { ...targetCluster, label: toTarget },
                     snapshotConfig: {
                         label: snapshotName,
                         ...(repoConfig ? {
@@ -461,14 +477,13 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
 
             const topic = proxy.kafkaTopic || replayer.fromProxy;
-            const { enabled: _e3, ...restOfTarget } = targetCluster;
             const replayerConfig = ARGO_REPLAYER_OPTIONS.parse(replayer.replayerConfig ?? {});
 
             return {
                 fromProxy: replayer.fromProxy,
                 kafkaClusterName: proxy.kafka ?? "default",
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
-                toTarget: { ...restOfTarget, label: replayer.toTarget },
+                toTarget: { ...targetCluster, label: replayer.toTarget },
                 replayerConfig,
                 ...(replayer.dependsOnSnapshotMigrations ? { dependsOnSnapshotMigrations: replayer.dependsOnSnapshotMigrations } : {}),
             };

@@ -15,6 +15,8 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {setupLog4jConfigForContainer} from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
+import {getTargetHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
@@ -78,6 +80,8 @@ function getReplayerDeploymentManifest
     loggingConfigMap: BaseExpression<string>,
     jvmArgs: BaseExpression<string>,
 
+    basicAuthSecretName: BaseExpression<string>,
+
     podReplicas: BaseExpression<number>,
     replayerImageName: BaseExpression<string>,
     replayerImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
@@ -91,7 +95,10 @@ function getReplayerDeploymentManifest
             "---INLINE-JSON",
             makeStringTypeProxy(args.jsonConfig)
         ],
-        resources: makeDirectTypeProxy(args.resources)
+        resources: makeDirectTypeProxy(args.resources),
+        env: [
+            ...getTargetHttpAuthCredsEnvVars(args.basicAuthSecretName),
+        ]
     };
     const finalContainerDefinition =
         setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
@@ -156,6 +163,7 @@ export const Replayer = WorkflowBuilder.create({
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("jvmArgs", typeToken<string>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
+        .addRequiredInput("basicAuthSecretName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
 
@@ -165,9 +173,10 @@ export const Replayer = WorkflowBuilder.create({
                 setOwnerReference: false,
                 manifest: getReplayerDeploymentManifest({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
-                    useCustomLogging: expr.equals(expr.literal(""), b.inputs.loggingConfigurationOverrideConfigMap),
+                    useCustomLogging: expr.not(expr.equals(expr.literal(""), b.inputs.loggingConfigurationOverrideConfigMap)),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     jvmArgs: b.inputs.jvmArgs,
+                    basicAuthSecretName: b.inputs.basicAuthSecretName,
                     name: b.inputs.name,
                     crdName: b.inputs.crdName,
                     crdUid: b.inputs.crdUid,
@@ -200,6 +209,7 @@ export const Replayer = WorkflowBuilder.create({
                     podReplicas: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["podReplicas"], 1),
                     jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["jvmArgs"], ""),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["loggingConfigurationOverrideConfigMap"], ""),
+                    basicAuthSecretName: getHttpAuthSecretName(b.inputs.targetConfig),
                     jsonConfig: expr.asString(expr.serialize(
                         makeReplayerParamsDict(
                             b.inputs.targetConfig,

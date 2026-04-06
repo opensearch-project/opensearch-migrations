@@ -2,7 +2,8 @@
 
 import logging
 import re
-from typing import Dict, List, Any, Optional
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Any, Optional, Union
 from rich.console import Console
 from rich.tree import Tree
 import json
@@ -10,12 +11,20 @@ import json
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class ArtifactRef:
+    """Reference to an artifact output that needs to be fetched from the Argo API."""
+    node_id: str
+    artifact_name: str
+
+
 class WorkflowDisplayer:
     """Base class for workflow display implementations."""
 
     def display_workflow_status(self, workflow_name: str, phase: str, started_at: str,
                                 finished_at: str, tree_nodes: List[Dict[str, Any]],
-                                workflow_data: Dict[str, Any] = None) -> None:
+                                workflow_data: Dict[str, Any] = None,
+                                artifact_resolver: Optional[Callable] = None) -> None:
         """Display complete workflow status. Must be implemented by subclasses."""
         raise NotImplementedError
 
@@ -257,8 +266,12 @@ def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return filter_recursive(tree_nodes)
 
 
-def get_step_status_output(workflow_data: Dict[str, Any], node_id: str) -> Optional[str]:
-    """Extract statusOutput from a workflow step or its children by node ID."""
+def get_step_status_output(workflow_data: Dict[str, Any], node_id: str) -> Optional[Union[str, ArtifactRef]]:
+    """Extract statusOutput from a workflow step or its children by node ID.
+
+    Returns the parameter value as a string, or an ArtifactRef if the output
+    is stored as an artifact (requires a separate API call to fetch content).
+    """
     logger.debug(f"Looking for statusOutput in node: {node_id}")
     nodes = workflow_data.get("status", {}).get("nodes", {})
 
@@ -267,13 +280,20 @@ def get_step_status_output(workflow_data: Dict[str, Any], node_id: str) -> Optio
         logger.debug(f"{'  ' * depth}Checking node {current_node_id} for statusOutput")
         node = nodes.get(current_node_id, {})
 
-        # Check outputs first
+        # Check parameter outputs first
         outputs = node.get("outputs", {})
         parameters = outputs.get("parameters", [])
         for param in parameters:
             if param.get("name") == "statusOutput":
-                logger.debug(f"Found statusOutput in node {current_node_id}: {param.get('value')}")
+                logger.debug(f"Found statusOutput parameter in node {current_node_id}: {param.get('value')}")
                 return param.get("value")
+
+        # Check artifact outputs
+        artifacts = outputs.get("artifacts", [])
+        for artifact in artifacts:
+            if artifact.get("name") == "statusOutput":
+                logger.debug(f"Found statusOutput artifact in node {current_node_id}")
+                return ArtifactRef(node_id=current_node_id, artifact_name="statusOutput")
 
         # Check children
         children = node.get("children", [])
@@ -287,7 +307,7 @@ def get_step_status_output(workflow_data: Dict[str, Any], node_id: str) -> Optio
 
     result = check_node_for_status_output(node_id)
     if not result:
-        logger.debug(f"No statusOutput found for node: {node_id}")  # Changed from warning to debug
+        logger.debug(f"No statusOutput found for node: {node_id}")
     return result
 
 
@@ -334,7 +354,10 @@ def get_node_phase(node: dict) -> str:
     return node['phase']
 
 
-def get_step_rich_label(node: dict, status_output: str, show_approval_name: bool = True) -> str:
+def get_step_rich_label(
+    node: dict, status_output: Optional[Union[str, ArtifactRef]],
+    show_approval_name: bool = True
+) -> str:
     """Get rich-formatted label for a workflow step node.
 
     Args:
@@ -400,7 +423,8 @@ def get_step_rich_label(node: dict, status_output: str, show_approval_name: bool
     full_unformatted_line = _construct_full_label_line(
         step_name_and_timestamp_str, step_phase, step_type, approval_name
     )
-    return f"[{color}]{symbol} {full_unformatted_line}{': ' + status_output if status_output else ''} [/{color}]"
+    status_suffix = f': {status_output}' if status_output and isinstance(status_output, str) else ''
+    return f"[{color}]{symbol} {full_unformatted_line}{status_suffix} [/{color}]"
 
 
 def _construct_full_label_line(step_name_and_timestamp_str, step_phase, step_type, approval_name=None):
@@ -420,8 +444,16 @@ def _construct_full_label_line(step_name_and_timestamp_str, step_phase, step_typ
 
 
 def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
-                          workflow_data: Optional[Dict] = None) -> None:
-    """Display workflow tree using Rich with proper nesting and live check results."""
+                          workflow_data: Optional[Dict] = None,
+                          artifact_resolver: Optional[Callable[[ArtifactRef], Optional[str]]] = None) -> None:
+    """Display workflow tree using Rich with proper nesting and live check results.
+
+    Args:
+        tree_nodes: List of tree node dictionaries
+        workflow_data: Full workflow data for extracting status outputs
+        artifact_resolver: Optional callable to lazily resolve artifact content.
+            Only invoked for nodes that are actually rendered and have artifact outputs.
+    """
 
     # Sort nodes: by sort_order if present, then by timestamp, then by name
     def _sort_key(n):
@@ -441,6 +473,11 @@ def display_workflow_tree(tree_nodes: List[Dict[str, Any]],
         for node in sorted_children:
             # Get statusOutput for all nodes that might have it
             status_output = get_step_status_output(workflow_data, node['id']) if workflow_data else ""
+
+            # Lazily resolve artifact references only for nodes being rendered
+            if isinstance(status_output, ArtifactRef):
+                status_output = artifact_resolver(status_output) if artifact_resolver else ""
+                status_output = status_output or ""
 
             # Use Rich formatting for the label
             node_label = get_step_rich_label(node, status_output)

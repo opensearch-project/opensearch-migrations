@@ -7,6 +7,7 @@ dependencies {
     implementation project(":coreUtilities")
     implementation project(":RFS")
     implementation project(":SnapshotReader")
+    implementation project(":SolrReader")
     implementation project(':transformation')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
 

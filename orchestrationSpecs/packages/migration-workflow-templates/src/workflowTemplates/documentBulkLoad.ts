@@ -31,6 +31,7 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
+import {getTargetHttpAuthCredsEnvVars, getCoordinatorHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
 
@@ -51,9 +52,10 @@ function makeParamsDict(
     rfsCoordinatorConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
     options: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>,
-    sessionName: BaseExpression<string>
+    sessionName: BaseExpression<string>,
+    sourceEndpoint?: BaseExpression<string>
 ) {
-    return expr.mergeDicts(
+    const base = expr.mergeDicts(
         expr.mergeDicts(
             expr.mergeDicts(
                 makeTargetParamDict(targetConfig),
@@ -74,6 +76,18 @@ function makeParamsDict(
                 true)
         )
     );
+
+    // Pass sourceHost for Solr backup migrations (RFS detects Solr from sourceVersion)
+    if (sourceEndpoint) {
+        return expr.mergeDicts(base,
+            expr.ternary(
+                expr.isEmpty(sourceEndpoint),
+                expr.makeDict({}),
+                expr.makeDict({ sourceHost: sourceEndpoint })
+            )
+        );
+    }
+    return base;
 }
 
 function getRfsDeploymentName(sessionName: BaseExpression<string>) {
@@ -106,16 +120,6 @@ function getRfsDeploymentManifest
     fromSnapshotMigrationK8sLabel: BaseExpression<string>,
     taskK8sLabel: BaseExpression<string>
 }): Deployment {
-    const targetBasicCredsSecretName = expr.ternary(
-        expr.isEmpty(args.targetBasicCredsSecretNameOrEmpty),
-        expr.literal("empty"),
-        args.targetBasicCredsSecretNameOrEmpty
-    );
-    const coordinatorBasicCredsSecretName = expr.ternary(
-        expr.isEmpty(args.coordinatorBasicCredsSecretNameOrEmpty),
-        expr.literal("empty"),
-        args.coordinatorBasicCredsSecretNameOrEmpty
-    );
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
     const baseContainerDefinition = {
         name: "bulk-loader",
@@ -123,59 +127,8 @@ function getRfsDeploymentManifest
         imagePullPolicy: makeStringTypeProxy(args.rfsImagePullPolicy),
         command: ["/rfs-app/runJavaWithClasspathWithRepeat.sh"],
         env: [
-            // see getTargetHttpAuthCreds() - it's very similar, but for a raw K8s container, we pass
-            // environment variables as a list, as K8s expects them.  The getTargetHttpAuthCreds()
-            // returns them in a key-value format that the ContainerBuilder uses, which is converted
-            // by the argoResourceRenderer.  It would be a nice idea to unify this format with the
-            // container builder's, but it's probably a much bigger lift than it seems since we're
-            // type checking this object against the k8s schema below.
-            //
-            // I could also use getTargetHttpAuthCreds to create the partial values, then substitute
-            // those into here by splicing.  Writing a generic splicer isn't that straightforward since
-            // there are a few other inconsistencies between the manifest and argo-container definitions.
-            // As of now, we only have this block (though a couple others will come about too) and it
-            // doesn't seem like it's worth the complexity.  There's some readability value to having
-            // less normalization here as it benefits readability.
-            {
-                name: "TARGET_USERNAME",
-                valueFrom: {
-                    secretKeyRef: {
-                        name: makeStringTypeProxy(targetBasicCredsSecretName),
-                        key: "username",
-                        optional: true
-                    }
-                }
-            },
-            {
-                name: "TARGET_PASSWORD",
-                valueFrom: {
-                    secretKeyRef: {
-                        name: makeStringTypeProxy(targetBasicCredsSecretName),
-                        key: "password",
-                        optional: true
-                    }
-                }
-            },
-            {
-                name: "COORDINATOR_USERNAME",
-                valueFrom: {
-                    secretKeyRef: {
-                        name: makeStringTypeProxy(coordinatorBasicCredsSecretName),
-                        key: "username",
-                        optional: true
-                    }
-                }
-            },
-            {
-                name: "COORDINATOR_PASSWORD",
-                valueFrom: {
-                    secretKeyRef: {
-                        name: makeStringTypeProxy(coordinatorBasicCredsSecretName),
-                        key: "password",
-                        optional: true
-                    }
-                }
-            },
+            ...getTargetHttpAuthCredsEnvVars(args.targetBasicCredsSecretNameOrEmpty),
+            ...getCoordinatorHttpAuthCredsEnvVars(args.coordinatorBasicCredsSecretNameOrEmpty),
             // We don't have a mechanism to scrape these off disk so need to disable this to avoid filling up the disk
             {
                 name: "FAILED_REQUESTS_LOGGER_LEVEL",
@@ -444,6 +397,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("coordinatorName", typeToken<string>())
         .addRequiredInput("coordinatorUid", typeToken<string>())
+        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
@@ -462,7 +416,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.rfsCoordinatorConfig,
                             b.inputs.snapshotConfig,
                             b.inputs.documentBackfillConfig,
-                            b.inputs.sessionName)
+                            b.inputs.sessionName,
+                            b.inputs.sourceEndpoint)
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
                     sourceK8sLabel: b.inputs.sourceLabel,
@@ -486,6 +441,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("coordinatorName", typeToken<string>())
         .addRequiredInput("coordinatorUid", typeToken<string>())
+        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
         .addSteps(b => b
@@ -533,6 +489,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("coordinatorUid", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
         .addRequiredInput("crdUid", typeToken<string>())
+        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole", "CoordinatorCluster"]))
 
         .addSteps(b => {

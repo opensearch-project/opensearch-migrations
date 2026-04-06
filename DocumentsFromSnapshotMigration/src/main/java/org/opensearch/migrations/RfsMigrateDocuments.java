@@ -2,6 +2,7 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
@@ -30,6 +31,15 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
+import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
+import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
+import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
+import org.opensearch.migrations.bulkload.solr.SolrBackupSource;
+import org.opensearch.migrations.bulkload.solr.SolrClient;
+import org.opensearch.migrations.bulkload.solr.SolrDocumentSource;
+import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
+import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
+import org.opensearch.migrations.bulkload.solr.SolrSnapshotReader;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
@@ -62,6 +72,7 @@ import com.beust.jcommander.IValueValidator;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -117,6 +128,11 @@ public class RfsMigrateDocuments {
         NEVER   // Always preserve source IDs
     }
 
+    public enum SourceType {
+        SNAPSHOT,  // Read from ES/OS snapshot (default)
+        SOLR_API   // Read from Solr HTTP API
+    }
+
     public static class Args {
         /** Default maximum documents per bulk batch. */
         static final int DEFAULT_MAX_DOCS_PER_BATCH = Integer.MAX_VALUE;
@@ -131,9 +147,9 @@ public class RfsMigrateDocuments {
             description = "Displays information about how to use this tool")
         private boolean help;
 
-        @Parameter(required = true,
+        @Parameter(required = false,
             names = { "--snapshot-name", "--snapshotName" },
-            description = "The name of the snapshot to migrate")
+            description = "The name of the snapshot to migrate. Required when --source-type is SNAPSHOT.")
         public String snapshotName;
 
         @Parameter(required = false,
@@ -169,9 +185,9 @@ public class RfsMigrateDocuments {
                 "For use when the default AWS ones won't work for a particular context."))
         public String s3Endpoint = null;
 
-        @Parameter(required = true,
+        @Parameter(required = false,
             names = { "--lucene-dir", "--luceneDir" },
-            description = "The absolute path to the directory where we'll put the Lucene docs")
+            description = "The absolute path to the directory where we'll put the Lucene docs. Required when --source-type is SNAPSHOT.")
         public String luceneDir;
 
         @Parameter(required = false,
@@ -239,10 +255,10 @@ public class RfsMigrateDocuments {
                 "NEVER: always preserve source IDs (may fail on serverless TIMESERIES/VECTOR).")
         public ServerGeneratedIdMode serverGeneratedIds = ServerGeneratedIdMode.AUTO;
 
-        @Parameter(required = true,
+        @Parameter(required = false,
             names = { "--source-version", "--sourceVersion" },
             converter = VersionConverter.class,
-            description = ("Version of the source cluster. Required parameter - no default fallback."))
+            description = ("Version of the source cluster. Required when --source-type is SNAPSHOT."))
         public Version sourceVersion;
 
         @Parameter(required = false,
@@ -285,6 +301,16 @@ public class RfsMigrateDocuments {
                 "allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success " +
                 "rather than failure. Example: --allowed-doc-exception-types version_conflict_engine_exception")
         public List<String> allowedDocExceptionTypes = List.of();
+
+        @Parameter(required = false,
+            names = { "--source-type" },
+            description = "Optional. The type of source to read documents from. " +
+                "SNAPSHOT (default): read from an ES/OS snapshot. " +
+                "SOLR_API: read from a Solr instance via HTTP API.")
+        public SourceType sourceType = SourceType.SNAPSHOT;
+
+        @ParametersDelegate
+        public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
 
     }
 
@@ -360,9 +386,43 @@ public class RfsMigrateDocuments {
     }
 
     public static void validateArgs(Args args) {
+        if (args.sourceType == SourceType.SOLR_API) {
+            if (args.sourceArgs.host == null) {
+                throw new ParameterException(
+                    "When --source-type is SOLR_API, --source-host must be provided."
+                );
+            }
+            return;
+        }
+
         boolean isSnapshotLocalDirProvided = args.snapshotLocalDir != null;
         boolean areAllS3ArgsProvided = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
         boolean areAnyS3ArgsProvided = args.s3LocalDir != null || args.s3RepoUri != null || args.s3Region != null;
+
+        // Solr backup path requires --source-host and either local dir or S3 args
+        if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
+            if (args.sourceArgs.host == null) {
+                throw new ParameterException("--source-host is required for Solr backup migration (to fetch schema).");
+            }
+            boolean hasLocal = args.snapshotLocalDir != null;
+            boolean hasS3 = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
+            if (!hasLocal && !hasS3) {
+                throw new ParameterException(
+                    "For Solr backup migration, provide either --snapshot-local-dir or S3 args (--s3-local-dir, --s3-repo-uri, --s3-region)."
+                );
+            }
+            return;
+        }
+
+        if (args.snapshotName == null) {
+            throw new ParameterException("--snapshot-name is required when --source-type is SNAPSHOT.");
+        }
+        if (args.luceneDir == null) {
+            throw new ParameterException("--lucene-dir is required when --source-type is SNAPSHOT.");
+        }
+        if (args.sourceVersion == null) {
+            throw new ParameterException("--source-version is required when --source-type is SNAPSHOT.");
+        }
 
         if (isSnapshotLocalDirProvided && areAnyS3ArgsProvided) {
             throw new ParameterException(
@@ -430,8 +490,6 @@ public class RfsMigrateDocuments {
         }
 
         var context = makeRootContext(arguments, workerId);
-        var luceneDirPath = Paths.get(arguments.luceneDir);
-        var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
         var targetConnectionContext = arguments.targetArgs.toConnectionContext();
         var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext, arguments.maxConnections);
@@ -452,15 +510,28 @@ public class RfsMigrateDocuments {
             }
         };
 
-        // Determine coordinator connection and version
-        var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
-
         var docTransformerConfig = Optional.ofNullable(TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams))
             .orElse(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
         log.atInfo().setMessage("Doc Transformations config string: {}")
                 .addArgument(docTransformerConfig).log();
         var transformationLoader = new TransformationLoader();
         Supplier<IJsonTransformer> docTransformerSupplier = () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
+
+        if (arguments.sourceType == SourceType.SOLR_API) {
+            runSolrMigration(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
+            return;
+        }
+
+        if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
+            runSolrBackupMigration(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
+            return;
+        }
+
+        var luceneDirPath = Paths.get(arguments.luceneDir);
+        var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
+
+        // Determine coordinator connection and version
+        var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
 
         var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
         var progressCursor = new AtomicReference<WorkItemCursor>();
@@ -810,6 +881,191 @@ public class RfsMigrateDocuments {
         return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
     }
 
+
+    private static void runSolrMigration(
+        Args arguments,
+        OpenSearchClient targetClient,
+        Supplier<IJsonTransformer> docTransformerSupplier,
+        boolean useServerGeneratedIds,
+        RootDocumentMigrationContext context
+    ) {
+        log.info("Starting Solr API document migration from {}", arguments.sourceArgs.host);
+
+        var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
+        var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
+
+        var solrClient = new SolrClient(
+            arguments.sourceArgs.host,
+            arguments.sourceArgs.username,
+            arguments.sourceArgs.password
+        );
+        var source = new SolrDocumentSource(solrClient);
+        var sink = new OpenSearchDocumentSink(
+            targetClient, docTransformerSupplier, useServerGeneratedIds, allowlist, () -> null
+        );
+
+        var pipeline = new DocumentMigrationPipeline(
+            source, sink,
+            arguments.numDocsPerBulkRequest,
+            arguments.numBytesPerBulkRequest,
+            1,
+            arguments.maxConnections
+        );
+
+        try {
+            pipeline.migrateAll().blockLast();
+            log.info("Solr document migration completed successfully");
+        } finally {
+            try { source.close(); } catch (Exception e) { log.warn("Error closing Solr source", e); }
+            try { sink.close(); } catch (Exception e) { log.warn("Error closing sink", e); }
+        }
+    }
+
+    private static void runSolrBackupMigration(
+        Args arguments,
+        OpenSearchClient targetClient,
+        Supplier<IJsonTransformer> docTransformerSupplier,
+        boolean useServerGeneratedIds,
+        RootDocumentMigrationContext context
+    ) {
+        if (arguments.coordinatorArgs.host == null) {
+            throw new ParameterException(
+                "When source version is SOLR, --coordinator-host must be provided for work coordination."
+            );
+        }
+
+        // Solr client for schema fetch (optional — if source is unavailable, use empty schema)
+        SolrClient solrClient = null;
+        if (arguments.sourceArgs.host != null) {
+            solrClient = new SolrClient(
+                arguments.sourceArgs.host,
+                arguments.sourceArgs.username,
+                arguments.sourceArgs.password
+            );
+        }
+
+        // Resolve backup directory: local or S3
+        Path backupDir;
+        if (arguments.snapshotLocalDir != null) {
+            backupDir = Paths.get(arguments.snapshotLocalDir);
+            log.info("Starting Solr backup document migration from local dir: {}", backupDir);
+        } else if (arguments.s3RepoUri != null && arguments.s3Region != null && arguments.s3LocalDir != null) {
+            // Solr BACKUP API writes to s3://<bucket>/<backupName>/ (location=/ puts it at repo root).
+            // Derive the actual backup path from the bucket and snapshot name.
+            var repoUri = new S3Uri(arguments.s3RepoUri);
+            var backupS3Uri = "s3://" + repoUri.bucketName + "/" + arguments.snapshotName;
+            log.info("Downloading Solr backup from S3: {}", backupS3Uri);
+            var s3Repo = S3Repo.createRaw(
+                Paths.get(arguments.s3LocalDir),
+                new S3Uri(backupS3Uri),
+                arguments.s3Region,
+                arguments.s3Endpoint != null ? URI.create(arguments.s3Endpoint) : null
+            );
+            backupDir = s3Repo.downloadAllFiles();
+        } else {
+            throw new ParameterException(
+                "When source version is SOLR, provide either --snapshot-local-dir or S3 args (--s3-local-dir, --s3-repo-uri, --s3-region)."
+            );
+        }
+
+        try {
+            // Discover collections from backup directory structure
+            var collections = new java.util.ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
+            if (!arguments.indexAllowlist.isEmpty()) {
+                collections.retainAll(arguments.indexAllowlist);
+            }
+
+            // Restore UUID filenames and build document sources per collection
+            for (var collection : collections) {
+                SolrBackupSource.restoreFileNames(backupDir.resolve(collection));
+            }
+
+            // Build a combined SolrBackupSource for all collections
+            // Each collection's shards become work items via the IndexMetadata.Factory
+            var schemas = new java.util.LinkedHashMap<String, JsonNode>();
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            for (var collection : collections) {
+                if (solrClient != null) {
+                    try {
+                        schemas.put(collection, solrClient.getSchema(collection));
+                    } catch (Exception e) {
+                        log.warn("Failed to fetch schema for {} from source, falling back to backup schema", collection, e);
+                        schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
+                    }
+                } else {
+                    schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
+                }
+            }
+
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas);
+            var documentSource = new SolrMultiCollectionSource(backupDir, schemas);
+
+            // Now flow through the standard coordinator path
+            var targetConnectionContext = arguments.targetArgs.toConnectionContext();
+            var targetVersion = targetClient.getClusterVersion();
+            var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
+
+            var workerId = ProcessHelpers.getNodeInstanceName();
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+            var progressCursor = new AtomicReference<WorkItemCursor>();
+            var cancellationRunnableRef = new AtomicReference<Runnable>();
+            var workItemTimeProvider = new WorkItemTimeProvider();
+            var completionRetryConfig = new OpenSearchWorkCoordinator.CompletionRetryConfig(
+                arguments.coordinatorRetryMaxRetries,
+                arguments.coordinatorRetryInitialDelayMs,
+                arguments.coordinatorRetryMaxDelayMs);
+            var coordinatorFactory = new WorkCoordinatorFactory(
+                coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig);
+            var cleanShutdownCompleted = new AtomicBoolean(false);
+            var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
+            var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
+
+            try (var workCoordinator = coordinatorFactory.get(
+                     new CoordinateWorkHttpClient(coordinatorInfo.connectionContext()),
+                     TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                     workerId,
+                     Clock.systemUTC(),
+                     workItemRef::set);
+                 var processManager = new LeaseExpireTrigger(
+                    w -> exitOnLeaseTimeout(
+                            workItemRef, workCoordinator, w, progressCursor, workItemTimeProvider,
+                            arguments.initialLeaseDuration,
+                            () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
+                            cleanShutdownCompleted,
+                            context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
+                    Clock.systemUTC())) {
+
+                var scopedWorkCoordinator = prepareWorkCoordination(
+                    workCoordinator, processManager, indexMetadataFactory,
+                    arguments.snapshotName, arguments.indexAllowlist, context);
+
+                var runner = DocumentMigrationBootstrap.builder()
+                    .targetClient(targetClient)
+                    .snapshotName(arguments.snapshotName)
+                    .maxDocsPerBatch(arguments.numDocsPerBulkRequest)
+                    .maxBytesPerBatch(arguments.numBytesPerBulkRequest)
+                    .batchConcurrency(arguments.maxConnections)
+                    .transformerSupplier(docTransformerSupplier)
+                    .allowServerGeneratedIds(useServerGeneratedIds)
+                    .allowlist(allowlist)
+                    .externalDocumentSource(documentSource)
+                    .workCoordinator(scopedWorkCoordinator)
+                    .workItemTimeProvider(workItemTimeProvider)
+                    .maxInitialLeaseDuration(arguments.initialLeaseDuration)
+                    .cursorConsumer(progressCursor::set)
+                    .cancellationTriggerConsumer(cancellationRunnableRef::set)
+                    .build();
+
+                runner.migrateOneShard(context::createReindexContext);
+                cleanShutdownCompleted.set(true);
+            }
+            log.info("Solr backup document migration completed successfully");
+        } catch (NoWorkLeftException e) {
+            log.info("No more Solr work items to process: {}", e.getMessage());
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to migrate Solr backup", e);
+        }
+    }
 
     public static CompletionStatus runWithPipeline(
         SnapshotExtractor extractor,

@@ -1,6 +1,7 @@
 import {
     ARGO_MIGRATION_CONFIG,
-    OVERALL_MIGRATION_CONFIG, zodSchemaToJsonSchema
+    OVERALL_MIGRATION_CONFIG,
+    zodSchemaToJsonSchema
 } from "../src";
 import {z} from "zod";
 

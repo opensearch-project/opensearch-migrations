@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.time.Duration;
 import java.util.HashSet;
 
 import org.opensearch.migrations.Flavor;
@@ -48,12 +49,13 @@ public class ClusterVersionDetector {
                 }
                 return Mono.error(new UnexpectedStatusCode(resp));
             })
-            .doOnError(e -> log.atWarn()
-                .setMessage("Check cluster version failed")
+            .doOnError(e -> log.atDebug()
+                .setMessage("ES/OS version detection failed, will try Solr detection")
                 .setCause(e)
                 .log())
             .retryWhen(RETRY_STRATEGY)
-            .block();
+            .onErrorResume(e -> detectSolrVersion(client))
+            .block(Duration.ofSeconds(30));
 
         // Compatibility mode is only enabled on OpenSearch clusters responding with the version of 7.10.2
         if (!VersionMatchers.isES_7_10.test(versionFromRootApi)) {
@@ -82,7 +84,35 @@ public class ClusterVersionDetector {
                 assert versionFromRootApi != null;
                 return Mono.just(versionFromRootApi);
             })
-            .block();
+            .block(Duration.ofSeconds(30));
+    }
+
+    private static Mono<Version> detectSolrVersion(RestClient client) {
+        return client.getAsync("solr/admin/info/system", null)
+            .flatMap(resp -> {
+                if (resp.statusCode != 200) {
+                    return Mono.error(new UnexpectedStatusCode(resp));
+                }
+                try {
+                    var body = objectMapper.readTree(resp.body);
+                    var specVersion = body.path("lucene").path("solr-spec-version").asText(null);
+                    if (specVersion == null) {
+                        return Mono.error(new RuntimeException("No solr-spec-version found in Solr system info"));
+                    }
+                    var parts = specVersion.split("[.\\-]");
+                    var version = Version.builder()
+                        .flavor(Flavor.SOLR)
+                        .major(Integer.parseInt(parts[0]))
+                        .minor(parts.length > 1 ? Integer.parseInt(parts[1]) : 0)
+                        .patch(parts.length > 2 ? Integer.parseInt(parts[2]) : 0)
+                        .build();
+                    log.atInfo().setMessage("Detected Solr version: {}").addArgument(version).log();
+                    return Mono.just(version);
+                } catch (Exception e) {
+                    log.error("Unable to parse Solr version from response", e);
+                    return Mono.error(new UnexpectedStatusCode(resp));
+                }
+            });
     }
 
     private static Mono<Version> versionFromResponse(HttpResponse resp, RestClient client) {

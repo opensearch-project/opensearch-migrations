@@ -348,6 +348,10 @@
               "name": "coordinatorUid"
             },
             {
+              "name": "sourceEndpoint",
+              "value": ""
+            },
+            {
               "name": "imageReindexFromSnapshotLocation"
             },
             {
@@ -407,7 +411,7 @@
                   },
                   {
                     "name": "rfsJsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorAwsServiceSigningName\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['service'], \"coordinatorAwsRegion\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorCaCert\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? (sprig.dict(\"coordinatorHost\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['endpoint'])) : ({}))), sprig.dict(\"coordinatorInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.rfsCoordinatorConfig))))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'podReplicas', 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'useTargetClusterForWorkCoordination', 'resources')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion, \"sessionName\", inputs.parameters.sessionName, \"luceneDir\", '/tmp', \"cleanLocalDirs\", true), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : ({}))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorAwsServiceSigningName\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['service'], \"coordinatorAwsRegion\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']) ? (sprig.dict(\"coordinatorCaCert\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.rfsCoordinatorConfig)) ? (sprig.dict(\"coordinatorHost\", fromJSON(inputs.parameters.rfsCoordinatorConfig)['endpoint'])) : ({}))), sprig.dict(\"coordinatorInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.rfsCoordinatorConfig))))), sprig.omit(fromJSON(inputs.parameters.documentBackfillConfig), 'podReplicas', 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'useTargetClusterForWorkCoordination', 'resources')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion, \"sessionName\", inputs.parameters.sessionName, \"luceneDir\", '/tmp', \"cleanLocalDirs\", true), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint)))))}}"
                   },
                   {
                     "name": "resources",
@@ -474,6 +478,10 @@
               "name": "coordinatorUid"
             },
             {
+              "name": "sourceEndpoint",
+              "value": ""
+            },
+            {
               "name": "imageReindexFromSnapshotLocation"
             },
             {
@@ -532,6 +540,10 @@
                   {
                     "name": "coordinatorUid",
                     "value": "{{inputs.parameters.coordinatorUid}}"
+                  },
+                  {
+                    "name": "sourceEndpoint",
+                    "value": "{{inputs.parameters.sourceEndpoint}}"
                   },
                   {
                     "name": "imageReindexFromSnapshotLocation",
@@ -682,6 +694,10 @@
               "name": "crdUid"
             },
             {
+              "name": "sourceEndpoint",
+              "value": ""
+            },
+            {
               "name": "imageReindexFromSnapshotLocation"
             },
             {
@@ -772,6 +788,10 @@
                   {
                     "name": "coordinatorUid",
                     "value": "{{inputs.parameters.coordinatorUid}}"
+                  },
+                  {
+                    "name": "sourceEndpoint",
+                    "value": "{{inputs.parameters.sourceEndpoint}}"
                   },
                   {
                     "name": "imageReindexFromSnapshotLocation",

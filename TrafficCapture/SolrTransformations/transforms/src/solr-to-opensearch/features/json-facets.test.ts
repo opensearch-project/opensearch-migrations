@@ -935,3 +935,284 @@ describe('edge cases and warning paths', () => {
     expect(ctx.body.has('aggs')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Nested facets (sub-facets via `facet` key)
+// ---------------------------------------------------------------------------
+
+describe('nested facets (sub-facets)', () => {
+  describe('terms facet with nested sub-facets', () => {
+    it('should produce nested aggs for a terms facet with a nested terms sub-facet', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'terms',
+          field: 'category',
+          facet: new Map<string, any>([
+            ['brands', new Map<string, any>([
+              ['type', 'terms'],
+              ['field', 'brand'],
+              ['limit', 5],
+            ])],
+          ]),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('terms')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(true);
+
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('brands')).toBe(true);
+
+      const brandsAgg = subAggs.get('brands');
+      expect(brandsAgg.has('terms')).toBe(true);
+      expect(brandsAgg.get('terms').get('field')).toBe('brand');
+      expect(brandsAgg.get('terms').get('size')).toBe(5);
+    });
+
+    it('should not set aggs when facet sub-map is empty', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'terms',
+          field: 'category',
+          facet: new Map(),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('terms')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(false);
+    });
+
+    it('should not set aggs when facet key is absent', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({ type: 'terms', field: 'category' }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('aggs')).toBe(false);
+    });
+
+    it('should not warn about facet as an unknown key', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'terms',
+          field: 'category',
+          facet: new Map([
+            ['sub', new Map([['type', 'terms'], ['field', 'brand']])],
+          ]),
+        }),
+      );
+      for (const call of warnSpy.mock.calls) {
+        expect(call[0]).not.toContain('Unprocessed keys');
+      }
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('range facet (histogram) with nested sub-facets', () => {
+    it('should produce nested aggs for a histogram facet with a nested terms sub-facet', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'range',
+          field: 'price',
+          start: 0,
+          end: 100,
+          gap: 25,
+          facet: new Map([
+            ['top_brands', new Map([
+              ['type', 'terms'],
+              ['field', 'brand'],
+            ])],
+          ]),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('histogram')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(true);
+
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('top_brands')).toBe(true);
+      expect(subAggs.get('top_brands').get('terms').get('field')).toBe('brand');
+    });
+  });
+
+  describe('range facet (arbitrary ranges) with nested sub-facets', () => {
+    it('should produce nested aggs for an arbitrary range facet with a nested terms sub-facet', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'range',
+          field: 'price',
+          ranges: ['[0,50)', '[50,100)'],
+          facet: new Map([
+            ['sellers', new Map([
+              ['type', 'terms'],
+              ['field', 'seller'],
+            ])],
+          ]),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('range')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(true);
+
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('sellers')).toBe(true);
+      expect(subAggs.get('sellers').get('terms').get('field')).toBe('seller');
+    });
+  });
+
+  describe('range facet (date_histogram) with nested sub-facets', () => {
+    it('should produce nested aggs for a date_histogram facet with a nested terms sub-facet', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'range',
+          field: 'created_at',
+          start: '2024-01-01T00:00:00Z',
+          end: '2024-12-31T00:00:00Z',
+          gap: '+1MONTH',
+          facet: new Map([
+            ['authors', new Map([
+              ['type', 'terms'],
+              ['field', 'author'],
+            ])],
+          ]),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('date_histogram')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(true);
+
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('authors')).toBe(true);
+      expect(subAggs.get('authors').get('terms').get('field')).toBe('author');
+    });
+  });
+
+  describe('query facet with nested sub-facets', () => {
+    it('should produce nested aggs for a query facet with a nested terms sub-facet', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'query',
+          q: 'status:active',
+          facet: new Map([
+            ['categories', new Map([
+              ['type', 'terms'],
+              ['field', 'category'],
+            ])],
+          ]),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('filter')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(true);
+
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('categories')).toBe(true);
+      expect(subAggs.get('categories').get('terms').get('field')).toBe('category');
+    });
+  });
+
+  describe('multi-level nesting', () => {
+    it('should handle three levels of nested facets', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'terms',
+          field: 'category',
+          facet: new Map([
+            ['brands', new Map<string, any>([
+              ['type', 'terms'],
+              ['field', 'brand'],
+              ['facet', new Map([
+                ['price_ranges', new Map<string, any>([
+                  ['type', 'range'],
+                  ['field', 'price'],
+                  ['start', 0],
+                  ['end', 100],
+                  ['gap', 25],
+                ])],
+              ])],
+            ])],
+          ]),
+        }),
+      );
+
+      // Level 1: category terms
+      const level1 = aggs.get(FACET_NAME);
+      expect(level1.has('terms')).toBe(true);
+      expect(level1.has('aggs')).toBe(true);
+
+      // Level 2: brand terms
+      const level2 = level1.get('aggs').get('brands');
+      expect(level2.has('terms')).toBe(true);
+      expect(level2.get('terms').get('field')).toBe('brand');
+      expect(level2.has('aggs')).toBe(true);
+
+      // Level 3: price histogram
+      const level3 = level2.get('aggs').get('price_ranges');
+      expect(level3.has('histogram')).toBe(true);
+      expect(level3.get('histogram').get('field')).toBe('price');
+      expect(level3.has('aggs')).toBe(false);
+    });
+
+    it('should handle multiple sibling sub-facets', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'terms',
+          field: 'category',
+          facet: new Map([
+            ['brands', new Map([
+              ['type', 'terms'],
+              ['field', 'brand'],
+            ])],
+            ['price_ranges', new Map<string, any>([
+              ['type', 'range'],
+              ['field', 'price'],
+              ['start', 0],
+              ['end', 100],
+              ['gap', 25],
+            ])],
+          ]),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('brands')).toBe(true);
+      expect(subAggs.has('price_ranges')).toBe(true);
+      expect(subAggs.get('brands').get('terms').get('field')).toBe('brand');
+      expect(subAggs.get('price_ranges').get('histogram').get('field')).toBe('price');
+    });
+  });
+
+  describe('nested facets from query-string param', () => {
+    it('should handle nested facets parsed from a JSON query-string param', () => {
+      const ctx = ctxWithParamFacet({
+        type: 'terms',
+        field: 'category',
+        facet: {
+          brands: {
+            type: 'terms',
+            field: 'brand',
+            limit: 3,
+          },
+        },
+      });
+      request.apply(ctx);
+
+      const outerAgg = ctx.body.get('aggs').get(FACET_NAME);
+      expect(outerAgg.has('terms')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(true);
+
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('brands')).toBe(true);
+      expect(subAggs.get('brands').get('terms').get('field')).toBe('brand');
+      expect(subAggs.get('brands').get('terms').get('size')).toBe(3);
+    });
+  });
+});

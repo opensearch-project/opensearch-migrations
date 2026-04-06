@@ -110,30 +110,15 @@ spec:
           operator: "Equal"
           value: "dedicated"
           effect: "NoSchedule"
-      # Prefer dedicated small nodes, but allow fallback to any node
       affinity:
         nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100  # Highest preference
-              preference:
-                matchExpressions:
-                  - key: karpenter.sh/nodepool
-                    operator: In
-                    values: ["dedicated-small-instance-migration-console-pool"]
-            - weight: 50   # Lower preference fallback
-              preference:
-                matchExpressions:
-                  - key: karpenter.sh/nodepool
-                    operator: In
-                    values: ["general-purpose"]
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
                   - key: karpenter.sh/nodepool
                     operator: In
-                    values:  # REQUIRED: Must be one of these pools
+                    values:
                       - "dedicated-small-instance-migration-console-pool"
-                      - "general-purpose"
       {{- end }}
       containers:
         - name: console
