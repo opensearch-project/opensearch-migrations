@@ -99,13 +99,15 @@ class TestResetCommandList:
 
 
 class TestResetCommandDelete:
+    @patch('console_link.workflow.commands.reset._list_migration_resources')
     @patch('console_link.workflow.commands.reset._wait_until_gone')
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._delete_crd')
     @patch('console_link.workflow.commands.reset._find_resource_by_name')
-    def test_delete_specific_resource(self, mock_find, mock_delete, mock_k8s, mock_wait):
+    def test_delete_specific_resource(self, mock_find, mock_delete, mock_k8s, mock_wait, mock_list):
         mock_find.return_value = ('capturedtraffics', 'source-proxy', 'Ready')
         mock_delete.return_value = True
+        mock_list.return_value = []  # no live dependents
 
         runner = CliRunner()
         result = runner.invoke(workflow_cli, ['reset', 'source-proxy'])

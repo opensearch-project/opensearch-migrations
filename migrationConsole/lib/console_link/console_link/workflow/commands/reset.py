@@ -210,9 +210,13 @@ def _delete_targets(targets, namespace):
     '--all', 'reset_all', is_flag=True, default=False,
     help='Delete all migration resources and workflows',
 )
+@click.option(
+    '--force', is_flag=True, default=False,
+    help='Skip dependency checks on targeted reset',
+)
 @click.option('--namespace', default='ma')
 @click.pass_context
-def reset_command(ctx, path, reset_all, namespace):
+def reset_command(ctx, path, reset_all, force, namespace):
     """Reset migration resources by deleting CRDs.
 
     With no arguments, lists migration resources and their status.
@@ -233,17 +237,29 @@ def reset_command(ctx, path, reset_all, namespace):
             if not targets:
                 click.echo(f"No resources matching '{path}'.")
                 return
-            # Warn about dependents that will need to be redone
-            target_plurals = {p for p, _, _ in targets}
-            affected = set()
-            for p in target_plurals:
-                affected.update(DEPENDENTS.get(p, []))
-            affected -= target_plurals
-            if affected:
-                names = [DISPLAY_NAMES.get(p, p) for p in affected]
-                click.echo(
-                    f"  ⚠ Will require redo of: {', '.join(sorted(names))}"
-                )
+            # Block if live dependents exist (unless --force or --all)
+            if not force:
+                target_plurals = {p for p, _, _ in targets}
+                dep_plurals = set()
+                for p in target_plurals:
+                    dep_plurals.update(DEPENDENTS.get(p, []))
+                dep_plurals -= target_plurals
+                if dep_plurals:
+                    all_crds = _list_migration_resources(namespace)
+                    blocking = [
+                        (p, n) for p, n, _ in all_crds
+                        if p in dep_plurals
+                    ]
+                    if blocking:
+                        click.echo("Cannot delete — dependent resources exist:")
+                        for p, n in blocking:
+                            click.echo(
+                                f"  {DISPLAY_NAMES.get(p, p)}: {n}"
+                            )
+                        click.echo()
+                        click.echo("Delete dependents first, or use --force to skip this check.")
+                        ctx.exit(ExitCode.FAILURE.value)
+                        return
             if not _delete_targets(targets, namespace):
                 ctx.exit(ExitCode.FAILURE.value)
             return
