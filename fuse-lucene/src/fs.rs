@@ -39,6 +39,9 @@ pub struct SnapshotFs {
     inodes: RwLock<Vec<InodeEntry>>,
     shard_file_inodes: RwLock<HashMap<(String, u32), Vec<u64>>>,
     loaded_shards: RwLock<HashMap<(String, u32), bool>>,
+    /// Cache of open file handles to avoid repeated open/close on S3-backed blobs.
+    /// Key is the blob path, value is the open File handle.
+    blob_cache: std::sync::Mutex<HashMap<PathBuf, fs::File>>,
 }
 
 impl SnapshotFs {
@@ -66,6 +69,7 @@ impl SnapshotFs {
             inodes: RwLock::new(inodes),
             shard_file_inodes: RwLock::new(HashMap::new()),
             loaded_shards: RwLock::new(HashMap::new()),
+            blob_cache: std::sync::Mutex::new(HashMap::new()),
         }
     }
 
@@ -266,20 +270,34 @@ impl SnapshotFs {
             let available = this_part_len.saturating_sub(offset_in_part);
             let to_read = std::cmp::min(remaining, available) as usize;
 
-            match fs::File::open(&blob_path) {
-                Ok(mut f) => {
-                    use std::io::Seek;
-                    if let Err(e) = f.seek(io::SeekFrom::Start(offset_in_part)) {
-                        error!("Failed to seek in blob {:?}: {}", blob_path, e);
-                        break;
-                    }
-                    let mut buf = vec![0u8; to_read];
-                    match f.read_exact(&mut buf) {
-                        Ok(()) => result.extend_from_slice(&buf),
-                        Err(e) => { error!("Failed to read blob {:?}: {}", blob_path, e); break; }
+            // Get or open a cached file handle. We use pread (read_at) which is
+            // thread-safe on the same fd — no seek needed, no mutex contention.
+            let file = {
+                let cache = self.blob_cache.lock().unwrap();
+                cache.get(&blob_path).map(|f| f.try_clone().ok()).flatten()
+            };
+            let file = match file {
+                Some(f) => f,
+                None => {
+                    match fs::File::open(&blob_path) {
+                        Ok(f) => {
+                            let cloned = f.try_clone().ok();
+                            self.blob_cache.lock().unwrap().insert(blob_path.clone(), f);
+                            match cloned {
+                                Some(c) => c,
+                                None => { error!("Failed to clone fd for {:?}", blob_path); break; }
+                            }
+                        }
+                        Err(e) => { error!("Failed to open blob {:?}: {}", blob_path, e); break; }
                     }
                 }
-                Err(e) => { error!("Failed to open blob {:?}: {}", blob_path, e); break; }
+            };
+
+            use std::os::unix::fs::FileExt;
+            let mut buf = vec![0u8; to_read];
+            match file.read_at(&mut buf, offset_in_part) {
+                Ok(n) => result.extend_from_slice(&buf[..n]),
+                Err(e) => { error!("Failed to read blob {:?}: {}", blob_path, e); break; }
             }
 
             file_offset += to_read as u64;

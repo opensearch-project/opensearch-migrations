@@ -57,4 +57,8 @@ if [ -n "${S3_BUCKET:-}" ]; then
     fi
 fi
 
-exec snapshot-fuse "$@"
+# Pass tunable parameters from env vars
+FUSE_EXTRA_ARGS=""
+[ -n "${FUSE_THREADS:-}" ] && FUSE_EXTRA_ARGS="${FUSE_EXTRA_ARGS} --threads ${FUSE_THREADS}"
+
+exec snapshot-fuse "$@" ${FUSE_EXTRA_ARGS}
