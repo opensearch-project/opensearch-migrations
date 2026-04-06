@@ -222,6 +222,14 @@ class TestRunner:
                 f"This may indicate webhook or finalizer issues (e.g. Kyverno)."
             ) from helm_uninstall_error
 
+    def workflow_reset(self) -> None:
+        """Run 'workflow reset --all' inside the migration console to tear down CRDs and Argo workflows."""
+        logger.info("Running 'workflow reset --all' to clean up migration resources")
+        try:
+            self.k8s_service.exec_migration_console_cmd(command_list=["workflow", "reset", "--all"])
+        except Exception as e:
+            logger.warning(f"workflow reset --all failed: {e}")
+
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
 
@@ -315,6 +323,7 @@ class TestRunner:
                 self.copy_logs()
 
             if not skip_delete:
+                self.workflow_reset()
                 self.cleanup_deployment()
 
         self._print_summary_table(reports=test_reports)
