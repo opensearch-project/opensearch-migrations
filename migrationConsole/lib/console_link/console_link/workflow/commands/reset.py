@@ -192,21 +192,53 @@ def _resolve_targets(namespace, path):
 
 
 def _delete_targets(targets, namespace):
-    """Delete a list of targets and wait. Targets are (plural, name, ...)."""
-    failed = False
-    for item in targets:
-        plural, name = item[0], item[1]
-        if _delete_crd(namespace, plural, name):
-            click.echo(f"  ✓ Deleted {name}")
-        else:
-            click.echo(f"  ✗ Failed to delete {name}", err=True)
-            failed = True
+    """Delete targets in dependency order (leaves first), waiting per layer.
 
-    by_plural = {}
+    Groups targets into layers: resources with no dependents in the set
+    are deleted first, then their parents, etc. Independent resources
+    within a layer are deleted in parallel.
+    """
+    remaining = {t[1]: t for t in targets}
+    # Build dependency edges within the target set
+    deps_in_set = {}
     for item in targets:
-        by_plural.setdefault(item[0], []).append(item[1])
-    for plural, names in by_plural.items():
-        _wait_until_gone(namespace, plural, names)
+        name, deps = item[1], item[3] if len(item) > 3 else []
+        deps_in_set[name] = {d for d in deps if d in remaining}
+
+    failed = False
+    while remaining:
+        # Find leaves: targets with no deps remaining in the set
+        leaves = [
+            n for n, deps in deps_in_set.items()
+            if n in remaining and not deps
+        ]
+        if not leaves:
+            # Cycle or error — delete everything remaining
+            leaves = list(remaining.keys())
+
+        # Delete this layer
+        for name in leaves:
+            item = remaining[name]
+            if _delete_crd(namespace, item[0], name):
+                click.echo(f"  ✓ Deleted {name}")
+            else:
+                click.echo(f"  ✗ Failed to delete {name}", err=True)
+                failed = True
+
+        # Wait for this layer to be fully gone
+        by_plural = {}
+        for name in leaves:
+            item = remaining[name]
+            by_plural.setdefault(item[0], []).append(name)
+        for plural, names in by_plural.items():
+            _wait_until_gone(namespace, plural, names)
+
+        # Remove deleted from remaining and from dep edges
+        for name in leaves:
+            del remaining[name]
+            del deps_in_set[name]
+        for deps in deps_in_set.values():
+            deps -= set(leaves)
 
     return not failed
 
@@ -259,8 +291,9 @@ def reset_command(ctx, path, reset_all, cascade, namespace):
                     r for r in all_crds if r[1] in dep_names
                 ]
                 if cascade:
-                    # Delete dependents first, then targets
-                    targets = blocking + list(targets)
+                    # Merge dependents into targets — topo delete handles order
+                    target_names.update(dep_names)
+                    targets = [r for r in all_crds if r[1] in target_names]
                 else:
                     click.echo("Cannot delete — dependent resources exist:")
                     for p, n, _, _ in blocking:
