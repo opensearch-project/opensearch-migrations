@@ -220,5 +220,4 @@ jobs:
             kiro-cli/build/kiro-assistant.tar.gz
             migration-assistant-${{ steps.get_data.outputs.version }}.tgz
             deployment/k8s/aws/dist/aws-bootstrap.sh
-            deployment/k8s/dashboards/*.json
             **/*.spdx.json
