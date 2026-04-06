@@ -1,4 +1,7 @@
 {{- if .Values.cloudwatchDashboards.enabled }}
+{{- $region := required "Missing required value: .Values.aws.region" .Values.aws.region }}
+{{- $account := required "Missing required value: .Values.aws.account" (toString .Values.aws.account) }}
+{{- $stage := required "Missing required value: .Values.stageName" .Values.stageName }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -39,25 +42,14 @@ spec:
             - -c
             - |
               set -e
-              deploy_dashboard() {
-                local name="$1"
-                local file="$2"
-                local full_name="MA-${STAGE_NAME}-${AWS_REGION}-${name}"
-                echo "Deploying dashboard: ${full_name}"
-                aws cloudwatch put-dashboard \
-                  --dashboard-name "${full_name}" \
-                  --dashboard-body "file://${file}" \
-                  --region "${AWS_REGION}"
-                echo "OK: Dashboard deployed: ${full_name}"
-              }
-              deploy_dashboard "CaptureReplay" "/dashboards/capture-replay-dashboard.json"
-              deploy_dashboard "ReindexFromSnapshot" "/dashboards/reindex-from-snapshot-dashboard.json"
-          volumeMounts:
-            - name: dashboards
-              mountPath: /dashboards
-              readOnly: true
-      volumes:
-        - name: dashboards
-          configMap:
-            name: cloudwatch-dashboards-config
+              aws cloudwatch put-dashboard \
+                --dashboard-name "MA-${STAGE_NAME}-${AWS_REGION}-CaptureReplay" \
+                --dashboard-body {{ .Files.Get "files/cloudwatch-dashboards/capture-replay-dashboard.json" | replace "placeholder-region" $region | replace "placeholder-account-id" $account | replace "placeholder-stage" $stage | replace "placeholder-qualifier" $stage | trim | toJson }} \
+                --region "${AWS_REGION}"
+              echo "OK: CaptureReplay dashboard deployed"
+              aws cloudwatch put-dashboard \
+                --dashboard-name "MA-${STAGE_NAME}-${AWS_REGION}-ReindexFromSnapshot" \
+                --dashboard-body {{ .Files.Get "files/cloudwatch-dashboards/reindex-from-snapshot-dashboard.json" | replace "placeholder-region" $region | replace "placeholder-account-id" $account | replace "placeholder-stage" $stage | replace "placeholder-qualifier" $stage | trim | toJson }} \
+                --region "${AWS_REGION}"
+              echo "OK: ReindexFromSnapshot dashboard deployed"
 {{- end }}
