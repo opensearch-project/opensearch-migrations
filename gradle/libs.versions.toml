@@ -1,7 +1,7 @@
 [versions]
 aws-crt = "0.44.0"
 aws-msk-iam-auth = "2.3.4"
-aws-sdk = "2.42.25"
+aws-sdk = "2.42.28"
 bouncycastle = "1.83"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
@@ -166,6 +166,7 @@ testcontainers = {module = "org.testcontainers:testcontainers", version.ref = "t
 testcontainers-junit-jupiter = {module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers-modules" }
 testcontainers-kafka = {module = "org.testcontainers:kafka", version.ref = "testcontainers-modules" }
 testcontainers-opensearch = {module = "org.opensearch:opensearch-testcontainers", version.ref = "opensearch-testcontainers" }
+testcontainers-solr = {module = "org.testcontainers:solr", version.ref = "testcontainers-modules" }
 testcontainers-toxiproxy = {module = "org.testcontainers:toxiproxy", version.ref = "testcontainers-modules" }
 toxiproxy = {module = "eu.rekawek.toxiproxy:toxiproxy-java", version.ref = "toxiproxy" }
 

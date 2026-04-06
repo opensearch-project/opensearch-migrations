@@ -11,6 +11,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _is_solr(cluster: Cluster) -> bool:
+    """Check if the cluster is a Solr instance based on its configured version."""
+    return isinstance(cluster.version, str) and cluster.version.upper().startswith("SOLR")
+
+
 @dataclass
 class ConnectionResult:
     connection_message: str
@@ -50,6 +55,8 @@ def call_api(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, head
 
 def cat_indices(cluster: Cluster, refresh=False, as_json=False):
     try:
+        if _is_solr(cluster):
+            return _solr_cat_indices(cluster, as_json)
         if refresh and not cluster.is_serverless:
             cluster.call_api('/_refresh')
         elif refresh and cluster.is_serverless:
@@ -66,6 +73,64 @@ def cat_indices(cluster: Cluster, refresh=False, as_json=False):
         return f"Error: Unable to perform cat-indices command with message: {e}"
 
 
+def _solr_cat_indices(cluster: Cluster, as_json=False):
+    """List Solr collections/cores with doc counts. Tries SolrCloud first, falls back to standalone."""
+    collections = _solr_list_collections_or_cores(cluster)
+
+    if as_json:
+        result = []
+        for coll in collections:
+            doc_count = _solr_collection_doc_count(cluster, coll)
+            result.append({
+                "index": coll,
+                "docs.count": str(doc_count),
+            })
+        return result
+    else:
+        lines = ["collection           docs.count"]
+        for coll in collections:
+            doc_count = _solr_collection_doc_count(cluster, coll)
+            lines.append(f"{coll:<20} {doc_count:>10}")
+        return ("\n".join(lines) + "\n").encode()
+
+
+def _solr_list_collections_or_cores(cluster: Cluster) -> list:
+    """List collections (SolrCloud) or cores (standalone). Tries both APIs."""
+    try:
+        r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+        if r.status_code == 200:
+            collections = r.json().get("collections", [])
+            if collections:
+                return collections
+    except Exception:
+        pass
+    try:
+        r = cluster.call_api("/solr/admin/cores?action=STATUS&wt=json")
+        return list(r.json().get("status", {}).keys())
+    except Exception:
+        return []
+
+
+def _solr_collection_doc_count(cluster: Cluster, collection: str) -> int:
+    """Get doc count for a Solr collection via select query."""
+    try:
+        r = cluster.call_api(f"/solr/{collection}/select?q=*:*&rows=0&wt=json")
+        return r.json().get("response", {}).get("numFound", 0)
+    except Exception:
+        return 0
+
+
+def _solr_connection_check(cluster: Cluster, r, caught_exception) -> ConnectionResult:
+    if caught_exception is None and r is not None:
+        response_json = r.json()
+        version = response_json.get("lucene", {}).get("solr-spec-version", "unknown")
+        return ConnectionResult(connection_message="Successfully connected!",
+                                connection_established=True,
+                                cluster_version=version)
+    return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {caught_exception}",
+                            connection_established=False)
+
+
 def connection_check(cluster: Cluster) -> ConnectionResult:
     # Probe GET / — mirrors Java getClusterVersion logic.
     # For non-serverless: returns the response directly (avoids a second GET /).
@@ -73,9 +138,15 @@ def connection_check(cluster: Cluster) -> ConnectionResult:
     caught_exception = None
     r = None
     try:
-        r = cluster.call_api("/", raise_error=False, timeout=5)
+        if _is_solr(cluster):
+            r = cluster.call_api("/solr/admin/info/system", timeout=3)
+        else:
+            r = cluster.call_api("/", raise_error=False, timeout=5)
     except Exception as e:
         caught_exception = e
+
+    if _is_solr(cluster):
+        return _solr_connection_check(cluster, r, caught_exception)
 
     if caught_exception is None and r is not None and r.status_code == 404:
         # Serverless — detect collection type (skip root probe, we already know it's 404)

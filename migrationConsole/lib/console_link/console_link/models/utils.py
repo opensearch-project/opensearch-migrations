@@ -163,6 +163,10 @@ def map_cluster_from_workflow_config(workflow_config_obj) -> dict:
         "endpoint": workflow_config_obj["endpoint"]
     }
 
+    # Map version if present
+    if "version" in workflow_config_obj:
+        mapped_config["version"] = workflow_config_obj["version"]
+
     # Map allowInsecure -> allow_insecure
     if "allowInsecure" in workflow_config_obj:
         mapped_config["allow_insecure"] = workflow_config_obj["allowInsecure"]

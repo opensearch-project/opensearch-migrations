@@ -126,7 +126,7 @@ class TargetMetadataWriteEndToEndTest {
 
             assertThat("Should report already exists",
                 result.getFailureType(),
-                equalTo(org.opensearch.migrations.metadata.CreationResult.CreationFailureType.ALREADY_EXISTS));
+                equalTo(org.opensearch.migrations.metadata.CreationResult.CreationFailureType.INDEX_ALREADY_EXISTS));
         }
     }
 
