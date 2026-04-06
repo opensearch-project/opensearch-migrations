@@ -12,7 +12,7 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation
 data:
   capture-replay-dashboard.json: |
-    {{- .Files.Get "files/dashboards/capture-replay-dashboard.json" | replace "placeholder-region" $region | replace "placeholder-stage" $stage | replace "placeholder-qualifier" $stage | nindent 4 }}
+    {{- .Files.Get "files/cloudwatch-dashboards/capture-replay-dashboard.json" | replace "placeholder-region" $region | replace "placeholder-stage" $stage | replace "placeholder-qualifier" $stage | nindent 4 }}
   reindex-from-snapshot-dashboard.json: |
-    {{- .Files.Get "files/dashboards/reindex-from-snapshot-dashboard.json" | replace "placeholder-region" $region | replace "placeholder-account-id" $account | replace "placeholder-stage" $stage | replace "placeholder-qualifier" $stage | nindent 4 }}
+    {{- .Files.Get "files/cloudwatch-dashboards/reindex-from-snapshot-dashboard.json" | replace "placeholder-region" $region | replace "placeholder-account-id" $account | replace "placeholder-stage" $stage | replace "placeholder-qualifier" $stage | nindent 4 }}
 {{- end }}
