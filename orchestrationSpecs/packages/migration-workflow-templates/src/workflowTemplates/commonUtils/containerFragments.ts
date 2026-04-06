@@ -189,18 +189,19 @@ export function setupSnapshotFuseSidecar(
             // and each pod has its own FUSE mount in a per-pod subdirectory.
             command: ["sh", "-c"],
             args: [
-                "POD_MNT=/mnt/.pods/${POD_NAME}; " +
-                "REWRITTEN_ARGS=''; " +
-                "for arg in \"$@\"; do " +
-                "  case \"$arg\" in " +
-                "    ---INLINE-JSON) REWRITTEN_ARGS=\"${REWRITTEN_ARGS} ${arg}\" ;; " +
-                "    eyJ*) REWRITTEN_ARGS=\"${REWRITTEN_ARGS} $(echo $arg | base64 -d | " +
-                "      sed \"s|/mnt/lucene|${POD_MNT}/lucene|g\" | " +
-                "      sed \"s|/mnt/s3/|${POD_MNT}/s3/|g\" | base64 -w0)\" ;; " +
-                "    *) REWRITTEN_ARGS=\"${REWRITTEN_ARGS} ${arg}\" ;; " +
-                "  esac; " +
+                "P=/mnt/.pods/${POD_NAME}; " +
+                "NEW_ARGS=''; " +
+                "NEXT_IS_JSON=false; " +
+                "for a do " +
+                "  if $NEXT_IS_JSON; then " +
+                "    a=$(printf '%s' \"$a\" | base64 -d | " +
+                "      sed \"s|/mnt/lucene|$P/lucene|g;s|/mnt/s3/|$P/s3/|g\" | base64 -w0); " +
+                "    NEXT_IS_JSON=false; " +
+                "  fi; " +
+                "  case $a in ---INLINE-JSON) NEXT_IS_JSON=true;; esac; " +
+                "  NEW_ARGS=\"$NEW_ARGS \\\"$a\\\"\"; " +
                 "done; " +
-                "exec " + (command ?? []).join(" ") + " ${REWRITTEN_ARGS}",
+                "eval exec " + (command ?? []).join(" ") + " $NEW_ARGS",
                 "--",
                 ...(args ?? [])
             ],
