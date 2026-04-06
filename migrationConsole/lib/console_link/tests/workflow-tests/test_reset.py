@@ -34,6 +34,7 @@ class TestListMigrationCrds:
             'snapshotmigrations': [],
             'kafkaclusters': [],
             'approvalgates': [],
+            'datasnapshots': [],
         })
         mock_client.CustomObjectsApi.return_value = mock_custom
 
@@ -50,6 +51,7 @@ class TestListMigrationCrds:
             'snapshotmigrations': [],
             'kafkaclusters': [],
             'approvalgates': [],
+            'datasnapshots': [],
         })
         mock_client.CustomObjectsApi.return_value = mock_custom
 
