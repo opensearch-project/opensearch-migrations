@@ -14,6 +14,10 @@
           "value": "s3-snapshot-config"
         },
         {
+          "name": "s3TupleConfigMap",
+          "value": "migrations-default-s3-tuple-config"
+        },
+        {
           "name": "imageConfigMapName",
           "value": "migration-image-config"
         },
@@ -107,6 +111,42 @@
               "name": "replayerOptions"
             },
             {
+              "name": "defaultTupleS3Bucket",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.s3TupleConfigMap}}",
+                  "key": "TUPLE_S3_BUCKET"
+                }
+              }
+            },
+            {
+              "name": "defaultTupleS3Region",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.s3TupleConfigMap}}",
+                  "key": "TUPLE_S3_REGION"
+                }
+              }
+            },
+            {
+              "name": "defaultTupleS3Prefix",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.s3TupleConfigMap}}",
+                  "key": "TUPLE_S3_PREFIX"
+                }
+              }
+            },
+            {
+              "name": "defaultUseLocalStack",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.s3TupleConfigMap}}",
+                  "key": "USE_LOCAL_STACK"
+                }
+              }
+            },
+            {
               "name": "imageTrafficReplayerLocation"
             },
             {
@@ -150,23 +190,23 @@
                   },
                   {
                     "name": "tupleS3Bucket",
-                    "value": "{{=sprig.dig('tupleS3Bucket', '', fromJSON(inputs.parameters.replayerOptions))}}"
+                    "value": "{{=((0 == len(sprig.dig('tupleS3Bucket', '', fromJSON(inputs.parameters.replayerOptions)))) ? (inputs.parameters.defaultTupleS3Bucket) : (sprig.dig('tupleS3Bucket', '', fromJSON(inputs.parameters.replayerOptions))))}}"
                   },
                   {
                     "name": "tupleS3Region",
-                    "value": "{{=sprig.dig('tupleS3Region', '', fromJSON(inputs.parameters.replayerOptions))}}"
+                    "value": "{{=((0 == len(sprig.dig('tupleS3Region', '', fromJSON(inputs.parameters.replayerOptions)))) ? (inputs.parameters.defaultTupleS3Region) : (sprig.dig('tupleS3Region', '', fromJSON(inputs.parameters.replayerOptions))))}}"
                   },
                   {
                     "name": "tupleS3Prefix",
-                    "value": "{{=sprig.dig('tupleS3Prefix', 'tuples/', fromJSON(inputs.parameters.replayerOptions))}}"
+                    "value": "{{=((0 == len(sprig.dig('tupleS3Prefix', '', fromJSON(inputs.parameters.replayerOptions)))) ? (inputs.parameters.defaultTupleS3Prefix) : (sprig.dig('tupleS3Prefix', '', fromJSON(inputs.parameters.replayerOptions))))}}"
                   },
                   {
                     "name": "useLocalStack",
-                    "value": "{{=toJSON(sprig.dig('useLocalStack', false, fromJSON(inputs.parameters.replayerOptions)))}}"
+                    "value": "{{=toJSON(((inputs.parameters.defaultUseLocalStack == 'true') ? (true) : (sprig.dig('useLocalStack', false, fromJSON(inputs.parameters.replayerOptions)))))}}"
                   },
                   {
                     "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.dict(\"targetUri\", fromJSON(inputs.parameters.targetConfig)['endpoint'], \"insecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig))), (('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"sigv4AuthHeaderServiceRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service']+','+fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ({}))) : ({}))), sprig.omit(fromJSON(inputs.parameters.replayerOptions), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources', 'tupleS3Bucket', 'tupleS3Region', 'tupleS3Prefix', 'useLocalStack')), sprig.dict(\"kafkaTrafficBrokers\", fromJSON(inputs.parameters.kafkaConfig)['kafkaConnection'], \"kafkaTrafficTopic\", fromJSON(inputs.parameters.kafkaConfig)['kafkaTopic'], \"kafkaTrafficGroupId\", inputs.parameters.kafkaGroupId)), ((0 == len(sprig.dig('tupleS3Bucket', '', fromJSON(inputs.parameters.replayerOptions)))) ? (sprig.dict()) : (sprig.dict(\"tupleOutputDir\", '/mnt/s3/tuples')))))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.dict(\"targetUri\", fromJSON(inputs.parameters.targetConfig)['endpoint'], \"insecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig))), (('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"sigv4AuthHeaderServiceRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service']+','+fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ({}))) : ({}))), sprig.omit(fromJSON(inputs.parameters.replayerOptions), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'resources', 'tupleS3Bucket', 'tupleS3Region', 'tupleS3Prefix', 'useLocalStack')), sprig.dict(\"kafkaTrafficBrokers\", fromJSON(inputs.parameters.kafkaConfig)['kafkaConnection'], \"kafkaTrafficTopic\", fromJSON(inputs.parameters.kafkaConfig)['kafkaTopic'], \"kafkaTrafficGroupId\", inputs.parameters.kafkaGroupId)), ((0 == len(((0 == len(sprig.dig('tupleS3Bucket', '', fromJSON(inputs.parameters.replayerOptions)))) ? (inputs.parameters.defaultTupleS3Bucket) : (sprig.dig('tupleS3Bucket', '', fromJSON(inputs.parameters.replayerOptions)))))) ? (sprig.dict()) : (sprig.dict(\"tupleOutputDir\", '/mnt/s3/tuples')))))}}"
                   },
                   {
                     "name": "resources",

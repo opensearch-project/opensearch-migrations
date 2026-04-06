@@ -5,9 +5,11 @@ import {
     ResourceRequirementsType, ARGO_REPLAYER_OPTIONS, ARGO_REPLAYER_WORKFLOW_OPTION_KEYS, KAFKA_CLIENT_CONFIG,
 } from "@opensearch-migrations/schemas";
 import {
-    BaseExpression, Deployment,
+    AllowLiteralOrExpression,
+    BaseExpression, configMapKey, Deployment, defineParam,
     expr,
     IMAGE_PULL_POLICY,
+    InputParamDef,
     INTERNAL, makeDirectTypeProxy, makeStringTypeProxy,
     selectInputsForRegister, Serialized,
     typeToken,
@@ -163,6 +165,28 @@ function getReplayerDeploymentManifest
 }
 
 
+function defaultTupleS3Config(s3TupleConfigMap: AllowLiteralOrExpression<string>) {
+    return {
+        defaultTupleS3Bucket: defineParam({
+            type: typeToken<string>(),
+            from: configMapKey(s3TupleConfigMap, "TUPLE_S3_BUCKET")
+        }),
+        defaultTupleS3Region: defineParam({
+            type: typeToken<string>(),
+            from: configMapKey(s3TupleConfigMap, "TUPLE_S3_REGION")
+        }),
+        defaultTupleS3Prefix: defineParam({
+            type: typeToken<string>(),
+            from: configMapKey(s3TupleConfigMap, "TUPLE_S3_PREFIX")
+        }),
+        defaultUseLocalStack: defineParam({
+            type: typeToken<string>(),
+            from: configMapKey(s3TupleConfigMap, "USE_LOCAL_STACK")
+        }),
+    } as const;
+}
+
+
 export const Replayer = WorkflowBuilder.create({
     k8sResourceName: "replayer",
     serviceAccountName: "argo-workflow-executor"
@@ -217,33 +241,47 @@ export const Replayer = WorkflowBuilder.create({
         .addRequiredInput("name", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
+        // ConfigMap defaults for S3 tuple config — used when user doesn't override
+        .addInputsFromRecord(defaultTupleS3Config(t.inputs.workflowParameters.s3TupleConfigMap))
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
 
-        .addSteps(b => b
-            .addStep("deployReplayer", INTERNAL, "createDeployment", c =>
+        .addSteps(b => {
+            // Resolve effective values: user override wins, else ConfigMap default
+            const userBucket = expr.asString(expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["tupleS3Bucket"], ""));
+            const userRegion = expr.asString(expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["tupleS3Region"], ""));
+            const userPrefix = expr.asString(expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["tupleS3Prefix"], ""));
+            const effectiveBucket = expr.cast(expr.ternary(expr.isEmpty(userBucket), b.inputs.defaultTupleS3Bucket, userBucket)).to<string>();
+            const effectiveRegion = expr.cast(expr.ternary(expr.isEmpty(userRegion), b.inputs.defaultTupleS3Region, userRegion)).to<string>();
+            const effectivePrefix = expr.cast(expr.ternary(expr.isEmpty(userPrefix), b.inputs.defaultTupleS3Prefix, userPrefix)).to<string>();
+            const effectiveUseLocalStack = expr.ternary(
+                expr.equals(expr.cast(b.inputs.defaultUseLocalStack).to<string>(), expr.literal("true")),
+                expr.literal(true),
+                expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["useLocalStack"], false));
+
+            return b.addStep("deployReplayer", INTERNAL, "createDeployment", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     podReplicas: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["podReplicas"], 1),
                     jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["jvmArgs"], ""),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["loggingConfigurationOverrideConfigMap"], ""),
                     basicAuthSecretName: getHttpAuthSecretName(b.inputs.targetConfig),
-                    tupleS3Bucket: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["tupleS3Bucket"], ""),
-                    tupleS3Region: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["tupleS3Region"], ""),
-                    tupleS3Prefix: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["tupleS3Prefix"], "tuples/"),
-                    useLocalStack: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["useLocalStack"], false)),
+                    tupleS3Bucket: effectiveBucket,
+                    tupleS3Region: effectiveRegion,
+                    tupleS3Prefix: effectivePrefix,
+                    useLocalStack: expr.serialize(effectiveUseLocalStack),
                     jsonConfig: expr.asString(expr.serialize(
                         makeReplayerParamsDict(
                             b.inputs.targetConfig,
                             b.inputs.replayerOptions,
                             b.inputs.kafkaConfig,
                             b.inputs.kafkaGroupId,
-                            expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["tupleS3Bucket"], "")
+                            effectiveBucket
                         ) as any
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.replayerOptions, "resources"))
-
-                })))
+                }));
+        })
     )
 
 
