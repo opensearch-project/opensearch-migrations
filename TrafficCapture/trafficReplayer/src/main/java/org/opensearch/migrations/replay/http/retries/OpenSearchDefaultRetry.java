@@ -30,6 +30,15 @@ import lombok.extern.slf4j.Slf4j;
 public class OpenSearchDefaultRetry extends DefaultRetry {
 
     private static final Pattern bulkPathMatcher = Pattern.compile("^(/[^/]*)?/_bulk(/.*)?$");
+    private final BulkItemErrorClassifier errorClassifier;
+
+    public OpenSearchDefaultRetry() {
+        this(new BulkItemErrorClassifier());
+    }
+
+    public OpenSearchDefaultRetry(BulkItemErrorClassifier errorClassifier) {
+        this.errorClassifier = errorClassifier;
+    }
 
     enum BulkResponseAnalysis {
         /** No errors at all */
@@ -48,6 +57,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
     static class BulkResponseAnalyzer extends ChannelInboundHandlerAdapter {
         private final JsonParser parser;
         private final ByteBufferFeeder feeder;
+        private final BulkItemErrorClassifier errorClassifier;
         private BulkResponseAnalysis result = null;
 
         // Parsing state
@@ -64,7 +74,8 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         private boolean foundTypeInCurrentError = false;
 
         @SneakyThrows
-        public BulkResponseAnalyzer() {
+        public BulkResponseAnalyzer(BulkItemErrorClassifier errorClassifier) {
+            this.errorClassifier = errorClassifier;
             var jsonFactory = new JsonFactory();
             parser = jsonFactory.createNonBlockingByteBufferParser();
             feeder = (ByteBufferFeeder) parser.getNonBlockingInputFeeder();
@@ -175,7 +186,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 hasAnyError = true;
                 foundTypeInCurrentError = true;
                 var errorType = parser.getValueAsString();
-                if (!BulkItemErrorClassifier.isNonRetryable(errorType)) {
+                if (!errorClassifier.isNonRetryable(errorType)) {
                     log.atDebug().setMessage("Found retryable bulk item error type: {}")
                         .addArgument(errorType).log();
                     hasRetryableError = true;
@@ -210,7 +221,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
     }
 
     BulkResponseAnalysis analyzeBulkResponse(ByteBuf responseByteBuf) {
-        var analyzer = new BulkResponseAnalyzer();
+        var analyzer = new BulkResponseAnalyzer(errorClassifier);
         HttpByteBufFormatter.processHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
             Stream.of(responseByteBuf), analyzer);
         return analyzer.getAnalysis();

@@ -6,6 +6,8 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class BulkItemErrorClassifierTest {
 
+    private final BulkItemErrorClassifier classifier = new BulkItemErrorClassifier();
+
     @ParameterizedTest
     @ValueSource(strings = {
         "version_conflict_engine_exception",
@@ -19,7 +21,7 @@ class BulkItemErrorClassifierTest {
         "resource_already_exists_exception"
     })
     void testNonRetryableErrors(String errorType) {
-        Assertions.assertTrue(BulkItemErrorClassifier.isNonRetryable(errorType));
+        Assertions.assertTrue(classifier.isNonRetryable(errorType));
     }
 
     @ParameterizedTest
@@ -32,11 +34,11 @@ class BulkItemErrorClassifierTest {
         "some_unknown_exception"
     })
     void testRetryableErrors(String errorType) {
-        Assertions.assertFalse(BulkItemErrorClassifier.isNonRetryable(errorType));
+        Assertions.assertFalse(classifier.isNonRetryable(errorType));
     }
 
     @org.junit.jupiter.api.Test
     void testNullErrorType() {
-        Assertions.assertFalse(BulkItemErrorClassifier.isNonRetryable(null));
+        Assertions.assertFalse(classifier.isNonRetryable(null));
     }
 }

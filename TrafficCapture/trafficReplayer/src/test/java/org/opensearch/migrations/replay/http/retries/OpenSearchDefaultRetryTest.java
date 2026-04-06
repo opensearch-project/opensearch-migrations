@@ -415,7 +415,7 @@ class OpenSearchDefaultRetryTest {
     public void testStreamingShortCircuitsOnErrorsFalse() {
         // Feed "errors":false in the first chunk, then a large items payload in a second chunk.
         // The analyzer should resolve after the first chunk without needing the second.
-        var analyzer = new OpenSearchDefaultRetry.BulkResponseAnalyzer();
+        var analyzer = new OpenSearchDefaultRetry.BulkResponseAnalyzer(new BulkItemErrorClassifier());
         var channel = new io.netty.channel.embedded.EmbeddedChannel(analyzer);
 
         var chunk1 = "{\"errors\":false,\"items\":[";
@@ -434,7 +434,7 @@ class OpenSearchDefaultRetryTest {
     public void testStreamingShortCircuitsOnFirstRetryableError() {
         // Feed errors:true + first item with retryable error. Analyzer should resolve
         // without needing to see remaining items.
-        var analyzer = new OpenSearchDefaultRetry.BulkResponseAnalyzer();
+        var analyzer = new OpenSearchDefaultRetry.BulkResponseAnalyzer(new BulkItemErrorClassifier());
         var channel = new io.netty.channel.embedded.EmbeddedChannel(analyzer);
 
         var chunk1 = "{\"errors\":true,\"items\":[" +
