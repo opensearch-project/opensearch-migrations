@@ -11,7 +11,6 @@ import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.AllArgsConstructor;
-import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
@@ -63,17 +62,17 @@ public interface LuceneIndexReader {
      *    Lucene Index.
 
      */
+    /** Number of parallel DirectoryReader instances for concurrent segment reads. */
+    int PARALLEL_READERS = 4;
+
     default Flux<LuceneDocumentChange> streamDocumentChanges(String segmentsFileName, int startDocIdx) {
         return Flux.using(
             () -> this.getReader(segmentsFileName),
             reader -> LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx),
             reader -> {
-                try {
-                    reader.close();
-                } catch (IOException e) {
-                    throw Lombok.sneakyThrow(e);
-                }
-        });
+                try { reader.close(); } catch (IOException e) { throw new RuntimeException(e); }
+            }
+        );
     }
 
     default Flux<LuceneDocumentChange> streamDocumentChanges(String segmentsFileName) {

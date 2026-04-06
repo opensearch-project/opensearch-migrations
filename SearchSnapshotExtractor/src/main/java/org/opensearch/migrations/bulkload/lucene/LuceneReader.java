@@ -7,14 +7,12 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
-import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
@@ -39,6 +37,23 @@ public class LuceneReader {
     private static final int PARALLEL_RAILS_PER_SEGMENT = 16;
 
     private LuceneReader() {}
+
+    /**
+     * Read documents from startDocId up to (but not including) endDocId.
+     * Each segment gets its own thread via Flux.generate + subscribeOn.
+     */
+    public static Flux<LuceneDocumentChange> readDocsByLeavesInRange(
+            LuceneDirectoryReader reader, int startDocId, int endDocId) {
+        log.atInfo().setMessage("{} documents in {} leaves, reading range [{}, {})")
+            .addArgument(reader::maxDoc)
+            .addArgument(() -> reader.leaves().size())
+            .addArgument(startDocId)
+            .addArgument(endDocId)
+            .log();
+
+        return readDocsByLeavesFromStartingPosition(reader, startDocId, null)
+            .filter(doc -> doc.getLuceneDocNumber() < endDocId);
+    }
 
     /* Start reading docs from a specific segment and document id.
        If the startSegmentIndex is 0, it will start from the first segment.
@@ -145,26 +160,34 @@ public class LuceneReader {
                 .addArgument(() -> segmentReader.maxDoc() - startDocIdInSegment)
                 .log();
 
-        // With ThreadLocal<StoredFields> in LeafReader9, each scheduler thread gets its own
-        // clone of the stored fields reader — no lock contention. flatMapSequential with high
-        // concurrency issues many concurrent blocking reads across different scheduler threads.
-        var idxStream = (liveDocs != null) ? liveDocs.stream().filter(idx -> idx >= startDocIdInSegment) :
-            IntStream.range(startDocIdInSegment, segmentReader.maxDoc());
-        return Flux.fromStream(idxStream.boxed())
-            .flatMapSequential(docIdx -> Mono.defer(() -> {
-                    try {
-                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext);
-                        return Mono.justOrEmpty(document);
-                    } catch (Exception e) {
-                        log.atError().setMessage("Error reading document from reader {} with index: {}")
-                            .addArgument(getSegmentReaderDebugInfo)
-                            .addArgument(docIdx)
-                            .setCause(e)
-                            .log();
-                        return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
-                            + " from segment " + getSegmentReaderDebugInfo.get(), e));
+        // Single thread per segment via Flux.generate — zero allocation per doc.
+        // ThreadLocal<StoredFields> in LeafReader9 gives each thread its own reader clone.
+        // The outer flatMap(segments, MAX_VALUE) runs all segments concurrently.
+        final int startDoc = (docStartingId <= segmentDocBase) ? 0 : docStartingId - segmentDocBase;
+        final int endDoc = segmentReader.maxDoc();
+        final var liveDocsBits = liveDocs;
+        final int[] cursor = {startDoc};
+
+        return Flux.<LuceneDocumentChange>generate(sink -> {
+            while (cursor[0] < endDoc) {
+                int docIdx = cursor[0]++;
+                if (liveDocsBits != null && !liveDocsBits.stream().anyMatch(x -> x == docIdx)) {
+                    continue;
+                }
+                try {
+                    var doc = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase,
+                        getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext);
+                    if (doc != null) {
+                        sink.next(doc);
+                        return;
                     }
-                }).subscribeOn(LUCENE_IO_SCHEDULER), SEGMENT_READ_CONCURRENCY, SEGMENT_PREFETCH);
+                } catch (Exception e) {
+                    log.atError().setMessage("Error reading doc {} from segment {}")
+                        .addArgument(docIdx).addArgument(getSegmentReaderDebugInfo).setCause(e).log();
+                }
+            }
+            sink.complete();
+        }).subscribeOn(LUCENE_IO_SCHEDULER);
     }
 
     /** Backwards-compatible overload without mapping context */
