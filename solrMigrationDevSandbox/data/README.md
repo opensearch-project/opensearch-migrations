@@ -7,9 +7,9 @@ The validation framework uses the [Amazon Customer Reviews Dataset](https://s3.a
 ## Download
 
 ```bash
-./data/generate-dataset.sh                          # Default: 200K docs → data/dataset.json
-./data/generate-dataset.sh --max-docs 50000         # Smaller subset for quick testing
-./data/generate-dataset.sh --output /tmp/data.json  # Custom output path
+python3 data/generate_dataset.py                          # Default: 200K docs → data/dataset.json
+python3 data/generate_dataset.py --max-docs 50000         # Smaller subset for quick testing
+python3 data/generate_dataset.py --output /tmp/data.json  # Custom output path
 ```
 
 ## Field Descriptions
