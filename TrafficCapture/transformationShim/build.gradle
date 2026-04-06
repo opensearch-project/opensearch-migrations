@@ -26,6 +26,9 @@ dependencies {
 
     testImplementation libs.junit.jupiter.api
     testImplementation testFixtures(project(':coreUtilities'))
+    testImplementation libs.testcontainers
+    testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.testcontainers.opensearch
     testRuntimeOnly libs.junit.jupiter.engine
 }
 
