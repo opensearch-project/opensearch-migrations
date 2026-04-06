@@ -343,7 +343,8 @@ class TestResetAllIntegration:
 
         # All CRDs should be deleted (404)
         custom = client.CustomObjectsApi()
-        for plural, name in [("capturedtraffics", "proxy-f"), ("snapshotmigrations", "snap-f"), ("trafficreplays", "replay-f")]:
+        targets = [("capturedtraffics", "proxy-f"), ("snapshotmigrations", "snap-f"), ("trafficreplays", "replay-f")]
+        for plural, name in targets:
             with pytest.raises(ApiException) as exc_info:
                 custom.get_namespaced_custom_object(
                     group=CRD_GROUP, version=CRD_VERSION,
