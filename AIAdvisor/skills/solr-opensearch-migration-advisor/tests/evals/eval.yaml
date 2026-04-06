@@ -10,7 +10,7 @@ providers:
 defaultTest:
   options:
     provider:
-      id: bedrock:us.anthropic.claude-3-5-sonnet-20241022-v2:0
+      id: bedrock:us.anthropic.claude-sonnet-4-5-20250929-v1:0
       config:
         region: us-east-1
         max_tokens: 256
@@ -103,14 +103,10 @@ tests:
           Response produces a valid OpenSearch index mapping JSON that satisfies all of the following:
           (1) 'id' is mapped to type 'keyword';
           (2) 'product_name' is mapped to type 'text' with a standard or equivalent analyzer;
-          (3) '_version_' is mapped to type 'long', and the response flags that TrieLongField is a
-              deprecated Trie type with no direct OpenSearch equivalent, recommending the Point field
-              equivalent (LongPointField);
-          (4) 'price' (solr.CurrencyField) is flagged as unsupported in OpenSearch with a recommended
-              workaround (e.g. storing amount as 'scaled_float' or 'double' plus a separate currency
-              keyword field);
-          (5) 'priority' (solr.EnumField) is flagged as unsupported in OpenSearch with a recommended
-              workaround (e.g. 'keyword' or 'integer' with application-level validation);
+          (3) The response should note that the TrieLongField type has no direct OpenSearch equivalent, 
+            recommending and using the `long` field type instead;
+          (4) 'price' (solr.CurrencyField) is flagged as unsupported in OpenSearch.
+          (5) 'priority' (solr.EnumField) is flagged as unsupported in OpenSearch.
           (6) the response notes the TF-IDF to BM25 similarity change as a behavioral incompatibility
               given the source is Solr 6.x.
         metric: solr6-schema-mapping-correct
