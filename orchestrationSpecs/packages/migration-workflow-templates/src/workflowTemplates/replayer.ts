@@ -103,6 +103,7 @@ function getReplayerDeploymentManifest
     tupleS3Region: BaseExpression<string>,
     tupleS3Prefix: BaseExpression<string>,
     useLocalStack: BaseExpression<boolean>,
+    mountpointS3Image: BaseExpression<string>,
 }): Deployment {
     const baseContainerDefinition = {
         name: "replayer",
@@ -126,6 +127,7 @@ function getReplayerDeploymentManifest
         args.tupleS3Prefix,
         S3_TUPLE_MOUNT_PATH,
         args.useLocalStack,
+        args.mountpointS3Image,
         withLog4j);
     const finalContainerDefinition = setupTestCredsForContainer(args.useLocalStack, withS3);
     return {
@@ -206,7 +208,7 @@ export const Replayer = WorkflowBuilder.create({
         .addRequiredInput("tupleS3Bucket", typeToken<string>())
         .addRequiredInput("tupleS3Region", typeToken<string>())
         .addRequiredInput("tupleS3Prefix", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer", "MountpointS3"]))
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
 
         .addResourceTask(b => b
@@ -229,6 +231,7 @@ export const Replayer = WorkflowBuilder.create({
                     tupleS3Region: b.inputs.tupleS3Region,
                     tupleS3Prefix: b.inputs.tupleS3Prefix,
                     useLocalStack: expr.deserializeRecord(b.inputs.useLocalStack),
+                    mountpointS3Image: b.inputs.imageMountpointS3Location,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -244,7 +247,7 @@ export const Replayer = WorkflowBuilder.create({
         // ConfigMap defaults for S3 tuple config — used when user doesn't override
         .addInputsFromRecord(defaultTupleS3Config(t.inputs.workflowParameters.s3TupleConfigMap))
 
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer", "MountpointS3"]))
 
         .addSteps(b => {
             // Resolve effective values: user override wins, else ConfigMap default

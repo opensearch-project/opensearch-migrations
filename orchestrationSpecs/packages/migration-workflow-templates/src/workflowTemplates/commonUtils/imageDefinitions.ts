@@ -5,7 +5,8 @@ export const LogicalOciImages = [
     "TrafficReplayer",
     "ReindexFromSnapshot",
     "MigrationConsole",
-    "CoordinatorCluster"
+    "CoordinatorCluster",
+    "MountpointS3"
 ] as const;
 export type LogicalOciImagesKeys = typeof LogicalOciImages[number];
 

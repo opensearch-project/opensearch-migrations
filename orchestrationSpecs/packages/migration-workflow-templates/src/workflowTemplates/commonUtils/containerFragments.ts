@@ -155,6 +155,7 @@ export function setupS3MountpointVolumeForContainer(
     s3Prefix: BaseExpression<string>,
     mountPath: string,
     useLocalStack: BaseExpression<boolean>,
+    mountpointS3Image: BaseExpression<string>,
     def: ContainerVolumePair): ContainerVolumePair {
 
     const SHARED_HOSTPATH_VOLUME = "s3-tuple-mnt";
@@ -189,7 +190,7 @@ export function setupS3MountpointVolumeForContainer(
             {
                 name: "mount-s3-tuples",
                 restartPolicy: "Always",
-                image: "public.ecr.aws/mountpoint-s3/aws-mountpoint-s3-csi-driver:latest",
+                image: makeStringTypeProxy(mountpointS3Image),
                 command: ["sh", "-c"],
                 args: [
                     "P=/mnt/.pods/${POD_NAME}; " +

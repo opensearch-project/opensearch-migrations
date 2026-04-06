@@ -113,6 +113,9 @@ mirror.gcr.io/amazon/aws-cli:2.25.11
 # --- coordinator cluster (used by RFS workflow) ---
 mirror.gcr.io/opensearchproject/opensearch:3.1.0
 
+# --- mountpoint-s3 (used by replayer for S3 tuple writes) ---
+public.ecr.aws/mountpoint-s3/aws-mountpoint-s3-csi-driver:v2.5.0
+
 # --- jib base images (used when building from source with --build-images) ---
 mirror.gcr.io/library/amazoncorretto:17-al2023-headless
 

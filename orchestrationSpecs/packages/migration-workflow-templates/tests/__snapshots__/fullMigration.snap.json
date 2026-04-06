@@ -284,6 +284,12 @@
             },
             {
               "name": "imageCoordinatorClusterPullPolicy"
+            },
+            {
+              "name": "imageMountpointS3Location"
+            },
+            {
+              "name": "imageMountpointS3PullPolicy"
             }
           ]
         },
@@ -421,6 +427,12 @@
             },
             {
               "name": "imageCoordinatorClusterPullPolicy"
+            },
+            {
+              "name": "imageMountpointS3Location"
+            },
+            {
+              "name": "imageMountpointS3PullPolicy"
             }
           ]
         },
@@ -482,6 +494,14 @@
                   {
                     "name": "imageCoordinatorClusterPullPolicy",
                     "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMountpointS3Location",
+                    "value": "{{inputs.parameters.imageMountpointS3Location}}"
+                  },
+                  {
+                    "name": "imageMountpointS3PullPolicy",
+                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}"
                   },
                   {
                     "name": "snapshotItemConfig",
@@ -569,6 +589,12 @@
             },
             {
               "name": "imageCoordinatorClusterPullPolicy"
+            },
+            {
+              "name": "imageMountpointS3Location"
+            },
+            {
+              "name": "imageMountpointS3PullPolicy"
             }
           ]
         },
@@ -759,6 +785,12 @@
             },
             {
               "name": "imageCoordinatorClusterPullPolicy"
+            },
+            {
+              "name": "imageMountpointS3Location"
+            },
+            {
+              "name": "imageMountpointS3PullPolicy"
             }
           ]
         },
@@ -860,6 +892,14 @@
                   {
                     "name": "imageCoordinatorClusterPullPolicy",
                     "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMountpointS3Location",
+                    "value": "{{inputs.parameters.imageMountpointS3Location}}"
+                  },
+                  {
+                    "name": "imageMountpointS3PullPolicy",
+                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}"
                   },
                   {
                     "name": "label",
@@ -965,6 +1005,12 @@
             },
             {
               "name": "imageTrafficReplayerPullPolicy"
+            },
+            {
+              "name": "imageMountpointS3Location"
+            },
+            {
+              "name": "imageMountpointS3PullPolicy"
             }
           ]
         },
@@ -1073,6 +1119,14 @@
                   {
                     "name": "imageTrafficReplayerPullPolicy",
                     "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMountpointS3Location",
+                    "value": "{{inputs.parameters.imageMountpointS3Location}}"
+                  },
+                  {
+                    "name": "imageMountpointS3PullPolicy",
+                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}"
                   },
                   {
                     "name": "kafkaGroupId",
@@ -1190,6 +1244,24 @@
                 "configMapKeyRef": {
                   "name": "{{workflow.parameters.imageConfigMapName}}",
                   "key": "coordinatorClusterPullPolicy"
+                }
+              }
+            },
+            {
+              "name": "imageMountpointS3Location",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "mountpointS3Image"
+                }
+              }
+            },
+            {
+              "name": "imageMountpointS3PullPolicy",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.imageConfigMapName}}",
+                  "key": "mountpointS3PullPolicy"
                 }
               }
             }
@@ -1334,6 +1406,14 @@
                     "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
                   },
                   {
+                    "name": "imageMountpointS3Location",
+                    "value": "{{inputs.parameters.imageMountpointS3Location}}"
+                  },
+                  {
+                    "name": "imageMountpointS3PullPolicy",
+                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}"
+                  },
+                  {
                     "name": "snapshotsSourceConfig",
                     "value": "{{=toJSON(sprig.dict(\"createSnapshotConfig\", fromJSON(item['createSnapshotConfig']), \"sourceConfig\", fromJSON(item['sourceConfig'])))}}"
                   },
@@ -1399,6 +1479,14 @@
                     "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
                   },
                   {
+                    "name": "imageMountpointS3Location",
+                    "value": "{{inputs.parameters.imageMountpointS3Location}}"
+                  },
+                  {
+                    "name": "imageMountpointS3PullPolicy",
+                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}"
+                  },
+                  {
                     "name": "resourceName",
                     "value": "{{=item['sourceLabel']+'-'+sprig.dig('label', '', fromJSON(item['targetConfig']))+'-'+item['label']}}"
                   },
@@ -1438,6 +1526,14 @@
                   {
                     "name": "imageTrafficReplayerPullPolicy",
                     "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
+                  },
+                  {
+                    "name": "imageMountpointS3Location",
+                    "value": "{{inputs.parameters.imageMountpointS3Location}}"
+                  },
+                  {
+                    "name": "imageMountpointS3PullPolicy",
+                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}"
                   },
                   {
                     "name": "dependsOnSnapshotMigrations",

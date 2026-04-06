@@ -219,6 +219,9 @@ images:
   coordinatorCluster:
     repository: "${M}/mirror.gcr.io/opensearchproject/opensearch"
     tag: "3.1.0"
+  mountpointS3:
+    repository: "${M}/public.ecr.aws/mountpoint-s3/aws-mountpoint-s3-csi-driver"
+    tag: "v2.5.0"
 EOF
 }
 
