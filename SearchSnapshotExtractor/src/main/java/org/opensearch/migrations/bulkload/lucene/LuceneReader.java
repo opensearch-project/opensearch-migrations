@@ -39,20 +39,45 @@ public class LuceneReader {
     private LuceneReader() {}
 
     /**
-     * Read documents from startDocId up to (but not including) endDocId.
-     * Each segment gets its own thread via Flux.generate + subscribeOn.
+     * Split segments round-robin across multiple readers. Each reader gets every Nth segment.
+     * Each reader's segments are read concurrently via flatMap + Flux.generate.
+     * No doc-range splitting, no takeWhile — each reader fully owns its segments.
      */
-    public static Flux<LuceneDocumentChange> readDocsByLeavesInRange(
-            LuceneDirectoryReader reader, int startDocId, int endDocId) {
-        log.atInfo().setMessage("{} documents in {} leaves, reading range [{}, {})")
-            .addArgument(reader::maxDoc)
-            .addArgument(() -> reader.leaves().size())
-            .addArgument(startDocId)
-            .addArgument(endDocId)
+    public static Flux<LuceneDocumentChange> readWithSegmentSplitReaders(
+            java.util.List<LuceneDirectoryReader> readers, int startDocId) {
+        var primary = readers.get(0);
+        // All readers opened the same commit — same segments in same order
+        var allSegments = getSegmentsFromStartingSegment(primary.leaves(), startDocId)
+            .collectList().block();
+
+        log.atInfo().setMessage("{} documents in {} segments, split across {} readers")
+            .addArgument(primary::maxDoc)
+            .addArgument(allSegments::size)
+            .addArgument(readers::size)
             .log();
 
-        return readDocsByLeavesFromStartingPosition(reader, startDocId, null)
-            .filter(doc -> doc.getLuceneDocNumber() < endDocId);
+        // Build per-reader segment lists using round-robin assignment
+        // Each reader gets its own ReaderAndBase from its own DirectoryReader
+        return Flux.range(0, readers.size())
+            .flatMap(readerIdx -> {
+                var reader = readers.get(readerIdx);
+                var readerSegments = getSegmentsFromStartingSegment(reader.leaves(), startDocId)
+                    .collectList().block();
+
+                // Round-robin: reader 0 gets segments 0,4,8,...; reader 1 gets 1,5,9,...
+                var mySegments = new java.util.ArrayList<ReaderAndBase>();
+                for (int i = readerIdx; i < readerSegments.size(); i += readers.size()) {
+                    mySegments.add(readerSegments.get(i));
+                }
+
+                log.atInfo().setMessage("Reader {} assigned {} segments")
+                    .addArgument(readerIdx).addArgument(mySegments::size).log();
+
+                return Flux.fromIterable(mySegments)
+                    .flatMap(seg -> readDocsFromSegment(seg, startDocId,
+                        reader.getIndexDirectoryPath(), DocumentChangeType.INDEX, null),
+                        mySegments.size());
+            }, readers.size());
     }
 
     /* Start reading docs from a specific segment and document id.

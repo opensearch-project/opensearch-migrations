@@ -62,15 +62,23 @@ public interface LuceneIndexReader {
      *    Lucene Index.
 
      */
-    /** Number of parallel DirectoryReader instances for concurrent segment reads. */
+    /** Number of parallel DirectoryReader instances — each gets a subset of segments. */
     int PARALLEL_READERS = 4;
 
     default Flux<LuceneDocumentChange> streamDocumentChanges(String segmentsFileName, int startDocIdx) {
         return Flux.using(
-            () -> this.getReader(segmentsFileName),
-            reader -> LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx),
-            reader -> {
-                try { reader.close(); } catch (IOException e) { throw new RuntimeException(e); }
+            () -> {
+                var readers = new java.util.ArrayList<LuceneDirectoryReader>(PARALLEL_READERS);
+                for (int i = 0; i < PARALLEL_READERS; i++) {
+                    readers.add(this.getReader(segmentsFileName));
+                }
+                return readers;
+            },
+            readers -> LuceneReader.readWithSegmentSplitReaders(readers, startDocIdx),
+            readers -> {
+                for (var r : readers) {
+                    try { r.close(); } catch (IOException e) { /* ignore */ }
+                }
             }
         );
     }
