@@ -1,0 +1,20 @@
+{{- if and .Values.cloudwatchDashboards.enabled (get .Values.conditionalPackageInstalls "ack-cloudwatch-controller") }}
+{{- $region := required "Missing required value: .Values.aws.region" .Values.aws.region }}
+{{- $account := required "Missing required value: .Values.aws.account" (toString .Values.aws.account) }}
+{{- $stage := required "Missing required value: .Values.stageName" .Values.stageName }}
+apiVersion: cloudwatch.services.k8s.aws/v1alpha1
+kind: Dashboard
+metadata:
+  name: ma-{{ $stage }}-{{ $region }}-capturereplay
+spec:
+  dashboardName: "MA-{{ $stage }}-{{ $region }}-CaptureReplay"
+  dashboardBody: {{ .Files.Get "files/cloudwatch-dashboards/capture-replay-dashboard.json" | replace "placeholder-region" $region | replace "placeholder-stage" $stage | replace "placeholder-qualifier" $stage | trim | toJson }}
+---
+apiVersion: cloudwatch.services.k8s.aws/v1alpha1
+kind: Dashboard
+metadata:
+  name: ma-{{ $stage }}-{{ $region }}-reindexfromsnapshot
+spec:
+  dashboardName: "MA-{{ $stage }}-{{ $region }}-ReindexFromSnapshot"
+  dashboardBody: {{ .Files.Get "files/cloudwatch-dashboards/reindex-from-snapshot-dashboard.json" | replace "placeholder-region" $region | replace "placeholder-account-id" $account | replace "placeholder-stage" $stage | replace "placeholder-qualifier" $stage | trim | toJson }}
+{{- end }}

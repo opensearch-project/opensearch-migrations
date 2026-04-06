@@ -606,6 +606,42 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
       },
       "Type": "AWS::EC2::VPCEndpoint",
     },
+    "EKSInfraAckCloudWatchPodIdentityAssociation51006884": {
+      "DependsOn": [
+        "EKSInfraMigrationsEKSClusterAccountReadonlyAccess3FCE8696",
+        "EKSInfraMigrationsEKSClusterControlPlaneSecurityGroupC698CE5B",
+        "EKSInfraMigrationsEKSClusterKubectlReadyBarrierF77D0AE4",
+        "EKSInfraMigrationsEKSClusterMigrationsEKSClusternodePoolRoleB06A3C37",
+        "EKSInfraMigrationsEKSCluster9232A360",
+        "EKSInfraMigrationsEKSClusterRole243C21EF",
+      ],
+      "Properties": {
+        "ClusterName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Namespace": "ma",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsPodIdentityRole873942CE",
+            "Arn",
+          ],
+        },
+        "ServiceAccount": "ack-cloudwatch-controller",
+      },
+      "Type": "AWS::EKS::PodIdentityAssociation",
+    },
     "EKSInfraArgoWorkflowPodIdentityAssociation9EBD0AE8": {
       "DependsOn": [
         "EKSInfraMigrationsEKSClusterAccountReadonlyAccess3FCE8696",
@@ -1743,6 +1779,42 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
         },
       },
       "Type": "AWS::ServiceCatalogAppRegistry::AttributeGroup",
+    },
+    "EKSInfraAckCloudWatchPodIdentityAssociation51006884": {
+      "DependsOn": [
+        "EKSInfraMigrationsEKSClusterAccountReadonlyAccess3FCE8696",
+        "EKSInfraMigrationsEKSClusterControlPlaneSecurityGroupC698CE5B",
+        "EKSInfraMigrationsEKSClusterKubectlReadyBarrierF77D0AE4",
+        "EKSInfraMigrationsEKSClusterMigrationsEKSClusternodePoolRoleB06A3C37",
+        "EKSInfraMigrationsEKSCluster9232A360",
+        "EKSInfraMigrationsEKSClusterRole243C21EF",
+      ],
+      "Properties": {
+        "ClusterName": {
+          "Fn::Join": [
+            "",
+            [
+              "migration-eks-cluster-",
+              {
+                "Ref": "Stage",
+              },
+              "-",
+              {
+                "Ref": "AWS::Region",
+              },
+            ],
+          ],
+        },
+        "Namespace": "ma",
+        "RoleArn": {
+          "Fn::GetAtt": [
+            "EKSInfraMigrationsPodIdentityRole873942CE",
+            "Arn",
+          ],
+        },
+        "ServiceAccount": "ack-cloudwatch-controller",
+      },
+      "Type": "AWS::EKS::PodIdentityAssociation",
     },
     "EKSInfraArgoWorkflowPodIdentityAssociation9EBD0AE8": {
       "DependsOn": [

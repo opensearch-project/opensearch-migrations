@@ -27,6 +27,7 @@ export interface EKSInfraProps {
     otelCollectorServiceAccountName?: string;
     enablePCA?: boolean;
     enableACKPCA?: boolean;
+    enableACKCloudWatch?: boolean;
 }
 
 export class EKSInfra extends Construct {
@@ -151,6 +152,15 @@ export class EKSInfra extends Construct {
                 roleArn: podIdentityRole.roleArn,
             });
             ackAcmpcaPodIdentityAssociation.node.addDependency(this.cluster)
+        }
+        if (props.enableACKCloudWatch) {
+            const ackCloudWatchPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'AckCloudWatchPodIdentityAssociation', {
+                clusterName: props.clusterName,
+                namespace: namespace,
+                serviceAccount: 'ack-cloudwatch-controller',
+                roleArn: podIdentityRole.roleArn,
+            });
+            ackCloudWatchPodIdentityAssociation.node.addDependency(this.cluster)
         }
     }
 
