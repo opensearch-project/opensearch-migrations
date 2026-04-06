@@ -1236,6 +1236,22 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                     },
+                    "tupleS3Bucket": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "tupleS3Region": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "tupleS3Prefix": {
+                      "type": "string",
+                      "default": "tuples/"
+                    },
+                    "useLocalStack": {
+                      "type": "boolean",
+                      "default": false
+                    },
                     "kafkaTrafficEnableMSKAuth": {
                       "type": "boolean",
                       "default": false
@@ -2654,6 +2670,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "requests"
                     ],
                     "description": "Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
+                  },
+                  "tupleS3Bucket": {
+                    "type": "string",
+                    "default": "",
+                    "description": "S3 bucket name for tuple output via Mountpoint S3. When set, a mount-s3 sidecar mounts the bucket at the tupleOutputDir path. Leave empty to write tuples to local storage only."
+                  },
+                  "tupleS3Region": {
+                    "type": "string",
+                    "default": "",
+                    "description": "AWS region for the tuple S3 bucket. Required when tupleS3Bucket is set."
+                  },
+                  "tupleS3Prefix": {
+                    "type": "string",
+                    "default": "tuples/",
+                    "description": "S3 key prefix within the tuple bucket. Defaults to 'tuples/'."
+                  },
+                  "useLocalStack": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Use LocalStack S3 endpoint instead of real AWS S3. Only for local testing."
                   },
                   "kafkaTrafficEnableMSKAuth": {
                     "type": "boolean",
