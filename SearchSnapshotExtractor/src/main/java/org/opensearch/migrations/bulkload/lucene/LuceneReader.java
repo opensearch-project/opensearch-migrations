@@ -35,43 +35,10 @@ public class LuceneReader {
     /** Max segments to read in parallel — read ALL segments concurrently for max FUSE throughput. */
     private static final int SEGMENT_CONCURRENCY = Integer.MAX_VALUE;
 
-    /** Parallel rails per segment — enables concurrent FUSE reads within a single segment. */
+    /** Parallel rails per segment — each rail gets its own ThreadLocal StoredFields clone. */
     private static final int PARALLEL_RAILS_PER_SEGMENT = 16;
 
-    /** Number of independent reader instances to open for parallel document reads. */
-    public static final int PARALLEL_READERS = 8;
-
     private LuceneReader() {}
-
-    /**
-     * Read documents using multiple independent reader instances for true parallelism.
-     * Each reader has its own stored fields reader with its own lock, so N readers
-     * can read N documents concurrently from the same segment data.
-     */
-    public static Flux<LuceneDocumentChange> readWithMultipleReaders(
-            java.util.List<LuceneDirectoryReader> readers, int startDocId) {
-        var primary = readers.get(0);
-        log.atInfo().setMessage("{} documents in {} leaves found, using {} parallel readers")
-            .addArgument(primary::maxDoc)
-            .addArgument(() -> primary.leaves().size())
-            .addArgument(readers.size())
-            .log();
-
-        int totalDocs = primary.maxDoc();
-        int docsPerReader = totalDocs / readers.size();
-
-        return Flux.range(0, readers.size())
-            .flatMap(readerIdx -> {
-                var reader = readers.get(readerIdx);
-                int readerStart = startDocId + readerIdx * docsPerReader;
-                // Last reader gets the remainder
-                int readerEnd = (readerIdx == readers.size() - 1) ? totalDocs : readerStart + docsPerReader;
-                int effectiveStart = Math.max(readerStart, startDocId);
-
-                return readDocsByLeavesFromStartingPosition(reader, effectiveStart, null)
-                    .takeWhile(doc -> doc.getLuceneDocNumber() < readerEnd);
-            }, readers.size());
-    }
 
     /* Start reading docs from a specific segment and document id.
        If the startSegmentIndex is 0, it will start from the first segment.
@@ -178,33 +145,30 @@ public class LuceneReader {
                 .addArgument(() -> segmentReader.maxDoc() - startDocIdInSegment)
                 .log();
 
-        // Single thread per segment — Lucene's stored fields reader serializes access.
-        // Use Flux.generate for minimal per-element overhead (no Mono wrapping, no scheduling).
+        // Use parallel rails — each rail gets its own StoredFields clone via ThreadLocal
+        // in LeafReader9, so concurrent document reads are safe and lock-free.
         final int startDoc = startDocIdInSegment;
         final int endDoc = segmentReader.maxDoc();
         final var liveDocsBits = liveDocs;
-        final int[] cursor = {startDoc};
 
-        return Flux.<LuceneDocumentChange>generate(sink -> {
-            while (cursor[0] < endDoc) {
-                int docIdx = cursor[0]++;
-                if (liveDocsBits != null) {
-                    final int idx = docIdx;
-                    if (!liveDocsBits.stream().anyMatch(x -> x == idx)) continue;
-                }
+        var idxStream = (liveDocsBits != null)
+            ? liveDocsBits.stream().filter(idx -> idx >= startDoc)
+            : IntStream.range(startDoc, endDoc);
+
+        return Flux.fromStream(idxStream.boxed())
+            .parallel(PARALLEL_RAILS_PER_SEGMENT)
+            .runOn(LUCENE_IO_SCHEDULER, SEGMENT_PREFETCH)
+            .map(docIdx -> {
                 try {
-                    var doc = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase,
+                    return LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase,
                         getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext);
-                    if (doc != null) {
-                        sink.next(doc);
-                        return;
-                    }
                 } catch (Exception e) {
                     log.atError().setMessage("Error reading doc {}").addArgument(docIdx).setCause(e).log();
+                    return (LuceneDocumentChange) null;
                 }
-            }
-            sink.complete();
-        }).subscribeOn(LUCENE_IO_SCHEDULER);
+            })
+            .filter(java.util.Objects::nonNull)
+            .sequential();
     }
 
     /** Backwards-compatible overload without mapping context */

@@ -40,6 +40,13 @@ public class LeafReader9 implements LuceneLeafReader {
     public LeafReader9(LeafReader wrapped) {
         this.wrapped = wrapped;
         this.liveDocs = convertLiveDocs(wrapped.getLiveDocs());
+        this.threadStoredFields = ThreadLocal.withInitial(() -> {
+            try {
+                return this.wrapped.storedFields();
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to create StoredFields clone", e);
+            }
+        });
     }
 
     private static BitSetConverter.FixedLengthBitSet convertLiveDocs(Bits bits) {
@@ -68,8 +75,12 @@ public class LeafReader9 implements LuceneLeafReader {
         }
     }
 
+    // ThreadLocal StoredFields — each thread gets its own clone of the stored fields reader,
+    // enabling concurrent document reads without contention on the internal lock.
+    private final ThreadLocal<shadow.lucene9.org.apache.lucene.index.StoredFields> threadStoredFields;
+
     public Document9 document(int luceneDocId) throws IOException {
-        return new Document9(wrapped.storedFields().document(luceneDocId));
+        return new Document9(threadStoredFields.get().document(luceneDocId));
     }
 
     public int maxDoc() {
