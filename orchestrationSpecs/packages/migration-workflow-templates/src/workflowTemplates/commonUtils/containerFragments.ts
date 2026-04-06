@@ -9,7 +9,9 @@ import {
 
 export type ContainerVolumePair = {
     readonly container: Container,
-    readonly volumes: Volume[]
+    readonly volumes: Volume[],
+    readonly sidecars: Container[],
+    readonly initContainers: Container[]
 };
 
 export function setupTestCredsForContainer(
@@ -45,7 +47,9 @@ export function setupTestCredsForContainer(
                     readOnly: true
                 }
             ]
-        }
+        },
+        sidecars: def.sidecars,
+        initContainers: def.initContainers
     } as const;
 }
 
@@ -125,6 +129,130 @@ export function setupLog4jConfigForContainer(
                     readOnly: true
                 }
             ]
-        }
+        },
+        sidecars: def.sidecars,
+        initContainers: def.initContainers
+    } as const;
+}
+
+/**
+ * Add a mount-s3 native sidecar (init container with restartPolicy: Always) that
+ * mounts an S3 bucket at a specified path for read-write access.
+ *
+ * Used by the replayer to write tuple files directly to S3 via Mountpoint S3.
+ * Mountpoint S3 supports sequential writes with one writer per file and fsync
+ * flushes multipart upload parts — matching GzipJsonLinesSink's write pattern.
+ *
+ * As a native sidecar (K8s 1.29+), kubelet guarantees it starts and passes its
+ * startupProbe before any regular containers start.
+ *
+ * Uses a hostPath volume for the mount point to avoid SELinux relabeling failures.
+ * Creates per-pod subdirectories (using POD_NAME) inside the hostPath.
+ */
+export function setupS3MountpointVolumeForContainer(
+    s3Bucket: BaseExpression<string>,
+    s3Region: BaseExpression<string>,
+    s3Prefix: BaseExpression<string>,
+    mountPath: string,
+    useLocalStack: BaseExpression<boolean>,
+    def: ContainerVolumePair): ContainerVolumePair {
+
+    const SHARED_HOSTPATH_VOLUME = "s3-tuple-mnt";
+    const {volumeMounts, env, ...restOfContainer} = def.container;
+    const podNameEnv = {
+        name: "POD_NAME",
+        valueFrom: { fieldRef: { fieldPath: "metadata.name" } }
+    };
+    return {
+        volumes: [
+            ...def.volumes,
+            { name: SHARED_HOSTPATH_VOLUME, hostPath: { path: "/var/tmp/s3-tuple-mnt", type: "DirectoryOrCreate" } }
+        ],
+        container: {
+            ...restOfContainer,
+            env: [
+                ...(env === undefined ? [] : env),
+                podNameEnv
+            ],
+            volumeMounts: [
+                ...(volumeMounts === undefined ? [] : volumeMounts),
+                {
+                    name: SHARED_HOSTPATH_VOLUME,
+                    mountPath: mountPath,
+                    mountPropagation: "HostToContainer"
+                }
+            ]
+        },
+        sidecars: def.sidecars,
+        initContainers: [
+            ...def.initContainers,
+            {
+                name: "mount-s3-tuples",
+                restartPolicy: "Always",
+                image: "public.ecr.aws/mountpoint-s3/aws-mountpoint-s3-csi-driver:latest",
+                command: ["sh", "-c"],
+                args: [
+                    "P=/mnt/.pods/${POD_NAME}; " +
+                    "mkdir -p $P/s3; " +
+                    "mount-s3 ${S3_BUCKET} $P/s3 " +
+                    "--prefix=${S3_PREFIX} " +
+                    "--allow-delete --allow-overwrite " +
+                    "--dir-mode=0777 --file-mode=0666 " +
+                    "${S3_ENDPOINT_FLAG} ${S3_FORCE_PATH_STYLE_FLAG} " +
+                    "--foreground"
+                ],
+                startupProbe: {
+                    exec: {
+                        command: ["sh", "-c", "mountpoint -q /mnt/.pods/${POD_NAME}/s3"]
+                    },
+                    initialDelaySeconds: 1,
+                    periodSeconds: 2,
+                    failureThreshold: 30
+                },
+                env: [
+                    podNameEnv,
+                    { name: "S3_BUCKET", value: makeStringTypeProxy(s3Bucket) },
+                    { name: "S3_PREFIX", value: makeStringTypeProxy(s3Prefix) },
+                    { name: "AWS_REGION", value: makeStringTypeProxy(s3Region) },
+                    {
+                        name: "S3_ENDPOINT_FLAG",
+                        value: makeStringTypeProxy(expr.ternary(
+                            useLocalStack,
+                            expr.literal("--endpoint-url=http://localstack:4566"),
+                            expr.literal("")
+                        ))
+                    },
+                    {
+                        name: "S3_FORCE_PATH_STYLE_FLAG",
+                        value: makeStringTypeProxy(expr.ternary(
+                            useLocalStack,
+                            expr.literal("--force-path-style"),
+                            expr.literal("")
+                        ))
+                    },
+                    {
+                        name: "AWS_SHARED_CREDENTIALS_FILE",
+                        value: makeStringTypeProxy(expr.ternary(
+                            useLocalStack,
+                            expr.literal("/config/credentials/configuration"),
+                            expr.literal("")
+                        ))
+                    }
+                ],
+                securityContext: { privileged: true },
+                volumeMounts: [
+                    {
+                        name: SHARED_HOSTPATH_VOLUME,
+                        mountPath: "/mnt",
+                        mountPropagation: "Bidirectional"
+                    },
+                    {
+                        name: "localstack-test-creds",
+                        mountPath: "/config/credentials",
+                        readOnly: true
+                    }
+                ]
+            }
+        ]
     } as const;
 }

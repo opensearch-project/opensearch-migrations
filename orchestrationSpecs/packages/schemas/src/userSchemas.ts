@@ -280,6 +280,14 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
             "Partial overrides are deep-merged with the built-in defaults. " +
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."),
+    tupleS3Bucket: z.string().default("").optional()
+        .describe("S3 bucket name for tuple output via Mountpoint S3. When set, a mount-s3 sidecar mounts the bucket at the tupleOutputDir path. Leave empty to write tuples to local storage only."),
+    tupleS3Region: z.string().default("").optional()
+        .describe("AWS region for the tuple S3 bucket. Required when tupleS3Bucket is set."),
+    tupleS3Prefix: z.string().default("tuples/").optional()
+        .describe("S3 key prefix within the tuple bucket. Defaults to 'tuples/'."),
+    useLocalStack: z.boolean().default(false).optional()
+        .describe("Use LocalStack S3 endpoint instead of real AWS S3. Only for local testing."),
 }).describe("Kubernetes deployment-level options for the traffic replayer.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({

@@ -149,7 +149,7 @@ function getRfsDeploymentManifest
         setupLog4jConfigForContainer(
             useCustomLogging,
             args.loggingConfigMap,
-            {container: baseContainerDefinition, volumes: []},
+            {container: baseContainerDefinition, volumes: [], sidecars: [], initContainers: []},
             args.jvmArgs
         )
     );

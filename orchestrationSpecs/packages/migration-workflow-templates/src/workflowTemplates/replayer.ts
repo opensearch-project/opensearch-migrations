@@ -13,7 +13,7 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
-import {setupLog4jConfigForContainer} from "./commonUtils/containerFragments";
+import {setupLog4jConfigForContainer, setupS3MountpointVolumeForContainer, setupTestCredsForContainer} from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
@@ -83,8 +83,14 @@ function getReplayerDeploymentManifest
     podReplicas: BaseExpression<number>,
     replayerImageName: BaseExpression<string>,
     replayerImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-    resources: BaseExpression<ResourceRequirementsType>
+    resources: BaseExpression<ResourceRequirementsType>,
+
+    tupleS3Bucket: BaseExpression<string>,
+    tupleS3Region: BaseExpression<string>,
+    tupleS3Prefix: BaseExpression<string>,
+    useLocalStack: BaseExpression<boolean>,
 }): Deployment {
+    const S3_TUPLE_MOUNT_PATH = "/mnt/s3/tuples";
     const baseContainerDefinition = {
         name: "replayer",
         image: makeStringTypeProxy(args.replayerImageName),
@@ -98,10 +104,17 @@ function getReplayerDeploymentManifest
             ...getTargetHttpAuthCredsEnvVars(args.basicAuthSecretName),
         ]
     };
-    const finalContainerDefinition =
-        setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
-            {container: baseContainerDefinition, volumes: []},
-            args.jvmArgs);
+    const withLog4j = setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
+        {container: baseContainerDefinition, volumes: [], sidecars: [], initContainers: []},
+        args.jvmArgs);
+    const withS3 = setupS3MountpointVolumeForContainer(
+        args.tupleS3Bucket,
+        args.tupleS3Region,
+        args.tupleS3Prefix,
+        S3_TUPLE_MOUNT_PATH,
+        args.useLocalStack,
+        withLog4j);
+    const finalContainerDefinition = setupTestCredsForContainer(args.useLocalStack, withS3);
     return {
         apiVersion: "apps/v1",
         kind: "Deployment",
@@ -128,8 +141,10 @@ function getReplayerDeploymentManifest
                 },
                 spec: {
                     serviceAccountName: "argo-workflow-executor",
-                    containers: [finalContainerDefinition.container],
-                    volumes: finalContainerDefinition.volumes
+                    securityContext: { seLinuxOptions: { type: "spc_t" } },
+                    initContainers: [...finalContainerDefinition.initContainers],
+                    containers: [finalContainerDefinition.container, ...finalContainerDefinition.sidecars],
+                    volumes: [...finalContainerDefinition.volumes]
                 },
             },
         }
@@ -152,6 +167,10 @@ export const Replayer = WorkflowBuilder.create({
         .addRequiredInput("jvmArgs", typeToken<string>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("basicAuthSecretName", typeToken<string>())
+        .addRequiredInput("useLocalStack", typeToken<boolean>())
+        .addRequiredInput("tupleS3Bucket", typeToken<string>())
+        .addRequiredInput("tupleS3Region", typeToken<string>())
+        .addRequiredInput("tupleS3Prefix", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
 
@@ -171,6 +190,10 @@ export const Replayer = WorkflowBuilder.create({
                     workflowName: expr.getWorkflowValue("name"),
                     jsonConfig: expr.toBase64(b.inputs.jsonConfig),
                     resources: expr.deserializeRecord(b.inputs.resources),
+                    tupleS3Bucket: b.inputs.tupleS3Bucket,
+                    tupleS3Region: b.inputs.tupleS3Region,
+                    tupleS3Prefix: b.inputs.tupleS3Prefix,
+                    useLocalStack: expr.deserializeRecord(b.inputs.useLocalStack),
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -194,6 +217,10 @@ export const Replayer = WorkflowBuilder.create({
                     jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["jvmArgs"], ""),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["loggingConfigurationOverrideConfigMap"], ""),
                     basicAuthSecretName: getHttpAuthSecretName(b.inputs.targetConfig),
+                    tupleS3Bucket: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["tupleS3Bucket"], ""),
+                    tupleS3Region: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["tupleS3Region"], ""),
+                    tupleS3Prefix: expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["tupleS3Prefix"], "tuples/"),
+                    useLocalStack: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["useLocalStack"], false)),
                     jsonConfig: expr.asString(expr.serialize(
                         makeReplayerParamsDict(
                             b.inputs.targetConfig,

@@ -174,6 +174,10 @@ export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_REPLAYER_OPTIO
     loggingConfigurationOverrideConfigMap: true,
     podReplicas: true,
     resources: true,
+    tupleS3Bucket: true,
+    tupleS3Region: true,
+    tupleS3Prefix: true,
+    useLocalStack: true,
 }));
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
