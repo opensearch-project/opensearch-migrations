@@ -20,31 +20,36 @@ logger = logging.getLogger(__name__)
 ARGO_GROUP = 'argoproj.io'
 ARGO_VERSION = 'v1alpha1'
 
-# All resettable resource types
-RESETTABLE_PLURALS = [
-    'capturedtraffics', 'datasnapshots', 'snapshotmigrations',
-    'trafficreplays', 'kafkaclusters', 'approvalgates',
+# Resource types in dependency order (upstream → downstream).
+# Resetting a resource requires redoing everything after it.
+# Adding a new CRD type only requires inserting it at the right position.
+DEPENDENCY_CHAIN = [
+    ('kafkaclusters', 'Kafka Cluster'),
+    ('capturedtraffics', 'Capture Proxy'),
+    ('datasnapshots', 'Data Snapshot'),
+    ('snapshotmigrations', 'Snapshot Migration'),
+    ('trafficreplays', 'Traffic Replay'),
 ]
 
-DISPLAY_NAMES = {
-    'capturedtraffics': 'Capture Proxy',
-    'datasnapshots': 'Data Snapshot',
-    'snapshotmigrations': 'Snapshot Migration',
-    'trafficreplays': 'Traffic Replay',
-    'kafkaclusters': 'Kafka Cluster',
-    'approvalgates': 'Approval Gate',
-}
+# Resources with no dependency relationships
+INDEPENDENT_RESOURCES = [
+    ('approvalgates', 'Approval Gate'),
+]
 
-# Dependency chain: deleting a resource requires redoing its dependents.
-# Maps plural → list of plurals that depend on it (will need redo).
-DEPENDENTS = {
-    'kafkaclusters': ['capturedtraffics', 'datasnapshots',
-                      'snapshotmigrations', 'trafficreplays'],
-    'capturedtraffics': ['datasnapshots', 'snapshotmigrations',
-                         'trafficreplays'],
-    'datasnapshots': ['snapshotmigrations', 'trafficreplays'],
-    'snapshotmigrations': ['trafficreplays'],
-}
+RESOURCE_ORDER = DEPENDENCY_CHAIN + INDEPENDENT_RESOURCES
+RESETTABLE_PLURALS = [p for p, _ in RESOURCE_ORDER]
+DISPLAY_NAMES = dict(RESOURCE_ORDER)
+
+# Derived: for each plural in the chain, the set of plurals after it.
+_chain_index = {p: i for i, (p, _) in enumerate(DEPENDENCY_CHAIN)}
+
+
+def _get_dependents(plural):
+    """Return plurals that depend on the given resource type."""
+    idx = _chain_index.get(plural)
+    if idx is None:
+        return set()
+    return {p for p, i in _chain_index.items() if i > idx}
 
 
 def _list_migration_resources(namespace):
@@ -241,7 +246,7 @@ def reset_command(ctx, path, reset_all, cascade, namespace):
             target_plurals = {p for p, _, _ in targets}
             dep_plurals = set()
             for p in target_plurals:
-                dep_plurals.update(DEPENDENTS.get(p, []))
+                dep_plurals.update(_get_dependents(p))
             dep_plurals -= target_plurals
             if dep_plurals:
                 all_crds = _list_migration_resources(namespace)
@@ -279,8 +284,8 @@ def reset_command(ctx, path, reset_all, cascade, namespace):
                 click.echo(f"  {display}: {name:<35} ({phase})")
             click.echo()
             click.echo("Dependency order (resetting a resource requires redoing those below it):")
-            click.echo("  Kafka Cluster → Capture Proxy → Data Snapshot"
-                       " → Snapshot Migration → Traffic Replay")
+            chain = ' → '.join(d for _, d in DEPENDENCY_CHAIN)
+            click.echo(f"  {chain}")
             click.echo()
             click.echo("Use 'workflow reset <name>' to delete a resource.")
             click.echo("Use 'workflow reset --all' to delete everything.")
