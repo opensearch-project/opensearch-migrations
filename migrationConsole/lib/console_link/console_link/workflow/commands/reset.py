@@ -119,7 +119,8 @@ def _wait_until_gone(namespace, plural, names, timeout=120):
     deadline = time.time() + timeout
     remaining = set(names)
     while remaining and time.time() < deadline:
-        for name in list(remaining):
+        gone = set()
+        for name in remaining:
             try:
                 custom.get_namespaced_custom_object(
                     group=CRD_GROUP, version=CRD_VERSION,
@@ -127,7 +128,8 @@ def _wait_until_gone(namespace, plural, names, timeout=120):
                 )
             except ApiException as e:
                 if e.status == 404:
-                    remaining.discard(name)
+                    gone.add(name)
+        remaining -= gone
         if remaining:
             time.sleep(2)
     if remaining:
@@ -181,7 +183,7 @@ def _reset_all(namespace, workflow_name, argo_server, token, insecure):
     if argo_stop(workflow_name, namespace, argo_server, token, insecure):
         click.echo(f"  ✓ Stopped workflow '{workflow_name}'")
     else:
-        click.echo(f"  ⚠ Could not stop workflow (may already be finished)", err=True)
+        click.echo("  ⚠ Could not stop workflow (may already be finished)", err=True)
 
     if delete_workflow(workflow_name, namespace, argo_server, token, insecure):
         click.echo(f"  ✓ Deleted workflow '{workflow_name}'")

@@ -1,5 +1,5 @@
 """Tests for workflow reset command (CRD deletion-based teardown)."""
-from unittest.mock import patch, Mock, call
+from unittest.mock import patch, Mock
 
 from click.testing import CliRunner
 

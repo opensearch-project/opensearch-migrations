@@ -49,3 +49,4 @@ def argo_stop(workflow_name, namespace, argo_server, token, insecure):
         return resp.status_code == 200
     except requests.RequestException:
         return False
+
