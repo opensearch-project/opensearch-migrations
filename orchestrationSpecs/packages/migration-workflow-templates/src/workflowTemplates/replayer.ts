@@ -20,6 +20,8 @@ import {getTargetHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
+const S3_TUPLE_MOUNT_PATH = "/mnt/s3/tuples";
+
 function makeReplayerTargetParamDict(
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>
 ) {
@@ -53,8 +55,9 @@ function makeReplayerParamsDict(
     options: BaseExpression<Serialized<z.infer<typeof USER_REPLAYER_OPTIONS>>>,
     kafkaConfig: BaseExpression<Serialized<z.infer<typeof KAFKA_CLIENT_CONFIG>>>,
     kafkaGroupId: BaseExpression<string>,
+    tupleS3Bucket: BaseExpression<string>,
 ) {
-    return expr.mergeDicts(
+    const base = expr.mergeDicts(
         expr.mergeDicts(
             makeReplayerTargetParamDict(targetConfig),
             expr.omit(expr.deserializeRecord(options), ...ARGO_REPLAYER_WORKFLOW_OPTION_KEYS)
@@ -64,6 +67,15 @@ function makeReplayerParamsDict(
             kafkaTrafficTopic: expr.get(expr.deserializeRecord(kafkaConfig), "kafkaTopic"),
             kafkaTrafficGroupId: kafkaGroupId,
         })
+    );
+    // When S3 bucket is configured, override tupleOutputDir to the mount path
+    return expr.mergeDicts(
+        base,
+        expr.ternary(
+            expr.isEmpty(tupleS3Bucket),
+            expr.makeDict({}),
+            expr.makeDict({ tupleOutputDir: expr.literal(S3_TUPLE_MOUNT_PATH) })
+        )
     );
 }
 
@@ -90,7 +102,6 @@ function getReplayerDeploymentManifest
     tupleS3Prefix: BaseExpression<string>,
     useLocalStack: BaseExpression<boolean>,
 }): Deployment {
-    const S3_TUPLE_MOUNT_PATH = "/mnt/s3/tuples";
     const baseContainerDefinition = {
         name: "replayer",
         image: makeStringTypeProxy(args.replayerImageName),
@@ -226,7 +237,8 @@ export const Replayer = WorkflowBuilder.create({
                             b.inputs.targetConfig,
                             b.inputs.replayerOptions,
                             b.inputs.kafkaConfig,
-                            b.inputs.kafkaGroupId
+                            b.inputs.kafkaGroupId,
+                            expr.dig(expr.deserializeRecord(b.inputs.replayerOptions), ["tupleS3Bucket"], "")
                         ) as any
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.replayerOptions, "resources"))
