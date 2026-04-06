@@ -440,7 +440,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                 ),
                 "--timeout=31536000s"
             ])
-            .addResources({limits: {cpu: "50m", memory: "32Mi"}, requests: {cpu: "50m", memory: "32Mi"}})
+            .addResources({limits: {cpu: "50m", memory: "64Mi"}, requests: {cpu: "50m", memory: "64Mi"}})
         )
     )
 
