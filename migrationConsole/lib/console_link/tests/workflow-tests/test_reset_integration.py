@@ -244,16 +244,21 @@ class TestDeleteCrdIntegration:
     def test_deletes_crd(self, reset_ns):
         _create_crd_instance(reset_ns, "snapshotmigrations", "snap-b", phase="Ready")
         assert _delete_crd(reset_ns, "snapshotmigrations", "snap-b") is True
-        # Wait briefly for deletion
-        import time
-        time.sleep(2)
+        # Foreground deletion may take time — poll until gone
         custom = client.CustomObjectsApi()
-        with pytest.raises(ApiException) as exc_info:
-            custom.get_namespaced_custom_object(
-                group=CRD_GROUP, version=CRD_VERSION,
-                namespace=reset_ns, plural="snapshotmigrations", name="snap-b"
-            )
-        assert exc_info.value.status == 404
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            try:
+                custom.get_namespaced_custom_object(
+                    group=CRD_GROUP, version=CRD_VERSION,
+                    namespace=reset_ns, plural="snapshotmigrations", name="snap-b"
+                )
+                time.sleep(1)
+            except ApiException as e:
+                assert e.status == 404
+                break
+        else:
+            pytest.fail("CRD snap-b was not deleted within 30s")
 
     def test_delete_nonexistent_returns_true(self, reset_ns):
         assert _delete_crd(reset_ns, "snapshotmigrations", "does-not-exist") is True
@@ -324,9 +329,9 @@ class TestResetSingleIntegration:
 @pytest.mark.slow
 class TestResetAllIntegration:
 
-    def test_reset_all_patches_all_crds(self, runner, reset_ns):
-        """--all patches all non-Teardown CRDs. Workflow deletion will fail
-        (no Argo workflow exists) but CRD patching should succeed."""
+    def test_reset_all_deletes_all_crds(self, runner, reset_ns):
+        """--all deletes all CRDs with foreground cascading. Workflow deletion will fail
+        (no Argo workflow exists) but CRD deletion should succeed."""
         _create_crd_instance(reset_ns, "capturedtraffics", "proxy-f", phase="Ready")
         _create_crd_instance(reset_ns, "snapshotmigrations", "snap-f", phase="Ready")
         _create_crd_instance(reset_ns, "trafficreplays", "replay-f", phase="Ready")
@@ -336,13 +341,16 @@ class TestResetAllIntegration:
             "--argo-server", "http://localhost:9999",  # intentionally wrong — no workflow to delete
         ])
 
-        # All CRDs should be patched to Teardown
-        assert _get_phase(reset_ns, "capturedtraffics", "proxy-f") == "Teardown"
-        assert _get_phase(reset_ns, "snapshotmigrations", "snap-f") == "Teardown"
-        assert _get_phase(reset_ns, "trafficreplays", "replay-f") == "Teardown"
-        assert "Patched proxy-f" in result.output
-        assert "Patched snap-f" in result.output
-        assert "Patched replay-f" in result.output
+        # All CRDs should be deleted (404)
+        custom = client.CustomObjectsApi()
+        for plural, name in [("capturedtraffics", "proxy-f"), ("snapshotmigrations", "snap-f"), ("trafficreplays", "replay-f")]:
+            with pytest.raises(ApiException) as exc_info:
+                custom.get_namespaced_custom_object(
+                    group=CRD_GROUP, version=CRD_VERSION,
+                    namespace=reset_ns, plural=plural, name=name,
+                )
+            assert exc_info.value.status == 404
+        assert "Deleted" in result.output
 
     def test_reset_all_skips_already_teardown(self, runner, reset_ns):
         """--all should still proceed even when all CRDs are already torn down."""
@@ -456,7 +464,7 @@ class TestPatchTargetsFailureIntegration:
         # Use a name that was never created, so there's no race with k8s deletion
         result = runner.invoke(workflow_cli, ["reset", "does-not-exist", "--namespace", reset_ns])
         assert result.exit_code == 0
-        assert "No resources to teardown" in result.output
+        assert "No resources matching" in result.output
 
 
 # ============================================================================

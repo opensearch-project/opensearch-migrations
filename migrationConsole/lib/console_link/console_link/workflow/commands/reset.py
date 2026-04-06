@@ -197,7 +197,7 @@ def _get_resource_completions(ctx, param, incomplete):
     try:
         load_k8s_config()
         crds = _list_migration_resources(ctx.params.get('namespace', 'ma'))
-        return [n for _, n, _ in crds if n.startswith(incomplete)]
+        return [n for _, n, phase in crds if n.startswith(incomplete) and phase != 'Teardown']
     except Exception:
         return []
 
