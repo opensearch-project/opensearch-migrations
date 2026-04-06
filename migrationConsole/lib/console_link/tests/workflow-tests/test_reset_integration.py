@@ -509,7 +509,7 @@ class TestSubmitErrorPathsIntegration:
         result = runner.invoke(workflow_cli, ["submit", "--namespace", reset_ns])
         assert result.exit_code != 0
         assert "workflow already exists" in result.output
-        assert "reset --all" in result.output
+        assert "resubmit" in result.output
 
     def test_submit_script_fails_generic(self, runner, reset_ns, monkeypatch, tmp_path):
         """Submit with a script that fails generically shows exit code."""
