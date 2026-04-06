@@ -22,13 +22,15 @@ ARGO_VERSION = 'v1alpha1'
 
 # All resettable resource types
 RESETTABLE_PLURALS = [
-    'capturedtraffics', 'datasnapshots', 'snapshotmigrations',
-    'trafficreplays', 'kafkaclusters', 'approvalgates',
+    'capturedtraffics', 'datasnapshots', 'metadatamigrations',
+    'snapshotmigrations', 'trafficreplays', 'kafkaclusters',
+    'approvalgates',
 ]
 
 DISPLAY_NAMES = {
     'capturedtraffics': 'Capture Proxy',
     'datasnapshots': 'Data Snapshot',
+    'metadatamigrations': 'Metadata Migration',
     'snapshotmigrations': 'Snapshot Migration',
     'trafficreplays': 'Traffic Replay',
     'kafkaclusters': 'Kafka Cluster',
