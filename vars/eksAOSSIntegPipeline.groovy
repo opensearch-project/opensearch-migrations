@@ -23,6 +23,10 @@ def call(Map config = [:]) {
             string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/aoss-osb-data/os1x-aoss-osb-data/', description: 'Full S3 URI to snapshot repository')
             string(name: 'SNAPSHOT_NAME', defaultValue: 'os1x-aoss-osb-data', description: 'Name of the snapshot')
             string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '33', description: 'Max retries for workflow monitoring (~1/min). 33=~30min')
+            booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source instead of using public images')
+            booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
+            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
+            string(name: 'VERSION', defaultValue: 'latest', description: 'Release version for bootstrap artifacts (e.g. 2.8.2). Only used when USE_RELEASE_BOOTSTRAP is true')
         }
 
         options {
@@ -83,7 +87,10 @@ def call(Map config = [:]) {
                 }
             }
 
+            // Skip source build when using release bootstrap — all artifacts are
+            // downloaded from the published GitHub release instead.
             stage('Build') {
+                when { expression { !params.USE_RELEASE_BOOTSTRAP } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
@@ -99,18 +106,45 @@ def call(Map config = [:]) {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 7200, roleSessionName: 'jenkins-session') {
+                                    def buildImagesArg = params.BUILD_IMAGES ? "--build-images" : ""
+                                    def buildChartArg = params.BUILD_CHART_AND_DASHBOARDS ? "--build-chart-and-dashboards" : ""
+                                    def bootstrapPath
+                                    def buildCfnArg
+                                    def baseDirArg
+                                    def versionArg
+                                    // When USE_RELEASE_BOOTSTRAP is true, download the self-contained
+                                    // aws-bootstrap.sh from the GitHub release. This script downloads
+                                    // all artifacts (CFN templates, images, chart) from the release,
+                                    // so --build-cfn and --base-dir are not needed.
+                                    if (params.USE_RELEASE_BOOTSTRAP) {
+                                        sh """
+                                            curl -sL -o /tmp/aws-bootstrap.sh \
+                                              "https://github.com/opensearch-project/opensearch-migrations/releases/${params.VERSION}/download/aws-bootstrap.sh"
+                                            chmod +x /tmp/aws-bootstrap.sh
+                                        """
+                                        bootstrapPath = "/tmp/aws-bootstrap.sh"
+                                        buildCfnArg = ""
+                                        baseDirArg = ""
+                                        versionArg = "--version ${params.VERSION}"
+                                    } else {
+                                        sh "./deployment/k8s/aws/assemble-bootstrap.sh"
+                                        bootstrapPath = "./deployment/k8s/aws/dist/aws-bootstrap.sh"
+                                        buildCfnArg = "--build-cfn"
+                                        baseDirArg = "--base-dir \"\$(pwd)\""
+                                        versionArg = ""
+                                    }
                                     sh """
-                                        ./deployment/k8s/aws/assemble-bootstrap.sh
-                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
+                                        ${bootstrapPath} \
                                           --deploy-create-vpc-cfn \
-                                          --build-cfn \
-                                          --build-images \
-                                          --build-chart-and-dashboards \
+                                          ${buildCfnArg} \
+                                          ${buildImagesArg} \
+                                          ${buildChartArg} \
                                           --stack-name "${env.STACK_NAME}" \
                                           --stage "${maStageName}" \
                                           --region "${params.REGION}" \
                                           --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          --base-dir "\$(pwd)" \
+                                          ${baseDirArg} \
+                                          ${versionArg} \
                                           --skip-console-exec \
                                           --skip-setting-k8s-context \
                                           2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}

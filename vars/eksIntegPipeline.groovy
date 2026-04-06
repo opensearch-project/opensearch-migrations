@@ -52,6 +52,10 @@ def call(Map config = [:]) {
             )
             string(name: 'TEST_IDS', defaultValue: 'all', description: 'Test IDs to execute. Use comma separated list e.g. "0001,0004" or "all" for all tests')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
+            booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source instead of using public images')
+            booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
+            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
+            string(name: 'VERSION', defaultValue: 'latest', description: 'Release version for bootstrap artifacts (e.g. 2.8.2). Only used when USE_RELEASE_BOOTSTRAP is true')
         }
 
         options {
@@ -95,7 +99,10 @@ def call(Map config = [:]) {
                 }
             }
 
+            // Skip source build when using release bootstrap — all artifacts are
+            // downloaded from the published GitHub release instead.
             stage('Build') {
+                when { expression { !params.USE_RELEASE_BOOTSTRAP } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
@@ -145,19 +152,46 @@ def call(Map config = [:]) {
                                         vpcId = sh(script: "aws ec2 describe-subnets --subnet-ids ${firstSubnet} --region ${params.REGION} --query 'Subnets[0].VpcId' --output text", returnStdout: true).trim()
                                         echo "Resolved VPC ID from subnet: ${vpcId}"
                                     }
+                                    def buildImagesArg = params.BUILD_IMAGES ? "--build-images" : ""
+                                    def buildChartArg = params.BUILD_CHART_AND_DASHBOARDS ? "--build-chart-and-dashboards" : ""
+                                    // When USE_RELEASE_BOOTSTRAP is true, download the self-contained
+                                    // aws-bootstrap.sh from the GitHub release. This script downloads
+                                    // all artifacts (CFN templates, images, chart) from the release,
+                                    // so --build-cfn and --base-dir are not needed.
+                                    def bootstrapPath
+                                    def buildCfnArg
+                                    def baseDirArg
+                                    def versionArg
+                                    if (params.USE_RELEASE_BOOTSTRAP) {
+                                        sh """
+                                            curl -sL -o /tmp/aws-bootstrap.sh \
+                                              "https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/aws-bootstrap.sh"
+                                            chmod +x /tmp/aws-bootstrap.sh
+                                        """
+                                        bootstrapPath = "/tmp/aws-bootstrap.sh"
+                                        buildCfnArg = ""
+                                        baseDirArg = ""
+                                        versionArg = "--version ${params.VERSION}"
+                                    } else {
+                                        sh "./deployment/k8s/aws/assemble-bootstrap.sh"
+                                        bootstrapPath = "./deployment/k8s/aws/dist/aws-bootstrap.sh"
+                                        buildCfnArg = "--build-cfn"
+                                        baseDirArg = "--base-dir \$(pwd)"
+                                        versionArg = ""
+                                    }
                                     sh """
-                                        ./deployment/k8s/aws/assemble-bootstrap.sh
-                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
+                                        ${bootstrapPath} \
                                           --deploy-import-vpc-cfn \
-                                          --build-cfn \
+                                          ${buildCfnArg} \
                                           --stack-name "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}" \
                                           --vpc-id "${vpcId}" \
                                           --subnet-ids "${subnetIds}" \
                                           --stage "${maStageName}" \
                                           --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          --build-images \
-                                          --build-chart-and-dashboards \
-                                          --base-dir "\$(pwd)" \
+                                          ${buildImagesArg} \
+                                          ${buildChartArg} \
+                                          ${baseDirArg} \
+                                          ${versionArg} \
                                           --skip-console-exec \
                                           --skip-setting-k8s-context \
                                           --region ${params.REGION} \
