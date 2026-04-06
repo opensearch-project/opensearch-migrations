@@ -145,30 +145,26 @@ public class LuceneReader {
                 .addArgument(() -> segmentReader.maxDoc() - startDocIdInSegment)
                 .log();
 
-        // Use parallel rails — each rail gets its own StoredFields clone via ThreadLocal
-        // in LeafReader9, so concurrent document reads are safe and lock-free.
-        final int startDoc = startDocIdInSegment;
-        final int endDoc = segmentReader.maxDoc();
-        final var liveDocsBits = liveDocs;
-
-        var idxStream = (liveDocsBits != null)
-            ? liveDocsBits.stream().filter(idx -> idx >= startDoc)
-            : IntStream.range(startDoc, endDoc);
-
+        // With ThreadLocal<StoredFields> in LeafReader9, each scheduler thread gets its own
+        // clone of the stored fields reader — no lock contention. flatMapSequential with high
+        // concurrency issues many concurrent blocking reads across different scheduler threads.
+        var idxStream = (liveDocs != null) ? liveDocs.stream().filter(idx -> idx >= startDocIdInSegment) :
+            IntStream.range(startDocIdInSegment, segmentReader.maxDoc());
         return Flux.fromStream(idxStream.boxed())
-            .parallel(PARALLEL_RAILS_PER_SEGMENT)
-            .runOn(LUCENE_IO_SCHEDULER, SEGMENT_PREFETCH)
-            .map(docIdx -> {
-                try {
-                    return LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase,
-                        getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext);
-                } catch (Exception e) {
-                    log.atError().setMessage("Error reading doc {}").addArgument(docIdx).setCause(e).log();
-                    return (LuceneDocumentChange) null;
-                }
-            })
-            .filter(java.util.Objects::nonNull)
-            .sequential();
+            .flatMapSequential(docIdx -> Mono.defer(() -> {
+                    try {
+                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext);
+                        return Mono.justOrEmpty(document);
+                    } catch (Exception e) {
+                        log.atError().setMessage("Error reading document from reader {} with index: {}")
+                            .addArgument(getSegmentReaderDebugInfo)
+                            .addArgument(docIdx)
+                            .setCause(e)
+                            .log();
+                        return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
+                            + " from segment " + getSegmentReaderDebugInfo.get(), e));
+                    }
+                }).subscribeOn(LUCENE_IO_SCHEDULER), SEGMENT_READ_CONCURRENCY, SEGMENT_PREFETCH);
     }
 
     /** Backwards-compatible overload without mapping context */
