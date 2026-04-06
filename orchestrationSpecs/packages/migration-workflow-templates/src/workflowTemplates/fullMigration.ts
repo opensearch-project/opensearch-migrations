@@ -98,13 +98,32 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("version", typeToken<string>())
         .addOptionalInput("groupName_view", c => "Kafka Cluster")
         .addOptionalInput("sortOrder_view", c => 999)
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
+            .addStep("createCrd", ResourceManagement, "createKafkaCluster", c =>
+                c.register({resourceName: b.inputs.clusterName})
+            )
+            .addStep("getCrdUid", ResourceManagement, "getResourceUid", c =>
+                c.register({
+                    resourceName: b.inputs.clusterName,
+                    resourceKind: expr.literal("KafkaCluster"),
+                })
+            )
             .addStep("deployCluster", SetupKafka, "deployKafkaClusterWithRetry", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
                     version: b.inputs.version,
                     clusterConfig: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "config"),
+                    crdName: b.inputs.clusterName,
+                    crdUid: c.steps.getCrdUid.outputs.uid,
+                })
+            )
+            .addStep("waitForCrdDeletion", ResourceManagement, "waitForCrdDeletion", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.clusterName,
+                    resourceKind: expr.literal("KafkaCluster"),
                 })
             )
         )
@@ -112,6 +131,56 @@ export const FullMigration = WorkflowBuilder.create({
 
 
     // ── Section 2: Proxies ───────────────────────────────────────────────
+
+    // Helper: when Kafka is deleted, redeploy proxy in non-capture mode, then wait for CapturedTraffic deletion
+    .addTemplate("proxyKafkaGoneTeardown", t => t
+        .addRequiredInput("proxyName", typeToken<string>())
+        .addRequiredInput("kafkaClusterName", typeToken<string>())
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("listenPort", typeToken<number>())
+        .addRequiredInput("podReplicas", typeToken<number>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "CaptureProxy"]))
+
+        .addSteps(b => b
+            .addStep("waitForKafkaDeletion", ResourceManagement, "waitForCrdDeletion", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.kafkaClusterName,
+                    resourceKind: expr.literal("KafkaCluster"),
+                })
+            )
+            .addStep("redeployNoCapture", SetupCapture, "deployProxyDeployment", c => {
+                const config = expr.deserializeRecord(b.inputs.proxyConfig);
+                const proxyOpts = expr.get(config, "proxyConfig") as any;
+                return c.register({
+                    ...selectInputsForRegister(b, c),
+                    proxyName: b.inputs.proxyName,
+                    listenPort: b.inputs.listenPort,
+                    podReplicas: b.inputs.podReplicas,
+                    resources: expr.serialize(expr.get(proxyOpts, "resources") as any),
+                    jsonConfig: expr.asString(expr.serialize(
+                        expr.mergeDicts(
+                            expr.omit(proxyOpts, "noCapture", "resources", "internetFacing", "tls", "podReplicas", "listenPort"),
+                            expr.makeDict({
+                                destinationUri: expr.get(config, "sourceEndpoint"),
+                                insecureDestination: expr.get(config, "sourceAllowInsecure"),
+                            })
+                        ) as any
+                    )),
+                    crdName: expr.literal(""),
+                    crdUid: expr.literal(""),
+                });
+            })
+            .addStep("waitForCapturedTrafficDeletion", ResourceManagement, "waitForCrdDeletion", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.proxyName,
+                    resourceKind: expr.literal("CapturedTraffic"),
+                })
+            )
+        )
+    )
+
 
     .addTemplate("setupSingleProxy", t => t
         .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
@@ -131,6 +200,15 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.kafkaClusterName,
                 })
             )
+            .addStep("createCrd", ResourceManagement, "createCapturedTraffic", c =>
+                c.register({resourceName: b.inputs.proxyName})
+            )
+            .addStep("getCrdUid", ResourceManagement, "getResourceUid", c =>
+                c.register({
+                    resourceName: b.inputs.proxyName,
+                    resourceKind: expr.literal("CapturedTraffic"),
+                })
+            )
             .addStep("setupProxy", SetupCapture, "setupProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -140,6 +218,8 @@ export const FullMigration = WorkflowBuilder.create({
                     proxyName: b.inputs.proxyName,
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    crdName: b.inputs.proxyName,
+                    crdUid: c.steps.getCrdUid.outputs.uid,
                 })
             )
             .addStep("patchCapturedTraffic", ResourceManagement, "patchCapturedTrafficReady", c =>
@@ -147,13 +227,27 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.proxyName,
                 })
             )
-            // Wait for teardown signal on the CapturedTraffic CRD
-            .addStep("waitForTeardown", ResourceManagement, "waitForTeardown", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    resourceName: b.inputs.proxyName,
-                    resourceKind: expr.literal("CapturedTraffic"),
-                })
+            // Dual-mode teardown: Kafka deletion → non-capture mode, CapturedTraffic deletion → full teardown
+            .addStepGroup(g => g
+                .addStep("kafkaGonePath", INTERNAL, "proxyKafkaGoneTeardown", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        proxyName: b.inputs.proxyName,
+                        kafkaClusterName: b.inputs.kafkaClusterName,
+                        proxyConfig: b.inputs.proxyConfig,
+                        listenPort: b.inputs.listenPort,
+                        podReplicas: b.inputs.podReplicas,
+                    }),
+                    {continueOn: {failed: true}}
+                )
+                .addStep("directTeardown", ResourceManagement, "waitForCrdDeletion", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        resourceName: b.inputs.proxyName,
+                        resourceKind: expr.literal("CapturedTraffic"),
+                    }),
+                    {continueOn: {failed: true}}
+                )
             )
         )
     )
@@ -258,6 +352,10 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("groupName_view", typeToken<string>())
+        .addRequiredInput("coordinatorName", typeToken<string>())
+        .addRequiredInput("coordinatorUid", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addOptionalInput("metadataMigrationConfig", c =>
             expr.empty<z.infer<typeof ARGO_METADATA_OPTIONS>>())
         .addOptionalInput("documentBackfillConfig", c =>
@@ -294,6 +392,10 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("resolvedSnapshotName", typeToken<string>())
+        .addRequiredInput("coordinatorName", typeToken<string>())
+        .addRequiredInput("coordinatorUid", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
@@ -325,7 +427,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("patchSnapshotMigration", ResourceManagement, "patchSnapshotMigrationReady", c =>
                 c.register({resourceName: b.inputs.resourceName})
             )
-            .addStep("selfTeardown", ResourceManagement, "patchTeardown", c =>
+            .addStep("selfTeardown", ResourceManagement, "deleteCrd", c =>
                 c.register({
                     resourceName: b.inputs.resourceName,
                     resourceKind: expr.literal("SnapshotMigration"),
@@ -344,6 +446,15 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b => b
+            .addStep("createCrd", ResourceManagement, "createSnapshotMigration", c =>
+                c.register({resourceName: b.inputs.resourceName})
+            )
+            .addStep("getCrdUid", ResourceManagement, "getResourceUid", c =>
+                c.register({
+                    resourceName: b.inputs.resourceName,
+                    resourceKind: expr.literal("SnapshotMigration"),
+                })
+            )
             .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -383,11 +494,11 @@ export const FullMigration = WorkflowBuilder.create({
                     }
                 }
             )
-            // Parallel: teardown watcher + (migrate → patchReady → selfTeardown)
-            // Natural completion: migration finishes, patches Ready then Teardown → watcher resolves
-            // External reset: CRD patched to Teardown → watcher resolves, migration killed via continueOn
+            // Parallel: CRD deletion watcher + (migrate → patchReady → self-delete CRD)
+            // Natural completion: migration finishes, patches Ready, deletes CRD → watcher resolves
+            // External reset: CLI deletes CRD → k8s cascades to coordinator/RFS → watcher resolves
             .addStepGroup(g => g
-                .addStep("teardownWatcher", ResourceManagement, "waitForTeardown", c =>
+                .addStep("deletionWatcher", ResourceManagement, "waitForCrdDeletion", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: b.inputs.resourceName,
@@ -406,6 +517,10 @@ export const FullMigration = WorkflowBuilder.create({
                                 expr.getLoose(snapshotNameResolution, "externalSnapshotName"),
                                 c.steps.readSnapshotName.outputs.snapshotName
                             ),
+                            coordinatorName: b.inputs.resourceName,
+                            coordinatorUid: c.steps.getCrdUid.outputs.uid,
+                            crdName: b.inputs.resourceName,
+                            crdUid: c.steps.getCrdUid.outputs.uid,
                         });
                     },
                     {continueOn: {failed: true}}
@@ -429,82 +544,80 @@ export const FullMigration = WorkflowBuilder.create({
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "TrafficReplayer"]))
 
-        .addSteps(b => b
-            .addStep("waitForSnapshotMigrationDeps", ResourceManagement, "waitForSnapshotMigration", c => {
-                    return c.register({
-                        ...selectInputsForRegister(b, c),
-                        resourceName: expr.concat(
-                            expr.asString(expr.get(c.item, "source")),
-                            expr.literal("-"),
-                            expr.asString(expr.get(c.item, "snapshot"))
-                        )
-                    });
-                }, {
-                    loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.dependsOnSnapshotMigrations)),
-                    when: {
-                        templateExp: expr.not(
-                            expr.isEmpty(expr.deserializeRecord(b.inputs.dependsOnSnapshotMigrations)))
-                    }
-                }
-            )
-            .addStep("waitForProxy", ResourceManagement, "waitForCapturedTraffic", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    resourceName: b.inputs.fromProxy,
-                })
-            )
-            .addStep("waitForKafkaCluster", ResourceManagement, "waitForKafkaCluster", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    resourceName: b.inputs.kafkaClusterName
-                })
-            )
+        .addSteps(b => {
+            const replayerName = expr.concat(
+                b.inputs.fromProxy,
+                expr.literal("-"),
+                expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
+                expr.literal("-replayer"));
 
-            .addStep("deployReplayer", Replayer, "setupReplayer", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    kafkaGroupId: expr.concat(expr.literal("replayer-"),
-                        expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label")),
-                    name: expr.concat(
-                        b.inputs.fromProxy,
-                        expr.literal("-"),
-                        expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
-                        expr.literal("-replayer"))
-                })
-            )
-            // Create TrafficReplay CRD and wait for teardown signal
-            .addStep("createTrafficReplay", ResourceManagement, "createTrafficReplay", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    resourceName: expr.concat(
-                        b.inputs.fromProxy,
-                        expr.literal("-"),
-                        expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
-                        expr.literal("-replayer")),
-                })
-            )
-            .addStep("patchTrafficReplayReady", ResourceManagement, "patchTrafficReplayReady", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    resourceName: expr.concat(
-                        b.inputs.fromProxy,
-                        expr.literal("-"),
-                        expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
-                        expr.literal("-replayer")),
-                })
-            )
-            .addStep("waitForTeardown", ResourceManagement, "waitForTeardown", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    resourceName: expr.concat(
-                        b.inputs.fromProxy,
-                        expr.literal("-"),
-                        expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
-                        expr.literal("-replayer")),
-                    resourceKind: expr.literal("TrafficReplay"),
-                })
-            )
-        )
+            return b
+                .addStep("waitForSnapshotMigrationDeps", ResourceManagement, "waitForSnapshotMigration", c => {
+                        return c.register({
+                            ...selectInputsForRegister(b, c),
+                            resourceName: expr.concat(
+                                expr.asString(expr.get(c.item, "source")),
+                                expr.literal("-"),
+                                expr.asString(expr.get(c.item, "snapshot"))
+                            )
+                        });
+                    }, {
+                        loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.dependsOnSnapshotMigrations)),
+                        when: {
+                            templateExp: expr.not(
+                                expr.isEmpty(expr.deserializeRecord(b.inputs.dependsOnSnapshotMigrations)))
+                        }
+                    }
+                )
+                .addStep("waitForProxy", ResourceManagement, "waitForCapturedTraffic", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        resourceName: b.inputs.fromProxy,
+                    })
+                )
+                .addStep("waitForKafkaCluster", ResourceManagement, "waitForKafkaCluster", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        resourceName: b.inputs.kafkaClusterName
+                    })
+                )
+                // Create TrafficReplay CRD and read its UID
+                .addStep("createTrafficReplay", ResourceManagement, "createTrafficReplay", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        resourceName: replayerName,
+                    })
+                )
+                .addStep("getCrdUid", ResourceManagement, "getResourceUid", c =>
+                    c.register({
+                        resourceName: replayerName,
+                        resourceKind: expr.literal("TrafficReplay"),
+                    })
+                )
+                .addStep("deployReplayer", Replayer, "setupReplayer", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        kafkaGroupId: expr.concat(expr.literal("replayer-"),
+                            expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label")),
+                        name: replayerName,
+                        crdName: replayerName,
+                        crdUid: c.steps.getCrdUid.outputs.uid,
+                    })
+                )
+                .addStep("patchTrafficReplayReady", ResourceManagement, "patchTrafficReplayReady", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        resourceName: replayerName,
+                    })
+                )
+                .addStep("waitForCrdDeletion", ResourceManagement, "waitForCrdDeletion", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        resourceName: replayerName,
+                        resourceKind: expr.literal("TrafficReplay"),
+                    })
+                );
+        })
     )
 
 
@@ -520,6 +633,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(g => g
             .addStep("createKafka", INTERNAL, "setupSingleKafkaCluster", c =>
                 c.register({
+                    ...selectInputsForRegister(b, c),
                     kafkaClusterConfig: expr.serialize(expr.makeDict({
                         name: expr.get(c.item, "name"),
                         version: expr.get(c.item, "version"),

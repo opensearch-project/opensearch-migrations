@@ -71,6 +71,8 @@ function getReplayerDeploymentManifest
     workflowName: BaseExpression<string>,
     jsonConfig: BaseExpression<string>,
     name: BaseExpression<string>,
+    crdName: BaseExpression<string>,
+    crdUid: BaseExpression<string>,
 
     useCustomLogging: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
@@ -104,6 +106,14 @@ function getReplayerDeploymentManifest
                 app: "replayer",
                 "workflows.argoproj.io/workflow": makeDirectTypeProxy(args.workflowName)
             },
+            ownerReferences: [{
+                apiVersion: "migrations.opensearch.org/v1alpha1",
+                kind: "TrafficReplay",
+                name: makeDirectTypeProxy(args.crdName),
+                uid: makeDirectTypeProxy(args.crdUid),
+                blockOwnerDeletion: true,
+                controller: false
+            }]
         },
         spec: {
             replicas: makeDirectTypeProxy(args.podReplicas),
@@ -140,6 +150,8 @@ export const Replayer = WorkflowBuilder.create({
 
     .addTemplate("createDeployment", t => t
         .addRequiredInput("name", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addRequiredInput("jsonConfig", typeToken<string>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("jvmArgs", typeToken<string>())
@@ -150,13 +162,15 @@ export const Replayer = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "create",
-                setOwnerReference: true,
+                setOwnerReference: false,
                 manifest: getReplayerDeploymentManifest({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     useCustomLogging: expr.equals(expr.literal(""), b.inputs.loggingConfigurationOverrideConfigMap),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     jvmArgs: b.inputs.jvmArgs,
                     name: b.inputs.name,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                     replayerImageName: b.inputs.imageTrafficReplayerLocation,
                     replayerImagePullPolicy: b.inputs.imageTrafficReplayerPullPolicy,
                     workflowName: expr.getWorkflowValue("name"),
@@ -169,6 +183,8 @@ export const Replayer = WorkflowBuilder.create({
 
 
     .addTemplate("setupReplayer", t => t
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addRequiredInput("kafkaConfig", typeToken<z.infer<typeof KAFKA_CLIENT_CONFIG>>())
         .addRequiredInput("kafkaGroupId", typeToken<string>())
         .addRequiredInput("name", typeToken<string>())

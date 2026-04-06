@@ -24,13 +24,23 @@ import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 function makeProxyServiceManifest(
     proxyName: BaseExpression<string>,
     listenPort: BaseExpression<Serialized<number>>,
-    internetFacing: BaseExpression<boolean>
+    internetFacing: BaseExpression<boolean>,
+    crdName: BaseExpression<string>,
+    crdUid: BaseExpression<string>
 ) {
     return {
         apiVersion: "v1",
         kind: "Service",
         metadata: {
             name: proxyName,
+            ownerReferences: [{
+                apiVersion: "migrations.opensearch.org/v1alpha1",
+                kind: "CapturedTraffic",
+                name: crdName,
+                uid: crdUid,
+                blockOwnerDeletion: true,
+                controller: false
+            }],
             annotations: {
                 // NLB IP mode for EKS Auto Mode — ignored on minikube/standard K8s
                 "service.beta.kubernetes.io/aws-load-balancer-type": "external",
@@ -84,6 +94,8 @@ function makeProxyDeploymentManifest(args: {
     resources: BaseExpression<ResourceRequirementsType>,
     jsonConfig: BaseExpression<string>,
     tlsSecretName?: BaseExpression<string>,
+    crdName: BaseExpression<string>,
+    crdUid: BaseExpression<string>,
 }) {
     const container: Record<string, any> = {
         name: "proxy",
@@ -108,7 +120,17 @@ function makeProxyDeploymentManifest(args: {
     return {
         apiVersion: "apps/v1",
         kind: "Deployment",
-        metadata: {name: args.proxyName},
+        metadata: {
+            name: args.proxyName,
+            ownerReferences: [{
+                apiVersion: "migrations.opensearch.org/v1alpha1",
+                kind: "CapturedTraffic",
+                name: args.crdName,
+                uid: args.crdUid,
+                blockOwnerDeletion: true,
+                controller: false
+            }]
+        },
         spec: {
             replicas: makeDirectTypeProxy(args.podReplicas),
             selector: {matchLabels: {"migrations/proxy": args.proxyName}},
@@ -163,6 +185,8 @@ export const SetupCapture = WorkflowBuilder.create({
     .addTemplate("deployProxyService", t => t
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addOptionalInput("internetFacing", c => false)
         .addResourceTask(b => b
             .setDefinition({
@@ -171,7 +195,9 @@ export const SetupCapture = WorkflowBuilder.create({
                 manifest: makeProxyServiceManifest(
                     b.inputs.proxyName,
                     b.inputs.listenPort,
-                    expr.deserializeRecord(b.inputs.internetFacing)
+                    expr.deserializeRecord(b.inputs.internetFacing),
+                    b.inputs.crdName,
+                    b.inputs.crdUid
                 )
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -184,6 +210,8 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addOptionalInput("tlsSecretName", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
         .addResourceTask(b => b
@@ -198,6 +226,8 @@ export const SetupCapture = WorkflowBuilder.create({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     resources: expr.deserializeRecord(b.inputs.resources),
                     jsonConfig: expr.toBase64(b.inputs.jsonConfig),
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -211,6 +241,8 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
         .addRequiredInput("tlsSecretName", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
         .addResourceTask(b => b
             .setDefinition({
@@ -225,6 +257,8 @@ export const SetupCapture = WorkflowBuilder.create({
                     resources: expr.deserializeRecord(b.inputs.resources),
                     jsonConfig: expr.toBase64(b.inputs.jsonConfig),
                     tlsSecretName: b.inputs.tlsSecretName,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -283,6 +317,8 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
 
         .addSteps(b => {
@@ -319,6 +355,8 @@ export const SetupCapture = WorkflowBuilder.create({
                             proxyName: b.inputs.proxyName,
                             listenPort: b.inputs.listenPort,
                             internetFacing: expr.dig(proxyOpts, ["internetFacing"], false),
+                            crdName: b.inputs.crdName,
+                            crdUid: b.inputs.crdUid,
                         })
                     )
                     .addStep("provisionCert", INTERNAL, "provisionProxyCert", c =>
@@ -352,6 +390,8 @@ export const SetupCapture = WorkflowBuilder.create({
                                 jsonConfig: expr.asString(expr.serialize(
                                     makeProxyParamsDict(b.inputs.proxyConfig) as any
                                 )),
+                                crdName: b.inputs.crdName,
+                                crdUid: b.inputs.crdUid,
                             }),
                         {when: {templateExp: expr.not(hasTls)}}
                     )
@@ -372,6 +412,8 @@ export const SetupCapture = WorkflowBuilder.create({
                                         })
                                     ) as any
                                 )),
+                                crdName: b.inputs.crdName,
+                                crdUid: b.inputs.crdUid,
                             }),
                         {when: {templateExp: hasTls}}
                     )

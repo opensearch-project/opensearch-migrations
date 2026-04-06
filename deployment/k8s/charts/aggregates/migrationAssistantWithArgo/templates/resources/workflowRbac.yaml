@@ -39,9 +39,9 @@ rules:
 
   # OpenSearch migration custom resources
   - apiGroups: ["migrations.opensearch.org"]
-    resources: ["approvalgates", "capturedtraffics", "datasnapshots", "proxyconfigs", "replayerconfigs",
+    resources: ["approvalgates", "capturedtraffics", "datasnapshots", "kafkaclusters", "proxyconfigs", "replayerconfigs",
                 "rfsconfigs", "snapshotconfigs", "snapshotmigrations", "trafficreplays",
-                "approvalgates/status", "capturedtraffics/status", "datasnapshots/status", "proxyconfigs/status",
+                "approvalgates/status", "capturedtraffics/status", "datasnapshots/status", "kafkaclusters/status", "proxyconfigs/status",
                 "replayerconfigs/status", "rfsconfigs/status", "snapshotconfigs/status",
                 "snapshotmigrations/status", "trafficreplays/status"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]

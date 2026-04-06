@@ -19,13 +19,23 @@ type KafkaConfig = z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>;
 function makeDeployKafkaNodePool(args: {
     clusterName: BaseExpression<string>,
     replicas: BaseExpression<number>,
+    crdName: BaseExpression<string>,
+    crdUid: BaseExpression<string>,
 }) {
     return {
         apiVersion: "kafka.strimzi.io/v1",
         kind: "KafkaNodePool",
         metadata: {
             name: "dual-role", // TODO - make this a user setting!
-            labels: {"strimzi.io/cluster": args.clusterName}
+            labels: {"strimzi.io/cluster": args.clusterName},
+            ownerReferences: [{
+                apiVersion: "migrations.opensearch.org/v1alpha1",
+                kind: "KafkaCluster",
+                name: args.crdName,
+                uid: args.crdUid,
+                blockOwnerDeletion: true,
+                controller: false
+            }]
         },
         spec: {
             replicas: makeDirectTypeProxy(args.replicas),
@@ -38,6 +48,8 @@ function makeDeployKafkaNodePool(args: {
 function makeDeployKafkaClusterKraftManifest(args: {
     clusterName: BaseExpression<string>,
     version: BaseExpression<string>,
+    crdName: BaseExpression<string>,
+    crdUid: BaseExpression<string>,
 }) {
     return {
         apiVersion: "kafka.strimzi.io/v1",
@@ -47,7 +59,15 @@ function makeDeployKafkaClusterKraftManifest(args: {
             annotations: {
                 "strimzi.io/node-pools": "enabled",
                 "strimzi.io/kraft": "enabled"
-            }
+            },
+            ownerReferences: [{
+                apiVersion: "migrations.opensearch.org/v1alpha1",
+                kind: "KafkaCluster",
+                name: args.crdName,
+                uid: args.crdUid,
+                blockOwnerDeletion: true,
+                controller: false
+            }]
         },
         spec: {
             kafka: {
@@ -77,14 +97,24 @@ function makeKafkaTopicManifest(args: {
     clusterName: BaseExpression<string>,
     topicName: BaseExpression<string>,
     topicPartitions: BaseExpression<number>,
-    topicReplicas: BaseExpression<number>
+    topicReplicas: BaseExpression<number>,
+    crdName: BaseExpression<string>,
+    crdUid: BaseExpression<string>,
 }) {
     return {
         apiVersion: "kafka.strimzi.io/v1",
         kind: "KafkaTopic",
         metadata: {
             name: args.topicName,
-            labels: {"strimzi.io/cluster": args.clusterName}
+            labels: {"strimzi.io/cluster": args.clusterName},
+            ownerReferences: [{
+                apiVersion: "migrations.opensearch.org/v1alpha1",
+                kind: "KafkaCluster",
+                name: args.crdName,
+                uid: args.crdUid,
+                blockOwnerDeletion: true,
+                controller: false
+            }]
         },
         spec: {
             partitions: makeDirectTypeProxy(args.topicPartitions),
@@ -109,6 +139,8 @@ export const SetupKafka = WorkflowBuilder.create({
     .addTemplate("deployKafkaNodePool", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -116,6 +148,8 @@ export const SetupKafka = WorkflowBuilder.create({
                 manifest: makeDeployKafkaNodePool({
                     clusterName: b.inputs.clusterName,
                     replicas: expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["replicas"], 1),
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -125,6 +159,8 @@ export const SetupKafka = WorkflowBuilder.create({
     .addTemplate("deployKafkaClusterKraft", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("version", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -133,6 +169,8 @@ export const SetupKafka = WorkflowBuilder.create({
                 manifest: makeDeployKafkaClusterKraftManifest({
                     clusterName: b.inputs.clusterName,
                     version: b.inputs.version,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                 })
             }))
         .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
@@ -145,18 +183,24 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("version", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
 
         .addSteps(b => b
             .addStep("deployPool", INTERNAL, "deployKafkaNodePool", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                 })
             )
             .addStep("deployCluster", INTERNAL, "deployKafkaClusterKraft", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
                     version: b.inputs.version,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                 })
             )
         )
@@ -168,6 +212,8 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("topicName", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
 
         .addResourceTask(b => b
             .setDefinition({
@@ -179,6 +225,8 @@ export const SetupKafka = WorkflowBuilder.create({
                     topicName: b.inputs.topicName,
                     topicPartitions: expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["partitions"], 1),
                     topicReplicas: expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["topicReplicas"], 1),
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                 })
             }))
         .addJsonPathOutput("topicName", "{.status.topicName}", typeToken<string>())
@@ -206,6 +254,8 @@ export const SetupKafka = WorkflowBuilder.create({
     .addTemplate("deployKafkaNodePoolWithRetry", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
         .addSteps(b => b
@@ -213,6 +263,8 @@ export const SetupKafka = WorkflowBuilder.create({
                 c.register({
                     clusterName: b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                 }),
                 {continueOn: {failed: true}}
             )
@@ -226,6 +278,8 @@ export const SetupKafka = WorkflowBuilder.create({
                 c.register({
                     clusterName: b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
                 {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
@@ -236,6 +290,8 @@ export const SetupKafka = WorkflowBuilder.create({
     .addTemplate("deployKafkaClusterKraftWithRetry", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("version", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
         .addSteps(b => b
@@ -243,6 +299,8 @@ export const SetupKafka = WorkflowBuilder.create({
                 c.register({
                     clusterName: b.inputs.clusterName,
                     version: b.inputs.version,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                 }),
                 {continueOn: {failed: true}}
             )
@@ -256,6 +314,8 @@ export const SetupKafka = WorkflowBuilder.create({
                 c.register({
                     clusterName: b.inputs.clusterName,
                     version: b.inputs.version,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
                 {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
@@ -268,6 +328,8 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("topicName", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
         .addSteps(b => b
@@ -276,6 +338,8 @@ export const SetupKafka = WorkflowBuilder.create({
                     clusterName: b.inputs.clusterName,
                     topicName: b.inputs.topicName,
                     clusterConfig: b.inputs.clusterConfig,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                 }),
                 {continueOn: {failed: true}}
             )
@@ -290,6 +354,8 @@ export const SetupKafka = WorkflowBuilder.create({
                     clusterName: b.inputs.clusterName,
                     topicName: b.inputs.topicName,
                     clusterConfig: b.inputs.clusterConfig,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
                 {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
@@ -303,12 +369,16 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("version", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
 
         .addSteps(b => b
             .addStep("deployPool", INTERNAL, "deployKafkaNodePoolWithRetry", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                     retryGroupName_view: expr.concat(expr.literal("KafkaNodePool: "), b.inputs.clusterName),
                 })
             )
@@ -316,6 +386,8 @@ export const SetupKafka = WorkflowBuilder.create({
                 c.register({
                     clusterName: b.inputs.clusterName,
                     version: b.inputs.version,
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                     retryGroupName_view: expr.concat(expr.literal("KafkaCluster: "), b.inputs.clusterName),
                 })
             )

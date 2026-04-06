@@ -57,10 +57,54 @@
             {
               "name": "sortOrder_view",
               "value": "999"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
             }
           ]
         },
         "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "createkafkacluster",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "createCrd"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "getresourceuid",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "KafkaCluster"
+                  }
+                ]
+              },
+              "name": "getCrdUid"
+            }
+          ],
           [
             {
               "templateRef": {
@@ -80,10 +124,193 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{=jsonpath(inputs.parameters.kafkaClusterConfig, '$.config')}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{steps.getCrdUid.outputs.parameters.uid}}"
                   }
                 ]
               },
               "name": "deployCluster"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforcrddeletion",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "KafkaCluster"
+                  }
+                ]
+              },
+              "name": "waitForCrdDeletion"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "proxykafkagoneteardown",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyName"
+            },
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "proxyConfig"
+            },
+            {
+              "name": "listenPort"
+            },
+            {
+              "name": "podReplicas"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "waitforcrddeletion",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "KafkaCluster"
+                  }
+                ]
+              },
+              "name": "waitForKafkaDeletion"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "deployproxydeployment",
+                "name": "setup-capture"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "listenPort",
+                    "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "podReplicas",
+                    "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "resources",
+                    "value": "{{=toJSON(fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources'])}}"
+                  },
+                  {
+                    "name": "jsonConfig",
+                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'noCapture', 'resources', 'internetFacing', 'tls', 'podReplicas', 'listenPort'), sprig.dict(\"destinationUri\", fromJSON(inputs.parameters.proxyConfig)['sourceEndpoint'], \"insecureDestination\", fromJSON(inputs.parameters.proxyConfig)['sourceAllowInsecure'])))}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": ""
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": ""
+                  }
+                ]
+              },
+              "name": "redeployNoCapture"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforcrddeletion",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "CapturedTraffic"
+                  }
+                ]
+              },
+              "name": "waitForCapturedTrafficDeletion"
             }
           ]
         ],
@@ -164,6 +391,44 @@
           [
             {
               "templateRef": {
+                "template": "createcapturedtraffic",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  }
+                ]
+              },
+              "name": "createCrd"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "getresourceuid",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "CapturedTraffic"
+                  }
+                ]
+              },
+              "name": "getCrdUid"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "setupproxy",
                 "name": "setup-capture"
               },
@@ -200,6 +465,14 @@
                   {
                     "name": "imageCaptureProxyPullPolicy",
                     "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{steps.getCrdUid.outputs.parameters.uid}}"
                   }
                 ]
               },
@@ -225,12 +498,67 @@
           ],
           [
             {
+              "template": "proxykafkagoneteardown",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "proxyConfig",
+                    "value": "{{inputs.parameters.proxyConfig}}"
+                  },
+                  {
+                    "name": "listenPort",
+                    "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "podReplicas",
+                    "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  }
+                ]
+              },
+              "name": "kafkaGonePath",
+              "continueOn": {
+                "failed": true
+              }
+            },
+            {
               "templateRef": {
-                "template": "waitforteardown",
+                "template": "waitforcrddeletion",
                 "name": "resource-management"
               },
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.proxyName}}"
@@ -241,7 +569,10 @@
                   }
                 ]
               },
-              "name": "waitForTeardown"
+              "name": "directTeardown",
+              "continueOn": {
+                "failed": true
+              }
             }
           ]
         ],
@@ -541,6 +872,18 @@
               "name": "groupName_view"
             },
             {
+              "name": "coordinatorName"
+            },
+            {
+              "name": "coordinatorUid"
+            },
+            {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
               "name": "metadataMigrationConfig",
               "value": ""
             },
@@ -675,6 +1018,22 @@
                     "value": "{{inputs.parameters.migrationLabel}}"
                   },
                   {
+                    "name": "coordinatorName",
+                    "value": "{{inputs.parameters.coordinatorName}}"
+                  },
+                  {
+                    "name": "coordinatorUid",
+                    "value": "{{inputs.parameters.coordinatorUid}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
+                  },
+                  {
                     "name": "imageReindexFromSnapshotLocation",
                     "value": "{{inputs.parameters.imageReindexFromSnapshotLocation}}"
                   },
@@ -726,6 +1085,18 @@
               "name": "resolvedSnapshotName"
             },
             {
+              "name": "coordinatorName"
+            },
+            {
+              "name": "coordinatorUid"
+            },
+            {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
               "name": "uniqueRunNonce",
               "description": "Workflow session nonce",
               "value": "{{workflow.uid}}"
@@ -769,6 +1140,22 @@
               "withParam": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrations']}}",
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "coordinatorName",
+                    "value": "{{inputs.parameters.coordinatorName}}"
+                  },
+                  {
+                    "name": "coordinatorUid",
+                    "value": "{{inputs.parameters.coordinatorUid}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
+                  },
                   {
                     "name": "uniqueRunNonce",
                     "value": "{{inputs.parameters.uniqueRunNonce}}"
@@ -874,7 +1261,7 @@
           [
             {
               "templateRef": {
-                "template": "patchteardown",
+                "template": "deletecrd",
                 "name": "resource-management"
               },
               "arguments": {
@@ -956,6 +1343,44 @@
           [
             {
               "templateRef": {
+                "template": "createsnapshotmigration",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  }
+                ]
+              },
+              "name": "createCrd"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "getresourceuid",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "SnapshotMigration"
+                  }
+                ]
+              },
+              "name": "getCrdUid"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "waitfordatasnapshot",
                 "name": "resource-management"
               },
@@ -1000,7 +1425,7 @@
           [
             {
               "templateRef": {
-                "template": "waitforteardown",
+                "template": "waitforcrddeletion",
                 "name": "resource-management"
               },
               "arguments": {
@@ -1010,12 +1435,20 @@
                     "value": "{{inputs.parameters.resourceName}}"
                   },
                   {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
                     "name": "resourceKind",
                     "value": "SnapshotMigration"
                   }
                 ]
               },
-              "name": "teardownWatcher"
+              "name": "deletionWatcher"
             },
             {
               "template": "migrateandselfteardown",
@@ -1076,6 +1509,22 @@
                   {
                     "name": "resolvedSnapshotName",
                     "value": "{{=(('externalSnapshotName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']) ? (fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['externalSnapshotName']) : (steps.readSnapshotName.outputs.parameters.snapshotName))}}"
+                  },
+                  {
+                    "name": "coordinatorName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "coordinatorUid",
+                    "value": "{{steps.getCrdUid.outputs.parameters.uid}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{steps.getCrdUid.outputs.parameters.uid}}"
                   }
                 ]
               },
@@ -1215,6 +1664,44 @@
           [
             {
               "templateRef": {
+                "template": "createtrafficreplay",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                  }
+                ]
+              },
+              "name": "createTrafficReplay"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "getresourceuid",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "TrafficReplay"
+                  }
+                ]
+              },
+              "name": "getCrdUid"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "setupreplayer",
                 "name": "replayer"
               },
@@ -1247,27 +1734,18 @@
                   {
                     "name": "name",
                     "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{steps.getCrdUid.outputs.parameters.uid}}"
                   }
                 ]
               },
               "name": "deployReplayer"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "createtrafficreplay",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
-                  }
-                ]
-              },
-              "name": "createTrafficReplay"
             }
           ],
           [
@@ -1290,11 +1768,19 @@
           [
             {
               "templateRef": {
-                "template": "waitforteardown",
+                "template": "waitforcrddeletion",
                 "name": "resource-management"
               },
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
                   {
                     "name": "resourceName",
                     "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
@@ -1305,7 +1791,7 @@
                   }
                 ]
               },
-              "name": "waitForTeardown"
+              "name": "waitForCrdDeletion"
             }
           ]
         ],
@@ -1424,6 +1910,14 @@
               "when": "{{='kafkaClusters' in fromJSON(inputs.parameters.config)}}",
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
                   {
                     "name": "kafkaClusterConfig",
                     "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"version\", item['version'], \"config\", fromJSON(item['config']), \"topics\", fromJSON(item['topics'])))}}"

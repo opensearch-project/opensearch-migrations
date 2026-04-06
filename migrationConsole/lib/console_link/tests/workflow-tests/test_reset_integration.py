@@ -30,7 +30,7 @@ from testcontainers.k3s import K3SContainer
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.commands.reset import (
     CRD_GROUP, CRD_VERSION,
-    _list_migration_resources, _patch_teardown,
+    _list_migration_resources, _delete_crd,
 )
 from console_link.workflow.commands.approve import list_approval_gates, approve_gate
 
@@ -48,6 +48,7 @@ for _kind, _plural, _singular in [
     ("DataSnapshot", "datasnapshots", "datasnapshot"),
     ("SnapshotMigration", "snapshotmigrations", "snapshotmigration"),
     ("TrafficReplay", "trafficreplays", "trafficreplay"),
+    ("KafkaCluster", "kafkaclusters", "kafkacluster"),
 ]:
     CRD_MANIFESTS.append({
         "apiVersion": "apiextensions.k8s.io/v1",
@@ -182,6 +183,7 @@ def _create_crd_instance(namespace, plural, name, phase=None):
         "trafficreplays": "TrafficReplay",
         "approvalgates": "ApprovalGate",
         "datasnapshots": "DataSnapshot",
+        "kafkaclusters": "KafkaCluster",
     }
     body["kind"] = kind_map[plural]
 
@@ -237,15 +239,24 @@ class TestListMigrationCrdsIntegration:
 # ============================================================================
 
 @pytest.mark.slow
-class TestPatchTeardownIntegration:
+class TestDeleteCrdIntegration:
 
-    def test_patches_to_teardown(self, reset_ns):
+    def test_deletes_crd(self, reset_ns):
         _create_crd_instance(reset_ns, "snapshotmigrations", "snap-b", phase="Ready")
-        assert _patch_teardown(reset_ns, "snapshotmigrations", "snap-b") is True
-        assert _get_phase(reset_ns, "snapshotmigrations", "snap-b") == "Teardown"
+        assert _delete_crd(reset_ns, "snapshotmigrations", "snap-b") is True
+        # Wait briefly for deletion
+        import time
+        time.sleep(2)
+        custom = client.CustomObjectsApi()
+        with pytest.raises(ApiException) as exc_info:
+            custom.get_namespaced_custom_object(
+                group=CRD_GROUP, version=CRD_VERSION,
+                namespace=reset_ns, plural="snapshotmigrations", name="snap-b"
+            )
+        assert exc_info.value.status == 404
 
-    def test_patch_nonexistent_returns_false(self, reset_ns):
-        assert _patch_teardown(reset_ns, "snapshotmigrations", "does-not-exist") is False
+    def test_delete_nonexistent_returns_true(self, reset_ns):
+        assert _delete_crd(reset_ns, "snapshotmigrations", "does-not-exist") is True
 
 
 # ============================================================================
@@ -285,17 +296,19 @@ class TestResetSingleIntegration:
 
         result = runner.invoke(workflow_cli, ["reset", "proxy-c", "--namespace", reset_ns])
         assert result.exit_code == 0
-        assert "Patched proxy-c to Teardown" in result.output
+        assert "✓ Deleted proxy-c" in result.output
 
-        # Only proxy-c should be torn down
-        assert _get_phase(reset_ns, "capturedtraffics", "proxy-c") == "Teardown"
+        # proxy-c should be gone (404), snap-c should be untouched
+        import time
+        time.sleep(2)
+        custom = client.CustomObjectsApi()
+        with pytest.raises(ApiException) as exc_info:
+            custom.get_namespaced_custom_object(
+                group=CRD_GROUP, version=CRD_VERSION,
+                namespace=reset_ns, plural="capturedtraffics", name="proxy-c"
+            )
+        assert exc_info.value.status == 404
         assert _get_phase(reset_ns, "snapshotmigrations", "snap-c") == "Ready"
-
-    def test_reset_already_teardown_skips(self, runner, reset_ns):
-        _create_crd_instance(reset_ns, "capturedtraffics", "proxy-d", phase="Teardown")
-
-        result = runner.invoke(workflow_cli, ["reset", "proxy-d", "--namespace", reset_ns])
-        assert "No resources to teardown" in result.output
 
     def test_reset_nonexistent_resource(self, runner, reset_ns):
         _create_crd_instance(reset_ns, "capturedtraffics", "proxy-e", phase="Ready")

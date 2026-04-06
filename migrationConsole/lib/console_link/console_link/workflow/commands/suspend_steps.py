@@ -38,3 +38,14 @@ def delete_workflow(workflow_name, namespace, argo_server, token, insecure):
         return resp.status_code == 200
     except requests.RequestException:
         return False
+
+
+def argo_stop(workflow_name, namespace, argo_server, token, insecure):
+    """Stop an Argo workflow — prevents new steps from starting."""
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}/stop"
+    try:
+        resp = requests.put(url, headers=headers, verify=not insecure, timeout=10)
+        return resp.status_code == 200
+    except requests.RequestException:
+        return False

@@ -327,4 +327,121 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
 
+
+
+    // ── CRD creation templates ──────────────────────────────────────────
+
+    .addTemplate("createKafkaCluster", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "KafkaCluster",
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Created"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("createSnapshotMigration", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "SnapshotMigration",
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Created"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("createCapturedTraffic", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: true,
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "CapturedTraffic",
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Created"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    // ── Resource UID reader ─────────────────────────────────────────────
+
+    .addTemplate("getResourceUid", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "get",
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: b.inputs.resourceKind,
+                    metadata: {name: b.inputs.resourceName}
+                }
+            })
+            .addJsonPathOutput("uid", "{.metadata.uid}", typeToken<string>()))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    // ── CRD deletion templates ──────────────────────────────────────────
+
+    .addTemplate("waitForCrdDeletion", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addContainer(b => b
+            .addImageInfo(
+                b.inputs.imageMigrationConsoleLocation,
+                b.inputs.imageMigrationConsolePullPolicy
+            )
+            .addCommand(["kubectl"])
+            .addArgs([
+                "wait", "--for=delete",
+                expr.concat(
+                    b.inputs.resourceKind,
+                    expr.literal(".migrations.opensearch.org/"),
+                    b.inputs.resourceName
+                ),
+                "--timeout=31536000s"
+            ])
+            .addResources({limits: {cpu: "50m", memory: "32Mi"}, requests: {cpu: "50m", memory: "32Mi"}})
+        )
+    )
+
+
+    .addTemplate("deleteCrd", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "delete",
+                flags: ["--ignore-not-found"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: b.inputs.resourceKind,
+                    metadata: {name: b.inputs.resourceName}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
     .getFullScope();

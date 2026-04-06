@@ -35,13 +35,19 @@
               "name": "listenPort"
             },
             {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
               "name": "internetFacing",
               "value": "false"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: v1\nkind: Service\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  annotations:\n    service.beta.kubernetes.io/aws-load-balancer-type: external\n    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip\n    service.beta.kubernetes.io/aws-load-balancer-scheme: \"{{=((fromJSON(inputs.parameters.internetFacing)) ? ('internet-facing') : ('internal'))}}\"\nspec:\n  type: LoadBalancer\n  selector:\n    migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  ports:\n    - port: {{inputs.parameters.listenPort}}\n      targetPort: {{inputs.parameters.listenPort}}\n      protocol: TCP\n",
+          "manifest": "apiVersion: v1\nkind: Service\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: CapturedTraffic\n      name: \"{{inputs.parameters.crdName}}\"\n      uid: \"{{inputs.parameters.crdUid}}\"\n      blockOwnerDeletion: true\n      controller: false\n  annotations:\n    service.beta.kubernetes.io/aws-load-balancer-type: external\n    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip\n    service.beta.kubernetes.io/aws-load-balancer-scheme: \"{{=((fromJSON(inputs.parameters.internetFacing)) ? ('internet-facing') : ('internal'))}}\"\nspec:\n  type: LoadBalancer\n  selector:\n    migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  ports:\n    - port: {{inputs.parameters.listenPort}}\n      targetPort: {{inputs.parameters.listenPort}}\n      protocol: TCP\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -78,6 +84,12 @@
               "name": "resources"
             },
             {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
               "name": "tlsSecretName",
               "value": ""
             },
@@ -90,7 +102,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          args:\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n",
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: CapturedTraffic\n      name: \"{{inputs.parameters.crdName}}\"\n      uid: \"{{inputs.parameters.crdUid}}\"\n      blockOwnerDeletion: true\n      controller: false\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          args:\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -130,6 +142,12 @@
               "name": "tlsSecretName"
             },
             {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
               "name": "imageCaptureProxyLocation"
             },
             {
@@ -138,7 +156,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          args:\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          volumeMounts:\n            - name: tls-certs\n              mountPath: /etc/proxy-tls\n              readOnly: true\n      volumes:\n        - name: tls-certs\n          secret:\n            secretName: \"{{inputs.parameters.tlsSecretName}}\"\n",
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: CapturedTraffic\n      name: \"{{inputs.parameters.crdName}}\"\n      uid: \"{{inputs.parameters.crdUid}}\"\n      blockOwnerDeletion: true\n      controller: false\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  template:\n    metadata:\n      labels:\n        migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n    spec:\n      containers:\n        - name: proxy\n          image: \"{{inputs.parameters.imageCaptureProxyLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageCaptureProxyPullPolicy}}\"\n          args:\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          ports:\n            - containerPort: {{inputs.parameters.listenPort}}\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          volumeMounts:\n            - name: tls-certs\n              mountPath: /etc/proxy-tls\n              readOnly: true\n      volumes:\n        - name: tls-certs\n          secret:\n            secretName: \"{{inputs.parameters.tlsSecretName}}\"\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -245,6 +263,12 @@
               "name": "podReplicas"
             },
             {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
               "name": "imageCaptureProxyLocation"
             },
             {
@@ -261,6 +285,14 @@
               },
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
+                  },
                   {
                     "name": "clusterName",
                     "value": "{{inputs.parameters.kafkaClusterName}}"
@@ -298,6 +330,14 @@
                   {
                     "name": "internetFacing",
                     "value": "{{=sprig.dig('internetFacing', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
                   }
                 ]
               },
@@ -379,6 +419,14 @@
                     "value": "{{inputs.parameters.podReplicas}}"
                   },
                   {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
+                  },
+                  {
                     "name": "imageCaptureProxyLocation",
                     "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
                   },
@@ -414,6 +462,14 @@
                   {
                     "name": "podReplicas",
                     "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
                   },
                   {
                     "name": "imageCaptureProxyLocation",

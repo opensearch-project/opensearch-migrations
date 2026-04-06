@@ -2,6 +2,7 @@
   (dict "kind" "ApprovalGate"      "plural" "approvalgates"      "singular" "approvalgate")
   (dict "kind" "CapturedTraffic"   "plural" "capturedtraffics"   "singular" "capturedtraffic")
   (dict "kind" "DataSnapshot"      "plural" "datasnapshots"      "singular" "datasnapshot")
+  (dict "kind" "KafkaCluster"     "plural" "kafkaclusters"      "singular" "kafkacluster")
   (dict "kind" "SnapshotMigration" "plural" "snapshotmigrations" "singular" "snapshotmigration")
   (dict "kind" "TrafficReplay"     "plural" "trafficreplays"     "singular" "trafficreplay")
 ) }}
