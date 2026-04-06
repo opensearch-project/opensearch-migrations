@@ -22,19 +22,28 @@ ARGO_VERSION = 'v1alpha1'
 
 # All resettable resource types
 RESETTABLE_PLURALS = [
-    'capturedtraffics', 'datasnapshots', 'metadatamigrations',
-    'snapshotmigrations', 'trafficreplays', 'kafkaclusters',
-    'approvalgates',
+    'capturedtraffics', 'datasnapshots', 'snapshotmigrations',
+    'trafficreplays', 'kafkaclusters', 'approvalgates',
 ]
 
 DISPLAY_NAMES = {
     'capturedtraffics': 'Capture Proxy',
     'datasnapshots': 'Data Snapshot',
-    'metadatamigrations': 'Metadata Migration',
     'snapshotmigrations': 'Snapshot Migration',
     'trafficreplays': 'Traffic Replay',
     'kafkaclusters': 'Kafka Cluster',
     'approvalgates': 'Approval Gate',
+}
+
+# Dependency chain: deleting a resource requires redoing its dependents.
+# Maps plural → list of plurals that depend on it (will need redo).
+DEPENDENTS = {
+    'kafkaclusters': ['capturedtraffics', 'datasnapshots',
+                      'snapshotmigrations', 'trafficreplays'],
+    'capturedtraffics': ['datasnapshots', 'snapshotmigrations',
+                         'trafficreplays'],
+    'datasnapshots': ['snapshotmigrations', 'trafficreplays'],
+    'snapshotmigrations': ['trafficreplays'],
 }
 
 
@@ -224,6 +233,17 @@ def reset_command(ctx, path, reset_all, namespace):
             if not targets:
                 click.echo(f"No resources matching '{path}'.")
                 return
+            # Warn about dependents that will need to be redone
+            target_plurals = {p for p, _, _ in targets}
+            affected = set()
+            for p in target_plurals:
+                affected.update(DEPENDENTS.get(p, []))
+            affected -= target_plurals
+            if affected:
+                names = [DISPLAY_NAMES.get(p, p) for p in affected]
+                click.echo(
+                    f"  ⚠ Will require redo of: {', '.join(sorted(names))}"
+                )
             if not _delete_targets(targets, namespace):
                 ctx.exit(ExitCode.FAILURE.value)
             return
@@ -239,6 +259,10 @@ def reset_command(ctx, path, reset_all, namespace):
             for plural, name, phase in crds:
                 display = DISPLAY_NAMES.get(plural, plural)
                 click.echo(f"  {display}: {name:<35} ({phase})")
+            click.echo()
+            click.echo("Dependency order (resetting a resource requires redoing those below it):")
+            click.echo("  Kafka Cluster → Capture Proxy → Data Snapshot"
+                       " → Snapshot Migration → Traffic Replay")
             click.echo()
             click.echo("Use 'workflow reset <name>' to delete a resource.")
             click.echo("Use 'workflow reset --all' to delete everything.")

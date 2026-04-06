@@ -49,7 +49,6 @@ for _kind, _plural, _singular in [
     ("SnapshotMigration", "snapshotmigrations", "snapshotmigration"),
     ("TrafficReplay", "trafficreplays", "trafficreplay"),
     ("KafkaCluster", "kafkaclusters", "kafkacluster"),
-    ("MetadataMigration", "metadatamigrations", "metadatamigration"),
 ]:
     CRD_MANIFESTS.append({
         "apiVersion": "apiextensions.k8s.io/v1",
@@ -182,7 +181,6 @@ def _create_crd_instance(namespace, plural, name, phase=None):
         "capturedtraffics": "CapturedTraffic",
         "datasnapshots": "DataSnapshot",
         "kafkaclusters": "KafkaCluster",
-        "metadatamigrations": "MetadataMigration",
         "snapshotmigrations": "SnapshotMigration",
         "trafficreplays": "TrafficReplay",
         "approvalgates": "ApprovalGate",

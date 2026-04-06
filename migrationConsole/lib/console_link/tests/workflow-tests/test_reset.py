@@ -35,7 +35,6 @@ class TestListMigrationCrds:
             'kafkaclusters': [],
             'approvalgates': [],
             'datasnapshots': [],
-            'metadatamigrations': [],
         })
         mock_client.CustomObjectsApi.return_value = mock_custom
 
@@ -53,7 +52,6 @@ class TestListMigrationCrds:
             'kafkaclusters': [],
             'approvalgates': [],
             'datasnapshots': [],
-            'metadatamigrations': [],
         })
         mock_client.CustomObjectsApi.return_value = mock_custom
 
