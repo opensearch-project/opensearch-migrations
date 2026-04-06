@@ -319,7 +319,7 @@ class TestResetSingleIntegration:
         _create_crd_instance(reset_ns, "capturedtraffics", "proxy-e", phase="Ready")
 
         result = runner.invoke(workflow_cli, ["reset", "no-such-thing", "--namespace", reset_ns])
-        assert "No resources to teardown" in result.output
+        assert "No resources matching" in result.output
 
 
 # ============================================================================
