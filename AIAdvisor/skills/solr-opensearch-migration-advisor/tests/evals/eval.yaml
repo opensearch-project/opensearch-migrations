@@ -44,8 +44,77 @@ tests:
     assert:
       - type: llm-rubric
         value: >-
-          Response asks for schema to be migrated.
-        metric: clarify-schema
+          Response asks for the Solr version the user is migrating from.
+        metric: clarify-solr-version
+
+  - description: "Provide Solr version 6 and expect version acknowledgement and schema request"
+    metadata:
+      continue: true
+    vars:
+      query: |
+        We are migrating from Solr 6.6.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response acknowledges Solr version 6.6 and mentions at least one version-specific concern,
+          such as Trie field types (TrieLongField, TrieIntField, etc.) being present or the default
+          similarity being TF-IDF (ClassicSimilarity) rather than BM25. Response then asks the user
+          to provide their Solr schema.
+        metric: solr-version-acknowledged
+
+  - description: "Provide Solr 6 schema and verify OpenSearch mapping is generated correctly"
+    metadata:
+      continue: true
+    vars:
+      query: |
+        Here is our Solr 6 schema:
+
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <schema name="example-solr6" version="1.6">
+          <fields>
+            <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false" />
+            <field name="product_name" type="text_general" indexed="true" stored="true" />
+            <field name="price" type="currency" indexed="true" stored="true"/>
+            <field name="priority" type="priority_enum" indexed="true" stored="true"/>
+            <field name="_version_" type="long" indexed="true" stored="true"/>
+          </fields>
+          <uniqueKey>id</uniqueKey>
+          <types>
+            <fieldType name="string" class="solr.StrField" sortMissingLast="true" />
+            <fieldType name="long" class="solr.TrieLongField" precisionStep="0" positionIncrementGap="0"/>
+            <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100">
+              <analyzer>
+                <tokenizer class="solr.StandardTokenizerFactory"/>
+                <filter class="solr.LowerCaseFilterFactory"/>
+              </analyzer>
+            </fieldType>
+            <fieldType name="currency" class="solr.CurrencyField"
+                       precisionStep="8"
+                       defaultCurrency="USD"
+                       currencyConfig="currency.xml" />
+            <fieldType name="priority_enum" class="solr.EnumField"
+                       enumsConfig="enumsConfig.xml"
+                       enumName="priority" />
+          </types>
+        </schema>
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response produces a valid OpenSearch index mapping JSON that satisfies all of the following:
+          (1) 'id' is mapped to type 'keyword';
+          (2) 'product_name' is mapped to type 'text' with a standard or equivalent analyzer;
+          (3) '_version_' is mapped to type 'long', and the response flags that TrieLongField is a
+              deprecated Trie type with no direct OpenSearch equivalent, recommending the Point field
+              equivalent (LongPointField);
+          (4) 'price' (solr.CurrencyField) is flagged as unsupported in OpenSearch with a recommended
+              workaround (e.g. storing amount as 'scaled_float' or 'double' plus a separate currency
+              keyword field);
+          (5) 'priority' (solr.EnumField) is flagged as unsupported in OpenSearch with a recommended
+              workaround (e.g. 'keyword' or 'integer' with application-level validation);
+          (6) the response notes the TF-IDF to BM25 similarity change as a behavioral incompatibility
+              given the source is Solr 6.x.
+        metric: solr6-schema-mapping-correct
+
   - description: "Create migration plan"
     metadata:
       continue: true # flag on / off if the last used session should be picked up or not
