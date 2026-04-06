@@ -109,6 +109,52 @@ class ReportingConfigTest {
     }
 
     @Test
+    void authWithTlsNullReturnsNotInsecure() throws IOException {
+        var config = ReportingConfig.parse(writeConfig("""
+            enabled: true
+            sink:
+              opensearch:
+                uri: http://localhost:9200
+                auth:
+                  username: admin
+                  password: pass
+            """));
+        assertTrue(config.hasSink());
+        assertEquals("admin", config.getUsername());
+        assertEquals("pass", config.getPassword());
+        assertFalse(config.isInsecureTls());
+    }
+
+    @Test
+    void authNullReturnsNullCredentials() throws IOException {
+        var config = ReportingConfig.parse(writeConfig("""
+            enabled: true
+            sink:
+              opensearch:
+                uri: http://localhost:9200
+            """));
+        assertNull(config.getUsername());
+        assertNull(config.getPassword());
+        assertFalse(config.isInsecureTls());
+    }
+
+    @Test
+    void tlsInsecureFalseExplicitly() throws IOException {
+        var config = ReportingConfig.parse(writeConfig("""
+            enabled: true
+            sink:
+              opensearch:
+                uri: http://localhost:9200
+                auth:
+                  username: u
+                  password: p
+                  tls:
+                    insecure: false
+            """));
+        assertFalse(config.isInsecureTls());
+    }
+
+    @Test
     void sinkConfigSettersWork() {
         var osConfig = new ReportingConfig.OpenSearchSinkConfig();
         osConfig.setUri("http://test:9200");
