@@ -29,6 +29,12 @@ public class LuceneReader {
     /** Concurrency for flatMapSequential within a segment — matches the scheduler thread count. */
     private static final int SEGMENT_READ_CONCURRENCY = 100;
 
+    /** Number of documents to prefetch per segment reader — keeps the FUSE pipeline fed. */
+    private static final int SEGMENT_PREFETCH = 256;
+
+    /** Max segments to read in parallel — enables concurrent FUSE reads across segments. */
+    private static final int SEGMENT_CONCURRENCY = 4;
+
     private LuceneReader() {}
 
     /* Start reading docs from a specific segment and document id.
@@ -45,12 +51,12 @@ public class LuceneReader {
             .log();
 
         return getSegmentsFromStartingSegment(reader.leaves(), startDocId)
-            .concatMapDelayError(c -> readDocsFromSegment(c,
+            .flatMap(c -> readDocsFromSegment(c,
                     startDocId,
                     reader.getIndexDirectoryPath(),
                     DocumentChangeType.INDEX,
-                    mappingContext)
-            )
+                    mappingContext),
+                SEGMENT_CONCURRENCY)
             .subscribeOn(LUCENE_IO_SCHEDULER);
     }
 
@@ -147,7 +153,7 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                }).subscribeOn(LUCENE_IO_SCHEDULER), SEGMENT_READ_CONCURRENCY, 1);
+                }).subscribeOn(LUCENE_IO_SCHEDULER), SEGMENT_READ_CONCURRENCY, SEGMENT_PREFETCH);
     }
 
     /** Backwards-compatible overload without mapping context */

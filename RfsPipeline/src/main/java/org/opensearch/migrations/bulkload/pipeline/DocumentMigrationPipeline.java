@@ -132,6 +132,7 @@ public class DocumentMigrationPipeline {
             return source.readDocuments(partition, startingDocOffset)
                 .subscribeOn(Schedulers.boundedElastic())
                 .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
+                .publishOn(Schedulers.boundedElastic(), batchConcurrency * 2)
                 .flatMapSequential(batch -> {
                     activeBatches.incrementAndGet();
                     return sink.writeBatch(collectionName, batch)
