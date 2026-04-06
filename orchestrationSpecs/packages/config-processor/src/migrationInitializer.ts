@@ -136,6 +136,17 @@ export class MigrationInitializer {
         const CRD_API_VERSION = 'migrations.opensearch.org/v1alpha1';
         const items: any[] = [];
 
+        // KafkaCluster resources (root — no dependencies)
+        for (const cluster of workflows.kafkaClusters ?? []) {
+            items.push({
+                apiVersion: CRD_API_VERSION,
+                kind: 'KafkaCluster',
+                metadata: { name: cluster.name },
+                spec: { dependsOn: [] },
+                status: { phase: 'Initialized' }
+            });
+        }
+
         // CapturedTraffic resources from proxies
         for (const proxy of workflows.proxies ?? []) {
             const kafkaDep = proxy.kafkaConfig?.label ? [proxy.kafkaConfig.label] : [];
@@ -172,6 +183,18 @@ export class MigrationInitializer {
                 kind: 'SnapshotMigration',
                 metadata: { name: this.makeCrdName(migration.sourceLabel, migration.targetConfig.label, migration.label) },
                 spec: { dependsOn: snapshotDep },
+                status: { phase: 'Initialized' }
+            });
+        }
+
+        // TrafficReplay resources from replayers
+        for (const replay of workflows.trafficReplays ?? []) {
+            const replayerName = `${replay.fromProxy}-${replay.toTarget.label}-replayer`;
+            items.push({
+                apiVersion: CRD_API_VERSION,
+                kind: 'TrafficReplay',
+                metadata: { name: replayerName },
+                spec: { dependsOn: [replay.fromProxy] },
                 status: { phase: 'Initialized' }
             });
         }

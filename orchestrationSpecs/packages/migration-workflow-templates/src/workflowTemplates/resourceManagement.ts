@@ -295,7 +295,6 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     .addTemplate("createTrafficReplay", t => t
         .addRequiredInput("resourceName", typeToken<string>())
-        .addOptionalInput("dependsOn", c => expr.literal([] as string[]))
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -304,7 +303,6 @@ export const ResourceManagement = WorkflowBuilder.create({
                     apiVersion: CRD_API_VERSION,
                     kind: "TrafficReplay",
                     metadata: {name: b.inputs.resourceName},
-                    spec: {dependsOn: b.inputs.dependsOn},
                     status: {phase: "Running"}
                 }
             }))
@@ -335,7 +333,6 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     .addTemplate("createKafkaCluster", t => t
         .addRequiredInput("resourceName", typeToken<string>())
-        .addOptionalInput("dependsOn", c => expr.literal([] as string[]))
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -344,7 +341,6 @@ export const ResourceManagement = WorkflowBuilder.create({
                     apiVersion: CRD_API_VERSION,
                     kind: "KafkaCluster",
                     metadata: {name: b.inputs.resourceName},
-                    spec: {dependsOn: b.inputs.dependsOn},
                     status: {phase: "Created"}
                 }
             }))
@@ -354,7 +350,6 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     .addTemplate("createSnapshotMigration", t => t
         .addRequiredInput("resourceName", typeToken<string>())
-        .addOptionalInput("dependsOn", c => expr.literal([] as string[]))
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -363,7 +358,6 @@ export const ResourceManagement = WorkflowBuilder.create({
                     apiVersion: CRD_API_VERSION,
                     kind: "SnapshotMigration",
                     metadata: {name: b.inputs.resourceName},
-                    spec: {dependsOn: b.inputs.dependsOn},
                     status: {phase: "Created"}
                 }
             }))
@@ -373,7 +367,6 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     .addTemplate("createCapturedTraffic", t => t
         .addRequiredInput("resourceName", typeToken<string>())
-        .addOptionalInput("dependsOn", c => expr.literal([] as string[]))
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -382,7 +375,6 @@ export const ResourceManagement = WorkflowBuilder.create({
                     apiVersion: CRD_API_VERSION,
                     kind: "CapturedTraffic",
                     metadata: {name: b.inputs.resourceName},
-                    spec: {dependsOn: b.inputs.dependsOn},
                     status: {phase: "Created"}
                 }
             }))
