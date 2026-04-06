@@ -17,6 +17,9 @@ from .crd_utils import CRD_GROUP, CRD_VERSION, has_glob, match_names
 
 logger = logging.getLogger(__name__)
 
+ARGO_GROUP = 'argoproj.io'
+ARGO_VERSION = 'v1alpha1'
+
 # All resettable resource types
 RESETTABLE_PLURALS = [
     'capturedtraffics', 'snapshotmigrations', 'trafficreplays',
@@ -96,7 +99,7 @@ def _stop_and_delete_workflows(namespace):
     custom = client.CustomObjectsApi()
     try:
         items = custom.list_namespaced_custom_object(
-            group='argoproj.io', version='v1alpha1',
+            group=ARGO_GROUP, version=ARGO_VERSION,
             namespace=namespace, plural='workflows'
         ).get('items', [])
     except ApiException:
@@ -107,7 +110,7 @@ def _stop_and_delete_workflows(namespace):
         try:
             # Patch to stop (prevents new steps)
             custom.patch_namespaced_custom_object(
-                group='argoproj.io', version='v1alpha1',
+                group=ARGO_GROUP, version=ARGO_VERSION,
                 namespace=namespace, plural='workflows', name=name,
                 body={'spec': {'shutdown': 'Stop'}},
             )
@@ -118,7 +121,7 @@ def _stop_and_delete_workflows(namespace):
 
         try:
             custom.delete_namespaced_custom_object(
-                group='argoproj.io', version='v1alpha1',
+                group=ARGO_GROUP, version=ARGO_VERSION,
                 namespace=namespace, plural='workflows', name=name,
             )
             click.echo(f"  ✓ Deleted workflow '{name}'")
