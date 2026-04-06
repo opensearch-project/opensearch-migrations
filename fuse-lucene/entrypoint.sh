@@ -1,36 +1,26 @@
 #!/bin/sh
 set -e
 
+# Entrypoint for the snapshot-fuse sidecar.
+# Creates per-pod FUSE/S3 mounts inside a shared hostPath volume.
+# The bulk-loader container rewrites its config to use the per-pod paths directly.
+
 S3_MOUNT="${S3_MOUNT_PATH:-/mnt/s3}"
 CACHE_DIR="${CACHE_DIR:-/cache}"
 MAX_CACHE_MB="${MAX_CACHE_MB:-10000}"
 
-# Forcefully clean a path that may be a stale FUSE mount
-force_clean() {
-    umount -l "$1" 2>/dev/null || fusermount -uz "$1" 2>/dev/null || true
-    rm -f "$1" 2>/dev/null || true
-    rmdir "$1" 2>/dev/null || true
-}
-
+# When POD_NAME is set, use per-pod directories to avoid conflicts
+# between pods sharing the same hostPath on a node.
 if [ -n "${POD_NAME:-}" ]; then
     POD_DIR="/mnt/.pods/${POD_NAME}"
     mkdir -p "${POD_DIR}"
-
     S3_MOUNT="${POD_DIR}/s3"
-    FUSE_MOUNT="${POD_DIR}/lucene"
-
-    # Clean stale mounts at well-known paths before creating symlinks
-    force_clean /mnt/s3
-    force_clean /mnt/lucene
-
-    ln -sfn "${POD_DIR}/s3" /mnt/s3
-    ln -sfn "${POD_DIR}/lucene" /mnt/lucene
 
     # Rewrite args to use per-pod paths
     NEW_ARGS=""
     for arg in "$@"; do
         case "$arg" in
-            --mount-point=*) NEW_ARGS="${NEW_ARGS} --mount-point=${FUSE_MOUNT}" ;;
+            --mount-point=*) NEW_ARGS="${NEW_ARGS} --mount-point=${POD_DIR}/lucene" ;;
             --repo-root=/mnt/s3/*) NEW_ARGS="${NEW_ARGS} --repo-root=${S3_MOUNT}/${arg#--repo-root=/mnt/s3/}" ;;
             *) NEW_ARGS="${NEW_ARGS} ${arg}" ;;
         esac

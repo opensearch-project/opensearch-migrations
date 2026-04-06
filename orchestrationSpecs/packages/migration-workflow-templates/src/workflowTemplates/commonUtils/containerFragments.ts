@@ -170,7 +170,11 @@ export function setupSnapshotFuseSidecar(
     def: ContainerVolumePair): ContainerVolumePair {
 
     const SHARED_HOSTPATH_VOLUME = "snapshot-mnt";
-    const {volumeMounts, ...restOfContainer} = def.container;
+    const {volumeMounts, command, args, env, ...restOfContainer} = def.container;
+    const podNameEnv = {
+        name: "POD_NAME",
+        valueFrom: { fieldRef: { fieldPath: "metadata.name" } }
+    };
     return {
         volumes: [
             ...def.volumes,
@@ -179,6 +183,31 @@ export function setupSnapshotFuseSidecar(
         ],
         container: {
             ...restOfContainer,
+            // Wrap the original command to rewrite /mnt/lucene and /mnt/s3 paths
+            // to per-pod paths (/mnt/.pods/$POD_NAME/{lucene,s3}) at runtime.
+            // This is needed because multiple pods share the same hostPath volume
+            // and each pod has its own FUSE mount in a per-pod subdirectory.
+            command: ["sh", "-c"],
+            args: [
+                "POD_MNT=/mnt/.pods/${POD_NAME}; " +
+                "REWRITTEN_ARGS=''; " +
+                "for arg in \"$@\"; do " +
+                "  case \"$arg\" in " +
+                "    ---INLINE-JSON) REWRITTEN_ARGS=\"${REWRITTEN_ARGS} ${arg}\" ;; " +
+                "    eyJ*) REWRITTEN_ARGS=\"${REWRITTEN_ARGS} $(echo $arg | base64 -d | " +
+                "      sed \"s|/mnt/lucene|${POD_MNT}/lucene|g\" | " +
+                "      sed \"s|/mnt/s3/|${POD_MNT}/s3/|g\" | base64 -w0)\" ;; " +
+                "    *) REWRITTEN_ARGS=\"${REWRITTEN_ARGS} ${arg}\" ;; " +
+                "  esac; " +
+                "done; " +
+                "exec " + (command ?? []).join(" ") + " ${REWRITTEN_ARGS}",
+                "--",
+                ...(args ?? [])
+            ],
+            env: [
+                ...(env === undefined ? [] : env),
+                podNameEnv
+            ],
             volumeMounts: [
                 ...(volumeMounts === undefined ? [] : volumeMounts),
                 {
@@ -203,7 +232,7 @@ export function setupSnapshotFuseSidecar(
                 ],
                 startupProbe: {
                     exec: {
-                        command: ["mountpoint", "-q", "/mnt/lucene"]
+                        command: ["sh", "-c", "mountpoint -q /mnt/.pods/${POD_NAME}/lucene"]
                     },
                     initialDelaySeconds: 1,
                     periodSeconds: 2,
