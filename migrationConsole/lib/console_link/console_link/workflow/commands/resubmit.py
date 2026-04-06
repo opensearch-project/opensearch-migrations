@@ -41,13 +41,13 @@ def resubmit_command(ctx, workflow_name, argo_server, namespace, insecure, token
     try:
         click.echo(f"Stopping workflow '{workflow_name}'...")
         if argo_stop(workflow_name, namespace, argo_server, token, insecure):
-            click.echo(f"  ✓ Stopped")
+            click.echo("  ✓ Stopped")
         else:
             click.echo("  ⚠ Could not stop (may already be finished)")
 
         click.echo(f"Deleting workflow '{workflow_name}'...")
         if delete_workflow(workflow_name, namespace, argo_server, token, insecure):
-            click.echo(f"  ✓ Deleted")
+            click.echo("  ✓ Deleted")
         else:
             click.echo("  ⚠ Could not delete (may not exist)")
 
