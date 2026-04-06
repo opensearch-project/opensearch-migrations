@@ -322,37 +322,19 @@ def call(Map config = [:]) {
                                         """
                                     }
 
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+                                    // Set BYOS env vars on migration-console so pytest can read them
+                                    def s3RepoUri = env.resolvedS3RepoUri
+                                    if (!s3RepoUri.endsWith('/')) { s3RepoUri = s3RepoUri + '/' }
+                                    sh """
+                                        kubectl --context=${env.eksKubeContext} -n ma set env statefulset/migration-console \
+                                            BYOS_SNAPSHOT_NAME='${env.resolvedSnapshotName}' \
+                                            BYOS_S3_REPO_URI='${s3RepoUri}' \
+                                            BYOS_S3_REGION='${params.REGION}' \
+                                            BYOS_POD_REPLICAS='${env.resolvedRfsWorkers}' \
+                                            BYOS_MONITOR_RETRY_LIMIT='${params.MONITOR_RETRY_LIMIT}'
+                                        kubectl --context=${env.eksKubeContext} -n ma rollout status statefulset/migration-console --timeout=120s
+                                    """
 
-            stage('Build Docker Images') {
-                steps {
-                    timeout(time: 1, unit: 'HOURS') {
-                        script {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    // Install QEMU for cross-architecture builds (arm64 on x86_64 host)
-                                    // Use ECR pull-through cache to avoid Docker Hub rate limits
-                                    def binfmtImage = env.registryEndpoint ?
-                                        "${env.registryEndpoint.split('/')[0]}/docker-hub/tonistiigi/binfmt" :
-                                        "tonistiigi/binfmt"
-                                    sh "docker run --privileged --rm ${binfmtImage} --install all"
-                                    def builderExists = sh(
-                                        script: "docker buildx ls | grep -q '^ecr-builder'",
-                                        returnStatus: true
-                                    ) == 0
-                                    if (builderExists) {
-                                        echo "Removing existing buildx builder ecr-builder"
-                                        sh "docker buildx rm ecr-builder"
-                                    }
-                                    echo "Creating buildx builder ecr-builder"
-                                    sh "docker buildx create --name ecr-builder --driver docker-container --bootstrap"
-                                    sh "docker buildx use ecr-builder"
-                                    sh "./gradlew buildImagesToRegistry -PregistryEndpoint=${env.registryEndpoint} -Pbuilder=ecr-builder"
                                 }
                             }
                         }
@@ -363,52 +345,18 @@ def call(Map config = [:]) {
             stage('Run BYOS Migration Test') {
                 steps {
                     timeout(time: 12, unit: 'HOURS') {
-                        script {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 43200, roleSessionName: 'jenkins-session') {
-                                    // Wait for migration-console pod to be ready
-                                    sh """
-                                        echo "Waiting for migration-console pod to be ready"
-                                        kubectl --context=${env.eksKubeContext} wait --for=condition=Ready pod/migration-console-0 -n ma --timeout=600s
-                                        echo "Migration console pod is ready"
-                                    """
-                                    sh """
-                                        echo "Applying workflow template"
-                                        kubectl --context=${env.eksKubeContext} apply -f ${WORKSPACE}/migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml -n ma
-                                        echo "Workflow template applied successfully"
-                                    """
-
-                                    // Normalize S3 URI - ensure it ends with /
-                                    def s3RepoUri = env.resolvedS3RepoUri
-                                    if (!s3RepoUri.endsWith('/')) {
-                                        s3RepoUri = s3RepoUri + '/'
+                        dir('libraries/testAutomation') {
+                            script {
+                                def testIdsArg = ""
+                                def testIdsResolved = testIds ?: params.TEST_IDS
+                                if (testIdsResolved != "" && testIdsResolved != "all") {
+                                    testIdsArg = "--test-ids='$testIdsResolved'"
+                                }
+                                sh "pipenv install --deploy"
+                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 43200, roleSessionName: 'jenkins-session') {
+                                        sh "pipenv run app --source-version=${env.sourceVer} --target-version=${env.targetVer} $testIdsArg --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
                                     }
-
-                                    // Resolve test IDs
-                                    def testIdsResolved = testIds ?: params.TEST_IDS
-                                    
-                                    // Run the BYOS test with env vars passed via file to avoid logging
-                                    sh """
-                                        cat > /tmp/byos-env.sh << 'ENVEOF'
-export BYOS_SNAPSHOT_NAME='${env.resolvedSnapshotName}'
-export BYOS_S3_REPO_URI='${s3RepoUri}'
-export BYOS_S3_REGION='${params.REGION}'
-export BYOS_POD_REPLICAS='${env.resolvedRfsWorkers}'
-export BYOS_MONITOR_RETRY_LIMIT='${params.MONITOR_RETRY_LIMIT}'
-ENVEOF
-
-                                        kubectl --context=${env.eksKubeContext} cp /tmp/byos-env.sh ma/migration-console-0:/tmp/byos-env.sh
-                                        kubectl --context=${env.eksKubeContext} exec migration-console-0 -n ma -- bash -c '
-                                            source /tmp/byos-env.sh && \
-                                            cd /root/lib/integ_test && \
-                                            pipenv run pytest integ_test/ma_workflow_test.py \
-                                                --source_version=${env.sourceVer} \
-                                                --target_version=${env.targetVer} \
-                                                --test_ids=${testIdsResolved} \
-                                                --reuse_clusters \
-                                                -s
-                                            '
-                                    """
                                 }
                             }
                         }
