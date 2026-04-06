@@ -1,4 +1,4 @@
-{{- if and .Values.cloudwatchDashboards.enabled (get .Values.conditionalPackageInstalls "ack-cloudwatch-controller") }}
+{{- if get .Values.conditionalPackageInstalls "ack-cloudwatch-controller" }}
 {{- $region := required "Missing required value: .Values.aws.region" .Values.aws.region }}
 {{- $account := required "Missing required value: .Values.aws.account" (toString .Values.aws.account) }}
 {{- $stage := required "Missing required value: .Values.stageName" .Values.stageName }}

@@ -19,8 +19,6 @@ cluster:
 workloadsNodePool:
   architectures: ["amd64", "arm64"]
 
-cloudwatchDashboards:
-  enabled: true
 
 defaultBucketConfiguration:
   useLocalStack: false
