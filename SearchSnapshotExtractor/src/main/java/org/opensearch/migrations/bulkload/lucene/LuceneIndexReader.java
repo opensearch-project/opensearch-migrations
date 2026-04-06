@@ -64,16 +64,24 @@ public interface LuceneIndexReader {
 
      */
     default Flux<LuceneDocumentChange> streamDocumentChanges(String segmentsFileName, int startDocIdx) {
+        // Open multiple independent readers to enable true parallel document reads.
+        // Each reader has its own stored fields reader with its own lock.
+        int readerCount = LuceneReader.PARALLEL_READERS;
         return Flux.using(
-            () -> this.getReader(segmentsFileName),
-            reader -> LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx),
-            reader -> {
-                try {
-                    reader.close();
-                } catch (IOException e) {
-                    throw Lombok.sneakyThrow(e);
+            () -> {
+                var readers = new java.util.ArrayList<LuceneDirectoryReader>(readerCount);
+                for (int i = 0; i < readerCount; i++) {
+                    readers.add(this.getReader(segmentsFileName));
                 }
-        });
+                return readers;
+            },
+            readers -> LuceneReader.readWithMultipleReaders(readers, startDocIdx),
+            readers -> {
+                for (var reader : readers) {
+                    try { reader.close(); } catch (IOException e) { /* ignore */ }
+                }
+            }
+        );
     }
 
     default Flux<LuceneDocumentChange> streamDocumentChanges(String segmentsFileName) {
