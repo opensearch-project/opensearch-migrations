@@ -178,6 +178,18 @@ class Environment:
         instance.source_cluster = source_cluster
         instance.proxy = getattr(source_cluster, "proxy", None)
         instance.kafka = cls._get_kafka_from_workflow_config(config)
+
+        # Wire up Solr-specific metadata and backfill when source is Solr
+        instance.metadata = None
+        instance.backfill = None
+        instance.snapshot = None
+        if (source_cluster and isinstance(source_cluster.version, str) and
+                source_cluster.version.upper().startswith("SOLR") and target_cluster):
+            from console_link.models.solr_metadata import SolrMetadata
+            from console_link.models.solr_backfill import SolrBackfill
+            instance.metadata = SolrMetadata(source_cluster, target_cluster)
+            instance.backfill = SolrBackfill(source_cluster, target_cluster)
+
         return instance
 
     @classmethod

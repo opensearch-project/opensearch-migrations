@@ -12,3 +12,12 @@ dependencies:
     condition: conditionalPackageInstalls.target
     version: "2.32.0"
     repository: "https://opensearch-project.github.io/helm-charts/"
+  - name: solr-operator
+    condition: conditionalPackageInstalls.solrSource
+    version: "0.9.1"
+    repository: "https://solr.apache.org/charts"
+  - name: solr
+    alias: solrSource
+    condition: conditionalPackageInstalls.solrSource
+    version: "0.9.1"
+    repository: "https://solr.apache.org/charts"

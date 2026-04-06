@@ -239,4 +239,70 @@ public class S3Repo implements SourceRepo {
         }
     }
 
+    /**
+     * Downloads all files from the S3 prefix to the local directory, preserving relative paths.
+     * Useful for Solr backups and other non-ES-snapshot formats where the entire directory
+     * needs to be available locally.
+     *
+     * @return the local directory containing all downloaded files
+     */
+    public Path downloadAllFiles() {
+        String prefixKey = s3RepoUri.key;
+        if (!prefixKey.isEmpty() && !prefixKey.endsWith("/")) {
+            prefixKey = prefixKey + "/";
+        }
+
+        String continuationToken = null;
+        do {
+            var requestBuilder = ListObjectsV2Request.builder()
+                .bucket(s3RepoUri.bucketName)
+                .prefix(prefixKey.isEmpty() ? null : prefixKey);
+            if (continuationToken != null) {
+                requestBuilder.continuationToken(continuationToken);
+            }
+
+            ListObjectsV2Response response;
+            try {
+                response = s3Client.listObjectsV2(requestBuilder.build()).join();
+            } catch (CompletionException e) {
+                throw new CannotListObjectsInS3(s3RepoUri.bucketName, prefixKey, e);
+            }
+
+            String finalPrefixKey = prefixKey;
+            for (S3Object obj : response.contents()) {
+                downloadS3Object(obj, finalPrefixKey);
+            }
+
+            continuationToken = response.isTruncated() ? response.nextContinuationToken() : null;
+        } while (continuationToken != null);
+
+        log.info("Downloaded all files from {} to {}", s3RepoUri, s3LocalDir);
+        return s3LocalDir;
+    }
+
+    private void downloadS3Object(S3Object obj, String prefixKey) {
+        String relativePath = obj.key().substring(prefixKey.length());
+        if (relativePath.isEmpty() || relativePath.endsWith("/")) return;
+        Path localPath = s3LocalDir.resolve(relativePath);
+        ensureFileExistsLocally(new S3Uri("s3://" + s3RepoUri.bucketName + "/" + obj.key()), localPath);
+    }
+
+    /**
+     * Creates an S3Repo without a SnapshotFileFinder, for use cases like Solr backups
+     * that only need {@link #downloadAllFiles()}.
+     */
+    public static S3Repo createRaw(Path s3LocalDir, S3Uri s3Uri, String s3Region, URI s3Endpoint) {
+        S3AsyncClient s3Client = S3AsyncClient.crtBuilder()
+            .region(Region.of(s3Region))
+            .credentialsProvider(DefaultCredentialsProvider.builder().build())
+            .retryConfiguration(r -> r.numRetries(3))
+            .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
+            .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)
+            .minimumPartSizeInBytes(S3_MINIMUM_PART_SIZE_BYTES)
+            .endpointOverride(s3Endpoint)
+            .build();
+
+        return new S3Repo(s3LocalDir, s3Uri, s3Region, s3Client, null);
+    }
+
 }

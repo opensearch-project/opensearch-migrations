@@ -205,7 +205,11 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     sourceVersion: z.string(),
     sourceLabel: z.string(),
     targetConfig: NAMED_TARGET_CLUSTER_CONFIG,
-    snapshotConfig: SNAPSHOT_REPO_CONFIG
+    snapshotConfig: SNAPSHOT_REPO_CONFIG,
+    // For Solr/HTTP API sources (no snapshot)
+    sourceEndpoint: z.string().optional(),
+    sourceAllowInsecure: z.boolean().optional(),
+    sourceAuth: z.any().optional(),
 });
 
 export const NAMED_KAFKA_CLIENT_CONFIG =
