@@ -191,54 +191,68 @@ def _resolve_targets(namespace, path):
     return [match] if match else []
 
 
-def _delete_targets(targets, namespace):
-    """Delete targets in dependency order (leaves first), waiting per layer.
+def _delete_and_wait(namespace, plural, name):
+    """Delete a single CRD and poll until it's gone. Returns (name, success)."""
+    ok = _delete_crd(namespace, plural, name)
+    if ok:
+        _wait_until_gone(namespace, plural, [name])
+    return (name, ok)
 
-    Groups targets into layers: resources with no dependents in the set
-    are deleted first, then their parents, etc. Independent resources
-    within a layer are deleted in parallel.
+
+def _delete_targets(targets, namespace):
+    """Delete targets respecting dependencies, with maximum concurrency.
+
+    Each resource is deleted as soon as all resources that depend on it
+    (its children in the DAG) are gone. Independent branches proceed in
+    parallel without waiting for each other.
     """
-    remaining = {t[1]: t for t in targets}
-    # Build dependency edges within the target set
-    deps_in_set = {}
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    target_map = {t[1]: t for t in targets}
+    # Build reverse deps: for each name, which targets in the set depend on it
+    # (i.e., which children must be deleted before this one)
+    children = {name: set() for name in target_map}
     for item in targets:
         name, deps = item[1], item[3] if len(item) > 3 else []
-        deps_in_set[name] = {d for d in deps if d in remaining}
+        for dep in deps:
+            if dep in children:
+                children[dep].add(name)
 
+    pending_children = {n: set(c) for n, c in children.items()}
     failed = False
-    while remaining:
-        # Find leaves: targets with no deps remaining in the set
-        leaves = [
-            n for n, deps in deps_in_set.items()
-            if n in remaining and not deps
-        ]
-        if not leaves:
-            # Cycle or error — delete everything remaining
-            leaves = list(remaining.keys())
 
-        # Delete this layer
-        for name in leaves:
-            item = remaining[name]
-            if _delete_crd(namespace, item[0], name):
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        in_flight = {}
+
+        def submit_ready():
+            for name in list(pending_children):
+                if name not in in_flight and not pending_children[name]:
+                    item = target_map[name]
+                    fut = pool.submit(_delete_and_wait, namespace, item[0], name)
+                    in_flight[name] = fut
+
+        submit_ready()
+
+        while in_flight:
+            # Wait for any one to complete
+            done = next(as_completed(in_flight.values()))
+            # Find which name completed
+            name = next(n for n, f in in_flight.items() if f is done)
+            del in_flight[name]
+            del pending_children[name]
+
+            _, ok = done.result()
+            if ok:
                 click.echo(f"  ✓ Deleted {name}")
             else:
                 click.echo(f"  ✗ Failed to delete {name}", err=True)
                 failed = True
 
-        # Wait for this layer to be fully gone
-        by_plural = {}
-        for name in leaves:
-            item = remaining[name]
-            by_plural.setdefault(item[0], []).append(name)
-        for plural, names in by_plural.items():
-            _wait_until_gone(namespace, plural, names)
+            # Unblock parents that were waiting on this child
+            for parent, kids in pending_children.items():
+                kids.discard(name)
 
-        # Remove deleted from remaining and from dep edges
-        for name in leaves:
-            del remaining[name]
-            del deps_in_set[name]
-        for deps in deps_in_set.values():
-            deps -= set(leaves)
+            submit_ready()
 
     return not failed
 
