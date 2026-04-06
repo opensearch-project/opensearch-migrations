@@ -110,6 +110,7 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceKind: expr.literal("KafkaCluster"),
                 })
             )
+            // Skip deploy if CRD already Ready (resubmit case — Kafka already running)
             .addStep("deployCluster", SetupKafka, "deployKafkaClusterWithRetry", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
@@ -117,7 +118,12 @@ export const FullMigration = WorkflowBuilder.create({
                     clusterConfig: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "config"),
                     crdName: b.inputs.clusterName,
                     crdUid: c.steps.getCrdUid.outputs.uid,
-                })
+                }),
+                {when: c => ({templateExp: expr.not(expr.equals(c.getCrdUid.outputs.phase, "Ready"))})}
+            )
+            .addStep("patchReady", ResourceManagement, "patchKafkaClusterReady", c =>
+                c.register({resourceName: b.inputs.clusterName}),
+                {when: c => ({templateExp: expr.not(expr.equals(c.getCrdUid.outputs.phase, "Ready"))})}
             )
             .addStep("waitForCrdDeletion", ResourceManagement, "waitForCrdDeletion", c =>
                 c.register({
@@ -209,6 +215,7 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceKind: expr.literal("CapturedTraffic"),
                 })
             )
+            // Skip deploy if CRD already Ready (resubmit case — proxy already running)
             .addStep("setupProxy", SetupCapture, "setupProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -220,12 +227,14 @@ export const FullMigration = WorkflowBuilder.create({
                     podReplicas: b.inputs.podReplicas,
                     crdName: b.inputs.proxyName,
                     crdUid: c.steps.getCrdUid.outputs.uid,
-                })
+                }),
+                {when: c => ({templateExp: expr.not(expr.equals(c.getCrdUid.outputs.phase, "Ready"))})}
             )
             .addStep("patchCapturedTraffic", ResourceManagement, "patchCapturedTrafficReady", c =>
                 c.register({
                     resourceName: b.inputs.proxyName,
-                })
+                }),
+                {when: c => ({templateExp: expr.not(expr.equals(c.getCrdUid.outputs.phase, "Ready"))})}
             )
             // Dual-mode teardown: Kafka deletion → non-capture mode, CapturedTraffic deletion → full teardown
             .addStepGroup(g => g

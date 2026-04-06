@@ -214,7 +214,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
-                setOwnerReference: true,
+                setOwnerReference: false,
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "ApprovalGate",
@@ -298,7 +298,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
-                setOwnerReference: true,
+                setOwnerReference: false,
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "TrafficReplay",
@@ -336,7 +336,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
-                setOwnerReference: true,
+                setOwnerReference: false,
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "KafkaCluster",
@@ -353,7 +353,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
-                setOwnerReference: true,
+                setOwnerReference: false,
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "SnapshotMigration",
@@ -370,12 +370,29 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
-                setOwnerReference: true,
+                setOwnerReference: false,
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "CapturedTraffic",
                     metadata: {name: b.inputs.resourceName},
                     status: {phase: "Created"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("patchKafkaClusterReady", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "KafkaCluster",
+                    metadata: {name: b.inputs.resourceName},
+                    status: {phase: "Ready"}
                 }
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -396,7 +413,8 @@ export const ResourceManagement = WorkflowBuilder.create({
                     metadata: {name: b.inputs.resourceName}
                 }
             })
-            .addJsonPathOutput("uid", "{.metadata.uid}", typeToken<string>()))
+            .addJsonPathOutput("uid", "{.metadata.uid}", typeToken<string>())
+            .addJsonPathOutput("phase", "{.status.phase}", typeToken<string>()))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 

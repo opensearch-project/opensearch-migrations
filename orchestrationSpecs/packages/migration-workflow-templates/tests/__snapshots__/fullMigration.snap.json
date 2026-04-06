@@ -111,6 +111,7 @@
                 "template": "deploykafkaclusterwithretry",
                 "name": "setup-kafka"
               },
+              "when": "{{=!(steps.getCrdUid.outputs.parameters.phase == 'Ready')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -136,6 +137,24 @@
                 ]
               },
               "name": "deployCluster"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchkafkaclusterready",
+                "name": "resource-management"
+              },
+              "when": "{{=!(steps.getCrdUid.outputs.parameters.phase == 'Ready')}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "patchReady"
             }
           ],
           [
@@ -432,6 +451,7 @@
                 "template": "setupproxy",
                 "name": "setup-capture"
               },
+              "when": "{{=!(steps.getCrdUid.outputs.parameters.phase == 'Ready')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -485,6 +505,7 @@
                 "template": "patchcapturedtrafficready",
                 "name": "resource-management"
               },
+              "when": "{{=!(steps.getCrdUid.outputs.parameters.phase == 'Ready')}}",
               "arguments": {
                 "parameters": [
                   {

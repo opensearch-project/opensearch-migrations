@@ -460,7 +460,7 @@
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: ApprovalGate\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Pending\n",
           "action": "apply",
-          "setOwnerReference": true
+          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
@@ -589,7 +589,7 @@
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: TrafficReplay\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Running\n",
           "action": "apply",
-          "setOwnerReference": true
+          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
@@ -647,7 +647,7 @@
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: KafkaCluster\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Created\n",
           "action": "apply",
-          "setOwnerReference": true
+          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
@@ -674,7 +674,7 @@
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Created\n",
           "action": "apply",
-          "setOwnerReference": true
+          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
@@ -701,7 +701,38 @@
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Created\n",
           "action": "apply",
-          "setOwnerReference": true
+          "setOwnerReference": false
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchkafkaclusterready",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: KafkaCluster\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Ready\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
         },
         "retryStrategy": {
           "limit": "6",
@@ -747,6 +778,12 @@
               "name": "uid",
               "valueFrom": {
                 "jsonPath": "{.metadata.uid}"
+              }
+            },
+            {
+              "name": "phase",
+              "valueFrom": {
+                "jsonPath": "{.status.phase}"
               }
             }
           ]
