@@ -211,12 +211,12 @@ def _delete_targets(targets, namespace):
     help='Delete all migration resources and workflows',
 )
 @click.option(
-    '--force', is_flag=True, default=False,
-    help='Skip dependency checks on targeted reset',
+    '--cascade', is_flag=True, default=False,
+    help='Also delete dependent resources',
 )
 @click.option('--namespace', default='ma')
 @click.pass_context
-def reset_command(ctx, path, reset_all, force, namespace):
+def reset_command(ctx, path, reset_all, cascade, namespace):
     """Reset migration resources by deleting CRDs.
 
     With no arguments, lists migration resources and their status.
@@ -237,27 +237,29 @@ def reset_command(ctx, path, reset_all, force, namespace):
             if not targets:
                 click.echo(f"No resources matching '{path}'.")
                 return
-            # Block if live dependents exist (unless --force or --all)
-            if not force:
-                target_plurals = {p for p, _, _ in targets}
-                dep_plurals = set()
-                for p in target_plurals:
-                    dep_plurals.update(DEPENDENTS.get(p, []))
-                dep_plurals -= target_plurals
-                if dep_plurals:
-                    all_crds = _list_migration_resources(namespace)
-                    blocking = [
-                        (p, n) for p, n, _ in all_crds
-                        if p in dep_plurals
-                    ]
-                    if blocking:
+            # Check for live dependents
+            target_plurals = {p for p, _, _ in targets}
+            dep_plurals = set()
+            for p in target_plurals:
+                dep_plurals.update(DEPENDENTS.get(p, []))
+            dep_plurals -= target_plurals
+            if dep_plurals:
+                all_crds = _list_migration_resources(namespace)
+                blocking = [
+                    (p, n, ph) for p, n, ph in all_crds
+                    if p in dep_plurals
+                ]
+                if blocking:
+                    if cascade:
+                        targets = blocking + targets
+                    else:
                         click.echo("Cannot delete — dependent resources exist:")
-                        for p, n in blocking:
+                        for p, n, _ in blocking:
                             click.echo(
                                 f"  {DISPLAY_NAMES.get(p, p)}: {n}"
                             )
                         click.echo()
-                        click.echo("Delete dependents first, or use --force to skip this check.")
+                        click.echo("Use --cascade to delete them too.")
                         ctx.exit(ExitCode.FAILURE.value)
                         return
             if not _delete_targets(targets, namespace):
