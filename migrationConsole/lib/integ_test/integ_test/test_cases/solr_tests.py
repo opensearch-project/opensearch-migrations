@@ -22,12 +22,11 @@ class TestSolr0001SingleDocumentBackfill(MATestBase):
             migrations_required=[MigrationType.BACKFILL],
             allow_source_target_combinations=SOLR_ALLOW_COMBINATIONS,
         )
-        self.index_name = f"test_solr0001_{self.unique_id}".replace("-", "_")
+        # Use the pre-created 'dummy' core (created by solr-precreate at container start)
+        self.index_name = "dummy"
         self.doc_id = "solr_0001_doc"
 
     def prepare_clusters(self):
-        self.source_operations.create_index(
-            cluster=self.source_cluster, index_name=self.index_name)
         self.source_operations.create_document(
             cluster=self.source_cluster, index_name=self.index_name,
             doc_id=self.doc_id,
