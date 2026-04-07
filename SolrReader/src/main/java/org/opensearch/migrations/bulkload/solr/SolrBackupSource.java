@@ -47,6 +47,7 @@ import shadow.lucene9.org.apache.lucene.store.FSDirectory;
 public class SolrBackupSource implements DocumentSource {
 
     private static final String INDEX_DIR_NAME = "index";
+    private static final String SEGMENTS_FILE_PREFIX = "segments_";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final Path backupDir;
@@ -190,7 +191,7 @@ public class SolrBackupSource implements DocumentSource {
     private static boolean hasSegmentsFile(Path dir) {
         if (!Files.isDirectory(dir)) return false;
         try (var stream = Files.list(dir)) {
-            return stream.anyMatch(p -> p.getFileName().toString().startsWith("segments_"));
+            return stream.anyMatch(p -> p.getFileName().toString().startsWith(SEGMENTS_FILE_PREFIX));
         } catch (IOException e) {
             return false;
         }
@@ -206,7 +207,7 @@ public class SolrBackupSource implements DocumentSource {
 
             // Find the segments file from the mapping
             var segmentsFile = fileNameMapping.keySet().stream()
-                .filter(name -> name.startsWith("segments_"))
+                .filter(name -> name.startsWith(SEGMENTS_FILE_PREFIX))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("No segments_N in shard mapping for " + indexDir));
 
@@ -283,7 +284,7 @@ public class SolrBackupSource implements DocumentSource {
         try (var stream = Files.list(dir)) {
             return stream
                 .map(p -> p.getFileName().toString())
-                .filter(name -> name.startsWith("segments_"))
+                .filter(name -> name.startsWith(SEGMENTS_FILE_PREFIX))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("No segments_N file found in: " + dir));
         } catch (IOException e) {
