@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: shim-proxy
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: shim-proxy
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shim-proxy
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: shim-proxy
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--listenPort"
+            - "{{ .Values.listenPort }}"
+            {{- range $name, $uri := .Values.targets }}
+            - "--target"
+            - "{{ $name }}={{ $uri }}"
+            {{- end }}
+            - "--primary"
+            - "{{ .Values.primary }}"
+            {{- range $name, $transform := .Values.targetTransforms }}
+            - "--targetTransform"
+            - "{{ $name }}=request:{{ $transform.request }},response:{{ $transform.response }}"
+            {{- end }}
+            {{- range $name, $auth := .Values.targetAuth }}
+            - "--targetAuth"
+            - "{{ $name }}={{ $auth }}"
+            {{- end }}
+            {{- range .Values.validators }}
+            - "--validator"
+            - "{{ . }}"
+            {{- end }}
+            {{- if .Values.watchTransforms }}
+            - "--watchTransforms"
+            {{- end }}
+            {{- if .Values.insecureBackend }}
+            - "--insecureBackend"
+            {{- end }}
+            {{- if ne (int .Values.timeout) 30000 }}
+            - "--timeout"
+            - "{{ .Values.timeout }}"
+            {{- end }}
+            {{- if gt (int .Values.healthPort) 0 }}
+            - "--healthPort"
+            - "{{ .Values.healthPort }}"
+            {{- end }}
+            {{- if .Values.otelCollectorEndpoint }}
+            - "--otelCollectorEndpoint"
+            - "{{ .Values.otelCollectorEndpoint }}"
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.listenPort }}
+              protocol: TCP
+            - name: health
+              containerPort: {{ .Values.healthPort }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: transforms
+              mountPath: {{ .Values.transformMountPath }}
+              readOnly: true
+      volumes:
+        - name: transforms
+          configMap:
+            name: {{ .Release.Name }}-transforms

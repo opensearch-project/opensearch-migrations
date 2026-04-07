@@ -1,0 +1,72 @@
+# Container image
+image:
+  repository: migrations/transformation_shim
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Deployment
+replicaCount: 1
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# ShimMain CLI configuration
+listenPort: 8080
+healthPort: 8081
+
+# Named backend targets (map: name -> URI)
+targets:
+  opensearch: "http://opensearch:9200"
+
+# Which target's response is returned to the client
+primary: opensearch
+
+# Per-target transforms (map: name -> {request, response})
+targetTransforms:
+  opensearch:
+    request: /transforms/solr-to-opensearch-request.js
+    response: /transforms/solr-to-opensearch-response.js
+
+# Per-target auth (map: name -> auth spec string)
+targetAuth: {}
+  # opensearch: "sigv4:es,us-east-1"
+  # opensearch: "basic:user:pass"
+  # opensearch: "header:Bearer token123"
+  # opensearch: "none"
+
+# Cross-target validators (list of spec strings)
+validators: []
+  # - "field-equality:solr,opensearch:ignore=responseHeader.QTime"
+  # - "doc-count:solr,opensearch:assert=solr==opensearch"
+
+# Secondary target timeout (ms)
+timeout: 30000
+
+# Transform file hot-reload
+watchTransforms: false
+
+# Trust all backend TLS certs
+insecureBackend: false
+
+# Transform JS files (map: filename -> content)
+# Populated via --set-file or inline
+transformFiles: {}
+  # solr-to-opensearch-request.js: |
+  #   (function(bindings) { ... })
+  # solr-to-opensearch-response.js: |
+  #   (function(bindings) { ... })
+
+# Volume mount path for transforms
+transformMountPath: /transforms
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 8080
+
+# OpenTelemetry collector endpoint (optional)
+otelCollectorEndpoint: ""

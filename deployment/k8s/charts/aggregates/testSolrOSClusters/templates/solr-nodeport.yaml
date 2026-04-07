@@ -1,0 +1,21 @@
+{{- if and .Values.conditionalPackageInstalls.solr .Values.nodePortServices.solr.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-solr-nodeport
+  labels:
+    app.kubernetes.io/name: solr
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  type: NodePort
+  ports:
+    - port: 8983
+      targetPort: 8983
+      nodePort: {{ .Values.nodePortServices.solr.nodePort }}
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: solr
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

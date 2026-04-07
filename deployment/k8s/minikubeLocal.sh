@@ -3,7 +3,7 @@
 # Wrapper around setting up Minikube
 
 usage() {
-  echo "Usage: $0 [--start | --pause | --delete]"
+  echo "Usage: $0 [--start | --pause | --delete] [--memory <MB>]"
   exit 1
 }
 
@@ -75,19 +75,50 @@ cd "$script_dir_abs_path" || exit
 
 cd ../.. || exit
 
-# Parse the argument and call the appropriate function
-case "$1" in
+# Parse arguments
+ACTION=""
+MEMORY=""
+while [ $# -gt 0 ]; do
+  case "$1" in
     --start)
-        start
+        ACTION="start"
+        shift
         ;;
     --pause)
-        pause
+        ACTION="pause"
+        shift
         ;;
     --delete)
-        delete
+        ACTION="delete"
+        shift
+        ;;
+    --memory)
+        MEMORY="$2"
+        shift 2
         ;;
     *)
         echo "Invalid option: $1"
         usage
+        ;;
+  esac
+done
+
+if [ -z "$ACTION" ]; then
+    usage
+fi
+
+if [ -n "$MEMORY" ]; then
+  minikube config set memory "$MEMORY"
+fi
+
+case "$ACTION" in
+    start)
+        start
+        ;;
+    pause)
+        pause
+        ;;
+    delete)
+        delete
         ;;
 esac

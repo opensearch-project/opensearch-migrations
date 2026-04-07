@@ -1,0 +1,21 @@
+{{- if .Values.nodePortServices.shimProxy.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-shimproxy-nodeport
+  labels:
+    app.kubernetes.io/name: shim-proxy
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  type: NodePort
+  ports:
+    - port: 8080
+      targetPort: http
+      nodePort: {{ .Values.nodePortServices.shimProxy.nodePort }}
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: shim-proxy
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

@@ -1,0 +1,21 @@
+image:
+  repository: solr
+  tag: "9.7"
+  pullPolicy: IfNotPresent
+
+zookeeper:
+  image:
+    repository: zookeeper
+    tag: "3.9"
+    pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+persistence:
+  enabled: false
+
+service:
+  type: ClusterIP
+  port: 8983
+
+resources: {}

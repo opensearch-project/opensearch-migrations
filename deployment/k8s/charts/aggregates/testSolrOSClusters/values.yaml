@@ -1,0 +1,60 @@
+# --- Conditional backend deployment ---
+conditionalPackageInstalls:
+  opensearch: true
+  solr: true
+
+# --- NodePort external access ---
+nodePortServices:
+  opensearch:
+    enabled: true
+    nodePort: 30920
+  solr:
+    enabled: true
+    nodePort: 30898
+  shimProxy:
+    enabled: true
+    nodePort: 30080
+
+# --- shimProxy sub-chart values ---
+shimProxy:
+  targets:
+    opensearch: "https://opensearch-cluster-master:9200"
+    solr: "http://tc-solr:8983"
+  primary: opensearch
+  insecureBackend: true
+  targetTransforms:
+    opensearch:
+      request: /transforms/solr-to-opensearch-request.js
+      response: /transforms/solr-to-opensearch-response.js
+  targetAuth:
+    opensearch: "basic:admin:myStrongPassword123!"
+
+# --- OpenSearch sub-chart values ---
+opensearch:
+  fullnameOverride: "opensearch"
+  singleNode: true
+  persistence:
+    enabled: false
+  extraEnvs:
+    - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+      value: myStrongPassword123!
+
+# --- Data loader job ---
+dataLoader:
+  enabled: true
+  image:
+    repository: dataloader
+    tag: latest
+    pullPolicy: IfNotPresent
+  solrUrl: "http://tc-solr:8983"
+  opensearchUrl: "https://admin:myStrongPassword123!@opensearch-cluster-master:9200"
+  collection: testharness
+  index: testharness
+  batchSize: "500"
+  maxDocs: "200000"
+
+# --- Solr sub-chart values ---
+solr:
+  replicaCount: 1
+  persistence:
+    enabled: false

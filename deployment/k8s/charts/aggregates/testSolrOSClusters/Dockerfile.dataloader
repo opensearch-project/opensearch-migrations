@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+RUN pip install --no-cache-dir requests && apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY solrMigrationDevSandbox/scripts/load_data.py /app/load_data.py
+COPY solrMigrationDevSandbox/data/generate_dataset.py /app/generate_dataset.py
+COPY solrMigrationDevSandbox/config/opensearch/index-mapping.json /app/index-mapping.json
+
+# Entrypoint script: generate dataset, create collection/index, then load data
+COPY deployment/k8s/charts/aggregates/testSolrOSClusters/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]

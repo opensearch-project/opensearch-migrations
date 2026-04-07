@@ -15,6 +15,9 @@ import json
 import sys
 
 import requests
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Flush stdout immediately for real-time progress output
 sys.stdout.reconfigure(line_buffering=True)
@@ -64,7 +67,8 @@ def load_into_opensearch(documents, opensearch_url, index, batch_size):
                 f"{opensearch_url}/_bulk",
                 data=bulk_body,
                 headers={"Content-Type": "application/x-ndjson"},
-                timeout=120
+                timeout=120,
+                verify=False
             )
             resp.raise_for_status()
             result = resp.json()
@@ -81,7 +85,7 @@ def load_into_opensearch(documents, opensearch_url, index, batch_size):
             print(f"ERROR: OpenSearch batch load failed at doc {i}: {e}", file=sys.stderr)
             sys.exit(1)
 
-    requests.post(f"{opensearch_url}/{index}/_refresh", timeout=30)
+    requests.post(f"{opensearch_url}/{index}/_refresh", timeout=30, verify=False)
     print(f"  OpenSearch: {loaded} documents loaded and refreshed.")
 
 
@@ -91,7 +95,7 @@ def verify_counts(solr_url, collection, opensearch_url, index):
         f"{solr_url}/solr/{collection}/select?q=*:*&rows=0&wt=json", timeout=30)
     solr_count = solr_resp.json()["response"]["numFound"]
 
-    os_resp = requests.get(f"{opensearch_url}/{index}/_count", timeout=30)
+    os_resp = requests.get(f"{opensearch_url}/{index}/_count", timeout=30, verify=False)
     os_count = os_resp.json()["count"]
 
     print(f"  Solr:       {solr_count}")

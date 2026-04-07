@@ -1,0 +1,42 @@
+{{- if .Values.dataLoader.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-dataloader
+  labels:
+    app.kubernetes.io/name: dataloader
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dataloader
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: dataloader
+          image: "{{ .Values.dataLoader.image.repository }}:{{ .Values.dataLoader.image.tag }}"
+          imagePullPolicy: {{ .Values.dataLoader.image.pullPolicy }}
+          env:
+            - name: SOLR_URL
+              value: {{ .Values.dataLoader.solrUrl | quote }}
+            - name: OPENSEARCH_URL
+              value: {{ .Values.dataLoader.opensearchUrl | quote }}
+            - name: COLLECTION
+              value: {{ .Values.dataLoader.collection | quote }}
+            - name: INDEX
+              value: {{ .Values.dataLoader.index | quote }}
+            - name: BATCH_SIZE
+              value: {{ .Values.dataLoader.batchSize | quote }}
+            - name: MAX_DOCS
+              value: {{ .Values.dataLoader.maxDocs | quote }}
+            - name: REQUESTS_CA_BUNDLE
+              value: ""
+            - name: CURL_CA_BUNDLE
+              value: ""
+{{- end }}
