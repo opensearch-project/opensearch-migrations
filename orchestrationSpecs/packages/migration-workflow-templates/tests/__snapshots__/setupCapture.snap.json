@@ -358,27 +358,27 @@
                   },
                   {
                     "name": "issuerName",
-                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['issuerRef']['name']}}"
+                    "value": "{{=sprig.dig('tls', 'issuerRef', 'name', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}"
                   },
                   {
                     "name": "issuerKind",
-                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['issuerRef']['kind']}}"
+                    "value": "{{=sprig.dig('tls', 'issuerRef', 'kind', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}"
                   },
                   {
                     "name": "issuerGroup",
-                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['issuerRef']['group']}}"
+                    "value": "{{=sprig.dig('tls', 'issuerRef', 'group', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}"
                   },
                   {
                     "name": "dnsNames",
-                    "value": "{{=toJSON(fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['dnsNames'])}}"
+                    "value": "{{=toJSON(sprig.dig('tls', 'dnsNames', [], fromJSON(inputs.parameters.proxyConfig)['proxyConfig']))}}"
                   },
                   {
                     "name": "duration",
-                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['duration']}}"
+                    "value": "{{=sprig.dig('tls', 'duration', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}"
                   },
                   {
                     "name": "renewBefore",
-                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['renewBefore']}}"
+                    "value": "{{=sprig.dig('tls', 'renewBefore', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}"
                   }
                 ]
               },
@@ -485,7 +485,7 @@
                   },
                   {
                     "name": "tlsSecretName",
-                    "value": "{{=((sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager') ? (inputs.parameters.proxyName+'-tls') : (((sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'existingSecret') ? (fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['tls']['secretName']) : (''))))}}"
+                    "value": "{{=((sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager') ? (inputs.parameters.proxyName+'-tls') : (((sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'existingSecret') ? (sprig.dig('tls', 'secretName', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])) : (''))))}}"
                   },
                   {
                     "name": "jsonConfig",

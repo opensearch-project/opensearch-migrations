@@ -255,18 +255,30 @@ function convertNumericHistogramFacet(def: JavaMap): JavaMap {
 
   const start = def.get('start');
   const end = def.get('end');
+
+  // Solr's start/end define the bucket-generation window:
+  //   - No buckets are created outside [start, end)  → hard_bounds
+  //   - Empty buckets ARE created within [start, end) → extended_bounds
+  // In OpenSearch we need both to replicate this behaviour.
   if (start != null || end != null) {
-    const bounds = new Map<string, any>();
-    if (start != null) bounds.set('min', start);
+    const extBounds = new Map<string, any>();
+    const hardBounds = new Map<string, any>();
+    if (start != null) {
+      extBounds.set('min', start);
+      hardBounds.set('min', start);
+    }
     // Solr's end is exclusive — the last bucket starts at (end - gap).
     // extended_bounds.max means "ensure a bucket containing this value exists",
     // so we use (end - gap) to avoid creating an extra bucket at `end`.
     if (end != null && gap != null) {
-      bounds.set('max', end - gap);
+      extBounds.set('max', end - gap);
+      hardBounds.set('max', end);
     } else if (end != null) {
-      bounds.set('max', end);
+      extBounds.set('max', end);
+      hardBounds.set('max', end);
     }
-    histogramInner.set('extended_bounds', bounds);
+    histogramInner.set('extended_bounds', extBounds);
+    histogramInner.set('hard_bounds', hardBounds);
   }
 
   const mincount = def.get('mincount');
@@ -299,14 +311,35 @@ function convertDateHistogramFacet(def: JavaMap): JavaMap {
   dateHistInner.set('format', 'strict_date_time_no_millis');
 
   const start = def.get('start');
-  if (start != null) {
-    // Only set extended_bounds.min (start).
-    // Solr's "end" is exclusive — the last bucket starts *before* end.
-    // Setting extended_bounds.max = end would create an extra empty bucket
-    // at the end boundary, so we omit it.
-    const bounds = new Map<string, any>();
-    bounds.set('min', start);
-    dateHistInner.set('extended_bounds', bounds);
+  const end = def.get('end');
+
+  // Solr's start/end define the bucket-generation window:
+  //   - No buckets are created outside [start, end)  → hard_bounds
+  //   - Empty buckets ARE created within [start, end) → extended_bounds
+  // In OpenSearch we need both to replicate this behaviour.
+  //
+  // Solr's `end` is exclusive — no bucket starts AT `end`.
+  // For extended_bounds.max we subtract 1 s so the last *forced*
+  // bucket is the one just before `end`, matching Solr's semantics.
+  // hard_bounds.max keeps the original `end` to clip any overshoot.
+  if (start != null || end != null) {
+    const extBounds = new Map<string, any>();
+    const hardBounds = new Map<string, any>();
+    if (start != null) {
+      extBounds.set('min', start);
+      hardBounds.set('min', start);
+    }
+    if (end != null) {
+      // Subtract 1 second so the max falls in the last valid bucket
+      // (not at the exclusive `end` boundary).  Format must match
+      // strict_date_time_no_millis ("yyyy-MM-dd'T'HH:mm:ssZ").
+      const endMs = new Date(end as string).getTime();
+      const maxDate = new Date(endMs - 1000);
+      extBounds.set('max', maxDate.toISOString().replace(/\.\d{3}Z$/, 'Z'));
+      hardBounds.set('max', end);
+    }
+    dateHistInner.set('extended_bounds', extBounds);
+    dateHistInner.set('hard_bounds', hardBounds);
   }
 
   const mincount = def.get('mincount');
