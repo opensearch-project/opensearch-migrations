@@ -285,6 +285,18 @@ public class S3Repo implements SourceRepo {
     }
 
     /**
+     * Downloads a single file by its relative path within the repo.
+     * Skips download if the file already exists locally.
+     *
+     * @param relativePath path relative to the repo root (e.g. "myCollection/index/abc123")
+     * @return the local file path
+     */
+    public Path downloadFile(String relativePath) {
+        var localPath = s3LocalDir.resolve(relativePath);
+        return fetch(localPath);
+    }
+
+    /**
      * Downloads files under a specific sub-prefix within the repo's S3 prefix.
      * For example, if the repo URI is {@code s3://bucket/backup/} and prefix is
      * {@code "myCollection/index/"}, this downloads all files under
