@@ -7,7 +7,7 @@ import requests
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from src.query_runner import (
-    _build_url, _classify_error, _execute_query, run_query, run_dual_query, QueryResult
+    _build_url, _classify_error, _execute_query, run_query, run_dual_query
 )
 
 
