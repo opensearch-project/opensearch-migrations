@@ -66,12 +66,19 @@ public interface LuceneIndexReader {
     int PARALLEL_READERS = 4;
 
     default Flux<LuceneDocumentChange> streamDocumentChanges(String segmentsFileName, int startDocIdx) {
+        var log = org.slf4j.LoggerFactory.getLogger(LuceneIndexReader.class);
         return Flux.using(
             () -> {
+                long openStart = System.nanoTime();
                 var readers = new java.util.ArrayList<LuceneDirectoryReader>(PARALLEL_READERS);
                 for (int i = 0; i < PARALLEL_READERS; i++) {
+                    long readerStart = System.nanoTime();
                     readers.add(this.getReader(segmentsFileName));
+                    long readerMs = (System.nanoTime() - readerStart) / 1_000_000;
+                    log.info("Opened DirectoryReader {} in {}ms", i, readerMs);
                 }
+                long totalMs = (System.nanoTime() - openStart) / 1_000_000;
+                log.info("All {} DirectoryReaders opened in {}ms", PARALLEL_READERS, totalMs);
                 return readers;
             },
             readers -> LuceneReader.readWithSegmentSplitReaders(readers, startDocIdx),

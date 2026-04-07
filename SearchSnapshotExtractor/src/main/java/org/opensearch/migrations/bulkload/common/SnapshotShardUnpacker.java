@@ -105,12 +105,15 @@ public class SnapshotShardUnpacker {
     }
 
     public Path unpack() {
+        long unpackStart = System.nanoTime();
         // If the target directory already has Lucene files (e.g., from a FUSE mount),
         // skip unpacking and use them directly.
         if (hasLuceneFiles(targetDirectory)) {
+            long detectMs = (System.nanoTime() - unpackStart) / 1_000_000;
             log.atInfo()
-                .setMessage("Lucene files already present at {}, skipping unpack (FUSE mount or pre-unpacked)")
+                .setMessage("Lucene files already present at {}, skipping unpack (FUSE mount or pre-unpacked), detection took {}ms")
                 .addArgument(targetDirectory)
+                .addArgument(detectMs)
                 .log();
             return targetDirectory;
         }
@@ -141,9 +144,10 @@ public class SnapshotShardUnpacker {
                 unpackFilesInParallel(primaryDirectory, completedFiles, totalFiles);
 
                 log.atInfo()
-                    .setMessage("Successfully unpacked {} files for shard {}")
+                    .setMessage("Successfully unpacked {} files for shard {} in {}ms")
                     .addArgument(filesToUnpack.size())
                     .addArgument(shardId)
+                    .addArgument(() -> (System.nanoTime() - unpackStart) / 1_000_000)
                     .log();
             }
             return targetDirectory;

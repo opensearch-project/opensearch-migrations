@@ -76,7 +76,7 @@ public class LuceneReader {
                 return Flux.fromIterable(mySegments)
                     .flatMap(seg -> readDocsFromSegment(seg, startDocId,
                         reader.getIndexDirectoryPath(), DocumentChangeType.INDEX, null),
-                        mySegments.size());
+                        Math.max(mySegments.size(), 1));
             }, readers.size());
     }
 
@@ -179,10 +179,11 @@ public class LuceneReader {
             s == null ? segmentReader.toString() : s
         );
 
+        int totalDocsInSegment = segmentReader.maxDoc() - startDocIdInSegment;
         log.atDebug().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
                 .addArgument(readerAndBase.getReader())
                 .addArgument(startDocIdInSegment)
-                .addArgument(() -> segmentReader.maxDoc() - startDocIdInSegment)
+                .addArgument(totalDocsInSegment)
                 .log();
 
         // Single thread per segment via Flux.generate — zero allocation per doc.
@@ -192,6 +193,9 @@ public class LuceneReader {
         final int endDoc = segmentReader.maxDoc();
         final var liveDocsBits = liveDocs;
         final int[] cursor = {startDoc};
+        final long segmentStartNanos = System.nanoTime();
+        final long[] docCount = {0};
+        final long[] firstDocNanos = {0};
 
         return Flux.<LuceneDocumentChange>generate(sink -> {
             while (cursor[0] < endDoc) {
@@ -203,6 +207,16 @@ public class LuceneReader {
                     var doc = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase,
                         getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext);
                     if (doc != null) {
+                        docCount[0]++;
+                        if (docCount[0] == 1) {
+                            firstDocNanos[0] = System.nanoTime();
+                            long firstDocMs = (firstDocNanos[0] - segmentStartNanos) / 1_000_000;
+                            log.atInfo().setMessage("Segment {} first doc read in {}ms (docBase={})")
+                                .addArgument(getSegmentReaderDebugInfo)
+                                .addArgument(firstDocMs)
+                                .addArgument(segmentDocBase)
+                                .log();
+                        }
                         sink.next(doc);
                         return;
                     }
@@ -211,6 +225,16 @@ public class LuceneReader {
                         .addArgument(docIdx).addArgument(getSegmentReaderDebugInfo).setCause(e).log();
                 }
             }
+            long totalMs = (System.nanoTime() - segmentStartNanos) / 1_000_000;
+            long docsRead = docCount[0];
+            long docsPerSec = totalMs > 0 ? docsRead * 1000 / totalMs : 0;
+            log.atInfo().setMessage("Segment {} complete: {} docs in {}ms ({} docs/sec, docBase={})")
+                .addArgument(getSegmentReaderDebugInfo)
+                .addArgument(docsRead)
+                .addArgument(totalMs)
+                .addArgument(docsPerSec)
+                .addArgument(segmentDocBase)
+                .log();
             sink.complete();
         }).subscribeOn(LUCENE_IO_SCHEDULER);
     }
