@@ -237,6 +237,10 @@ public class CreateSnapshot {
             var response = java.net.http.HttpClient.newHttpClient()
                 .send(builder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
             return response.statusCode() == 200;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.info("SolrCloud detection interrupted, assuming standalone");
+            return false;
         } catch (Exception e) {
             log.info("SolrCloud detection failed, assuming standalone: {}", e.getMessage());
             return false;
@@ -246,7 +250,7 @@ public class CreateSnapshot {
     /**
      * Discover Solr collections (SolrCloud) or cores (standalone) via HTTP API.
      */
-    private static List<String> discoverSolrCollections(String solrUrl, String username, String password) throws Exception {
+    private static List<String> discoverSolrCollections(String solrUrl, String username, String password) throws java.io.IOException {
         // Try SolrCloud Collections API first
         try {
             var json = solrHttpGet(solrUrl + "/solr/admin/collections?action=LIST&wt=json", username, password);
@@ -288,48 +292,52 @@ public class CreateSnapshot {
         if (idx < 0) return result;
         int objStart = json.indexOf('{', idx + key.length());
         if (objStart < 0) return result;
-        // Find matching closing brace
+        int objEnd = findMatchingBrace(json, objStart);
+        var objContent = json.substring(objStart + 1, objEnd);
+        extractTopLevelKeys(objContent, result);
+        return result;
+    }
+
+    /** Find the position of the closing brace matching the opening brace at {@code openPos}. */
+    private static int findMatchingBrace(String s, int openPos) {
         int depth = 1;
-        int pos = objStart + 1;
-        while (pos < json.length() && depth > 0) {
-            char c = json.charAt(pos);
+        int pos = openPos + 1;
+        while (pos < s.length() && depth > 0) {
+            char c = s.charAt(pos);
             if (c == '{') depth++;
             else if (c == '}') depth--;
             pos++;
         }
-        var objContent = json.substring(objStart + 1, pos - 1);
-        // Extract top-level keys (quoted strings followed by ':')
+        return pos - 1;
+    }
+
+    /** Extract top-level quoted keys (followed by ':') from the content of a JSON object. */
+    private static void extractTopLevelKeys(String objContent, List<String> result) {
         int i = 0;
         while (i < objContent.length()) {
             int qStart = objContent.indexOf('"', i);
-            if (qStart < 0) break;
+            if (qStart < 0) return;
             int qEnd = objContent.indexOf('"', qStart + 1);
-            if (qEnd < 0) break;
-            int colon = objContent.indexOf(':', qEnd);
-            if (colon >= 0 && objContent.substring(qEnd + 1, colon).trim().isEmpty()) {
-                result.add(objContent.substring(qStart + 1, qEnd));
-                // Skip past the value (which is a nested object)
-                int valStart = objContent.indexOf('{', colon);
-                if (valStart >= 0) {
-                    int d = 1;
-                    int p = valStart + 1;
-                    while (p < objContent.length() && d > 0) {
-                        if (objContent.charAt(p) == '{') d++;
-                        else if (objContent.charAt(p) == '}') d--;
-                        p++;
-                    }
-                    i = p;
-                } else {
-                    i = colon + 1;
-                }
-            } else {
-                i = qEnd + 1;
-            }
+            if (qEnd < 0) return;
+            i = processKeyCandidate(objContent, qStart, qEnd, result);
         }
-        return result;
     }
 
-    private static String solrHttpGet(String url, String username, String password) throws Exception {
+    /** Check if the quoted string is a key (followed by ':') and advance past its value. Returns next scan position. */
+    private static int processKeyCandidate(String objContent, int qStart, int qEnd, List<String> result) {
+        int colon = objContent.indexOf(':', qEnd);
+        if (colon < 0 || !objContent.substring(qEnd + 1, colon).trim().isEmpty()) {
+            return qEnd + 1;
+        }
+        result.add(objContent.substring(qStart + 1, qEnd));
+        int valStart = objContent.indexOf('{', colon);
+        if (valStart >= 0) {
+            return findMatchingBrace(objContent, valStart) + 1;
+        }
+        return colon + 1;
+    }
+
+    private static String solrHttpGet(String url, String username, String password) throws java.io.IOException {
         var builder = java.net.http.HttpRequest.newBuilder()
             .uri(java.net.URI.create(url))
             .GET()
@@ -338,12 +346,17 @@ public class CreateSnapshot {
             builder.header("Authorization", "Basic " +
                 java.util.Base64.getEncoder().encodeToString((username + ":" + password).getBytes()));
         }
-        var response = java.net.http.HttpClient.newHttpClient()
-            .send(builder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() != 200) {
-            throw new java.io.IOException("HTTP " + response.statusCode() + " from " + url);
+        try {
+            var response = java.net.http.HttpClient.newHttpClient()
+                .send(builder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new java.io.IOException("HTTP " + response.statusCode() + " from " + url);
+            }
+            return response.body();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new java.io.IOException("Interrupted during HTTP request to " + url, e);
         }
-        return response.body();
     }
 
     private void runSolrCloudBackup(String solrUrl, String backupLocation, String username, String password) {
