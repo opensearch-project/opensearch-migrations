@@ -47,7 +47,7 @@ public class PipelineProgressMonitor implements AutoCloseable {
             if (snapshot.totalDocs() == 0 && snapshot.currentPartition() == null) {
                 return; // nothing started yet
             }
-            log.info("Pipeline heartbeat: partition={}, docs={}, bytes={} MB, activeBatches={}/{}, batchesProduced={}, batchesWritten={}, avgWriteMs={}",
+            log.info("Pipeline heartbeat: partition={}, docs={}, bytes={} MB, activeBatches={}/{}, batchesProduced={}, batchesWritten={}, avgReadInterDocUs={}, avgBufferFillMs={}, avgQueueWaitMs={}, avgWriteMs={}",
                 snapshot.currentPartition(),
                 snapshot.totalDocs(),
                 snapshot.totalBytes() / (1024 * 1024),
@@ -55,6 +55,9 @@ public class PipelineProgressMonitor implements AutoCloseable {
                 snapshot.batchConcurrency(),
                 snapshot.batchesProduced(),
                 snapshot.batchesWritten(),
+                snapshot.avgReadInterDocUs(),
+                snapshot.avgBufferFillMs(),
+                snapshot.avgQueueWaitMs(),
                 snapshot.avgWriteMs());
         } catch (Exception e) {
             log.debug("Error in progress monitor heartbeat", e);

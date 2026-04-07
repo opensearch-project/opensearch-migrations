@@ -52,11 +52,22 @@ public class DocumentMigrationPipeline {
     private final AtomicInteger activeBatches = new AtomicInteger();
     private final AtomicReference<Partition> currentPartition = new AtomicReference<>();
 
-    // Timing instrumentation — tracks where time is spent
+    // Timing instrumentation — tracks where time is spent at each pipeline stage
     private final AtomicLong batchesProduced = new AtomicLong();
     private final AtomicLong batchesWritten = new AtomicLong();
     private final AtomicLong totalWriteNanos = new AtomicLong();
-    private final AtomicLong lastBatchProducedAt = new AtomicLong(System.nanoTime());
+
+    // Read-side timing: inter-doc gap measures how fast the source emits documents
+    private final AtomicLong totalReadInterDocNanos = new AtomicLong();
+    private final AtomicLong readDocCount = new AtomicLong();
+    private final AtomicLong lastDocEmittedAt = new AtomicLong();
+
+    // Buffer fill timing: how long it takes to accumulate a full batch
+    private final AtomicLong totalBufferFillNanos = new AtomicLong();
+    private final AtomicLong batchStartNanos = new AtomicLong();
+
+    // Queue wait timing: time a batch sits in the publishOn queue before flatMapSequential picks it up
+    private final AtomicLong totalQueueWaitNanos = new AtomicLong();
 
     /**
      * Create a pipeline with sequential partition processing and default batch concurrency.
@@ -112,22 +123,33 @@ public class DocumentMigrationPipeline {
         int batchConcurrency,
         long batchesProduced,
         long batchesWritten,
-        long avgWriteMs
+        long avgWriteMs,
+        long avgReadInterDocUs,
+        long avgBufferFillMs,
+        long avgQueueWaitMs
     ) {}
 
     /** Returns a point-in-time snapshot of pipeline progress for external monitoring. */
     public ProgressSnapshot getProgressSnapshot() {
         long written = batchesWritten.get();
-        long avgMs = written > 0 ? totalWriteNanos.get() / written / 1_000_000 : 0;
+        long produced = batchesProduced.get();
+        long reads = readDocCount.get();
+        long avgWriteMs = written > 0 ? totalWriteNanos.get() / written / 1_000_000 : 0;
+        long avgReadUs = reads > 0 ? totalReadInterDocNanos.get() / reads / 1_000 : 0;
+        long avgBufferMs = produced > 0 ? totalBufferFillNanos.get() / produced / 1_000_000 : 0;
+        long avgQueueMs = written > 0 ? totalQueueWaitNanos.get() / written / 1_000_000 : 0;
         return new ProgressSnapshot(
             currentPartition.get(),
             totalDocs.get(),
             totalBytes.get(),
             activeBatches.get(),
             batchConcurrency,
-            batchesProduced.get(),
+            produced,
             written,
-            avgMs
+            avgWriteMs,
+            avgReadUs,
+            avgBufferMs,
+            avgQueueMs
         );
     }
 
@@ -143,16 +165,35 @@ public class DocumentMigrationPipeline {
         final long[] cumulativeOffset = { startingDocOffset };
         return Flux.defer(() -> {
             currentPartition.set(partition);
+            lastDocEmittedAt.set(System.nanoTime());
+            batchStartNanos.set(System.nanoTime());
             return source.readDocuments(partition, startingDocOffset)
                 .subscribeOn(Schedulers.boundedElastic())
+                // Stage 1: measure inter-doc read latency (time source takes to emit each doc)
+                .doOnNext(doc -> {
+                    long now = System.nanoTime();
+                    long prev = lastDocEmittedAt.getAndSet(now);
+                    totalReadInterDocNanos.addAndGet(now - prev);
+                    readDocCount.incrementAndGet();
+                })
                 .bufferUntil(new BatchPredicate(maxDocsPerBatch, maxBytesPerBatch))
-                .doOnNext(batch -> batchesProduced.incrementAndGet())
+                // Stage 2: measure buffer fill time (first doc to batch complete)
+                .doOnNext(batch -> {
+                    long now = System.nanoTime();
+                    totalBufferFillNanos.addAndGet(now - batchStartNanos.getAndSet(now));
+                    batchesProduced.incrementAndGet();
+                })
+                // Stage 3: stamp each batch before it enters the publishOn queue
+                .map(batch -> new TimestampedBatch<>(batch, System.nanoTime()))
                 .publishOn(Schedulers.boundedElastic(), batchConcurrency * 2)
-                .flatMapSequential(batch -> {
+                .flatMapSequential(tsBatch -> {
+                    // Stage 4: measure queue wait (time between batch produced and picked up)
+                    totalQueueWaitNanos.addAndGet(System.nanoTime() - tsBatch.enqueuedAtNanos);
                     activeBatches.incrementAndGet();
                     long writeStart = System.nanoTime();
-                    return sink.writeBatch(collectionName, batch)
+                    return sink.writeBatch(collectionName, tsBatch.batch)
                         .map(result -> {
+                            // Stage 5: measure write latency
                             totalWriteNanos.addAndGet(System.nanoTime() - writeStart);
                             batchesWritten.incrementAndGet();
                             cumulativeOffset[0] += result.docsInBatch();
@@ -171,6 +212,9 @@ public class DocumentMigrationPipeline {
                     e -> new PipelineException("Failed migrating partition " + partition, e));
         });
     }
+
+    /** Wrapper to carry a nanoTime timestamp through the publishOn queue. */
+    private record TimestampedBatch<T>(java.util.List<T> batch, long enqueuedAtNanos) {}
 
     /**
      * Migrate all partitions for a collection. Creates the collection first, then migrates
