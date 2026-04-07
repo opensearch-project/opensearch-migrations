@@ -16,7 +16,7 @@
 
 ## Prerequisites
 
-- Java Development Kit (JDK) 11-17
+- Java Development Kit (JDK) 17+
 - Python3
 - Docker/Minikube/K3s/etc (for local deployment)
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html#getting-started-install-instructions) (for AWS deployment)
