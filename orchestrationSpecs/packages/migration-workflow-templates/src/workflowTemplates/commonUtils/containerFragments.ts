@@ -208,7 +208,7 @@ export function setupS3MountpointVolumeForContainer(
                 args: [
                     "P=/mnt/.pods/${POD_NAME}; " +
                     "mkdir -p $P/s3; " +
-                    "mount-s3 ${S3_BUCKET} $P/s3 " +
+                    "/mountpoint-s3/bin/mount-s3 ${S3_BUCKET} $P/s3 " +
                     "--prefix=${S3_PREFIX} " +
                     "--allow-delete --allow-overwrite " +
                     "--dir-mode=0777 --file-mode=0666 " +
