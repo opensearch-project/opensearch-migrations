@@ -1,9 +1,14 @@
 """Approve command for workflow CLI - approves pending gates via CRD status patching."""
 
+import json
 import logging
 import os
+import tempfile
+import time
+from pathlib import Path
 
 import click
+from click.shell_completion import CompletionItem
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
@@ -12,6 +17,8 @@ from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completi
 from .crd_utils import CRD_GROUP, CRD_VERSION, match_names
 
 logger = logging.getLogger(__name__)
+
+_AUTOCOMPLETE_APPROVAL_CACHE_TTL_SECONDS = 10
 
 
 def list_approval_gates(namespace):
@@ -43,8 +50,44 @@ def approve_gate(namespace, name):
         return False
 
 
+def _get_cache_file() -> Path:
+    cache_dir = Path(tempfile.gettempdir()) / "workflow_completions"
+    cache_dir.mkdir(exist_ok=True)
+    return cache_dir / "approval_gates.json"
+
+
+def _get_cached_pending_names(ctx) -> list[str]:
+    """Fetch and cache pending approval gate names."""
+    cache_file = _get_cache_file()
+
+    if cache_file.exists() and (time.time() - cache_file.stat().st_mtime) < _AUTOCOMPLETE_APPROVAL_CACHE_TTL_SECONDS:
+        try:
+            return json.loads(cache_file.read_text()).get('pending', [])
+        except Exception:
+            pass
+
+    try:
+        load_k8s_config()
+        namespace = ctx.params.get('namespace', 'ma')
+        gates = list_approval_gates(namespace)
+        pending = [name for name, phase in gates if phase == 'Pending']
+        cache_file.write_text(json.dumps({'pending': pending}))
+        return pending
+    except Exception:
+        return []
+
+
+def get_approval_task_name_completions(ctx, _, incomplete):
+    """Shell completion for pending approval gate names."""
+    return [
+        CompletionItem(name)
+        for name in _get_cached_pending_names(ctx)
+        if name.startswith(incomplete)
+    ]
+
+
 @click.command(name="approve")
-@click.argument('task-names', nargs=-1, required=True)
+@click.argument('task-names', nargs=-1, required=True, shell_complete=get_approval_task_name_completions)
 @click.option('--workflow-name', default=DEFAULT_WORKFLOW_NAME, shell_complete=get_workflow_completions)
 @click.option(
     '--argo-server',

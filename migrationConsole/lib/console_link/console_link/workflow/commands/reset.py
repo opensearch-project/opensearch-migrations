@@ -8,8 +8,11 @@ Dependencies are read from spec.dependsOn on each CRD instance, so the CLI
 does not hardcode any dependency order.
 """
 
+import json
 import logging
+import tempfile
 import time
+from pathlib import Path
 
 import click
 from kubernetes import client
@@ -19,6 +22,8 @@ from ..models.utils import ExitCode, load_k8s_config
 from .crd_utils import CRD_GROUP, CRD_VERSION, has_glob, match_names
 
 logger = logging.getLogger(__name__)
+
+_AUTOCOMPLETE_RESET_CACHE_TTL_SECONDS = 10
 
 ARGO_GROUP = 'argoproj.io'
 ARGO_VERSION = 'v1alpha1'
@@ -169,16 +174,34 @@ def _find_resource_by_name(namespace, name):
     return None
 
 
-def _get_resource_completions(ctx, param, incomplete):
+def _get_reset_cache_file() -> Path:
+    cache_dir = Path(tempfile.gettempdir()) / "workflow_completions"
+    cache_dir.mkdir(exist_ok=True)
+    return cache_dir / "reset_resources.json"
+
+
+def _get_cached_resource_names(ctx) -> list[str]:
+    """Fetch and cache resettable resource names."""
+    cache_file = _get_reset_cache_file()
+
+    if cache_file.exists() and (time.time() - cache_file.stat().st_mtime) < _AUTOCOMPLETE_RESET_CACHE_TTL_SECONDS:
+        try:
+            return json.loads(cache_file.read_text()).get('names', [])
+        except Exception:
+            pass
+
     try:
         load_k8s_config()
         crds = _list_migration_resources(ctx.params.get('namespace', 'ma'))
-        return [
-            n for _, n, phase, _ in crds
-            if n.startswith(incomplete) and phase != 'Teardown'
-        ]
+        names = [n for _, n, phase, _ in crds if phase != 'Teardown']
+        cache_file.write_text(json.dumps({'names': names}))
+        return names
     except Exception:
         return []
+
+
+def _get_resource_completions(ctx, param, incomplete):
+    return [n for n in _get_cached_resource_names(ctx) if n.startswith(incomplete)]
 
 
 def _resolve_targets(namespace, path):
