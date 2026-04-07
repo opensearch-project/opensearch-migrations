@@ -34,7 +34,6 @@ import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
-import org.opensearch.migrations.bulkload.solr.SolrBackupSource;
 import org.opensearch.migrations.bulkload.solr.SolrClient;
 import org.opensearch.migrations.bulkload.solr.SolrDocumentSource;
 import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
