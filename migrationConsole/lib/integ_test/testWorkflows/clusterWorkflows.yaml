@@ -1404,8 +1404,12 @@ spec:
                         - name: SOLR_JAVA_MEM
                           value: "-Xms512m -Xmx512m"
                       command:
-                        - solr-precreate
-                        - dummy
+                        - sh
+                        - -c
+                        - |
+                          # Make configsets available in SOLR_HOME so Core Admin API can use configSet=_default
+                          ln -s /opt/solr/server/solr/configsets /var/solr/data/configsets 2>/dev/null || true
+                          exec solr-precreate dummy
                       readinessProbe:
                         httpGet:
                           path: /solr/admin/info/system?wt=json
