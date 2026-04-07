@@ -1354,8 +1354,7 @@ spec:
               jsonPath: '{.data.cluster-config}'
 
     # Solr 8.11 Single Node Template
-    # Deploys Solr via the Solr Operator (Helm) with ZooKeeper.
-    # Uses localstack S3 for backup repository.
+    # Deploys standalone Solr as a Deployment (no operator, no ZooKeeper needed).
     - name: solr-8-11-single-node
       inputs:
         parameters:
@@ -1372,124 +1371,87 @@ spec:
             CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
             NAMESPACE='{{inputs.parameters.namespace}}'
 
-            # Install Solr Operator (includes ZooKeeper operator)
-            helm repo add apache-solr https://solr.apache.org/charts
-            helm repo update
-
-            helm install solr-operator apache-solr/solr-operator \
-              --namespace "${NAMESPACE}" \
-              --set zookeeper-operator.install=true \
-              --set zookeeper-operator.crd.create=true \
-              --set resources.requests.cpu=100m \
-              --set resources.requests.memory=128Mi \
-              --set resources.limits.memory=256Mi \
-              --wait --timeout 5m
-
-            # Create S3 credentials secret for localstack
-            kubectl create secret generic solr-s3-credentials \
-              --from-literal=access-key-id=test \
-              --from-literal=secret-access-key=test \
-              -n "${NAMESPACE}" \
-              --dry-run=client -o yaml | \
-              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
-              kubectl apply -f -
-
-            # Create SolrCloud resource
             cat <<EOF | kubectl apply -f -
-            apiVersion: solr.apache.org/v1beta1
-            kind: SolrCloud
+            apiVersion: apps/v1
+            kind: Deployment
             metadata:
               name: ${CLUSTER_NAME}
               namespace: ${NAMESPACE}
               labels:
+                app: ${CLUSTER_NAME}
                 migration-test: "true"
                 cluster-name: ${CLUSTER_NAME}
             spec:
               replicas: 1
-              solrImage:
-                tag: "8.11.4"
-              solrJavaMem: "-Xms512m -Xmx512m"
-              customSolrKubeOptions:
-                podOptions:
-                  envVars:
-                    - name: SOLR_MODULES
-                      value: s3-repository
-                    - name: SOLR_SECURITY_MANAGER_ENABLED
-                      value: "false"
-                  startupProbe:
-                    initialDelaySeconds: 30
-                    periodSeconds: 10
-                    failureThreshold: 30
-                    timeoutSeconds: 5
-                  livenessProbe:
-                    initialDelaySeconds: 30
-                    periodSeconds: 30
-                    failureThreshold: 5
-                    timeoutSeconds: 5
-                  readinessProbe:
-                    periodSeconds: 10
-                    failureThreshold: 5
-                    timeoutSeconds: 5
-                  resources:
-                    requests:
-                      cpu: 500m
-                      memory: 1Gi
-                    limits:
-                      memory: 1Gi
-              dataStorage:
-                type: "persistent"
-                persistent:
-                  reclaimPolicy: "Delete"
-                  pvcTemplate:
-                    spec:
-                      accessModes: ["ReadWriteOnce"]
+              selector:
+                matchLabels:
+                  app: ${CLUSTER_NAME}
+              template:
+                metadata:
+                  labels:
+                    app: ${CLUSTER_NAME}
+                    migration-test: "true"
+                    cluster-name: ${CLUSTER_NAME}
+                spec:
+                  serviceAccountName: migration-console-access-role
+                  containers:
+                    - name: solr
+                      image: solr:8.11.4
+                      ports:
+                        - containerPort: 8983
+                          name: http
+                      env:
+                        - name: SOLR_JAVA_MEM
+                          value: "-Xms512m -Xmx512m"
+                      command:
+                        - solr-precreate
+                        - dummy
+                      readinessProbe:
+                        httpGet:
+                          path: /solr/admin/info/system?wt=json
+                          port: 8983
+                        initialDelaySeconds: 15
+                        periodSeconds: 5
+                        failureThreshold: 24
                       resources:
                         requests:
-                          storage: 1Gi
-              zookeeperRef:
-                provided:
-                  replicas: 1
-                  zookeeperPodPolicy:
-                    resources:
-                      requests:
-                        cpu: 250m
-                        memory: 256Mi
-                      limits:
-                        memory: 512Mi
-              backupRepositories:
-                - name: localstack-s3
-                  s3:
-                    region: us-east-1
-                    bucket: solr-backups
-                    endpoint: "http://localstack.${NAMESPACE}.svc.cluster.local:4566"
-                    credentials:
-                      accessKeyIdSecret:
-                        name: solr-s3-credentials
-                        key: access-key-id
-                      secretAccessKeySecret:
-                        name: solr-s3-credentials
-                        key: secret-access-key
+                          cpu: 500m
+                          memory: 1Gi
+                        limits:
+                          cpu: "2"
+                          memory: 2Gi
+                      volumeMounts:
+                        - name: solr-data
+                          mountPath: /var/solr
+                  volumes:
+                    - name: solr-data
+                      emptyDir: {}
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              selector:
+                app: ${CLUSTER_NAME}
+              ports:
+                - name: http
+                  port: 8983
+                  targetPort: 8983
             EOF
 
-            # Wait for SolrCloud to be ready
-            echo "Waiting for SolrCloud ${CLUSTER_NAME} to be ready..."
-            for i in $(seq 1 60); do
-              READY=$(kubectl get solrcloud ${CLUSTER_NAME} -n ${NAMESPACE} -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
-              if [ "${READY}" = "1" ]; then
-                echo "SolrCloud is ready"
-                break
-              fi
-              echo "Attempt ${i}/60: readyReplicas=${READY}, waiting..."
-              sleep 10
-            done
+            # Wait for Solr to be ready
+            echo "Waiting for Solr to be ready..."
+            kubectl rollout status deployment/${CLUSTER_NAME} -n ${NAMESPACE} --timeout=300s
 
-            # Get the common service name created by the Solr operator
-            SVC_NAME="${CLUSTER_NAME}-solrcloud-common"
-
-            # Generate cluster configuration output
             cat > /tmp/cluster-config.json <<EOF
             {
-              "endpoint": "http://${SVC_NAME}:80",
+              "endpoint": "http://${CLUSTER_NAME}:8983",
               "allowInsecure": true,
               "version": "SOLR 8.11.4"
             }
@@ -1502,7 +1464,7 @@ spec:
               kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
               kubectl apply -f -
 
-            echo "Solr 8.11 cluster created successfully."
+            echo "Solr 8.11 standalone cluster created successfully."
             echo "Cluster config:"
             cat /tmp/cluster-config.json
       outputs:
