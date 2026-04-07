@@ -2,7 +2,6 @@ package org.opensearch.migrations;
 
 import java.io.File;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -20,7 +19,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsString;
 
 /**
  * E2E test: Solr backup → MetadataMigration → OpenSearch.
