@@ -1,4 +1,4 @@
-# Solr Shim Test Harness
+# Solr Migration Developer Sandbox
 # Standalone compose: Solr 9.x + OpenSearch 3.3 + Translation Shim.
 # Uses non-default ports to avoid conflicts with the existing demo-validation compose.
 #
