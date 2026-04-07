@@ -10,7 +10,7 @@ providers:
 defaultTest:
   options:
     provider:
-      id: bedrock:us.anthropic.claude-3-5-sonnet-20241022-v2:0
+      id: bedrock:us.anthropic.claude-sonnet-4-5-20250929-v1:0
       config:
         region: us-east-1
         max_tokens: 256
@@ -22,6 +22,7 @@ prompts:
 
 
 tests:
+
   # Note the sequence of continue: False to start new session, and continue: True if building on the previous prompts
   - description: "Ensure the agent asks for the specific role of the user."
     metadata:
@@ -35,7 +36,8 @@ tests:
           Response clarifies the actual role of the user. Provides at least 6 explicit role examples to choose from,
           which distinguish engineers / developers, platform / ops engineers, data engineers, architects and product manager roles.
         metric: clarify-role
-  - description: "Ask for schema"
+
+  - description: "Ask for Solr version"
     metadata:
       continue: true # flag on / off if the last used session should be picked up or not
     vars:
@@ -44,20 +46,75 @@ tests:
     assert:
       - type: llm-rubric
         value: >-
-          Response asks for schema to be migrated.
-        metric: clarify-schema
-  - description: "Create migration plan"
+          Response asks for the Solr version the user is migrating from.
+        metric: clarify-solr-version
+
+  - description: "Provide Solr version 6 and expect version acknowledgement and schema request"
     metadata:
-      continue: true # flag on / off if the last used session should be picked up or not
+      continue: true
     vars:
       query: |
-        To your previous question: you can find the corresponding schema here: 
-        https://github.com/apache/solr/blob/main/solr/server/solr/configsets/sample_techproducts_configs/conf/managed-schema.xml.
+        We are migrating from Solr 6.6.
     assert:
       - type: llm-rubric
         value: >-
-          Response contains a migration plan including the migrated schema with plausible opensearch schema.
+          Response acknowledges Solr version 6.6 response then asks the user to provide their Solr schema.
+        metric: solr-version-acknowledged
+
+  - description: "Provide Solr 6 schema and verify OpenSearch mapping is generated correctly"
+    metadata:
+      continue: true
+    vars:
+      query: |
+        Here is our Solr 6 schema:
+
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <schema name="example-solr6" version="1.6">
+          <fields>
+            <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false" />
+            <field name="product_name" type="text_general" indexed="true" stored="true" />
+            <field name="price" type="currency" indexed="true" stored="true"/>
+            <field name="priority" type="priority_enum" indexed="true" stored="true"/>
+            <field name="_version_" type="long" indexed="true" stored="true"/>
+          </fields>
+          <uniqueKey>id</uniqueKey>
+          <types>
+            <fieldType name="string" class="solr.StrField" sortMissingLast="true" />
+            <fieldType name="long" class="solr.TrieLongField" precisionStep="0" positionIncrementGap="0"/>
+            <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100">
+              <analyzer>
+                <tokenizer class="solr.StandardTokenizerFactory"/>
+                <filter class="solr.LowerCaseFilterFactory"/>
+              </analyzer>
+            </fieldType>
+            <fieldType name="currency" class="solr.CurrencyField"
+                       precisionStep="8"
+                       defaultCurrency="USD"
+                       currencyConfig="currency.xml" />
+            <fieldType name="priority_enum" class="solr.EnumField"
+                       enumsConfig="enumsConfig.xml"
+                       enumName="priority" />
+          </types>
+        </schema>
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response produces a valid OpenSearch index mapping JSON that satisfies all of the following:
+          (1) 'id' is mapped to type 'keyword';
+          (2) 'product_name' is mapped to type 'text' with a standard or equivalent analyzer;
+          (3) The response should note that the TrieLongField type has no direct OpenSearch equivalent, 
+            recommending and using the `long` field type instead;
+          (4) 'price' (solr.CurrencyField) is flagged as unsupported in OpenSearch.
+          (5) 'priority' (solr.EnumField) is flagged as unsupported in OpenSearch.
+          (6) the response notes the TF-IDF to BM25 similarity change as a behavioral incompatibility
+              given the source is Solr 6.x.
+        metric: solr6-schema-mapping-correct
+
+  - description: "Create migration plan"
+    metadata:
+      continue: true # flag on / off if the last used session should be picked up or not
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response contains either clarifying questions or a migration plan.
         metric: clarify-migration-steps
-
-
-    

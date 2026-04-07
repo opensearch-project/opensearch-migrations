@@ -441,7 +441,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "compressionEnabled": {
                             "type": "boolean",
-                            "default": true
+                            "default": false
                           },
                           "includeGlobalState": {
                             "type": "boolean",
@@ -1754,8 +1754,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                 },
                                 "compressionEnabled": {
                                   "type": "boolean",
-                                  "default": true,
-                                  "description": "[Expert] Enables metadata compression for the snapshot. Can be turned off if issues are observed with snapshot configuration extraction."
+                                  "default": false,
+                                  "description": "[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version."
                                 },
                                 "includeGlobalState": {
                                   "type": "boolean",

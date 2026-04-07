@@ -54,7 +54,9 @@ RUN dnf install -y --allowerasing tar gzip findutils curl && dnf clean all && \
     MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
     if [ "$MAJOR" -ge 8 ]; then rm -rf modules/ingest-geoip/*.mmdb 2>/dev/null; fi && \
     # Remove Sigar native libs (ES 1.x-2.x)
-    rm -rf lib/sigar 2>/dev/null; true
+    rm -rf lib/sigar 2>/dev/null; \
+    # Remove x86-only UseAVX JVM option (breaks on ARM64/aarch64)
+    sed -i '/UseAVX/d' config/jvm.options 2>/dev/null; true
 
 # --- Stage 2: Build cgroups v2 fix for ES 5.1-5.2 ---
 FROM ${BASE_IMAGE} AS cgroup-fixer
