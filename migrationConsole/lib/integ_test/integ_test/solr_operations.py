@@ -41,15 +41,19 @@ class SolrOperationsLibrary(DefaultOperationsLibrary):
         raise AssertionError(f"Document {doc_id} not found in {index_name} after {max_attempts} attempts")
 
     def create_index(self, index_name: str, cluster: Cluster, **kwargs):
-        """Create a Solr core by reusing the dummy core's config directory.
+        """Create a Solr core by copying the dummy core's config.
 
-        The Solr container starts with `solr-precreate dummy` which creates a core
-        with the _default configset. We reuse that core's instanceDir (config) but
-        with a separate dataDir for each new core.
+        Uses the Solr ConfigSet API approach: the dummy core (created at startup
+        via solr-precreate) has a valid _default config. We create a new core
+        pointing to a fresh instanceDir with configSet pointing to the server-side
+        _default configset at /opt/solr/server/solr/configsets/_default/conf.
         """
         r = requests.get(
             f"{cluster.endpoint}/solr/admin/cores?action=CREATE"
-            f"&name={index_name}&instanceDir=dummy&dataDir=data_{index_name}",
+            f"&name={index_name}"
+            f"&instanceDir=/var/solr/data/{index_name}"
+            f"&config=/var/solr/data/dummy/conf/solrconfig.xml"
+            f"&schema=/var/solr/data/dummy/conf/managed-schema",
             timeout=30
         )
         r.raise_for_status()
