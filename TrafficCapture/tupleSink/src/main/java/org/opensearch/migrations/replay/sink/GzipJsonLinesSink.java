@@ -36,21 +36,15 @@ public class GzipJsonLinesSink implements TupleSink {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final Path outputDir;
-    private final long maxFileSizeBytes;
-    private final Duration maxFileAge;
     private final int threadIndex;
     private final AtomicLong sequenceCounter = new AtomicLong();
 
     private GZIPOutputStream gzipOut;
     private FileOutputStream fileOut;
-    private long bytesWritten;
-    private Instant fileOpenedAt;
     private final List<CompletableFuture<Void>> pendingFutures = new ArrayList<>();
 
     public GzipJsonLinesSink(Path outputDir, long maxFileSizeBytes, Duration maxFileAge, int threadIndex) {
         this.outputDir = outputDir;
-        this.maxFileSizeBytes = maxFileSizeBytes;
-        this.maxFileAge = maxFileAge;
         this.threadIndex = threadIndex;
         try {
             java.nio.file.Files.createDirectories(outputDir);
@@ -71,7 +65,6 @@ public class GzipJsonLinesSink implements TupleSink {
             byte[] json = mapper.writeValueAsBytes(tupleMap);
             gzipOut.write(json);
             gzipOut.write('\n');
-            bytesWritten += json.length + 1;
             pendingFutures.add(future);
         } catch (IOException e) {
             future.completeExceptionally(e);
@@ -138,8 +131,6 @@ public class GzipJsonLinesSink implements TupleSink {
         try {
             fileOut = new FileOutputStream(path.toFile());
             gzipOut = new GZIPOutputStream(fileOut, true);
-            bytesWritten = 0;
-            fileOpenedAt = Instant.now();
             log.atInfo().setMessage("Opened new tuple file: {}").addArgument(path).log();
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to open tuple file: " + path, e);
