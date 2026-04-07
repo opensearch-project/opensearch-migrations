@@ -207,6 +207,15 @@ charts:
         repository: "${M}/public.ecr.aws/aws-controllers-k8s/acmpca-controller"
         tag: "1.2.2"
 
+  ack-cloudwatch-controller:
+    repository: "oci://${ECR}/charts/cloudwatch-chart"
+    version: "1.4.2"
+    values:
+      image:
+        repository: "${M}/public.ecr.aws/aws-controllers-k8s/cloudwatch-controller"
+        tag: "1.4.2"
+        tag: "1.4.2"
+
 # --- Direct template image overrides ---
 defaultBucketConfiguration:
   bucketOperationImage: "${M}/mirror.gcr.io/amazon/aws-cli:2.25.11"
