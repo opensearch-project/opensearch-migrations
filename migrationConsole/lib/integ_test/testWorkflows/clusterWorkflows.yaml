@@ -1352,3 +1352,161 @@ spec:
           - name: cluster-config
             valueFrom:
               jsonPath: '{.data.cluster-config}'
+
+    # Solr 8.11 Single Node Template
+    # Deploys Solr via the Solr Operator (Helm) with ZooKeeper.
+    # Uses localstack S3 for backup repository.
+    - name: solr-8-11-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+          - name: image-registry-prefix
+            default: ""
+      container:
+        image: dtzar/helm-kubectl:3.18.6
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
+            NAMESPACE='{{inputs.parameters.namespace}}'
+
+            # Install Solr Operator (includes ZooKeeper operator)
+            helm repo add apache-solr https://solr.apache.org/charts
+            helm repo update
+
+            helm install solr-operator apache-solr/solr-operator \
+              --namespace "${NAMESPACE}" \
+              --set zookeeper-operator.install=true \
+              --set zookeeper-operator.crd.create=true \
+              --set resources.requests.cpu=100m \
+              --set resources.requests.memory=128Mi \
+              --set resources.limits.memory=256Mi \
+              --wait --timeout 5m
+
+            # Create S3 credentials secret for localstack
+            kubectl create secret generic solr-s3-credentials \
+              --from-literal=access-key-id=test \
+              --from-literal=secret-access-key=test \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+
+            # Create SolrCloud resource
+            cat <<EOF | kubectl apply -f -
+            apiVersion: solr.apache.org/v1beta1
+            kind: SolrCloud
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              replicas: 1
+              solrImage:
+                tag: "8.11.4"
+              solrJavaMem: "-Xms512m -Xmx512m"
+              customSolrKubeOptions:
+                podOptions:
+                  envVars:
+                    - name: SOLR_MODULES
+                      value: s3-repository
+                    - name: SOLR_SECURITY_MANAGER_ENABLED
+                      value: "false"
+                  startupProbe:
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                    failureThreshold: 30
+                    timeoutSeconds: 5
+                  livenessProbe:
+                    initialDelaySeconds: 30
+                    periodSeconds: 30
+                    failureThreshold: 5
+                    timeoutSeconds: 5
+                  readinessProbe:
+                    periodSeconds: 10
+                    failureThreshold: 5
+                    timeoutSeconds: 5
+                  resources:
+                    requests:
+                      cpu: 500m
+                      memory: 1Gi
+                    limits:
+                      memory: 1Gi
+              dataStorage:
+                type: "persistent"
+                persistent:
+                  reclaimPolicy: "Delete"
+                  pvcTemplate:
+                    spec:
+                      accessModes: ["ReadWriteOnce"]
+                      resources:
+                        requests:
+                          storage: 1Gi
+              zookeeperRef:
+                provided:
+                  replicas: 1
+                  zookeeperPodPolicy:
+                    resources:
+                      requests:
+                        cpu: 250m
+                        memory: 256Mi
+                      limits:
+                        memory: 512Mi
+              backupRepositories:
+                - name: localstack-s3
+                  s3:
+                    region: us-east-1
+                    bucket: solr-backups
+                    endpoint: "http://localstack.${NAMESPACE}.svc.cluster.local:4566"
+                    credentials:
+                      accessKeyIdSecret:
+                        name: solr-s3-credentials
+                        key: access-key-id
+                      secretAccessKeySecret:
+                        name: solr-s3-credentials
+                        key: secret-access-key
+            EOF
+
+            # Wait for SolrCloud to be ready
+            echo "Waiting for SolrCloud ${CLUSTER_NAME} to be ready..."
+            for i in $(seq 1 60); do
+              READY=$(kubectl get solrcloud ${CLUSTER_NAME} -n ${NAMESPACE} -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo "0")
+              if [ "${READY}" = "1" ]; then
+                echo "SolrCloud is ready"
+                break
+              fi
+              echo "Attempt ${i}/60: readyReplicas=${READY}, waiting..."
+              sleep 10
+            done
+
+            # Get the common service name created by the Solr operator
+            SVC_NAME="${CLUSTER_NAME}-solrcloud-common"
+
+            # Generate cluster configuration output
+            cat > /tmp/cluster-config.json <<EOF
+            {
+              "endpoint": "http://${SVC_NAME}:80",
+              "allowInsecure": true,
+              "version": "SOLR 8.11.4"
+            }
+            EOF
+
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+
+            echo "Solr 8.11 cluster created successfully."
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
