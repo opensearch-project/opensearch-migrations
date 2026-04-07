@@ -1,5 +1,6 @@
 """Tests for workflow status command."""
 
+import pathlib
 import sys
 from io import StringIO
 from typing import Any, Dict, List, Optional
@@ -542,3 +543,55 @@ target_cluster:
             'test-wf', 'http://argo', 'ma', False, False, True))
 
         assert 'test-wf' in output
+
+
+class TestConfigConverter:
+    """Tests for ConfigConverter.convert_with_jq using the actual jq script."""
+
+    JQ_SCRIPT = str(pathlib.Path(__file__).parents[4] / "workflowConfigToServicesConfig.jq")
+
+    def _run(self, json_input: str) -> Optional[str]:
+        import os
+        os.environ['WORKFLOW_CONFIG_JQ_SCRIPT'] = self.JQ_SCRIPT
+        from console_link.workflow.commands.status import ConfigConverter
+        return ConfigConverter.convert_with_jq(json_input)
+
+    def test_snapshotRepos_plural_is_stripped_from_cluster(self):
+        """snapshotRepos (plural) must not leak into service config — regression for schema plural form."""
+        import json
+        import yaml
+        config = {
+            "source_cluster": {
+                "endpoint": "https://es:9200",
+                "authConfig": {"basic": {"secretName": "creds"}},
+                "snapshotRepos": [{"s3RepoPathUri": "s3://bucket"}],
+            },
+            "target_cluster": {
+                "endpoint": "https://os:9200",
+                "authConfig": {"basic": {"secretName": "creds"}},
+            }
+        }
+        result = self._run(json.dumps(config))
+        assert result is not None
+        parsed = yaml.safe_load(result)
+        assert "snapshotRepos" not in parsed.get("source_cluster", {})
+
+    def test_snapshotRepo_singular_is_stripped_from_cluster(self):
+        """snapshotRepo (singular) must not leak into service config."""
+        import json
+        import yaml
+        config = {
+            "source_cluster": {
+                "endpoint": "https://es:9200",
+                "authConfig": {"basic": {"secretName": "creds"}},
+                "snapshotRepo": {"s3RepoPathUri": "s3://bucket"},
+            },
+            "target_cluster": {
+                "endpoint": "https://os:9200",
+                "authConfig": {"basic": {"secretName": "creds"}},
+            }
+        }
+        result = self._run(json.dumps(config))
+        assert result is not None
+        parsed = yaml.safe_load(result)
+        assert "snapshotRepo" not in parsed.get("source_cluster", {})
