@@ -14,22 +14,11 @@ fi
 # NOTE: This naming convention must match RegistryImageBuildUtils.groovy's builder name derivation
 BUILDER_NAME="builder-${CONTEXT//[^a-zA-Z0-9_-]/-}"
 
-# Check if builder already exists and is healthy
-# Fast path: inspect without --bootstrap returns instantly
-if docker buildx inspect "$BUILDER_NAME" 2>/dev/null | grep -q "Status: running"; then
-  echo "Builder '$BUILDER_NAME' already running, skipping bootstrap"
-  docker buildx use "$BUILDER_NAME"
-  exit 0
-# Slow path: --bootstrap tries to start buildkit pods
-elif docker buildx inspect "$BUILDER_NAME" --bootstrap &>/dev/null; then
-  echo "Builder '$BUILDER_NAME' bootstrapped successfully"
-  docker buildx use "$BUILDER_NAME"
-  exit 0
-fi
-
-echo "Creating buildx builder..."
+# Always remove stale builder — the helm chart is reinstalled before this script,
+# so any pre-existing builder config points at a dead endpoint.
 docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
 
+echo "Creating buildx builder..."
 NAMESPACE="${BUILDKIT_NAMESPACE:-buildkit}"
 
 # Detect cloud vs local K8s
@@ -80,10 +69,24 @@ else
   if ! pgrep -f "kubectl port-forward.*buildkitd.*1234:1234" >/dev/null; then
     echo "Starting buildkit port-forward..."
     nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} port-forward -n "$NAMESPACE" svc/buildkitd 1234:1234 > /tmp/buildkit-forward.log 2>&1 &
-    sleep 2
   else
     echo "buildkit port-forward already running"
   fi
+  
+  # Wait for port-forward to be ready by probing the TCP port
+  echo "Waiting for buildkit port-forward to be ready..."
+  for i in $(seq 1 30); do
+    if (echo >/dev/tcp/localhost/1234) 2>/dev/null; then
+      echo "buildkit endpoint reachable"
+      break
+    fi
+    if [ "$i" -eq 30 ]; then
+      echo "ERROR: buildkit endpoint not reachable at localhost:1234 after 30s" >&2
+      cat /tmp/buildkit-forward.log 2>/dev/null || true
+      exit 1
+    fi
+    sleep 1
+  done
   
   docker buildx create \
     --name="$BUILDER_NAME" \
