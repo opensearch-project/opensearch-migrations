@@ -259,6 +259,61 @@ public class SolrSnapshotToOpenSearchTest {
         }
     }
 
+    /**
+     * Tests migrating multiple Solr collections through a single pipeline using SolrMultiCollectionSource.
+     */
+    @ParameterizedTest(name = "multi-collection: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch3")
+    void multiCollectionMigration(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            // Create two collections
+            createSolrCore(solr, "movies");
+            createSolrCore(solr, "books");
+
+            // Index documents
+            indexMovieDocuments(solr, "movies");
+            indexBookDocuments(solr, "books");
+
+            // Fetch schemas
+            var moviesSchema = fetchSchema(solr, "movies");
+            var booksSchema = fetchSchema(solr, "books");
+
+            // Create backups into the same backupRoot directory
+            var backupRoot = createBackup(solr, "movies", "backup_movies");
+            createBackup(solr, "books", "backup_books");
+
+            // Build multi-collection source
+            var schemas = Map.<String, JsonNode>of(
+                "movies", MAPPER.createObjectNode().set("schema", moviesSchema),
+                "books", MAPPER.createObjectNode().set("schema", booksSchema)
+            );
+            var source = new SolrMultiCollectionSource(backupRoot, schemas);
+
+            var targetClient = new OpenSearchClientFactory(
+                ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext()
+            ).determineVersionAndCreate();
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
+            var pipeline = new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE);
+
+            var cursors = pipeline.migrateAll().collectList().block();
+            assertThat("Should have progress cursors", cursors.size(), greaterThan(0));
+
+            verifyDocCount(target, "movies", 5);
+            verifyDocCount(target, "books", 3);
+        }
+    }
+
     // --- Helpers ---
 
     private static void createSolrCore(SolrClusterContainer solr, String name) throws Exception {
@@ -289,6 +344,25 @@ public class SolrSnapshotToOpenSearchTest {
         }
     }
 
+    private static void indexBookDocuments(SolrClusterContainer solr, String collection) throws Exception {
+        String[][] books = {
+            {"1", "Dune", "Frank Herbert"},
+            {"2", "Neuromancer", "William Gibson"},
+            {"3", "Foundation", "Isaac Asimov"},
+        };
+        for (String[] b : books) {
+            String doc = String.format(
+                "[{\"id\":\"%s\",\"title\":\"%s\",\"author\":\"%s\"}]",
+                b[0], b[1], b[2]
+            );
+            solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/" + collection + "/update?commit=true",
+                "-H", "Content-Type: application/json",
+                "-d", doc
+            );
+        }
+    }
+
     private static JsonNode fetchSchema(SolrClusterContainer solr, String collection) throws Exception {
         var result = solr.execInContainer(
             "curl", "-s", "http://localhost:8983/solr/" + collection + "/schema?wt=json"
@@ -297,13 +371,17 @@ public class SolrSnapshotToOpenSearchTest {
     }
 
     private Path createBackup(SolrClusterContainer solr, String collection) throws Exception {
+        return createBackup(solr, collection, "migration_backup");
+    }
+
+    private Path createBackup(SolrClusterContainer solr, String collection, String backupName) throws Exception {
         solr.execInContainer("curl", "-s",
             "http://localhost:8983/solr/" + collection
-                + "/replication?command=backup&location=/var/solr/data&name=migration_backup"
+                + "/replication?command=backup&location=/var/solr/data&name=" + backupName
         );
-        Thread.sleep(3000);
+        waitForBackup(solr, collection, 30);
 
-        var snapshotDir = "/var/solr/data/snapshot.migration_backup";
+        var snapshotDir = "/var/solr/data/snapshot." + backupName;
         // Create backup with collection subdirectory structure expected by SolrMultiCollectionSource
         var backupRoot = tempDir.toPath().resolve("solr_backup");
         var collectionDir = backupRoot.resolve(collection);
@@ -318,6 +396,16 @@ public class SolrSnapshotToOpenSearchTest {
             );
         }
         return backupRoot;
+    }
+
+    private void waitForBackup(SolrClusterContainer solr, String collection, int maxSeconds) throws Exception {
+        for (int i = 0; i < maxSeconds; i++) {
+            var result = solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/" + collection + "/replication?command=details&wt=json");
+            if (result.getStdout().contains("success")) return;
+            Thread.sleep(1000);
+        }
+        throw new RuntimeException("Backup did not complete within " + maxSeconds + "s");
     }
 
     private static void verifyDocCount(SearchClusterContainer cluster, String indexName, int expected) {
