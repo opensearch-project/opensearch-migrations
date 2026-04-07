@@ -1,10 +1,8 @@
 package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
-import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import shadow.lucene9.org.apache.lucene.store.Directory;
 import shadow.lucene9.org.apache.lucene.store.FilterDirectory;
