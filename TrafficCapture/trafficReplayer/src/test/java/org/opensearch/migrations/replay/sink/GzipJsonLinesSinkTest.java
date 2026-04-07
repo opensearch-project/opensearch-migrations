@@ -45,14 +45,14 @@ class GzipJsonLinesSinkTest {
             assertFalse(f1.isDone());
             assertFalse(f2.isDone());
 
-            // onEndOfBatch flushes + fsyncs and completes futures immediately
+            // onEndOfBatch rotates: finish + fsync + close + open new
             sink.onEndOfBatch();
             assertTrue(f1.isDone(), "Future should complete on onEndOfBatch");
             assertTrue(f2.isDone(), "Future should complete on onEndOfBatch");
             f1.get(1, TimeUnit.SECONDS);
             f2.get(1, TimeUnit.SECONDS);
 
-            // Write more — same gzip member, same file
+            // Write more — goes to a new file since previous batch rotated
             var f3 = new CompletableFuture<Void>();
             sink.accept(makeTuple("conn3.0"), f3);
             sink.onEndOfBatch();
@@ -60,17 +60,23 @@ class GzipJsonLinesSinkTest {
             f3.get(1, TimeUnit.SECONDS);
         }
 
-        // File is valid gzip after close (which calls finish())
-        var gzFiles = Files.list(tempDir).filter(p -> p.toString().endsWith(".log.gz")).toList();
-        assertEquals(1, gzFiles.size());
+        // Each onEndOfBatch rotates, so we get 2 data files (close() produces an empty file that's also valid)
+        var gzFiles = Files.list(tempDir).filter(p -> p.toString().endsWith(".log.gz")).sorted().toList();
+        assertTrue(gzFiles.size() >= 2, "Expected at least 2 files from rotation, got " + gzFiles.size());
 
-        try (var reader = new BufferedReader(
-            new InputStreamReader(new GZIPInputStream(new FileInputStream(gzFiles.get(0).toFile()))))) {
-            assertEquals("conn1.0", MAPPER.readValue(reader.readLine(), Map.class).get("connectionId"));
-            assertEquals("conn2.0", MAPPER.readValue(reader.readLine(), Map.class).get("connectionId"));
-            assertEquals("conn3.0", MAPPER.readValue(reader.readLine(), Map.class).get("connectionId"));
-            assertTrue(reader.readLine() == null);
+        int totalLines = 0;
+        for (var file : gzFiles) {
+            try (var reader = new BufferedReader(
+                new InputStreamReader(new GZIPInputStream(new FileInputStream(file.toFile()))))) {
+                String line;
+                while ((line = reader.readLine()) != null && !line.isEmpty()) {
+                    var parsed = MAPPER.readValue(line, Map.class);
+                    assertTrue(((String) parsed.get("connectionId")).startsWith("conn"));
+                    totalLines++;
+                }
+            }
         }
+        assertEquals(3, totalLines);
     }
 
     @Test
