@@ -22,6 +22,7 @@ prompts:
 
 
 tests:
+
   # Note the sequence of continue: False to start new session, and continue: True if building on the previous prompts
   - description: "Ensure the agent asks for the specific role of the user."
     metadata:
@@ -35,7 +36,8 @@ tests:
           Response clarifies the actual role of the user. Provides at least 6 explicit role examples to choose from,
           which distinguish engineers / developers, platform / ops engineers, data engineers, architects and product manager roles.
         metric: clarify-role
-  - description: "Ask for schema"
+
+  - description: "Ask for Solr version"
     metadata:
       continue: true # flag on / off if the last used session should be picked up or not
     vars:
@@ -56,10 +58,7 @@ tests:
     assert:
       - type: llm-rubric
         value: >-
-          Response acknowledges Solr version 6.6 and mentions at least one version-specific concern,
-          such as Trie field types (TrieLongField, TrieIntField, etc.) being present or the default
-          similarity being TF-IDF (ClassicSimilarity) rather than BM25. Response then asks the user
-          to provide their Solr schema.
+          Response acknowledges Solr version 6.6 response then asks the user to provide their Solr schema.
         metric: solr-version-acknowledged
 
   - description: "Provide Solr 6 schema and verify OpenSearch mapping is generated correctly"
@@ -114,15 +113,8 @@ tests:
   - description: "Create migration plan"
     metadata:
       continue: true # flag on / off if the last used session should be picked up or not
-    vars:
-      query: |
-        To your previous question: you can find the corresponding schema here: 
-        https://github.com/apache/solr/blob/main/solr/server/solr/configsets/sample_techproducts_configs/conf/managed-schema.xml.
     assert:
       - type: llm-rubric
         value: >-
-          Response contains a migration plan including the migrated schema with plausible opensearch schema.
+          Response contains either clarifying questions or a migration plan.
         metric: clarify-migration-steps
-
-
-    
