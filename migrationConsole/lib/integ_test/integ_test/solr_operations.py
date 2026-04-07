@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 class SolrOperationsLibrary(DefaultOperationsLibrary):
-    """Operations library for Solr clusters."""
+    """Operations library for Solr clusters (standalone mode)."""
 
     def create_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None,
                         doc_type="_doc", **kwargs):
@@ -42,10 +42,11 @@ class SolrOperationsLibrary(DefaultOperationsLibrary):
         raise AssertionError(f"Document {doc_id} not found in {index_name} after {max_attempts} attempts")
 
     def create_index(self, index_name: str, cluster: Cluster, **kwargs):
+        """Create a Solr core (standalone mode) via the Core Admin API."""
         import requests
         r = requests.get(
-            f"{cluster.endpoint}/solr/admin/collections?action=CREATE"
-            f"&name={index_name}&numShards=1&replicationFactor=1&wt=json",
+            f"{cluster.endpoint}/solr/admin/cores?action=CREATE"
+            f"&name={index_name}&configSet=_default",
             timeout=30
         )
         r.raise_for_status()
@@ -53,15 +54,16 @@ class SolrOperationsLibrary(DefaultOperationsLibrary):
 
     def get_all_index_details(self, cluster: Cluster, index_prefix_ignore_list=None, **kwargs):
         import requests
-        r = requests.get(f"{cluster.endpoint}/solr/admin/collections?action=LIST&wt=json", timeout=10)
-        collections = r.json().get("collections", [])
+        # Use Core Admin API for standalone Solr
+        r = requests.get(f"{cluster.endpoint}/solr/admin/cores?action=STATUS&wt=json", timeout=10)
+        r.raise_for_status()
+        cores = r.json().get("status", {})
         index_dict = {}
-        for coll in collections:
-            if index_prefix_ignore_list and any(coll.startswith(p) for p in index_prefix_ignore_list):
+        for core_name, core_info in cores.items():
+            if index_prefix_ignore_list and any(core_name.startswith(p) for p in index_prefix_ignore_list):
                 continue
-            r2 = requests.get(f"{cluster.endpoint}/solr/{coll}/select?q=*:*&rows=0&wt=json", timeout=10)
-            count = r2.json().get("response", {}).get("numFound", 0)
-            index_dict[coll] = {"count": str(count), "index": coll}
+            count = core_info.get("index", {}).get("numDocs", 0)
+            index_dict[core_name] = {"count": str(count), "index": core_name}
         return index_dict
 
     def clear_index_templates(self, cluster: Cluster, **kwargs):
