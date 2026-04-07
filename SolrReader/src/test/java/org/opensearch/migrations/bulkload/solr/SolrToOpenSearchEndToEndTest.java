@@ -598,9 +598,6 @@ public class SolrToOpenSearchEndToEndTest {
             // Parse schema from the backup's zk_backup_0 directory
             var schema = SolrSchemaXmlParser.findAndParse(localBackupRoot.resolve(collection));
 
-            // Restore UUID filenames → creates per-shard directories for multi-shard backups
-            SolrBackupSource.restoreFileNames(localBackupRoot.resolve(collection));
-
             // Verify shard discovery — should find 2 shards
             var schemaNode = schema.path("schema");
             var source = new SolrBackupSource(localBackupRoot.resolve(collection), collection, schemaNode);
@@ -678,9 +675,6 @@ public class SolrToOpenSearchEndToEndTest {
             // Parse schema from zk_backup_0 in the backup
             var schema = SolrSchemaXmlParser.findAndParse(localBackupRoot.resolve(collection));
             var schemaNode = schema.path("schema");
-
-            // Restore UUID filenames for multi-shard backup
-            SolrBackupSource.restoreFileNames(localBackupRoot.resolve(collection));
 
             // Convert to OpenSearch mappings
             var mappings = SolrSchemaConverter.convertToOpenSearchMappings(

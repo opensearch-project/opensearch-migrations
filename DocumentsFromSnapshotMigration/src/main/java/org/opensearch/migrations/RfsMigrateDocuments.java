@@ -998,7 +998,6 @@ public class RfsMigrateDocuments {
                     collections.retainAll(arguments.indexAllowlist);
                 }
                 for (var collection : collections) {
-                    SolrBackupSource.restoreFileNames(backupDir.resolve(collection));
                     if (solrClient != null) {
                         try {
                             schemas.put(collection, solrClient.getSchema(collection));
@@ -1020,11 +1019,6 @@ public class RfsMigrateDocuments {
                 log.info("Downloading index data for collection '{}' from S3", collection);
                 finalS3Repo.downloadPrefix(collection + "/index");
                 finalS3Repo.downloadPrefix(collection + "/shard_backup_metadata");
-                try {
-                    SolrBackupSource.restoreFileNames(finalBackupDir.resolve(collection));
-                } catch (java.io.IOException e) {
-                    log.warn("Failed to restore filenames for collection '{}': {}", collection, e.getMessage());
-                }
             } : null;
             var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer);
 
