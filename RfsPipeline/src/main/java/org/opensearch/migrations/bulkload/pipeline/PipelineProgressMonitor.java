@@ -9,9 +9,9 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Polls {@link DocumentMigrationPipeline} for progress on a fixed timer and logs a heartbeat.
  *
- * <p>Follows the replayer's {@code ActiveContextMonitor} pattern: a {@link ScheduledExecutorService}
- * runs at a fixed rate, independent of pipeline throughput. This keeps logging deterministic
- * and out of the reactive chain.
+ * <p>Diffs consecutive snapshots to show per-interval timing breakdown: what percentage
+ * of aggregate batch time was spent reading, queuing, and writing. This shows the steady-state
+ * bottleneck, not lifetime averages.
  */
 @Slf4j
 public class PipelineProgressMonitor implements AutoCloseable {
@@ -21,6 +21,9 @@ public class PipelineProgressMonitor implements AutoCloseable {
     private final DocumentMigrationPipeline pipeline;
     private final ScheduledExecutorService scheduler;
     private final long intervalMs;
+
+    // Previous snapshot for diffing
+    private volatile DocumentMigrationPipeline.ProgressSnapshot prev;
 
     public PipelineProgressMonitor(DocumentMigrationPipeline pipeline) {
         this(pipeline, DEFAULT_INTERVAL_MS);
@@ -38,27 +41,52 @@ public class PipelineProgressMonitor implements AutoCloseable {
 
     /** Start the periodic heartbeat logging. */
     public void start() {
+        prev = pipeline.getProgressSnapshot();
         scheduler.scheduleAtFixedRate(this::logHeartbeat, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
     }
 
     void logHeartbeat() {
         try {
-            var snapshot = pipeline.getProgressSnapshot();
-            if (snapshot.totalDocs() == 0 && snapshot.currentPartition() == null) {
-                return; // nothing started yet
+            var curr = pipeline.getProgressSnapshot();
+            if (curr.totalDocs() == 0 && curr.currentPartition() == null) {
+                return;
             }
-            log.info("Pipeline heartbeat: partition={}, docs={}, bytes={} MB, activeBatches={}/{}, batchesProduced={}, batchesWritten={}, avgReadInterDocUs={}, avgBufferFillMs={}, avgQueueWaitMs={}, avgWriteMs={}",
-                snapshot.currentPartition(),
-                snapshot.totalDocs(),
-                snapshot.totalBytes() / (1024 * 1024),
-                snapshot.activeBatches(),
-                snapshot.batchConcurrency(),
-                snapshot.batchesProduced(),
-                snapshot.batchesWritten(),
-                snapshot.avgReadInterDocUs(),
-                snapshot.avgBufferFillMs(),
-                snapshot.avgQueueWaitMs(),
-                snapshot.avgWriteMs());
+
+            var p = prev;
+            prev = curr;
+
+            // Diff the cumulative nanos to get this interval's values
+            long dBufNanos = curr.bufferFillNanos() - (p != null ? p.bufferFillNanos() : 0);
+            long dQueueNanos = curr.queueWaitNanos() - (p != null ? p.queueWaitNanos() : 0);
+            long dWriteNanos = curr.writeNanos() - (p != null ? p.writeNanos() : 0);
+            long dBatchesWritten = curr.batchesWritten() - (p != null ? p.batchesWritten() : 0);
+            long dBatchesProduced = curr.batchesProduced() - (p != null ? p.batchesProduced() : 0);
+
+            long totalNanos = dBufNanos + dQueueNanos + dWriteNanos;
+
+            // Per-batch averages for this interval
+            long avgBufMs = dBatchesProduced > 0 ? dBufNanos / dBatchesProduced / 1_000_000 : 0;
+            long avgQueueMs = dBatchesWritten > 0 ? dQueueNanos / dBatchesWritten / 1_000_000 : 0;
+            long avgWriteMs = dBatchesWritten > 0 ? dWriteNanos / dBatchesWritten / 1_000_000 : 0;
+
+            // Percentage breakdown
+            int pctBuf = totalNanos > 0 ? (int) (dBufNanos * 100 / totalNanos) : 0;
+            int pctQueue = totalNanos > 0 ? (int) (dQueueNanos * 100 / totalNanos) : 0;
+            int pctWrite = totalNanos > 0 ? (int) (dWriteNanos * 100 / totalNanos) : 0;
+
+            log.info("Pipeline heartbeat: partition={}, docs={}, bytes={} MB, " +
+                    "activeBatches={}/{}, batchesProduced={}, batchesWritten={}, " +
+                    "interval[readMs={} ({}%), queueMs={} ({}%), writeMs={} ({}%)]",
+                curr.currentPartition(),
+                curr.totalDocs(),
+                curr.totalBytes() / (1024 * 1024),
+                curr.activeBatches(),
+                curr.batchConcurrency(),
+                curr.batchesProduced(),
+                curr.batchesWritten(),
+                avgBufMs, pctBuf,
+                avgQueueMs, pctQueue,
+                avgWriteMs, pctWrite);
         } catch (Exception e) {
             log.debug("Error in progress monitor heartbeat", e);
         }
