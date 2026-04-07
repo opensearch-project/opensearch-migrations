@@ -23,7 +23,12 @@ import reactor.core.publisher.Flux;
  *
  * <p>When constructed with a {@code collectionPreparer}, it is called once per
  * collection before the first {@link #listPartitions} or {@link #readDocuments}
- * call. This enables lazy per-collection S3 downloads without coupling to S3Repo.
+ * call. This enables lazy per-collection S3 downloads (e.g. shard metadata)
+ * without coupling to S3Repo.
+ *
+ * <p>When constructed with a {@code shardPreparer}, it is called once per
+ * partition before {@link #readDocuments}. This enables per-shard S3 downloads
+ * of only the Lucene segment files needed for that shard.
  */
 @Slf4j
 public class SolrMultiCollectionSource implements DocumentSource {
@@ -31,21 +36,33 @@ public class SolrMultiCollectionSource implements DocumentSource {
     private final Path backupDir;
     private final Map<String, JsonNode> schemas;
     private final Consumer<String> collectionPreparer;
+    private final Consumer<SolrShardPartition> shardPreparer;
     private final ConcurrentHashMap<String, SolrBackupSource> sources = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Boolean> preparedCollections = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Boolean> preparedShards = new ConcurrentHashMap<>();
 
     public SolrMultiCollectionSource(Path backupDir, Map<String, JsonNode> schemas) {
-        this(backupDir, schemas, null);
+        this(backupDir, schemas, null, null);
+    }
+
+    public SolrMultiCollectionSource(Path backupDir, Map<String, JsonNode> schemas, Consumer<String> collectionPreparer) {
+        this(backupDir, schemas, collectionPreparer, null);
     }
 
     /**
      * @param collectionPreparer called once per collection name before first access.
-     *                           Use this to download S3 data or restore filenames on demand.
+     *                           Use this to download shard metadata on demand.
+     * @param shardPreparer called once per shard partition before readDocuments.
+     *                      Use this to download only the specific shard's index files.
      */
-    public SolrMultiCollectionSource(Path backupDir, Map<String, JsonNode> schemas, Consumer<String> collectionPreparer) {
+    public SolrMultiCollectionSource(
+        Path backupDir, Map<String, JsonNode> schemas,
+        Consumer<String> collectionPreparer, Consumer<SolrShardPartition> shardPreparer
+    ) {
         this.backupDir = backupDir;
         this.schemas = schemas;
         this.collectionPreparer = collectionPreparer;
+        this.shardPreparer = shardPreparer;
     }
 
     private void ensureCollectionPrepared(String collection) {
@@ -86,6 +103,13 @@ public class SolrMultiCollectionSource implements DocumentSource {
     @Override
     public Flux<Document> readDocuments(Partition partition, long startingDocOffset) {
         ensureCollectionPrepared(partition.collectionName());
+        if (shardPreparer != null && partition instanceof SolrShardPartition solrPartition) {
+            preparedShards.computeIfAbsent(solrPartition.name(), key -> {
+                log.info("Preparing shard '{}' for reading", key);
+                shardPreparer.accept(solrPartition);
+                return true;
+            });
+        }
         return getSource(partition.collectionName()).readDocuments(partition, startingDocOffset);
     }
 

@@ -36,6 +36,7 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSin
 import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
 import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
 import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
+import org.opensearch.migrations.bulkload.solr.SolrShardPartition;
 import org.opensearch.migrations.bulkload.solr.SolrSnapshotReader;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
@@ -909,14 +910,30 @@ public class RfsMigrateDocuments {
             }
 
             var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas);
-            // For S3: lazily download index data per-collection when the shard is processed
+            // For S3: download shard metadata at collection-prepare time (small),
+            // then download only the specific shard's index files when readDocuments is called.
             final S3Repo finalS3Repo = s3Repo;
             java.util.function.Consumer<String> collectionPreparer = (finalS3Repo != null) ? collection -> {
-                log.info("Downloading index data for collection '{}' from S3", collection);
-                finalS3Repo.downloadPrefix(collection + "/index");
+                log.info("Downloading shard metadata for collection '{}' from S3", collection);
                 finalS3Repo.downloadPrefix(collection + "/shard_backup_metadata");
             } : null;
-            var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer);
+            java.util.function.Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
+                var mapping = partition.fileNameMapping();
+                if (mapping != null) {
+                    // SolrCloud UUID backup: download only the UUID files for this shard
+                    log.info("Downloading {} index files for shard '{}/{}' from S3",
+                        mapping.size(), partition.collection(), partition.shard());
+                    for (var uuid : mapping.values()) {
+                        finalS3Repo.downloadFile(partition.collection() + "/index/" + uuid);
+                    }
+                } else {
+                    // Non-UUID layout: download the shard's directory
+                    log.info("Downloading index data for shard '{}/{}' from S3",
+                        partition.collection(), partition.shard());
+                    finalS3Repo.downloadPrefix(partition.collection() + "/index");
+                }
+            } : null;
+            var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer);
 
             // Now flow through the standard coordinator path
             var targetConnectionContext = arguments.targetArgs.toConnectionContext();
