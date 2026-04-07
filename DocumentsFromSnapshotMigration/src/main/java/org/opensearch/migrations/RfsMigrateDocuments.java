@@ -946,22 +946,22 @@ public class RfsMigrateDocuments {
 
         // Resolve backup directory: local or S3
         Path backupDir;
+        S3Repo s3Repo = null;
         if (arguments.snapshotLocalDir != null) {
             backupDir = Paths.get(arguments.snapshotLocalDir);
             log.info("Starting Solr backup document migration from local dir: {}", backupDir);
         } else if (arguments.s3RepoUri != null && arguments.s3Region != null && arguments.s3LocalDir != null) {
-            // Solr BACKUP API writes to s3://<bucket>/<backupName>/ (location=/ puts it at repo root).
-            // Derive the actual backup path from the bucket and snapshot name.
+            // Solr BACKUP API writes to s3://<bucket>/<backupName>/ (location=/ at repo root).
             var repoUri = new S3Uri(arguments.s3RepoUri);
             var backupS3Uri = "s3://" + repoUri.bucketName + "/" + arguments.snapshotName;
-            log.info("Downloading Solr backup from S3: {}", backupS3Uri);
-            var s3Repo = S3Repo.createRaw(
+            log.info("Downloading Solr backup metadata from S3: {}", backupS3Uri);
+            s3Repo = S3Repo.createRaw(
                 Paths.get(arguments.s3LocalDir),
                 new S3Uri(backupS3Uri),
                 arguments.s3Region,
                 arguments.s3Endpoint != null ? URI.create(arguments.s3Endpoint) : null
             );
-            backupDir = s3Repo.downloadAllFiles();
+            backupDir = s3Repo.getRepoRootDir();
         } else {
             throw new ParameterException(
                 "When source version is SOLR, provide either --snapshot-local-dir or S3 args (--s3-local-dir, --s3-repo-uri, --s3-region)."
@@ -969,36 +969,64 @@ public class RfsMigrateDocuments {
         }
 
         try {
-            // Discover collections from backup directory structure
-            var collections = new java.util.ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
-            if (!arguments.indexAllowlist.isEmpty()) {
-                collections.retainAll(arguments.indexAllowlist);
-            }
-
-            // Restore UUID filenames and build document sources per collection
-            for (var collection : collections) {
-                SolrBackupSource.restoreFileNames(backupDir.resolve(collection));
-            }
-
-            // Build a combined SolrBackupSource for all collections
-            // Each collection's shards become work items via the IndexMetadata.Factory
+            // For S3: download only lightweight metadata per collection (schema + backup properties).
+            // The heavy index data is downloaded lazily per-collection when readDocuments() is called.
             var schemas = new java.util.LinkedHashMap<String, JsonNode>();
-            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            for (var collection : collections) {
-                if (solrClient != null) {
-                    try {
-                        schemas.put(collection, solrClient.getSchema(collection));
-                    } catch (Exception e) {
-                        log.warn("Failed to fetch schema for {} from source, falling back to backup schema", collection, e);
+            if (s3Repo != null) {
+                // List S3 to discover collection names, then download only schema metadata
+                var collections = new java.util.ArrayList<>(s3Repo.listTopLevelDirectories());
+                if (!arguments.indexAllowlist.isEmpty()) {
+                    collections.retainAll(arguments.indexAllowlist);
+                }
+                for (var collection : collections) {
+                    s3Repo.downloadPrefix(collection + "/zk_backup_0");
+                    if (solrClient != null) {
+                        try {
+                            schemas.put(collection, solrClient.getSchema(collection));
+                        } catch (Exception e) {
+                            log.warn("Failed to fetch schema for {} from source, falling back to backup schema", collection, e);
+                            schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
+                        }
+                    } else {
                         schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
                     }
-                } else {
-                    schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
+                }
+            } else {
+                // Local filesystem: discover and parse schemas directly
+                var collections = new java.util.ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
+                if (!arguments.indexAllowlist.isEmpty()) {
+                    collections.retainAll(arguments.indexAllowlist);
+                }
+                for (var collection : collections) {
+                    SolrBackupSource.restoreFileNames(backupDir.resolve(collection));
+                    if (solrClient != null) {
+                        try {
+                            schemas.put(collection, solrClient.getSchema(collection));
+                        } catch (Exception e) {
+                            log.warn("Failed to fetch schema for {} from source, falling back to backup schema", collection, e);
+                            schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
+                        }
+                    } else {
+                        schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
+                    }
                 }
             }
 
             var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas);
-            var documentSource = new SolrMultiCollectionSource(backupDir, schemas);
+            // For S3: lazily download index data + restore filenames per-collection when the shard is processed
+            final S3Repo finalS3Repo = s3Repo;
+            final Path finalBackupDir = backupDir;
+            java.util.function.Consumer<String> collectionPreparer = (finalS3Repo != null) ? collection -> {
+                log.info("Downloading index data for collection '{}' from S3", collection);
+                finalS3Repo.downloadPrefix(collection + "/index");
+                finalS3Repo.downloadPrefix(collection + "/shard_backup_metadata");
+                try {
+                    SolrBackupSource.restoreFileNames(finalBackupDir.resolve(collection));
+                } catch (java.io.IOException e) {
+                    log.warn("Failed to restore filenames for collection '{}': {}", collection, e.getMessage());
+                }
+            } : null;
+            var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer);
 
             // Now flow through the standard coordinator path
             var targetConnectionContext = arguments.targetArgs.toConnectionContext();
