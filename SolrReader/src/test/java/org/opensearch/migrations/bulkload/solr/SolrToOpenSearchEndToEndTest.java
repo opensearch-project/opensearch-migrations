@@ -57,8 +57,15 @@ public class SolrToOpenSearchEndToEndTest {
         );
     }
 
+    static Stream<Arguments> solrToOpenSearch() {
+        return Stream.of(
+            Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V2_19_4),
+            Arguments.of(SolrClusterContainer.SOLR_9, SearchClusterContainer.OS_V2_19_4)
+        );
+    }
+
     @ParameterizedTest(name = "{0} → {1}")
-    @MethodSource("solr8ToOpenSearch")
+    @MethodSource("solrToOpenSearch")
     void fullMigrationFromBackup(
         SolrClusterContainer.SolrVersion solrVersion,
         SearchClusterContainer.ContainerVersion targetVersion
@@ -645,7 +652,13 @@ public class SolrToOpenSearchEndToEndTest {
             "http://localhost:8983/solr/" + collection
                 + "/replication?command=backup&location=/var/solr/data&name=" + backupName
         );
-        Thread.sleep(3000);
+        // Poll for backup completion instead of fixed sleep
+        for (int i = 0; i < 30; i++) {
+            var detailsResult = solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/" + collection + "/replication?command=details&wt=json");
+            if (detailsResult.getStdout().contains("success")) break;
+            Thread.sleep(1000);
+        }
 
         var snapshotDir = "/var/solr/data/snapshot." + backupName;
         var localBackupDir = tempDir.toPath().resolve("solr_backup_" + backupName);
