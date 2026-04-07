@@ -97,8 +97,7 @@ public class SolrSnapshotToOpenSearchTest {
             var backupDir = createBackup(solr, COLLECTION_NAME);
 
             int exitCode = SourceTestBase.runProcessAgainstTarget(new String[]{
-                "--source-version", "SOLR 8.11.4",
-                "--source-host", solr.getSolrUrl(),
+                "--source-version", "SOLR_8.11.4",
                 "--snapshot-local-dir", backupDir.toString(),
                 "--snapshot-name", "solr-migration",
                 "--target-host", target.getUrl(),
