@@ -76,7 +76,7 @@ function makeReplayerParamsDict(
         expr.ternary(
             expr.isEmpty(tupleS3Bucket),
             expr.makeDict({}),
-            expr.makeDict({ tupleOutputDir: expr.literal(S3_TUPLE_MOUNT_PATH) })
+            expr.makeDict({ tupleOutputDir: expr.literal(S3_TUPLE_MOUNT_PATH), enableSyncTuples: expr.literal(true) })
         )
     );
 }
