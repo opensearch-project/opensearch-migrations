@@ -837,12 +837,10 @@
           }
         },
         "retryStrategy": {
-          "limit": "6",
           "retryPolicy": "Always",
           "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
+            "duration": "5",
+            "factor": "1"
           }
         },
         "outputs": {
