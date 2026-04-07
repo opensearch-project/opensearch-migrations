@@ -260,7 +260,9 @@ public class SolrSnapshotToOpenSearchTest {
     }
 
     /**
-     * Tests migrating multiple Solr collections through a single pipeline using SolrMultiCollectionSource.
+     * Tests migrating multiple Solr collections through the work coordinator.
+     * Each collection is a single shard, so migrateOneShard() should be called
+     * exactly once per collection (2 total), then return NOTHING_DONE.
      */
     @ParameterizedTest(name = "multi-collection: {0} → {1}")
     @MethodSource("solr8ToOpenSearch3")
@@ -291,23 +293,67 @@ public class SolrSnapshotToOpenSearchTest {
             var backupRoot = createBackup(solr, "movies", "backup_movies");
             createBackup(solr, "books", "backup_books");
 
-            // Build multi-collection source
+            // Build multi-collection source and metadata factory
             var schemas = Map.<String, JsonNode>of(
                 "movies", MAPPER.createObjectNode().set("schema", moviesSchema),
                 "books", MAPPER.createObjectNode().set("schema", booksSchema)
             );
-            var source = new SolrMultiCollectionSource(backupRoot, schemas);
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupRoot, schemas);
+            var documentSource = new SolrMultiCollectionSource(backupRoot, schemas);
 
-            var targetClient = new OpenSearchClientFactory(
-                ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext()
-            ).determineVersionAndCreate();
-            var sink = new OpenSearchDocumentSink(
-                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
-            );
-            var pipeline = new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE);
+            var connectionContext = ConnectionContextTestParams.builder()
+                .host(target.getUrl()).build().toConnectionContext();
+            var targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
+            var targetVersion_ = targetClient.getClusterVersion();
 
-            var cursors = pipeline.migrateAll().collectList().block();
-            assertThat("Should have progress cursors", cursors.size(), greaterThan(0));
+            var coordinatorFactory = new WorkCoordinatorFactory(targetVersion_);
+            var progressCursor = new AtomicReference<WorkItemCursor>();
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+            var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            try (var workCoordinator = coordinatorFactory.get(
+                     new CoordinateWorkHttpClient(connectionContext),
+                     SourceTestBase.TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                     UUID.randomUUID().toString(),
+                     Clock.systemUTC(),
+                     workItemRef::set);
+                 var processManager = new LeaseExpireTrigger(w -> {
+                     log.debug("Lease expired for {} (test)", w);
+                 })) {
+
+                var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);
+
+                // Register work items for both collections
+                new ShardWorkPreparer().run(
+                    scopedWorkCoordinator, indexMetadataFactory,
+                    "solr-multi", List.of("movies", "books"), testContext
+                );
+
+                // Process one shard at a time — each call should migrate exactly one shard
+                int shardsProcessed = 0;
+                for (int attempt = 0; attempt < 10; attempt++) {
+                    var runner = DocumentMigrationBootstrap.builder()
+                        .targetClient(targetClient)
+                        .snapshotName("solr-multi")
+                        .maxDocsPerBatch(1000)
+                        .maxBytesPerBatch(Long.MAX_VALUE)
+                        .batchConcurrency(10)
+                        .allowlist(DocumentExceptionAllowlist.empty())
+                        .externalDocumentSource(documentSource)
+                        .workCoordinator(scopedWorkCoordinator)
+                        .maxInitialLeaseDuration(Duration.ofMinutes(5))
+                        .cursorConsumer(progressCursor::set)
+                        .cancellationTriggerConsumer(r -> {})
+                        .build();
+
+                    var status = runner.migrateOneShard(testContext::createReindexContext);
+                    if (status == CompletionStatus.NOTHING_DONE) break;
+                    shardsProcessed++;
+                }
+
+                // 2 collections × 1 shard each = exactly 2 migrateOneShard calls
+                assertThat("Should process exactly 2 shards (one per collection)", shardsProcessed, equalTo(2));
+            }
 
             verifyDocCount(target, "movies", 5);
             verifyDocCount(target, "books", 3);
