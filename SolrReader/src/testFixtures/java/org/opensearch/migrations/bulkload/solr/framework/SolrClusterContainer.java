@@ -11,6 +11,12 @@ import org.testcontainers.utility.DockerImageName;
 /**
  * Testcontainers wrapper for Solr, following the project's container pattern.
  * Uses GenericContainer directly to avoid testcontainers-solr module compatibility issues.
+ *
+ * <p>Supports two modes:
+ * <ul>
+ *   <li>Standalone (default): {@code new SolrClusterContainer(version)} — single-node, core-based</li>
+ *   <li>SolrCloud: {@code SolrClusterContainer.cloud(version)} — embedded ZooKeeper, collection-based with sharding</li>
+ * </ul>
  */
 @Slf4j
 public class SolrClusterContainer extends GenericContainer<SolrClusterContainer> {
@@ -20,17 +26,39 @@ public class SolrClusterContainer extends GenericContainer<SolrClusterContainer>
 
     @Getter
     private final SolrVersion solrVersion;
+    @Getter
+    private final boolean cloudMode;
 
+    /** Create a standalone Solr container. */
     @SuppressWarnings("resource")
     public SolrClusterContainer(SolrVersion version) {
+        this(version, false);
+    }
+
+    @SuppressWarnings("resource")
+    private SolrClusterContainer(SolrVersion version, boolean cloudMode) {
         super(DockerImageName.parse("solr:" + version.tag()));
         this.solrVersion = version;
-        this.withExposedPorts(8983)
-            .withCommand("solr-precreate", "dummy") // start Solr in standalone mode
-            .waitingFor(Wait.forHttp("/solr/admin/info/system")
-                .forPort(8983)
-                .forStatusCode(200)
-                .withStartupTimeout(Duration.ofMinutes(2)));
+        this.cloudMode = cloudMode;
+        this.withExposedPorts(8983);
+        if (cloudMode) {
+            this.withCommand("solr", "-c", "-f")
+                .waitingFor(Wait.forHttp("/solr/admin/collections?action=LIST&wt=json")
+                    .forPort(8983)
+                    .forStatusCode(200)
+                    .withStartupTimeout(Duration.ofMinutes(3)));
+        } else {
+            this.withCommand("solr-precreate", "dummy")
+                .waitingFor(Wait.forHttp("/solr/admin/info/system")
+                    .forPort(8983)
+                    .forStatusCode(200)
+                    .withStartupTimeout(Duration.ofMinutes(2)));
+        }
+    }
+
+    /** Create a SolrCloud container with embedded ZooKeeper. */
+    public static SolrClusterContainer cloud(SolrVersion version) {
+        return new SolrClusterContainer(version, true);
     }
 
     public String getSolrUrl() {
@@ -39,7 +67,7 @@ public class SolrClusterContainer extends GenericContainer<SolrClusterContainer>
 
     @Override
     public void start() {
-        log.info("Starting Solr container: {}", solrVersion);
+        log.info("Starting Solr container: {} (cloud={})", solrVersion, cloudMode);
         super.start();
     }
 

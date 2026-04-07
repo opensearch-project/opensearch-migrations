@@ -543,7 +543,195 @@ public class SolrToOpenSearchEndToEndTest {
         }
     }
 
+    /**
+     * E2E: SolrCloud backup with multiple shards.
+     * Creates a SolrCloud collection with 2 shards, backs up via Collections API,
+     * and verifies the backup structure is correctly read with 2 partitions.
+     * Migrates all shards and verifies total doc count.
+     */
+    @ParameterizedTest(name = "solrcloud multi-shard: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch")
+    void solrCloudMultiShardBackupMigration(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = SolrClusterContainer.cloud(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            var collection = "cloud_test";
+            var numShards = 2;
+
+            // Create SolrCloud collection with 2 shards
+            var createResult = solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/admin/collections?action=CREATE"
+                    + "&name=" + collection
+                    + "&numShards=" + numShards
+                    + "&replicationFactor=1"
+                    + "&maxShardsPerNode=" + numShards
+                    + "&wt=json");
+            log.info("Create collection response: {}", createResult.getStdout());
+
+            // Index 20 documents (distributed across shards by Solr's hash routing)
+            populateSolrDocuments(solr, collection, 20);
+
+            // Backup via Collections API
+            var backupLocation = "/var/solr/data/backups";
+            solr.execInContainer("mkdir", "-p", backupLocation);
+
+            var backupResult = solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/admin/collections?action=BACKUP"
+                    + "&name=cloud_backup"
+                    + "&collection=" + collection
+                    + "&location=" + backupLocation
+                    + "&wt=json");
+            log.info("Backup response: {}", backupResult.getStdout());
+
+            // Copy the backup directory tree from container to local
+            var localBackupRoot = tempDir.toPath().resolve("cloud_backup");
+            var containerBackupDir = backupLocation + "/cloud_backup/" + collection;
+            copyDirectoryFromContainer(solr, containerBackupDir, localBackupRoot.resolve(collection));
+
+            // Parse schema from the backup's zk_backup_0 directory
+            var schema = SolrSchemaXmlParser.findAndParse(localBackupRoot.resolve(collection));
+
+            // Restore UUID filenames → creates per-shard directories for multi-shard backups
+            SolrBackupSource.restoreFileNames(localBackupRoot.resolve(collection));
+
+            // Verify shard discovery — should find 2 shards
+            var schemaNode = schema.path("schema");
+            var source = new SolrBackupSource(localBackupRoot.resolve(collection), collection, schemaNode);
+            var partitions = source.listPartitions(collection);
+            assertThat("Should discover " + numShards + " shards from SolrCloud backup",
+                partitions.size(), equalTo(numShards));
+
+            // Migrate all shards
+            var targetClient = createOpenSearchClient(target);
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
+            var pipeline = new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE, numShards, 10);
+            var cursors = pipeline.migrateAll().collectList().block();
+
+            assertThat("Should have cursors from shards", cursors.size(), greaterThan(0));
+            verifyDocCount(target, collection, 20);
+        }
+    }
+
+    /**
+     * E2E: SolrCloud metadata migration — verifies schema from backup's zk_backup_0
+     * is correctly converted to OpenSearch mappings.
+     */
+    @ParameterizedTest(name = "solrcloud metadata: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch")
+    void solrCloudBackupMetadataMigration(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = SolrClusterContainer.cloud(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            var collection = "schema_test";
+
+            // Create SolrCloud collection with custom schema fields
+            solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/admin/collections?action=CREATE"
+                    + "&name=" + collection
+                    + "&numShards=2&replicationFactor=1&maxShardsPerNode=2&wt=json");
+
+            // Add typed fields
+            solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/" + collection + "/schema",
+                "-d", "{\"add-field\":["
+                    + "{\"name\":\"title\",\"type\":\"text_general\",\"stored\":true},"
+                    + "{\"name\":\"count\",\"type\":\"pint\",\"stored\":true},"
+                    + "{\"name\":\"created\",\"type\":\"pdate\",\"stored\":true},"
+                    + "{\"name\":\"active\",\"type\":\"boolean\",\"stored\":true}"
+                    + "]}");
+
+            // Index a doc
+            solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/" + collection + "/update?commit=true",
+                "-d", "[{\"id\":\"1\",\"title\":\"test\",\"count\":42,\"created\":\"2024-01-15T00:00:00Z\",\"active\":true}]");
+
+            // Backup via Collections API
+            var backupLocation = "/var/solr/data/backups";
+            solr.execInContainer("mkdir", "-p", backupLocation);
+            solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/admin/collections?action=BACKUP"
+                    + "&name=meta_backup&collection=" + collection
+                    + "&location=" + backupLocation + "&wt=json");
+
+            // Copy backup
+            var localBackupRoot = tempDir.toPath().resolve("meta_backup");
+            copyDirectoryFromContainer(solr,
+                backupLocation + "/meta_backup/" + collection,
+                localBackupRoot.resolve(collection));
+
+            // Parse schema from zk_backup_0 in the backup
+            var schema = SolrSchemaXmlParser.findAndParse(localBackupRoot.resolve(collection));
+            var schemaNode = schema.path("schema");
+
+            // Restore UUID filenames for multi-shard backup
+            SolrBackupSource.restoreFileNames(localBackupRoot.resolve(collection));
+
+            // Convert to OpenSearch mappings
+            var mappings = SolrSchemaConverter.convertToOpenSearchMappings(
+                schemaNode.path("fields"),
+                schemaNode.path("dynamicFields"),
+                schemaNode.path("copyFields"),
+                schemaNode.path("fieldTypes")
+            );
+            var properties = mappings.path("properties");
+            log.info("SolrCloud backup schema mappings: {}", properties);
+
+            // Verify field type conversions from the backup schema
+            assertThat("title → text", properties.path("title").path("type").asText(), equalTo("text"));
+            assertThat("count → integer", properties.path("count").path("type").asText(), equalTo("integer"));
+            assertThat("created → date", properties.path("created").path("type").asText(), equalTo("date"));
+            assertThat("active → boolean", properties.path("active").path("type").asText(), equalTo("boolean"));
+
+            // Also migrate the doc to verify end-to-end
+            var source = new SolrBackupSource(localBackupRoot.resolve(collection), collection, schemaNode);
+            var targetClient = createOpenSearchClient(target);
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
+            new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE)
+                .migrateAll().collectList().block();
+
+            verifyDocCount(target, collection, 1);
+        }
+    }
+
     // --- Helpers ---
+
+    /**
+     * Recursively copies a directory tree from a container to a local path.
+     * Uses 'find' to list all files, then copies each one individually.
+     */
+    private static void copyDirectoryFromContainer(
+        SolrClusterContainer solr, String containerDir, Path localDir
+    ) throws Exception {
+        Files.createDirectories(localDir);
+        var findResult = solr.execInContainer("find", containerDir, "-type", "f");
+        for (var line : findResult.getStdout().trim().split("\n")) {
+            if (line.isEmpty()) continue;
+            var relativePath = line.substring(containerDir.length());
+            if (relativePath.startsWith("/")) relativePath = relativePath.substring(1);
+            var localFile = localDir.resolve(relativePath);
+            Files.createDirectories(localFile.getParent());
+            solr.copyFileFromContainer(line, localFile.toString());
+        }
+        log.info("Copied {} to {}", containerDir, localDir);
+    }
 
     private static void populateSolrDocuments(SolrClusterContainer solr, String collection, int count)
         throws Exception {

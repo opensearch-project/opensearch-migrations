@@ -207,13 +207,14 @@ public class SolrBackupSource implements DocumentSource {
     }
 
     /**
-     * Renames UUID-named files in a Solr S3 backup to their original Lucene filenames
+     * Restores UUID-named files in a Solr backup to their original Lucene filenames
      * using the shard_backup_metadata mapping files.
      *
-     * <p>Solr's S3 backup repository stores index files with UUID names and keeps
-     * a mapping in {@code shard_backup_metadata/md_shardN_0.json}. This method
-     * reads those mappings and renames the files in the {@code index/} directory
-     * so that standard Lucene readers can open them.
+     * <p>Solr's backup repository stores index files with UUID names and keeps
+     * a mapping in {@code shard_backup_metadata/md_shardN_0.json}. For multi-shard
+     * backups, each shard's files are placed in a separate subdirectory
+     * ({@code shard1/}, {@code shard2/}, etc.) so Lucene readers can open each
+     * shard independently.
      */
     public static void restoreFileNames(Path backupDir) throws IOException {
         var metadataDir = backupDir.resolve("shard_backup_metadata");
@@ -223,16 +224,31 @@ public class SolrBackupSource implements DocumentSource {
         }
         var mapper = new ObjectMapper();
         try (var mdFiles = Files.list(metadataDir)) {
-            mdFiles.filter(p -> p.getFileName().toString().endsWith(".json")).forEach(mdFile -> {
+            var metadataFiles = mdFiles.filter(p -> p.getFileName().toString().endsWith(".json")).toList();
+            boolean multiShard = metadataFiles.size() > 1;
+
+            for (var mdFile : metadataFiles) {
                 try {
                     var tree = mapper.readTree(mdFile.toFile());
                     var indexDir = backupDir.resolve(INDEX_DIR_NAME);
+
+                    // Extract shard name from metadata filename: md_shard1_0.json → shard1
+                    Path targetDir;
+                    if (multiShard) {
+                        var mdName = mdFile.getFileName().toString(); // md_shard1_0.json
+                        var shardName = mdName.replaceFirst("^md_", "").replaceFirst("_\\d+\\.json$", "");
+                        targetDir = backupDir.resolve(shardName);
+                        Files.createDirectories(targetDir);
+                    } else {
+                        targetDir = indexDir;
+                    }
+
                     tree.fields().forEachRemaining(entry -> {
                         var uuid = entry.getKey();
                         var fileName = entry.getValue().path("fileName").asText(null);
                         if (fileName == null) return;
                         var src = indexDir.resolve(uuid);
-                        var dst = indexDir.resolve(fileName);
+                        var dst = targetDir.resolve(fileName);
                         if (Files.exists(src) && !Files.exists(dst)) {
                             try {
                                 Files.move(src, dst);
@@ -241,11 +257,11 @@ public class SolrBackupSource implements DocumentSource {
                             }
                         }
                     });
-                    log.info("Restored Lucene filenames from {}", mdFile.getFileName());
+                    log.info("Restored Lucene filenames from {} to {}", mdFile.getFileName(), targetDir);
                 } catch (IOException e) {
                     log.warn("Failed to read shard metadata: {}", mdFile, e);
                 }
-            });
+            }
         }
     }
 
