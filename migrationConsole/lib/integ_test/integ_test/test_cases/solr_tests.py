@@ -1,4 +1,12 @@
-"""Solr-to-OpenSearch integration test cases using the standard Argo workflow pipeline."""
+"""Solr-to-OpenSearch integration test cases using the standard Argo workflow pipeline.
+
+NOTE: Standalone Solr does not support S3-based snapshots required by the RFS pipeline.
+The full migration workflow will fail at the snapshot step until either:
+1. SolrCloud mode is used (requires Solr Operator CRDs pre-installed), or
+2. The RFS pipeline adds support for standalone Solr replication-based backups.
+
+For now, this test validates the cluster creation and data loading steps.
+"""
 import logging
 
 from ..cluster_version import SolrV8_X, OpensearchV2_X, OpensearchV3_X
