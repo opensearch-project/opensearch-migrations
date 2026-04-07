@@ -127,8 +127,7 @@ User guide documentation is available in the [OpenSearch Migration Assistant doc
 
 ### Local Deployment
 
-- Java 17 or newer is required for local builds and tests.
-- Refer to the [Development Guide](DEVELOPER_GUIDE.md) for more details.
+ Refer to the [Development Guide](DEVELOPER_GUIDE.md) for more details.
 
 ### AWS Deployment
 
