@@ -174,15 +174,16 @@ def _find_resource_by_name(namespace, name):
     return None
 
 
-def _get_reset_cache_file() -> Path:
+def _get_reset_cache_file(namespace: str) -> Path:
     cache_dir = Path(tempfile.gettempdir()) / "workflow_completions"
     cache_dir.mkdir(exist_ok=True)
-    return cache_dir / "reset_resources.json"
+    return cache_dir / f"reset_resources_{namespace}.json"
 
 
 def _get_cached_resource_names(ctx) -> list[str]:
     """Fetch and cache resettable resource names."""
-    cache_file = _get_reset_cache_file()
+    namespace = ctx.params.get('namespace', 'ma')
+    cache_file = _get_reset_cache_file(namespace)
 
     if cache_file.exists() and (time.time() - cache_file.stat().st_mtime) < _AUTOCOMPLETE_RESET_CACHE_TTL_SECONDS:
         try:
@@ -192,7 +193,7 @@ def _get_cached_resource_names(ctx) -> list[str]:
 
     try:
         load_k8s_config()
-        crds = _list_migration_resources(ctx.params.get('namespace', 'ma'))
+        crds = _list_migration_resources(namespace)
         names = [n for _, n, phase, _ in crds if phase != 'Teardown']
         cache_file.write_text(json.dumps({'names': names}))
         return names
