@@ -231,38 +231,43 @@ public class SolrBackupSource implements DocumentSource {
                 try {
                     var tree = mapper.readTree(mdFile.toFile());
                     var indexDir = backupDir.resolve(INDEX_DIR_NAME);
-
-                    // Extract shard name from metadata filename: md_shard1_0.json → shard1
-                    Path targetDir;
-                    if (multiShard) {
-                        var mdName = mdFile.getFileName().toString(); // md_shard1_0.json
-                        var shardName = mdName.replaceFirst("^md_", "").replaceFirst("_\\d+\\.json$", "");
-                        targetDir = backupDir.resolve(shardName);
-                        Files.createDirectories(targetDir);
-                    } else {
-                        targetDir = indexDir;
-                    }
-
-                    tree.fields().forEachRemaining(entry -> {
-                        var uuid = entry.getKey();
-                        var fileName = entry.getValue().path("fileName").asText(null);
-                        if (fileName == null) return;
-                        var src = indexDir.resolve(uuid);
-                        var dst = targetDir.resolve(fileName);
-                        if (Files.exists(src) && !Files.exists(dst)) {
-                            try {
-                                Files.move(src, dst);
-                            } catch (IOException e) {
-                                log.warn("Failed to rename {} to {}", src, dst, e);
-                            }
-                        }
-                    });
+                    var targetDir = resolveTargetDir(backupDir, indexDir, mdFile, multiShard);
+                    renameIndexFiles(tree, indexDir, targetDir);
                     log.info("Restored Lucene filenames from {} to {}", mdFile.getFileName(), targetDir);
                 } catch (IOException e) {
                     log.warn("Failed to read shard metadata: {}", mdFile, e);
                 }
             }
         }
+    }
+
+    private static Path resolveTargetDir(Path backupDir, Path indexDir, Path mdFile, boolean multiShard)
+            throws IOException {
+        if (!multiShard) {
+            return indexDir;
+        }
+        // Extract shard name from metadata filename: md_shard1_0.json → shard1
+        var mdName = mdFile.getFileName().toString();
+        var shardName = mdName.replaceFirst("^md_", "").replaceFirst("_\\d+\\.json$", "");
+        var targetDir = backupDir.resolve(shardName);
+        Files.createDirectories(targetDir);
+        return targetDir;
+    }
+
+    private static void renameIndexFiles(JsonNode tree, Path indexDir, Path targetDir) {
+        tree.fields().forEachRemaining(entry -> {
+            var fileName = entry.getValue().path("fileName").asText(null);
+            if (fileName == null) return;
+            var src = indexDir.resolve(entry.getKey());
+            var dst = targetDir.resolve(fileName);
+            if (Files.exists(src) && !Files.exists(dst)) {
+                try {
+                    Files.move(src, dst);
+                } catch (IOException e) {
+                    log.warn("Failed to rename {} to {}", src, dst, e);
+                }
+            }
+        });
     }
 
     static Document toDocument(LuceneDocumentChange change) {
