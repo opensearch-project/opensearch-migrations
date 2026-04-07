@@ -823,17 +823,26 @@
           "resources": {
             "limits": {
               "cpu": "50m",
-              "memory": "32Mi"
+              "memory": "64Mi"
             },
             "requests": {
               "cpu": "50m",
-              "memory": "32Mi"
+              "memory": "64Mi"
             }
           }
         },
         "metadata": {
           "annotations": {
             "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
           }
         },
         "outputs": {
