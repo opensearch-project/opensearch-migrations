@@ -13,9 +13,11 @@
 # migration-workflow-templates-test) to break this dependency cycle.
 # ============================================================================
 
-set -e -x
+set -x
 
 echo "Checking workflow status"
+. /etc/profile.d/venv.sh
+source /.venv/bin/activate
 
 STATUS_OUTPUT=$(workflow status --workflow-name migration-workflow 2>&1)
 STATUS_EXIT_CODE=$?
