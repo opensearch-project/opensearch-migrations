@@ -605,8 +605,9 @@ public class TrafficReplayer {
             setupShutdownHookForReplayer(tr);
             if (params.enableSyncTuples) {
                 log.info("Sync tuple writing enabled — using per-thread GzipJsonLinesSink");
+                var tupleOutputDir = resolveTupleOutputDir(params.tupleOutputDir);
                 var tupleWriter = new ThreadLocalTupleWriter(
-                    Path.of(params.tupleOutputDir),
+                    tupleOutputDir,
                     params.tupleMaxFileSizeMb * 1024L * 1024L,
                     Duration.ofSeconds(params.tupleMaxLagSeconds)
                 );
@@ -643,6 +644,21 @@ public class TrafficReplayer {
                 activeContextLogger.atLevel(acmLevel).setMessage("[end of run]]").log();
             }
         }
+    }
+
+    /**
+     * When running with a Mountpoint S3 sidecar, each pod's FUSE mount lives at
+     * {@code <hostPath>/.pods/<POD_NAME>/s3}. Append that suffix so the replayer
+     * writes through the FUSE mount instead of to the bare hostPath root.
+     */
+    static Path resolveTupleOutputDir(String tupleOutputDir) {
+        var podName = System.getenv("POD_NAME");
+        var base = Path.of(tupleOutputDir);
+        if (podName != null && !podName.isEmpty()) {
+            base = base.resolve(".pods").resolve(podName).resolve("s3");
+            log.info("Resolved tupleOutputDir with POD_NAME: {}", base);
+        }
+        return base;
     }
 
     private static void setupShutdownHookForReplayer(TrafficReplayerTopLevel tr) {

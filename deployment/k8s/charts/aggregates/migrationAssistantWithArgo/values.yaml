@@ -62,7 +62,7 @@ images:
     tag: "3.1.0"
     pullPolicy: IfNotPresent
   mountpointS3:
-    repository: public.ecr.aws/mountpoint-s3/aws-mountpoint-s3-csi-driver
+    repository: public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver
     tag: "v2.5.0"
     pullPolicy: IfNotPresent
 

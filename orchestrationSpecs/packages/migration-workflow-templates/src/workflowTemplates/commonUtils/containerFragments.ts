@@ -206,12 +206,14 @@ export function setupS3MountpointVolumeForContainer(
                 image: makeStringTypeProxy(mountpointS3Image),
                 command: ["sh", "-c"],
                 args: [
+                    "export PATH=/mountpoint-s3/bin:$PATH; " +
                     "P=/mnt/.pods/${POD_NAME}; " +
                     "mkdir -p $P/s3; " +
-                    "/mountpoint-s3/bin/mount-s3 ${S3_BUCKET} $P/s3 " +
+                    "mount-s3 ${S3_BUCKET} $P/s3 " +
                     "--prefix=${S3_PREFIX} " +
                     "--allow-delete --allow-overwrite " +
                     "--dir-mode=0777 --file-mode=0666 " +
+                    "${S3_CHECKSUM_FLAG} " +
                     "${S3_ENDPOINT_FLAG} ${S3_FORCE_PATH_STYLE_FLAG} " +
                     "--foreground"
                 ],
@@ -241,6 +243,14 @@ export function setupS3MountpointVolumeForContainer(
                         value: makeStringTypeProxy(expr.ternary(
                             useLocalStack,
                             expr.literal("--force-path-style"),
+                            expr.literal("")
+                        ))
+                    },
+                    {
+                        name: "S3_CHECKSUM_FLAG",
+                        value: makeStringTypeProxy(expr.ternary(
+                            useLocalStack,
+                            expr.literal("--upload-checksums off"),
                             expr.literal("")
                         ))
                     },

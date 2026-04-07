@@ -21,17 +21,13 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Writes tuples as gzip-compressed JSON lines to files compatible with Mountpoint S3.
  *
- * <p>Commits tuples on every {@link #onEndOfBatch()} by flushing the gzip stream
- * (via {@code syncFlush=true}) and fsyncing the underlying file. This makes the
- * compressed data durable on disk/S3 so Kafka offsets can be committed immediately,
- * while preserving the deflate dictionary across flushes for good compression.</p>
+ * <p>On every {@link #onEndOfBatch()}, the current file is finished, fsynced, closed,
+ * and a new file is opened. This "fsync-then-rotate" semantic is required by Mountpoint
+ * S3, which has write-once-then-close semantics — once fsync completes the S3 upload,
+ * further writes to the same file descriptor fail.</p>
  *
  * <p>Each instance is single-threaded (one per Netty event loop). The {@code threadIndex}
  * is embedded in filenames to avoid collisions between concurrent writers.</p>
- *
- * <p>Files are rotated (finish + close + open new) when size or age thresholds are
- * exceeded. The file is only readable as valid gzip after {@code finish()} is called
- * (on rotation or close), but durability for Kafka commit safety only requires fsync.</p>
  */
 @Slf4j
 public class GzipJsonLinesSink implements TupleSink {
@@ -87,21 +83,10 @@ public class GzipJsonLinesSink implements TupleSink {
         if (pendingFutures.isEmpty()) {
             return;
         }
-        if (shouldRotate()) {
-            rotate();
-        } else {
-            try {
-                // syncFlush=true ensures flush() pushes all deflated data to the
-                // FileOutputStream. fsync then makes it durable on disk/Mountpoint.
-                gzipOut.flush();
-                fileOut.getFD().sync();
-            } catch (IOException e) {
-                log.atError().setCause(e).setMessage("Failed to flush/sync tuple file").log();
-                completeAllExceptionally(e);
-                return;
-            }
-            completeAll();
-        }
+        // Mountpoint S3 has write-once-then-close semantics: once fsync completes
+        // the S3 upload, further writes to the same file fail. Always rotate
+        // (finish + close + open new) so each fsync is the final write to its file.
+        rotate();
     }
 
     @Override
@@ -128,11 +113,6 @@ public class GzipJsonLinesSink implements TupleSink {
         completeAll();
         gzipOut = null;
         fileOut = null;
-    }
-
-    private boolean shouldRotate() {
-        return bytesWritten >= maxFileSizeBytes
-            || Duration.between(fileOpenedAt, Instant.now()).compareTo(maxFileAge) >= 0;
     }
 
     private void rotate() {
