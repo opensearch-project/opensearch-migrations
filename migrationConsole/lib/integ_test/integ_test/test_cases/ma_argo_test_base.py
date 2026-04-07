@@ -146,8 +146,8 @@ class MATestBase:
                 "documentBackfillConfig": {
                     "maxShardSizeBytes": 16000000,
                     "resources": {
-                        "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
-                        "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"}
+                        "requests": {"ephemeral-storage": "1Gi"},
+                        "limits": {"ephemeral-storage": "1Gi"}
                     }
                 }
             }]

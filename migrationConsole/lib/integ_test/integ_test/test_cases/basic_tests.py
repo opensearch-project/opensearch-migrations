@@ -45,7 +45,12 @@ class Test0001SingleDocumentBackfill(MATestBase):
             "migrations": [{
                 "metadataMigrationConfig": {},
                 "documentBackfillConfig": {
-                    "useTargetClusterForWorkCoordination": True
+                    "useTargetClusterForWorkCoordination": True,
+                    "maxShardSizeBytes": 16000000,
+                    "resources": {
+                        "requests": {"ephemeral-storage": "1Gi"},
+                        "limits": {"ephemeral-storage": "1Gi"}
+                    }
                 }
             }]
         }]
