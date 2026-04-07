@@ -1,7 +1,7 @@
 [versions]
 aws-crt = "0.44.0"
 aws-msk-iam-auth = "2.3.4"
-aws-sdk = "2.42.25"
+aws-sdk = "2.42.28"
 bouncycastle = "1.83"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
@@ -148,6 +148,8 @@ opentelemetry-semconv = { module = "io.opentelemetry.semconv:opentelemetry-semco
 
 polyglot = { module = "org.graalvm.polyglot:polyglot", version.ref = "graalvm" }
 polyglot-js-community = { module = "org.graalvm.polyglot:js-community", version.ref = "graalvm" }
+polyglot-python-community = { module = "org.graalvm.polyglot:python-community", version.ref = "graalvm" }
+python-embedding = { module = "org.graalvm.python:python-embedding", version.ref = "graalvm" }
 
 protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
 protobuf-protoc = { module = "com.google.protobuf:protoc", version.ref = "protobuf" }

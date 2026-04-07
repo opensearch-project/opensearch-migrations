@@ -1,0 +1,63 @@
+{{- if get .Values.conditionalPackageInstalls "ack-cloudwatch-controller" }}
+{{- $region := required "Missing required value: .Values.aws.region" .Values.aws.region }}
+{{- $account := required "Missing required value: .Values.aws.account" (toString .Values.aws.account) }}
+{{- $stage := required "Missing required value: .Values.stageName" .Values.stageName }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-cloudwatch-dashboards-{{ .Release.Name }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app: cloudwatch-dashboards-create
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: OnFailure
+      containers:
+        - name: kubectl
+          image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+          imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "Waiting for Dashboard CRD to be established..."
+              for i in $(seq 1 60); do
+                if kubectl get crd dashboards.cloudwatch.services.k8s.aws >/dev/null 2>&1; then
+                  echo "CRD ready."
+                  break
+                fi
+                echo "Attempt $i: CRD not ready yet, retrying in 10s..."
+                sleep 10
+              done
+              kubectl apply -f - <<'EOF'
+              apiVersion: cloudwatch.services.k8s.aws/v1alpha1
+              kind: Dashboard
+              metadata:
+                name: ma-{{ $stage }}-{{ $region }}-capturereplay
+                namespace: {{ .Release.Namespace }}
+              spec:
+                dashboardName: "MA-{{ $stage }}-{{ $region }}-CaptureReplay"
+                dashboardBody: {{ .Files.Get "files/cloudwatch-dashboards/capture-replay-dashboard.json" | replace "placeholder-region" $region | replace "placeholder-stage" $stage | replace "placeholder-qualifier" $stage | trim | toJson }}
+              ---
+              apiVersion: cloudwatch.services.k8s.aws/v1alpha1
+              kind: Dashboard
+              metadata:
+                name: ma-{{ $stage }}-{{ $region }}-reindexfromsnapshot
+                namespace: {{ .Release.Namespace }}
+              spec:
+                dashboardName: "MA-{{ $stage }}-{{ $region }}-ReindexFromSnapshot"
+                dashboardBody: {{ .Files.Get "files/cloudwatch-dashboards/reindex-from-snapshot-dashboard.json" | replace "placeholder-region" $region | replace "placeholder-account-id" $account | replace "placeholder-stage" $stage | replace "placeholder-qualifier" $stage | trim | toJson }}
+              EOF
+              echo "Dashboard CRs applied."
+{{- end }}

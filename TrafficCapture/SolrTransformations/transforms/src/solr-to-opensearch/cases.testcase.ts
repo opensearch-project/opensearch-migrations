@@ -57,6 +57,127 @@ export const testCases: TestCase[] = [
   // Facet tests — JSON Facet API (json.facet)
   // ───────────────────────────────────────────────────────────
 
+  // ───────────────────────────────────────────────────────────
+  // Cursor pagination tests — cursorMark → search_after
+  // ───────────────────────────────────────────────────────────
+
+  solrTest('cursor-pagination-initial-request', {
+    description: 'cursorMark=* should return first page with nextCursorMark',
+    documents: [
+      { id: '1', title: 'alpha', price: 10 },
+      { id: '2', title: 'beta', price: 20 },
+      { id: '3', title: 'gamma', price: 30 },
+      { id: '4', title: 'delta', price: 40 },
+    ],
+    requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+asc,id+asc&cursorMark=*&wt=json',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        price: { type: 'pfloat' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        price: { type: 'float' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.nextCursorMark', rule: 'expect-diff', reason: 'Shim uses base64(JSON) encoding vs Solr internal format' },
+    ],
+  }),
+
+  solrTest('cursor-pagination-full-walk-through', {
+    description: 'Walk through all pages using cursorMark — verifies page 2, 3, and end detection',
+    documents: [
+      { id: '1', title: 'alpha', price: 10 },
+      { id: '2', title: 'beta', price: 20 },
+      { id: '3', title: 'gamma', price: 30 },
+      { id: '4', title: 'delta', price: 40 },
+      { id: '5', title: 'epsilon', price: 50 },
+    ],
+    requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+asc,id+asc&cursorMark=*&wt=json',
+    requestSequence: [
+      { requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+asc,id+asc&cursorMark={{nextCursorMark}}&wt=json' },
+      { requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+asc,id+asc&cursorMark={{nextCursorMark}}&wt=json' },
+      { requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+asc,id+asc&cursorMark={{nextCursorMark}}&wt=json' },
+    ],
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        price: { type: 'pfloat' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        price: { type: 'float' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.nextCursorMark', rule: 'expect-diff', reason: 'Shim uses base64(JSON) encoding vs Solr internal format' },
+    ],
+  }),
+
+  solrTest('cursor-pagination-descending-sort', {
+    description: 'Cursor pagination with descending sort',
+    documents: [
+      { id: '1', title: 'alpha', price: 10 },
+      { id: '2', title: 'beta', price: 20 },
+      { id: '3', title: 'gamma', price: 30 },
+    ],
+    requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+desc,id+asc&cursorMark=*&wt=json',
+    requestSequence: [
+      { requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+desc,id+asc&cursorMark={{nextCursorMark}}&wt=json' },
+    ],
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        price: { type: 'pfloat' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        price: { type: 'float' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.nextCursorMark', rule: 'expect-diff', reason: 'Shim uses base64(JSON) encoding vs Solr internal format' },
+    ],
+  }),
+
+  solrTest('cursor-pagination-default-sort', {
+    description: 'cursorMark without explicit sort should default to id asc',
+    documents: [
+      { id: '1', title: 'alpha' },
+      { id: '2', title: 'beta' },
+      { id: '3', title: 'gamma' },
+    ],
+    requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=id+asc&cursorMark=*&wt=json',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      { path: '$.nextCursorMark', rule: 'expect-diff', reason: 'Shim uses base64(JSON) encoding vs Solr internal format' },
+    ],
+  }),
+
+  // ───────────────────────────────────────────────────────────
+  // Facet tests — JSON Facet API (json.facet)
+  // ───────────────────────────────────────────────────────────
+
   solrTest('facet-basic-terms', {
     description: 'Basic terms facet on a keyword field with distinct counts',
     documents: [
@@ -305,6 +426,97 @@ export const testCases: TestCase[] = [
     ],
   }),
 
+  solrTest('facet-numeric-range-with-bounds', {
+    description:
+      'Numeric range facet where data exists outside the requested start/end — ' +
+      'verifies hard_bounds ensures only buckets within [start, end) are returned',
+    documents: [
+      { id: '1', title: 'very cheap', price: 5 },
+      { id: '2', title: 'cheap', price: 15 },
+      { id: '3', title: 'mid-low', price: 30 },
+      { id: '4', title: 'mid', price: 50 },
+      { id: '5', title: 'mid-high', price: 70 },
+      { id: '6', title: 'expensive', price: 90 },
+      { id: '7', title: 'very expensive', price: 150 },
+      { id: '8', title: 'ultra expensive', price: 500 },
+    ],
+    requestPath:
+      '/solr/testcollection/select?q=*:*&wt=json&json.facet=' +
+      encodeURIComponent(
+        JSON.stringify({
+          prices: { type: 'range', field: 'price', start: 20, end: 100, gap: 20 },
+        }),
+      ),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        price: { type: 'pfloat' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        price: { type: 'float' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      {
+        path: '$.response',
+        rule: 'ignore',
+        reason: 'Facet test — only validating $.facets, not hits',
+      },
+    ],
+  }),
+
+  solrTest('facet-date-range-with-bounds', {
+    description:
+      'Date range facet where data exists outside the requested start/end — ' +
+      'verifies hard_bounds ensures only buckets within [start, end) are returned',
+    documents: [
+      { id: '1', title: 'old event', event_date: '2023-06-15T00:00:00Z' },
+      { id: '2', title: 'dec event', event_date: '2023-12-20T00:00:00Z' },
+      { id: '3', title: 'jan event', event_date: '2024-01-10T00:00:00Z' },
+      { id: '4', title: 'feb event', event_date: '2024-02-14T00:00:00Z' },
+      { id: '5', title: 'mar event', event_date: '2024-03-01T00:00:00Z' },
+      { id: '6', title: 'future event', event_date: '2024-08-20T00:00:00Z' },
+      { id: '7', title: 'far future', event_date: '2025-03-01T00:00:00Z' },
+    ],
+    requestPath:
+      '/solr/testcollection/select?q=*:*&wt=json&json.facet=' +
+      encodeURIComponent(
+        JSON.stringify({
+          quarterly: {
+            type: 'range',
+            field: 'event_date',
+            start: '2024-01-01T00:00:00Z',
+            end: '2024-04-01T00:00:00Z',
+            gap: '+1MONTH',
+          },
+        }),
+      ),
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        event_date: { type: 'pdate' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+        event_date: { type: 'date' },
+      },
+    },
+    assertionRules: [
+      ...SOLR_INTERNAL_RULES,
+      {
+        path: '$.response',
+        rule: 'ignore',
+        reason: 'Facet test — only validating $.facets, not hits',
+      },
+    ],
+  }),
+
   solrTest('facet-nested-terms-in-terms', {
     description: 'Nested facet: terms facet with a nested terms sub-facet',
     documents: [
@@ -431,4 +643,3 @@ export const testCases: TestCase[] = [
     ],
   }),
 ];
-

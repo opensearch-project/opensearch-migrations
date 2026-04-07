@@ -27,6 +27,7 @@ dependencies {
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
+    runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonPythonTransformerProvider')
 
     implementation libs.jcommander
     implementation libs.jackson.databind

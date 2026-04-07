@@ -369,8 +369,8 @@ export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
             "An empty list includes all indices."),
     maxSnapshotRateMbPerNode: z.number().default(0).optional()
         .describe("Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."),
-    compressionEnabled: z.boolean().default(true).optional()
-        .describe("[Expert] Enables metadata compression for the snapshot. Can be turned off if issues are observed with snapshot configuration extraction."),
+    compressionEnabled: z.boolean().default(false).optional()
+        .describe("[Expert] Enables metadata compression for the snapshot. Must be set to false for Elasticsearch 1.x sources, as compressed snapshot metadata is not supported by the snapshot reader for that version."),
     includeGlobalState: z.boolean().default(true).optional()
         .describe("[Expert] Includes cluster global state (persistent settings, templates, etc.) in the snapshot. " +
             "Only disable if metadata migration encounters template processing issues that cannot be resolved via an allowlist."),
