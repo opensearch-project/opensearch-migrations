@@ -34,7 +34,6 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.closeTo;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -182,107 +181,6 @@ public class SolrToOpenSearchEndToEndTest {
             assertTrue(multiValues.contains("alpha"), "multi_string should contain alpha");
             assertTrue(multiValues.contains("beta"), "multi_string should contain beta");
             assertTrue(multiValues.contains("gamma"), "multi_string should contain gamma");
-        }
-    }
-
-    /**
-     * E2E: SolrClient with Basic Auth sends correct headers and handles 401/403.
-     * Uses a real Solr instance to verify authenticated queries work end-to-end,
-     * and a mock HTTP server to verify auth failure handling.
-     *
-     * Note: Solr 8 standalone doesn't support BasicAuthPlugin (SolrCloud-only),
-     * so we verify auth header construction and error handling separately.
-     */
-    @ParameterizedTest(name = "auth: {0} → {1}")
-    @MethodSource("solr8ToOpenSearch")
-    void basicAuthClientReadsDocuments(
-        SolrClusterContainer.SolrVersion solrVersion,
-        SearchClusterContainer.ContainerVersion targetVersion
-    ) throws Exception {
-        try (var solr = new SolrClusterContainer(solrVersion)) {
-            solr.start();
-
-            createSolrCollection(solr, COLLECTION_NAME);
-            populateSolrDocuments(solr, COLLECTION_NAME, 5);
-
-            // Client with credentials should work against unauthenticated Solr
-            // (Solr ignores the Authorization header when auth is not configured)
-            var authedClient = new SolrClient(solr.getSolrUrl(), "user", "pass");
-            var collections = authedClient.listCollections();
-            assertTrue(collections.contains(COLLECTION_NAME), "Should list collection");
-
-            var response = authedClient.query(COLLECTION_NAME, "*", 10);
-            assertThat("Should find 5 docs", response.numFound(), equalTo(5L));
-
-            // Verify 401 handling: start a mock HTTP server that returns 401
-            var mockServer = com.sun.net.httpserver.HttpServer.create(
-                    new java.net.InetSocketAddress(0), 0);
-            try {
-                mockServer.createContext("/", exchange -> {
-                    var authHdr = exchange.getRequestHeaders().getFirst("Authorization");
-                    if (authHdr != null && authHdr.equals("Basic "
-                            + java.util.Base64.getEncoder().encodeToString("good:pass".getBytes()))) {
-                        // Return valid Solr response
-                        var body = "{\"collections\":[\"test\"]}";
-                        exchange.sendResponseHeaders(200, body.length());
-                        exchange.getResponseBody().write(body.getBytes());
-                    } else {
-                        exchange.sendResponseHeaders(401, -1);
-                    }
-                    exchange.close();
-                });
-                mockServer.start();
-                var port = mockServer.getAddress().getPort();
-
-                // Good credentials → success
-                var goodClient = new SolrClient("http://localhost:" + port, "good", "pass", 0);
-                var result = goodClient.listCollections();
-                assertTrue(result.contains("test"), "Should succeed with correct auth");
-
-                // Bad credentials → IOException (401)
-                var badClient = new SolrClient("http://localhost:" + port, "bad", "creds", 0);
-                assertThrows(IOException.class, badClient::listCollections,
-                    "Should fail with wrong credentials");
-
-                // No credentials → IOException (401)
-                var noAuthClient = new SolrClient("http://localhost:" + port, null, null, 0);
-                assertThrows(IOException.class, noAuthClient::listCollections,
-                    "Should fail without credentials");
-            } finally {
-                mockServer.stop(0);
-            }
-        }
-    }
-
-    /**
-     * E2E: SolrClient retries on transient server errors.
-     */
-    @ParameterizedTest(name = "retry: {0} → {1}")
-    @MethodSource("solr8ToOpenSearch")
-    void clientRetriesOnTransientFailure(
-        SolrClusterContainer.SolrVersion solrVersion,
-        SearchClusterContainer.ContainerVersion targetVersion
-    ) throws Exception {
-        try (var solr = new SolrClusterContainer(solrVersion)) {
-            solr.start();
-
-            createSolrCollection(solr, COLLECTION_NAME);
-            populateSolrDocuments(solr, COLLECTION_NAME, 3);
-
-            // Client with retries should succeed on a healthy server
-            var client = new SolrClient(solr.getSolrUrl(), null, null, 3);
-            var response = client.query(COLLECTION_NAME, "*", 10);
-            assertThat("Should find 3 docs", response.numFound(), equalTo(3L));
-
-            // Client with 0 retries against unreachable host should fail fast
-            var badClient = new SolrClient("http://localhost:1", null, null, 0);
-            assertThrows(IOException.class, badClient::listCollections,
-                "Should fail immediately with 0 retries");
-
-            // Client with retries against unreachable host should eventually fail
-            var retryClient = new SolrClient("http://localhost:1", null, null, 1);
-            assertThrows(IOException.class, retryClient::listCollections,
-                "Should fail after retries exhausted");
         }
     }
 

@@ -34,8 +34,6 @@ import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationPipeline;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
 import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
-import org.opensearch.migrations.bulkload.solr.SolrClient;
-import org.opensearch.migrations.bulkload.solr.SolrDocumentSource;
 import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
 import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
 import org.opensearch.migrations.bulkload.solr.SolrSnapshotReader;
@@ -125,11 +123,6 @@ public class RfsMigrateDocuments {
         AUTO,   // Auto-detect serverless TIMESERIES/VECTOR collections and enable
         ALWAYS, // Always use server-generated IDs
         NEVER   // Always preserve source IDs
-    }
-
-    public enum SourceType {
-        SNAPSHOT,  // Read from ES/OS snapshot (default)
-        SOLR_API   // Read from Solr HTTP API
     }
 
     public static class Args {
@@ -301,16 +294,6 @@ public class RfsMigrateDocuments {
                 "rather than failure. Example: --allowed-doc-exception-types version_conflict_engine_exception")
         public List<String> allowedDocExceptionTypes = List.of();
 
-        @Parameter(required = false,
-            names = { "--source-type" },
-            description = "Optional. The type of source to read documents from. " +
-                "SNAPSHOT (default): read from an ES/OS snapshot. " +
-                "SOLR_API: read from a Solr instance via HTTP API.")
-        public SourceType sourceType = SourceType.SNAPSHOT;
-
-        @ParametersDelegate
-        public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
-
     }
 
     public static class ExperimentalArgs {
@@ -385,24 +368,12 @@ public class RfsMigrateDocuments {
     }
 
     public static void validateArgs(Args args) {
-        if (args.sourceType == SourceType.SOLR_API) {
-            if (args.sourceArgs.host == null) {
-                throw new ParameterException(
-                    "When --source-type is SOLR_API, --source-host must be provided."
-                );
-            }
-            return;
-        }
-
         boolean isSnapshotLocalDirProvided = args.snapshotLocalDir != null;
         boolean areAllS3ArgsProvided = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
         boolean areAnyS3ArgsProvided = args.s3LocalDir != null || args.s3RepoUri != null || args.s3Region != null;
 
-        // Solr backup path requires --source-host and either local dir or S3 args
+        // Solr backup path requires either local dir or S3 args
         if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
-            if (args.sourceArgs.host == null) {
-                throw new ParameterException("--source-host is required for Solr backup migration (to fetch schema).");
-            }
             boolean hasLocal = args.snapshotLocalDir != null;
             boolean hasS3 = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
             if (!hasLocal && !hasS3) {
@@ -515,11 +486,6 @@ public class RfsMigrateDocuments {
                 .addArgument(docTransformerConfig).log();
         var transformationLoader = new TransformationLoader();
         Supplier<IJsonTransformer> docTransformerSupplier = () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
-
-        if (arguments.sourceType == SourceType.SOLR_API) {
-            runSolrMigration(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
-            return;
-        }
 
         if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
             runSolrBackupMigration(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
@@ -881,45 +847,6 @@ public class RfsMigrateDocuments {
     }
 
 
-    private static void runSolrMigration(
-        Args arguments,
-        OpenSearchClient targetClient,
-        Supplier<IJsonTransformer> docTransformerSupplier,
-        boolean useServerGeneratedIds,
-        RootDocumentMigrationContext context
-    ) {
-        log.info("Starting Solr API document migration from {}", arguments.sourceArgs.host);
-
-        var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
-        var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
-
-        var solrClient = new SolrClient(
-            arguments.sourceArgs.host,
-            arguments.sourceArgs.username,
-            arguments.sourceArgs.password
-        );
-        var source = new SolrDocumentSource(solrClient);
-        var sink = new OpenSearchDocumentSink(
-            targetClient, docTransformerSupplier, useServerGeneratedIds, allowlist, () -> null
-        );
-
-        var pipeline = new DocumentMigrationPipeline(
-            source, sink,
-            arguments.numDocsPerBulkRequest,
-            arguments.numBytesPerBulkRequest,
-            1,
-            arguments.maxConnections
-        );
-
-        try {
-            pipeline.migrateAll().blockLast();
-            log.info("Solr document migration completed successfully");
-        } finally {
-            try { source.close(); } catch (Exception e) { log.warn("Error closing Solr source", e); }
-            try { sink.close(); } catch (Exception e) { log.warn("Error closing sink", e); }
-        }
-    }
-
     private static void runSolrBackupMigration(
         Args arguments,
         OpenSearchClient targetClient,
@@ -930,16 +857,6 @@ public class RfsMigrateDocuments {
         if (arguments.coordinatorArgs.host == null) {
             throw new ParameterException(
                 "When source version is SOLR, --coordinator-host must be provided for work coordination."
-            );
-        }
-
-        // Solr client for schema fetch (optional — if source is unavailable, use empty schema)
-        SolrClient solrClient = null;
-        if (arguments.sourceArgs.host != null) {
-            solrClient = new SolrClient(
-                arguments.sourceArgs.host,
-                arguments.sourceArgs.username,
-                arguments.sourceArgs.password
             );
         }
 
@@ -968,8 +885,7 @@ public class RfsMigrateDocuments {
         }
 
         try {
-            // For S3: download only lightweight metadata per collection (schema + backup properties).
-            // The heavy index data is downloaded lazily per-collection when readDocuments() is called.
+            // Parse schemas from backup directory (no live Solr API access needed).
             var schemas = new java.util.LinkedHashMap<String, JsonNode>();
             if (s3Repo != null) {
                 // List S3 to discover collection names, then download only schema metadata
@@ -979,16 +895,7 @@ public class RfsMigrateDocuments {
                 }
                 for (var collection : collections) {
                     s3Repo.downloadPrefix(collection + "/zk_backup_0");
-                    if (solrClient != null) {
-                        try {
-                            schemas.put(collection, solrClient.getSchema(collection));
-                        } catch (Exception e) {
-                            log.warn("Failed to fetch schema for {} from source, falling back to backup schema", collection, e);
-                            schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
-                        }
-                    } else {
-                        schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
-                    }
+                    schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
                 }
             } else {
                 // Local filesystem: discover and parse schemas directly
@@ -997,23 +904,13 @@ public class RfsMigrateDocuments {
                     collections.retainAll(arguments.indexAllowlist);
                 }
                 for (var collection : collections) {
-                    if (solrClient != null) {
-                        try {
-                            schemas.put(collection, solrClient.getSchema(collection));
-                        } catch (Exception e) {
-                            log.warn("Failed to fetch schema for {} from source, falling back to backup schema", collection, e);
-                            schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
-                        }
-                    } else {
-                        schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
-                    }
+                    schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
                 }
             }
 
             var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas);
-            // For S3: lazily download index data + restore filenames per-collection when the shard is processed
+            // For S3: lazily download index data per-collection when the shard is processed
             final S3Repo finalS3Repo = s3Repo;
-            final Path finalBackupDir = backupDir;
             java.util.function.Consumer<String> collectionPreparer = (finalS3Repo != null) ? collection -> {
                 log.info("Downloading index data for collection '{}' from S3", collection);
                 finalS3Repo.downloadPrefix(collection + "/index");

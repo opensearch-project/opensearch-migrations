@@ -10,7 +10,6 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
-import org.opensearch.migrations.bulkload.solr.SolrClient;
 import org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator;
 import org.opensearch.migrations.bulkload.solr.SolrStandaloneBackupCreator;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
@@ -209,9 +208,8 @@ public class CreateSnapshot {
 
         // Auto-discover collections if not specified
         if (arguments.solrCollections.isEmpty()) {
-            var client = new SolrClient(solrUrl, username, password);
             try {
-                arguments.solrCollections = client.listCollections();
+                arguments.solrCollections = discoverSolrCollections(solrUrl, username, password);
                 log.info("Auto-discovered {} Solr collection(s): {}", arguments.solrCollections.size(), arguments.solrCollections);
             } catch (Exception e) {
                 throw new ParameterException("Failed to discover Solr collections: " + e.getMessage());
@@ -227,12 +225,125 @@ public class CreateSnapshot {
 
     private boolean isSolrCloud(String solrUrl, String username, String password) {
         try {
-            var client = new SolrClient(solrUrl, username, password, 1);
-            return client.isSolrCloud();
+            var url = solrUrl + "/solr/admin/collections?action=LIST&wt=json";
+            var builder = java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create(url))
+                .GET()
+                .timeout(java.time.Duration.ofSeconds(5));
+            if (username != null && password != null) {
+                builder.header("Authorization", "Basic " +
+                    java.util.Base64.getEncoder().encodeToString((username + ":" + password).getBytes()));
+            }
+            var response = java.net.http.HttpClient.newHttpClient()
+                .send(builder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+            return response.statusCode() == 200;
         } catch (Exception e) {
             log.info("SolrCloud detection failed, assuming standalone: {}", e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Discover Solr collections (SolrCloud) or cores (standalone) via HTTP API.
+     */
+    private static List<String> discoverSolrCollections(String solrUrl, String username, String password) throws Exception {
+        // Try SolrCloud Collections API first
+        try {
+            var json = solrHttpGet(solrUrl + "/solr/admin/collections?action=LIST&wt=json", username, password);
+            var collections = parseJsonStringArray(json, "collections");
+            if (!collections.isEmpty()) return collections;
+        } catch (Exception e) {
+            log.debug("Collections API failed, trying Core Admin: {}", e.getMessage());
+        }
+        // Fall back to Core Admin API (standalone)
+        var json = solrHttpGet(solrUrl + "/solr/admin/cores?action=STATUS&wt=json", username, password);
+        return parseJsonObjectKeys(json, "status");
+    }
+
+    /** Extract string array values from a top-level JSON field, e.g. {"collections":["a","b"]} → ["a","b"] */
+    private static List<String> parseJsonStringArray(String json, String fieldName) {
+        var result = new java.util.ArrayList<String>();
+        var key = "\"" + fieldName + "\"";
+        int idx = json.indexOf(key);
+        if (idx < 0) return result;
+        int arrStart = json.indexOf('[', idx);
+        if (arrStart < 0) return result;
+        int arrEnd = json.indexOf(']', arrStart);
+        if (arrEnd < 0) return result;
+        var arrContent = json.substring(arrStart + 1, arrEnd);
+        for (var part : arrContent.split(",")) {
+            var trimmed = part.trim();
+            if (trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+                result.add(trimmed.substring(1, trimmed.length() - 1));
+            }
+        }
+        return result;
+    }
+
+    /** Extract top-level keys from a JSON object field, e.g. {"status":{"core1":{},"core2":{}}} → ["core1","core2"] */
+    private static List<String> parseJsonObjectKeys(String json, String fieldName) {
+        var result = new java.util.ArrayList<String>();
+        var key = "\"" + fieldName + "\"";
+        int idx = json.indexOf(key);
+        if (idx < 0) return result;
+        int objStart = json.indexOf('{', idx + key.length());
+        if (objStart < 0) return result;
+        // Find matching closing brace
+        int depth = 1;
+        int pos = objStart + 1;
+        while (pos < json.length() && depth > 0) {
+            char c = json.charAt(pos);
+            if (c == '{') depth++;
+            else if (c == '}') depth--;
+            pos++;
+        }
+        var objContent = json.substring(objStart + 1, pos - 1);
+        // Extract top-level keys (quoted strings followed by ':')
+        int i = 0;
+        while (i < objContent.length()) {
+            int qStart = objContent.indexOf('"', i);
+            if (qStart < 0) break;
+            int qEnd = objContent.indexOf('"', qStart + 1);
+            if (qEnd < 0) break;
+            int colon = objContent.indexOf(':', qEnd);
+            if (colon >= 0 && objContent.substring(qEnd + 1, colon).trim().isEmpty()) {
+                result.add(objContent.substring(qStart + 1, qEnd));
+                // Skip past the value (which is a nested object)
+                int valStart = objContent.indexOf('{', colon);
+                if (valStart >= 0) {
+                    int d = 1;
+                    int p = valStart + 1;
+                    while (p < objContent.length() && d > 0) {
+                        if (objContent.charAt(p) == '{') d++;
+                        else if (objContent.charAt(p) == '}') d--;
+                        p++;
+                    }
+                    i = p;
+                } else {
+                    i = colon + 1;
+                }
+            } else {
+                i = qEnd + 1;
+            }
+        }
+        return result;
+    }
+
+    private static String solrHttpGet(String url, String username, String password) throws Exception {
+        var builder = java.net.http.HttpRequest.newBuilder()
+            .uri(java.net.URI.create(url))
+            .GET()
+            .timeout(java.time.Duration.ofSeconds(10));
+        if (username != null && password != null) {
+            builder.header("Authorization", "Basic " +
+                java.util.Base64.getEncoder().encodeToString((username + ":" + password).getBytes()));
+        }
+        var response = java.net.http.HttpClient.newHttpClient()
+            .send(builder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            throw new java.io.IOException("HTTP " + response.statusCode() + " from " + url);
+        }
+        return response.body();
     }
 
     private void runSolrCloudBackup(String solrUrl, String backupLocation, String username, String password) {
