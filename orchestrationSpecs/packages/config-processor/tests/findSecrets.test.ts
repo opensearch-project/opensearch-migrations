@@ -97,6 +97,33 @@ describe('scrapeSecrets', () => {
         expect(secrets).toEqual([]);
     });
 
+    it('should ignore basic auth with username/password but no secretName', () => {
+        const config = {
+            sourceClusters: {
+                source1: {
+                    authConfig: {
+                        basic: {
+                            username: 'admin',
+                            password: 'password123'
+                        }
+                    }
+                }
+            },
+            targetClusters: {
+                target1: {
+                    authConfig: {
+                        basic: {
+                            secretName: 'target-secret-1'
+                        }
+                    }
+                }
+            }
+        };
+
+        const secrets = scrapeSecrets(config as any);
+        expect(secrets).toEqual(['target-secret-1']);
+    });
+
     it('should return empty array for empty clusters', () => {
         const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
             skipApprovals: false,
@@ -234,6 +261,34 @@ describe('scrapeAndCategorize', () => {
 
         const result = getCategorizedCredentialsSecretsFromConfig(config);
         expect(result.validSecrets).toBeUndefined();
+        expect(result.invalidSecrets).toBeUndefined();
+    });
+
+    it('should not crash when basic auth uses username/password instead of secretName', () => {
+        const config = {
+            sourceClusters: {
+                source1: {
+                    authConfig: {
+                        basic: {
+                            username: 'admin',
+                            password: 'password123'
+                        }
+                    }
+                }
+            },
+            targetClusters: {
+                target1: {
+                    authConfig: {
+                        basic: {
+                            secretName: 'valid-secret'
+                        }
+                    }
+                }
+            }
+        };
+
+        const result = getCategorizedCredentialsSecretsFromConfig(config as any);
+        expect(result.validSecrets).toEqual(['valid-secret']);
         expect(result.invalidSecrets).toBeUndefined();
     });
 });

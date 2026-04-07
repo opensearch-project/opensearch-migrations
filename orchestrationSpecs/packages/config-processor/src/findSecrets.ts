@@ -35,14 +35,19 @@ export function scrapeSecrets(userConfig: Partial<z.infer<typeof OVERALL_MIGRATI
     ]
         .map(c => c?.authConfig)
         .filter(isBasicAuth)
-        .map(ac => ac.basic.secretName);
+        .map(ac => ac.basic.secretName)
+        .filter((s): s is string => s !== undefined);
 }
 
 export function getCategorizedCredentialsSecretsFromConfig(
     userConfig: Partial<z.infer<typeof OVERALL_MIGRATION_CONFIG>>
 ) {
     const rawSecrets = scrapeSecrets(userConfig);
-    return Object.groupBy(rawSecrets, s=> s && s.match(K8S_NAMING_PATTERN) ? "validSecrets" : "invalidSecrets");
+    return rawSecrets.reduce((acc, s) => {
+        const key = s.match(K8S_NAMING_PATTERN) ? "validSecrets" : "invalidSecrets";
+        (acc[key] ??= []).push(s);
+        return acc;
+    }, {} as Record<"validSecrets" | "invalidSecrets", string[]>);
 }
 
 export async function main() {
