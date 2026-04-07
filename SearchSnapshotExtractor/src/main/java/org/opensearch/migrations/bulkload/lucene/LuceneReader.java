@@ -57,28 +57,25 @@ public class LuceneReader {
             .addArgument(readers::size)
             .log();
 
-        // Build per-reader segment lists using round-robin assignment
-        // Each reader gets its own ReaderAndBase from its own DirectoryReader
-        return Flux.range(0, readers.size())
-            .flatMap(readerIdx -> {
-                var reader = readers.get(readerIdx);
-                var readerSegments = getSegmentsFromStartingSegment(reader.leaves(), startDocId)
-                    .collectList().block();
+        // Build per-reader segment lists — each reader opens the same commit so segments match.
+        var perReaderSegments = new java.util.ArrayList<java.util.List<ReaderAndBase>>();
+        for (var reader : readers) {
+            perReaderSegments.add(
+                getSegmentsFromStartingSegment(reader.leaves(), startDocId).collectList().block()
+            );
+        }
 
-                // Round-robin: reader 0 gets segments 0,4,8,...; reader 1 gets 1,5,9,...
-                var mySegments = new java.util.ArrayList<ReaderAndBase>();
-                for (int i = readerIdx; i < readerSegments.size(); i += readers.size()) {
-                    mySegments.add(readerSegments.get(i));
-                }
+        // Iterate segments in global order, round-robin across readers.
+        // flatMapSequential preserves segment order while reading in parallel.
+        int numSegments = allSegments.size();
+        return Flux.range(0, numSegments)
+            .flatMapSequential(segIdx -> {
+                int readerIdx = segIdx % readers.size();
+                var seg = perReaderSegments.get(readerIdx).get(segIdx);
 
-                log.atInfo().setMessage("Reader {} assigned {} segments")
-                    .addArgument(readerIdx).addArgument(mySegments::size).log();
-
-                return Flux.fromIterable(mySegments)
-                    .flatMap(seg -> readDocsFromSegment(seg, startDocId,
-                        reader.getIndexDirectoryPath(), DocumentChangeType.INDEX, null),
-                        Math.max(mySegments.size(), 1));
-            }, readers.size());
+                return readDocsFromSegment(seg, startDocId,
+                    readers.get(readerIdx).getIndexDirectoryPath(), DocumentChangeType.INDEX, null);
+            }, numSegments);
     }
 
     /* Start reading docs from a specific segment and document id.
