@@ -17,10 +17,6 @@ def call(Map config = [:]) {
             string(name: 'ISOLATED_VPC_ID', defaultValue: isolatedVpcId, description: 'VPC ID for isolated deployment')
             string(name: 'ISOLATED_SUBNET_IDS', defaultValue: isolatedSubnetIds, description: 'Comma-separated subnet IDs (isolated, no internet)')
             string(name: 'REGION', defaultValue: region, description: 'AWS region')
-            booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source instead of using public images')
-            booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
-            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
-            string(name: 'VERSION', defaultValue: 'latest', description: 'Release version for bootstrap artifacts (e.g. 2.8.2). Only used when USE_RELEASE_BOOTSTRAP is true')
         }
 
         options {
@@ -40,41 +36,17 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
-                            def buildImagesArg = params.BUILD_IMAGES ? "--build-images" : ""
-                            def buildChartArg = params.BUILD_CHART_AND_DASHBOARDS ? "--build-chart-and-dashboards" : ""
-                            def bootstrapPath
-                            // Release bootstrap downloads a pre-built bundle that already includes CFN templates,
-                            // so --build-cfn is not needed. Source builds must compile CFN from local files.
-                            def buildCfnArg
-                            def baseDirArg
-                            def versionArg
-                            if (params.USE_RELEASE_BOOTSTRAP) {
-                                sh """
-                                    curl -sL -o /tmp/aws-bootstrap.sh \
-                                      "https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/aws-bootstrap.sh"
-                                    chmod +x /tmp/aws-bootstrap.sh
-                                """
-                                bootstrapPath = "/tmp/aws-bootstrap.sh"
-                                buildCfnArg = ""
-                                baseDirArg = ""
-                                versionArg = "--version ${params.VERSION}"
-                            } else {
-                                sh "./deployment/k8s/aws/assemble-bootstrap.sh"
-                                bootstrapPath = "./deployment/k8s/aws/dist/aws-bootstrap.sh"
-                                buildCfnArg = "--build-cfn"
-                                baseDirArg = ""
-                                versionArg = "--version latest"
-                            }
                             sh """
-                                ${bootstrapPath} \
+                                ./deployment/k8s/aws/assemble-bootstrap.sh
+                                ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                   --deploy-create-vpc-cfn \
-                                  ${buildCfnArg} \
-                                  ${buildImagesArg} \
-                                  ${buildChartArg} \
+                                  --build-cfn \
+                                  --build-images \
+                                  --build-chart-and-dashboards \
                                   --stack-name "${buildStackName}" \
                                   --stage "${buildStage}" \
                                   --region "${params.REGION}" \
-                                  ${versionArg} \
+                                  --version latest \
                                   --skip-console-exec \
                                   2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
                             """
@@ -99,21 +71,11 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
-                            def buildChartArgIsolated = params.BUILD_CHART_AND_DASHBOARDS ? "--build-chart-and-dashboards" : ""
-                            def bootstrapPathIsolated
-                            def buildCfnArgIsolated
-                            if (params.USE_RELEASE_BOOTSTRAP) {
-                                bootstrapPathIsolated = "/tmp/aws-bootstrap.sh"
-                                buildCfnArgIsolated = ""
-                            } else {
-                                bootstrapPathIsolated = "./deployment/k8s/aws/dist/aws-bootstrap.sh"
-                                buildCfnArgIsolated = "--build-cfn"
-                            }
                             sh """
-                                ${bootstrapPathIsolated} \
+                                ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                   --deploy-import-vpc-cfn \
-                                  ${buildCfnArgIsolated} \
-                                  ${buildChartArgIsolated} \
+                                  --build-cfn \
+                                  --build-chart-and-dashboards \
                                   --create-vpc-endpoints \
                                   --ma-images-source "${env.BUILD_ECR}" \
                                   --stack-name "${isolatedStackName}" \

@@ -99,10 +99,11 @@ def call(Map config = [:]) {
                 }
             }
 
-            // Skip source build when using release bootstrap — all artifacts are
-            // downloaded from the published GitHub release instead.
+            // Skip source build when using release bootstrap or when not building
+            // any artifacts from source (images/chart). The Gradle build is only needed
+            // to produce JARs for Docker image builds and CDK synth for CFN templates.
             stage('Build') {
-                when { expression { !params.USE_RELEASE_BOOTSTRAP } }
+                when { expression { !params.USE_RELEASE_BOOTSTRAP && (params.BUILD_IMAGES || params.BUILD_CHART_AND_DASHBOARDS) } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
@@ -152,46 +153,38 @@ def call(Map config = [:]) {
                                         vpcId = sh(script: "aws ec2 describe-subnets --subnet-ids ${firstSubnet} --region ${params.REGION} --query 'Subnets[0].VpcId' --output text", returnStdout: true).trim()
                                         echo "Resolved VPC ID from subnet: ${vpcId}"
                                     }
-                                    def buildImagesArg = params.BUILD_IMAGES ? "--build-images" : ""
-                                    def buildChartArg = params.BUILD_CHART_AND_DASHBOARDS ? "--build-chart-and-dashboards" : ""
+                                    // Compute bootstrap script path and flags.
                                     // When USE_RELEASE_BOOTSTRAP is true, download the self-contained
                                     // aws-bootstrap.sh from the GitHub release. This script downloads
                                     // all artifacts (CFN templates, images, chart) from the release,
                                     // so --build-cfn and --base-dir are not needed.
-                                    def bootstrapPath
-                                    def buildCfnArg
-                                    def baseDirArg
-                                    def versionArg
+                                    def bootstrapScript
                                     if (params.USE_RELEASE_BOOTSTRAP) {
                                         sh """
                                             curl -sL -o /tmp/aws-bootstrap.sh \
-                                              "https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/aws-bootstrap.sh"
+                                              "https://github.com/opensearch-project/opensearch-migrations/releases/download/${params.VERSION}/aws-bootstrap.sh"
                                             chmod +x /tmp/aws-bootstrap.sh
                                         """
-                                        bootstrapPath = "/tmp/aws-bootstrap.sh"
-                                        buildCfnArg = ""
-                                        baseDirArg = ""
-                                        versionArg = "--version ${params.VERSION}"
+                                        bootstrapScript = "/tmp/aws-bootstrap.sh"
                                     } else {
                                         sh "./deployment/k8s/aws/assemble-bootstrap.sh"
-                                        bootstrapPath = "./deployment/k8s/aws/dist/aws-bootstrap.sh"
-                                        buildCfnArg = "--build-cfn"
-                                        baseDirArg = "--base-dir \$(pwd)"
-                                        versionArg = ""
+                                        bootstrapScript = "./deployment/k8s/aws/dist/aws-bootstrap.sh"
                                     }
+                                    def flags = []
+                                    if (!params.USE_RELEASE_BOOTSTRAP) flags << '--build-cfn'
+                                    if (params.BUILD_IMAGES) flags << '--build-images'
+                                    if (params.BUILD_CHART_AND_DASHBOARDS) flags << '--build-chart-and-dashboards'
+                                    if (!params.USE_RELEASE_BOOTSTRAP) flags << "--base-dir \"\$(pwd)\""
+                                    flags << "--version ${params.VERSION}"
                                     sh """
-                                        ${bootstrapPath} \
+                                        ${bootstrapScript} \
                                           --deploy-import-vpc-cfn \
-                                          ${buildCfnArg} \
                                           --stack-name "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}" \
                                           --vpc-id "${vpcId}" \
                                           --subnet-ids "${subnetIds}" \
                                           --stage "${maStageName}" \
                                           --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          ${buildImagesArg} \
-                                          ${buildChartArg} \
-                                          ${baseDirArg} \
-                                          ${versionArg} \
+                                          ${flags.join(' ')} \
                                           --skip-console-exec \
                                           --skip-setting-k8s-context \
                                           --region ${params.REGION} \
