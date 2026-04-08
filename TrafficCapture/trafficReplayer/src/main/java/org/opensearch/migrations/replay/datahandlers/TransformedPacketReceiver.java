@@ -1,11 +1,12 @@
 package org.opensearch.migrations.replay.datahandlers;
 
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.ByteBuf;
 
-public class TransformedPacketReceiver implements IPacketFinalizingConsumer<ByteBufList> {
+public class TransformedPacketReceiver implements IPacketFinalizingConsumer<ByteBufListProducer> {
 
     public final ByteBufList packets = new ByteBufList();
 
@@ -16,7 +17,8 @@ public class TransformedPacketReceiver implements IPacketFinalizingConsumer<Byte
     }
 
     @Override
-    public TrackedFuture<String, ByteBufList> finalizeRequest() {
-        return TrackedFuture.Factory.completedFuture(packets, () -> "TransformedPacketReceiver.finalize...");
+    public TrackedFuture<String, ByteBufListProducer> finalizeRequest() {
+        return TrackedFuture.Factory.completedFuture(
+            ByteBufListProducer.of(packets), () -> "TransformedPacketReceiver.finalize...");
     }
 }
