@@ -59,15 +59,15 @@ tasks.register('pipInstallPydantic', Exec) {
     dependsOn createGraalPyVenv
     inputs.dir venvDir
     inputs.dir customTransformDir
-    commandLine "${venvDir}/bin/graalpy", '-m', 'pip', 'install', 'pydantic', customTransformDir.absolutePath
-    outputs.file "${venvDir}/lib/python3.12/site-packages/pydantic/__init__.py"
+    commandLine 'bash', "${venvDir}/bin/graalpy", '-m', 'pip', 'install', 'pydantic', customTransformDir.absolutePath
+    outputs.dir venvDir
 }
 
 // Step 3: tar czf (exactly as a customer would ship it)
 tasks.register('packageVenvTarball', Exec) {
     dependsOn pipInstallPydantic
     inputs.dir venvDir
-    commandLine 'tar', 'czf', venvTarball.absolutePath, '-C', venvParent.absolutePath, venvDir.name
+    commandLine 'tar', 'czf', venvTarball.absolutePath, '-C', layout.buildDirectory.get().asFile.absolutePath, venvParent.name
     outputs.file venvTarball
 }
 
