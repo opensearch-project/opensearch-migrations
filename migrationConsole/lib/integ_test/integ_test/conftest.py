@@ -82,6 +82,13 @@ def pytest_generate_tests(metafunc):
                                         target_type=target_type, unique_id=unique_id, reuse_clusters=reuse_clusters,
                                         image_registry_prefix=image_registry_prefix)
         test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
+        metafunc.config.test_summary["expected"] = len(test_cases_param)
+        if not test_cases_param and not test_ids_list:
+            target_label = target_version if target_type != "AOSS" else "AOSS"
+            pytest.fail(
+                f"No default test cases compatible with {source_version} → {target_label}. "
+                f"Version pair may be untested."
+            )
         metafunc.parametrize("test_case", test_cases_param)
 
 

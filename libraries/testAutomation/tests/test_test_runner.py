@@ -29,7 +29,7 @@ def _make_runner(combinations, skip_install=True):
     )
 
 
-def _make_report(passed=0, failed=0, tests=None, source="ES_7.10", target="OS_2.19"):
+def _make_report(passed=0, failed=0, tests=None, source="ES_7.10", target="OS_2.19", expected=None):
     """Create a TestReport with given summary values."""
     if tests is None:
         tests = []
@@ -38,7 +38,8 @@ def _make_report(passed=0, failed=0, tests=None, source="ES_7.10", target="OS_2.
         for i in range(failed):
             tests.append(TestEntry(name=f"fail_{i}", description="", result="failed", duration=0.1))
     return TestReport(
-        summary=TestSummary(passed=passed, failed=failed, source_version=source, target_version=target),
+        summary=TestSummary(passed=passed, failed=failed, source_version=source, target_version=target,
+                            expected=expected),
         tests=tests,
     )
 
@@ -86,16 +87,20 @@ class TestFailureDetection:
             with pytest.raises(TestsFailed, match="test failures"):
                 runner.run()
 
-    def test_fewer_tests_than_test_ids_raises(self):
+    def test_expected_mismatch_raises(self):
         runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
-        runner.test_ids = ["test_a", "test_b", "test_c"]
-        # Only 2 of 3 requested tests ran
-        with patch.object(runner, "run_tests", return_value=_make_report(passed=2, failed=0)):
+        # 5 expected but only 3 passed
+        with patch.object(runner, "run_tests", return_value=_make_report(passed=3, failed=0, expected=5)):
             with pytest.raises(TestsFailed, match="test failures"):
                 runner.run()
 
-    def test_all_test_ids_present_succeeds(self):
+    def test_expected_all_passed_succeeds(self):
         runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
-        runner.test_ids = ["test_a", "test_b", "test_c"]
-        with patch.object(runner, "run_tests", return_value=_make_report(passed=3, failed=0)):
+        with patch.object(runner, "run_tests", return_value=_make_report(passed=5, failed=0, expected=5)):
+            runner.run()  # Should not raise
+
+    def test_expected_none_skips_check(self):
+        """Old reports without 'expected' field still work."""
+        runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
+        with patch.object(runner, "run_tests", return_value=_make_report(passed=3, failed=0, expected=None)):
             runner.run()  # Should not raise

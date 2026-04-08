@@ -43,6 +43,7 @@ class TestSummary:
     failed: int
     source_version: str
     target_version: str
+    expected: Optional[int] = None
 
 
 @dataclass
@@ -296,9 +297,10 @@ class TestRunner:
                 test_reports.append(test_report)
                 tests_failed = test_report.summary.failed > 0 or test_report.summary.passed == 0
 
-                if self.test_ids and len(test_report.tests) < len(self.test_ids):
-                    logger.warning(f"Expected {len(self.test_ids)} tests from --test-ids but only "
-                                   f"{len(test_report.tests)} ran. Missing tests were silently skipped.")
+                if test_report.summary.expected is not None and test_report.summary.passed != test_report.summary.expected:
+                    logger.warning(f"Expected {test_report.summary.expected} tests but only "
+                                   f"{test_report.summary.passed} passed "
+                                   f"({test_report.summary.failed} failed)")
                     tests_failed = True
 
                 if tests_failed:
