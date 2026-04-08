@@ -55,7 +55,7 @@ full-migration workflow, run
 For the end-to-end validation and transformation flow, including how the
 console entrypoint, `MigrationConfigTransformer`, unified schema loading, and
 Kafka/Strimzi validation fit together, see
-[ConfigValidationFile.md](/Users/schohn/dev/m3/orchestrationSpecs/ConfigValidationFile.md).
+[ConfigValidationFile.md](./ConfigValidationFlow.md).
 
 The migration config is validated against a single unified JSON Schema.  That
 schema starts with the orchestration config shape from
