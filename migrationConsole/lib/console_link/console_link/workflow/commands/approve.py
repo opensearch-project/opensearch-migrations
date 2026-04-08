@@ -1,4 +1,4 @@
-"""Approve command for workflow CLI - resumes suspended workflows in Argo Workflows."""
+"""Approve command for workflow CLI - manages approval gates via CRDs and Argo Workflows."""
 
 import fnmatch
 import json
@@ -12,12 +12,43 @@ from typing import Any
 import click
 from click.shell_completion import CompletionItem
 import requests
+from kubernetes import client
+from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode
 from ..services.workflow_service import WorkflowService
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .crd_utils import CRD_GROUP, CRD_VERSION
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# CRD-based approval gate functions
+# ============================================================================
+
+def list_approval_gates(namespace):
+    """List all approval gates in a namespace. Returns list of (name, phase) tuples."""
+    custom = client.CustomObjectsApi()
+    resp = custom.list_namespaced_custom_object(
+        group=CRD_GROUP, version=CRD_VERSION,
+        namespace=namespace, plural="approvalgates",
+    )
+    return [
+        (item["metadata"]["name"], item.get("status", {}).get("phase", "Unknown"))
+        for item in resp.get("items", [])
+    ]
+
+
+def approve_gate(namespace, name):
+    """Approve a gate by patching its status phase to 'Approved'. Returns True on success."""
+    custom = client.CustomObjectsApi()
+    custom.patch_namespaced_custom_object_status(
+        group=CRD_GROUP, version=CRD_VERSION,
+        namespace=namespace, plural="approvalgates", name=name,
+        body={"status": {"phase": "Approved"}},
+    )
+    return True
 
 _AUTOCOMPLETE_APPROVAL_CACHE_TTL_SECONDS = 10
 
@@ -162,3 +193,53 @@ def approve_command(ctx, task_names, workflow_name, argo_server, namespace, inse
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)
+
+
+# ============================================================================
+# CRD-based approve CLI command
+# ============================================================================
+
+@click.command(name="approve")
+@click.argument("gate-pattern", required=True)
+@click.option("--namespace", default="ma", help="Kubernetes namespace")
+@click.pass_context
+def approve_crd_command(ctx, gate_pattern, namespace):
+    """Approve pending approval gates matching GATE_PATTERN.
+
+    GATE_PATTERN can be an exact name or glob (e.g., eval-*).
+
+    Example:
+        workflow approve eval-metadata
+        workflow approve "eval-*"
+    """
+    try:
+        gates = list_approval_gates(namespace)
+    except Exception as e:
+        click.echo(f"Error listing approval gates: {e}", err=True)
+        ctx.exit(ExitCode.FAILURE.value)
+        return
+
+    pending = [(n, p) for n, p in gates if p == "Pending"]
+    matches = [n for n, _ in pending if fnmatch.fnmatch(n, gate_pattern)]
+
+    if not matches:
+        if not pending:
+            click.echo("No pending approval gates found.")
+        else:
+            click.echo(f"No pending gates match '{gate_pattern}'.")
+            click.echo("Pending gates:")
+            for n, _ in pending:
+                click.echo(f"  - {n}")
+            # Also show non-pending gates
+            non_pending = [(n, p) for n, p in gates if p != "Pending"]
+            for n, p in non_pending:
+                click.echo(f"  - {n} ({p})")
+        return
+
+    for name in matches:
+        try:
+            approve_gate(namespace, name)
+            click.echo(f"Approved {name}")
+        except Exception as e:
+            click.echo(f"Failed to approve {name}: {e}", err=True)
+            ctx.exit(ExitCode.FAILURE.value)
