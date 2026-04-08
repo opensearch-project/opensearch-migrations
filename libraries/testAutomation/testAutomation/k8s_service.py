@@ -481,6 +481,14 @@ class K8sService:
         logger.info(f"Uninstalling {release_name}...")
         return self.run_command(self._helm_base() + ["uninstall", release_name, "-n", self.namespace])
 
+    def cleanup_ack_dashboard_crs(self) -> None:
+        """Delete Dashboard CRs and wait for ACK controller to process them before helm uninstall."""
+        self.run_command(
+            self._kubectl_base() + ["delete", "dashboards.cloudwatch.services.k8s.aws",
+                                    "--all", "-n", self.namespace, "--timeout=60s"],
+            ignore_errors=True
+        )
+
     def get_helm_installations(self) -> List[str]:
         target_namespace = self.namespace
         # Use helm list with short output format to get just the release names
