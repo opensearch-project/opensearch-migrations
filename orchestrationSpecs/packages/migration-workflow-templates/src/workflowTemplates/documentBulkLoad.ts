@@ -26,7 +26,8 @@ import {makeMountpointRepoParamDict, getSnapshotLocalDir, getS3BucketName} from 
 import {
     setupLog4jConfigForContainer,
     setupTestCredsForContainer,
-    setupSnapshotFuseSidecar
+    setupSnapshotFuseSidecar,
+    setupS3FilesNfsPv
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
@@ -118,6 +119,9 @@ function getRfsDeploymentManifest
     fuseSidecarImage: BaseExpression<string>,
     fuseSidecarImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
 
+    useS3Files: BaseExpression<boolean>,
+    s3FilesFileSystemId: BaseExpression<string>,
+
     sourceK8sLabel: BaseExpression<string>,
     targetK8sLabel: BaseExpression<string>,
     snapshotK8sLabel: BaseExpression<string>,
@@ -153,21 +157,35 @@ function getRfsDeploymentManifest
 
     const finalContainerDefinition = setupTestCredsForContainer(
         args.useLocalstackAwsCreds,
-        setupSnapshotFuseSidecar(
-            args.snapshotLocalDir,
-            args.snapshotName,
-            args.s3Bucket,
-            args.s3Region,
-            args.useLocalstackAwsCreds,
-            args.fuseSidecarImage,
-            args.fuseSidecarImagePullPolicy,
-            setupLog4jConfigForContainer(
+        (() => {
+            const logConfigured = setupLog4jConfigForContainer(
                 useCustomLogging,
                 args.loggingConfigMap,
                 {container: baseContainerDefinition, volumes: [], sidecars: [], initContainers: []},
                 args.jvmArgs
-            )
-        )
+            );
+            // S3 Files mode: use NFS PV instead of per-pod mount-s3
+            // mount-s3 mode: each pod independently mounts S3 via FUSE sidecar
+            return args.useS3Files
+                ? setupS3FilesNfsPv(
+                    args.s3FilesFileSystemId,
+                    args.snapshotLocalDir,
+                    args.snapshotName,
+                    args.fuseSidecarImage,
+                    args.fuseSidecarImagePullPolicy,
+                    logConfigured
+                )
+                : setupSnapshotFuseSidecar(
+                    args.snapshotLocalDir,
+                    args.snapshotName,
+                    args.s3Bucket,
+                    args.s3Region,
+                    args.useLocalstackAwsCreds,
+                    args.fuseSidecarImage,
+                    args.fuseSidecarImagePullPolicy,
+                    logConfigured
+                );
+        })()
     );
     const deploymentName = getRfsDeploymentName(args.sessionName);
     return {
@@ -377,6 +395,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("snapshotName", typeToken<string>(), "Snapshot name for FUSE sidecar")
         .addRequiredInput("s3Bucket", typeToken<string>(), "S3 bucket name for per-pod mount-s3")
         .addRequiredInput("s3Region", typeToken<string>(), "AWS region for S3 bucket")
+        .addRequiredInput("useS3Files", typeToken<boolean>(), "Use S3 Files NFS PV instead of per-pod mount-s3")
+        .addRequiredInput("s3FilesFileSystemId", typeToken<string>(), "S3 Files file system ID for NFS PV")
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("targetK8sLabel", typeToken<string>())
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
@@ -407,6 +427,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     s3Region: b.inputs.s3Region,
                     fuseSidecarImage: b.inputs.imageSnapshotFuseLocation,
                     fuseSidecarImagePullPolicy: b.inputs.imageSnapshotFusePullPolicy,
+                    useS3Files: expr.deserializeRecord(b.inputs.useS3Files),
+                    s3FilesFileSystemId: b.inputs.s3FilesFileSystemId,
                     sourceK8sLabel: b.inputs.sourceK8sLabel,
                     targetK8sLabel: b.inputs.targetK8sLabel,
                     snapshotK8sLabel: b.inputs.snapshotK8sLabel,
@@ -458,6 +480,12 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                         expr.omit(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RoleArn"),
                         "awsRegion"),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
+                    useS3Files: expr.dig(
+                        expr.omit(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RoleArn"),
+                        ["useS3Files"], false),
+                    s3FilesFileSystemId: expr.dig(
+                        expr.omit(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RoleArn"),
+                        ["s3FilesFileSystemId"], ""),
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),

@@ -1,0 +1,31 @@
+{{- if .Values.s3Files.enabled }}
+# PersistentVolume backed by S3 Files NFS mount target.
+# The EFS CSI driver handles NFS mounting transparently.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: s3-files-pv
+spec:
+  capacity:
+    storage: 8Ei  # S3 Files is effectively unlimited
+  volumeMode: Filesystem
+  accessModes:
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  csi:
+    driver: efs.csi.aws.com
+    volumeHandle: {{ required "s3Files.fileSystemId is required when s3Files.enabled=true" .Values.s3Files.fileSystemId }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: s3-files-pvc
+spec:
+  accessModes:
+    - ReadOnlyMany
+  storageClassName: ""
+  resources:
+    requests:
+      storage: 8Ei
+  volumeName: s3-files-pv
+{{- end }}

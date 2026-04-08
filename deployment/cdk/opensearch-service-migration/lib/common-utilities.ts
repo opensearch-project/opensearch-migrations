@@ -333,6 +333,7 @@ export enum MigrationSSMParameter {
     OSI_PIPELINE_ROLE_ARN = 'osiPipelineRoleArn',
     SHARED_LOGS_SECURITY_GROUP_ID = 'sharedLogsSecurityGroupId',
     SHARED_LOGS_EFS_ID = 'sharedLogsEfsId',
+    S3_FILES_FILE_SYSTEM_ID = 's3FilesFileSystemId',
     SOURCE_CLUSTER_ENDPOINT = 'sourceClusterEndpoint',
     SERVICE_SECURITY_GROUP_ID = 'serviceSecurityGroupId',
     SERVICES_YAML_FILE = 'servicesYamlFile',

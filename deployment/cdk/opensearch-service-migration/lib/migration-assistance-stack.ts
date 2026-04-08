@@ -6,6 +6,8 @@ import {CfnConfiguration} from "aws-cdk-lib/aws-msk";
 import {Cluster} from "aws-cdk-lib/aws-ecs";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
+import {Effect, ManagedPolicy, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
+import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId} from "aws-cdk-lib/custom-resources";
 import {
     ScalableTarget, 
     TargetTrackingScalingPolicy, 
@@ -28,6 +30,7 @@ import {
 import {VpcDetails} from "./network-stack";
 import {StackPropsExt} from "./stack-composer";
 import {StreamingSourceType} from "./streaming-source-type";
+import {KafkaYaml} from "./migration-services-yaml";
 import {KafkaYaml} from "./migration-services-yaml";
 
 export interface MigrationStackProps extends StackPropsExt {
@@ -198,12 +201,141 @@ export class MigrationAssistanceStack extends Stack {
             bucketName: this.artifactBucketName,
             encryption: BucketEncryption.S3_MANAGED,
             enforceSSL: true,
+            versioned: true, // Required for S3 Files
             removalPolicy: bucketRemovalPolicy,
             autoDeleteObjects: !!(props.artifactBucketRemovalPolicy && bucketRemovalPolicy === RemovalPolicy.DESTROY)
         });
         createMigrationStringParameter(this, artifactBucket.bucketArn, {
             ...props,
             parameter: MigrationSSMParameter.ARTIFACT_S3_ARN
+        });
+
+        // S3 Files: Create an IAM role, file system, security group, and mount targets
+        // so that snapshot data can be accessed via NFS instead of per-pod mount-s3.
+        const s3FilesRole = new Role(this, 's3FilesRole', {
+            assumedBy: new ServicePrincipal('elasticfilesystem.amazonaws.com'),
+            description: 'Role for S3 Files to sync with the artifact S3 bucket',
+        });
+        s3FilesRole.addToPolicy(new PolicyStatement({
+            effect: Effect.ALLOW,
+            actions: ['s3:ListBucket', 's3:ListBucketVersions'],
+            resources: [artifactBucket.bucketArn],
+        }));
+        s3FilesRole.addToPolicy(new PolicyStatement({
+            effect: Effect.ALLOW,
+            actions: [
+                's3:AbortMultipartUpload', 's3:DeleteObject*',
+                's3:GetObject*', 's3:List*', 's3:PutObject*'
+            ],
+            resources: [`${artifactBucket.bucketArn}/*`],
+        }));
+        s3FilesRole.addToPolicy(new PolicyStatement({
+            effect: Effect.ALLOW,
+            actions: [
+                'events:DeleteRule', 'events:DisableRule', 'events:EnableRule',
+                'events:PutRule', 'events:PutTargets', 'events:RemoveTargets'
+            ],
+            resources: ['arn:aws:events:*:*:rule/DO-NOT-DELETE-S3-Files*'],
+            conditions: { StringEquals: { 'events:ManagedBy': 'elasticfilesystem.amazonaws.com' } },
+        }));
+        s3FilesRole.addToPolicy(new PolicyStatement({
+            effect: Effect.ALLOW,
+            actions: [
+                'events:DescribeRule', 'events:ListRuleNamesByTarget',
+                'events:ListRules', 'events:ListTargetsByRule'
+            ],
+            resources: ['arn:aws:events:*:*:rule/*'],
+        }));
+
+        // Security group for S3 Files mount targets (NFS port 2049)
+        const s3FilesSG = new SecurityGroup(this, 's3FilesMountTargetSG', {
+            vpc: props.vpcDetails.vpc,
+            description: 'Security group for S3 Files mount targets',
+            allowAllOutbound: false,
+        });
+        s3FilesSG.addIngressRule(serviceSecurityGroup, Port.tcp(2049), 'NFS from migration services');
+        s3FilesSG.addIngressRule(s3FilesSG, Port.tcp(2049), 'NFS within S3 Files SG');
+
+        // Create S3 Files file system via custom resource (no L2 construct yet)
+        const s3FilesFileSystem = new AwsCustomResource(this, 's3FilesFileSystem', {
+            onCreate: {
+                service: 'S3Files',
+                action: 'createFileSystem',
+                parameters: {
+                    bucket: artifactBucket.bucketArn,
+                    roleArn: s3FilesRole.roleArn,
+                    acceptBucketWarning: true,
+                    tags: [{ key: 'Name', value: `migration-s3files-${props.stage}` }],
+                },
+                physicalResourceId: PhysicalResourceId.fromResponse('fileSystemId'),
+            },
+            onDelete: {
+                service: 'S3Files',
+                action: 'deleteFileSystem',
+                parameters: {
+                    fileSystemId: new PhysicalResourceId('fileSystemId').id,
+                    forceDelete: true,
+                },
+            },
+            policy: AwsCustomResourcePolicy.fromStatements([
+                new PolicyStatement({
+                    effect: Effect.ALLOW,
+                    actions: ['s3files:CreateFileSystem', 's3files:DeleteFileSystem', 's3files:GetFileSystem'],
+                    resources: ['*'],
+                }),
+                new PolicyStatement({
+                    effect: Effect.ALLOW,
+                    actions: ['iam:PassRole'],
+                    resources: [s3FilesRole.roleArn],
+                }),
+            ]),
+        });
+
+        const fileSystemId = s3FilesFileSystem.getResponseField('fileSystemId');
+
+        // Create mount targets in each selected subnet
+        const subnets = props.vpcDetails.vpc.selectSubnets(props.vpcDetails.subnetSelection).subnets;
+        for (let i = 0; i < subnets.length; i++) {
+            new AwsCustomResource(this, `s3FilesMountTarget${i}`, {
+                onCreate: {
+                    service: 'S3Files',
+                    action: 'createMountTarget',
+                    parameters: {
+                        fileSystemId: fileSystemId,
+                        subnetId: subnets[i].subnetId,
+                        securityGroups: [s3FilesSG.securityGroupId],
+                    },
+                    physicalResourceId: PhysicalResourceId.fromResponse('mountTargetId'),
+                },
+                onDelete: {
+                    service: 'S3Files',
+                    action: 'deleteMountTarget',
+                    parameters: {
+                        mountTargetId: new PhysicalResourceId('mountTargetId').id,
+                    },
+                },
+                policy: AwsCustomResourcePolicy.fromStatements([
+                    new PolicyStatement({
+                        effect: Effect.ALLOW,
+                        actions: [
+                            's3files:CreateMountTarget', 's3files:DeleteMountTarget',
+                            's3files:GetMountTarget', 's3files:ListMountTargets'
+                        ],
+                        resources: ['*'],
+                    }),
+                    new PolicyStatement({
+                        effect: Effect.ALLOW,
+                        actions: ['ec2:DescribeSubnets', 'ec2:DescribeSecurityGroups',
+                            'ec2:CreateNetworkInterface', 'ec2:DeleteNetworkInterface'],
+                        resources: ['*'],
+                    }),
+                ]),
+            });
+        }
+
+        createMigrationStringParameter(this, fileSystemId, {
+            ...props,
+            parameter: MigrationSSMParameter.S3_FILES_FILE_SYSTEM_ID
         });
 
         new Cluster(this, 'migrationECSCluster', {

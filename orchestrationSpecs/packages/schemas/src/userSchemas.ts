@@ -117,7 +117,13 @@ export const S3_REPO_CONFIG = z.object({
     s3RoleArn: z.string().regex(/^(arn:aws:iam::\d{12}:(user|role|group|policy)\/[a-zA-Z0-9+=,.@_-]+)?$/).default("").optional()
         .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
             "This is passed to the cluster when registering the snapshot repository. " +
-            "Leave empty if the cluster's own IAM role already has S3 access.")
+            "Leave empty if the cluster's own IAM role already has S3 access."),
+    useS3Files: z.boolean().default(false).optional()
+        .describe("When true, mount the S3 bucket via S3 Files (NFS PV) instead of per-pod mount-s3. " +
+            "Requires an S3 Files file system and mount target in the same VPC. " +
+            "The s3FilesFileSystemId must be set when this is true."),
+    s3FilesFileSystemId: z.string().regex(/^(fs-[0-9a-f]{17,40})?$/).default("").optional()
+        .describe("S3 Files file system ID (e.g. 'fs-0123456789abcdef0'). Required when useS3Files is true.")
 }).describe("Configuration for an S3-backed snapshot repository used by the source cluster.");
 
 export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
