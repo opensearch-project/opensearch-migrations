@@ -271,6 +271,7 @@ charts:
     version: "1.4.2"
     repository: "oci://public.ecr.aws/aws-controllers-k8s/cloudwatch-chart"
     waitForInstallation: true
+    deletionPolicy: delete
     values:
       serviceAccount:
         name: ack-cloudwatch-controller
