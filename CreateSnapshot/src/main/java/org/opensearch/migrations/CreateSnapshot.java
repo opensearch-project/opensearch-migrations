@@ -223,7 +223,7 @@ public class CreateSnapshot {
         }
     }
 
-    private boolean isSolrCloud(String solrUrl, String username, String password) {
+    static boolean isSolrCloud(String solrUrl, String username, String password) {
         try {
             var url = solrUrl + "/solr/admin/collections?action=LIST&wt=json";
             var builder = java.net.http.HttpRequest.newBuilder()
@@ -250,7 +250,7 @@ public class CreateSnapshot {
     /**
      * Discover Solr collections (SolrCloud) or cores (standalone) via HTTP API.
      */
-    private static List<String> discoverSolrCollections(String solrUrl, String username, String password) throws java.io.IOException {
+    static List<String> discoverSolrCollections(String solrUrl, String username, String password) throws java.io.IOException {
         // Try SolrCloud Collections API first
         try {
             var json = solrHttpGet(solrUrl + "/solr/admin/collections?action=LIST&wt=json", username, password);
