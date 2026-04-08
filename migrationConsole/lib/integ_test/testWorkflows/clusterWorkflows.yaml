@@ -1355,6 +1355,7 @@ spec:
 
     # Solr 8.11 Single Node Template
     # Deploys standalone Solr as a Deployment (no operator, no ZooKeeper needed).
+    # Includes s3-repository module for S3 backups via localstack.
     - name: solr-8-11-single-node
       inputs:
         parameters:
@@ -1370,6 +1371,38 @@ spec:
             set -euo pipefail
             CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
             NAMESPACE='{{inputs.parameters.namespace}}'
+
+            # Create a custom solr.xml with S3BackupRepository configured
+            cat > /tmp/solr.xml <<'SOLRXML'
+            <?xml version="1.0" encoding="UTF-8" ?>
+            <solr>
+              <int name="maxBooleanClauses">${solr.max.booleanClauses:1024}</int>
+              <str name="sharedLib">/opt/solr/contrib/s3-repository/lib</str>
+              <str name="allowPaths">${solr.allowPaths:}</str>
+
+              <backup>
+                <repository name="default" class="org.apache.solr.s3.S3BackupRepository" default="true">
+                  <str name="s3.bucket.name">${S3_BUCKET_NAME:}</str>
+                  <str name="s3.region">${S3_REGION:us-east-2}</str>
+                  <str name="s3.endpoint">${S3_ENDPOINT:}</str>
+                </repository>
+              </backup>
+
+              <shardHandlerFactory name="shardHandlerFactory" class="HttpShardHandlerFactory">
+                <int name="socketTimeout">${socketTimeout:600000}</int>
+                <int name="connTimeout">${connTimeout:60000}</int>
+              </shardHandlerFactory>
+
+              <metrics enabled="${metricsEnabled:true}"/>
+            </solr>
+            SOLRXML
+
+            kubectl create configmap "${CLUSTER_NAME}-solr-xml" \
+              --from-file=solr.xml=/tmp/solr.xml \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
 
             cat <<EOF | kubectl apply -f -
             apiVersion: apps/v1
@@ -1403,6 +1436,26 @@ spec:
                       env:
                         - name: SOLR_JAVA_MEM
                           value: "-Xms512m -Xmx512m"
+                        - name: AWS_ACCESS_KEY_ID
+                          value: "test"
+                        - name: AWS_SECRET_ACCESS_KEY
+                          value: "test"
+                        - name: S3_BUCKET_NAME
+                          valueFrom:
+                            configMapKeyRef:
+                              name: s3-snapshot-config
+                              key: BUCKET_NAME
+                        - name: S3_REGION
+                          valueFrom:
+                            configMapKeyRef:
+                              name: s3-snapshot-config
+                              key: AWS_REGION
+                        - name: S3_ENDPOINT
+                          valueFrom:
+                            configMapKeyRef:
+                              name: s3-snapshot-config
+                              key: ENDPOINT
+                              optional: true
                       command:
                         - solr-precreate
                         - dummy
@@ -1423,9 +1476,15 @@ spec:
                       volumeMounts:
                         - name: solr-data
                           mountPath: /var/solr
+                        - name: solr-xml
+                          mountPath: /opt/solr/server/solr/solr.xml
+                          subPath: solr.xml
                   volumes:
                     - name: solr-data
                       emptyDir: {}
+                    - name: solr-xml
+                      configMap:
+                        name: ${CLUSTER_NAME}-solr-xml
             ---
             apiVersion: v1
             kind: Service
