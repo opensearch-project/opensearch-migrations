@@ -26,8 +26,7 @@ import {makeMountpointRepoParamDict, getSnapshotLocalDir, getS3BucketName} from 
 import {
     setupLog4jConfigForContainer,
     setupTestCredsForContainer,
-    setupSnapshotFuseSidecar,
-    setupS3FilesNfsPv
+    setupSnapshotFuseSidecar
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
@@ -157,35 +156,23 @@ function getRfsDeploymentManifest
 
     const finalContainerDefinition = setupTestCredsForContainer(
         args.useLocalstackAwsCreds,
-        (() => {
-            const logConfigured = setupLog4jConfigForContainer(
+        setupSnapshotFuseSidecar(
+            args.snapshotLocalDir,
+            args.snapshotName,
+            args.s3Bucket,
+            args.s3Region,
+            args.useLocalstackAwsCreds,
+            args.useS3Files,
+            args.s3FilesFileSystemId,
+            args.fuseSidecarImage,
+            args.fuseSidecarImagePullPolicy,
+            setupLog4jConfigForContainer(
                 useCustomLogging,
                 args.loggingConfigMap,
                 {container: baseContainerDefinition, volumes: [], sidecars: [], initContainers: []},
                 args.jvmArgs
-            );
-            // S3 Files mode: use NFS PV instead of per-pod mount-s3
-            // mount-s3 mode: each pod independently mounts S3 via FUSE sidecar
-            return args.useS3Files
-                ? setupS3FilesNfsPv(
-                    args.s3FilesFileSystemId,
-                    args.snapshotLocalDir,
-                    args.snapshotName,
-                    args.fuseSidecarImage,
-                    args.fuseSidecarImagePullPolicy,
-                    logConfigured
-                )
-                : setupSnapshotFuseSidecar(
-                    args.snapshotLocalDir,
-                    args.snapshotName,
-                    args.s3Bucket,
-                    args.s3Region,
-                    args.useLocalstackAwsCreds,
-                    args.fuseSidecarImage,
-                    args.fuseSidecarImagePullPolicy,
-                    logConfigured
-                );
-        })()
+            )
+        )
     );
     const deploymentName = getRfsDeploymentName(args.sessionName);
     return {

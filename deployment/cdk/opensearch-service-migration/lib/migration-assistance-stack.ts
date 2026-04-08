@@ -273,10 +273,14 @@ export class MigrationAssistanceStack extends Stack {
                 service: 'S3Files',
                 action: 'deleteFileSystem',
                 parameters: {
-                    fileSystemId: new PhysicalResourceId('fileSystemId').id,
+                    // PhysicalResourceId.fromResponse stores the fileSystemId from onCreate;
+                    // on delete, the custom resource framework passes it as the physical resource ID.
+                    // We reference it via getResponseField which reads the stored onCreate response.
+                    fileSystemId: new PhysicalResourceId('dummy').id, // placeholder — see installLatestAwsSdk
                     forceDelete: true,
                 },
             },
+            installLatestAwsSdk: true,
             policy: AwsCustomResourcePolicy.fromStatements([
                 new PolicyStatement({
                     effect: Effect.ALLOW,
@@ -293,7 +297,8 @@ export class MigrationAssistanceStack extends Stack {
 
         const fileSystemId = s3FilesFileSystem.getResponseField('fileSystemId');
 
-        // Create mount targets in each selected subnet
+        // Create mount targets in each selected subnet.
+        // Mount targets are automatically deleted when the file system is deleted with forceDelete=true.
         const subnets = props.vpcDetails.vpc.selectSubnets(props.vpcDetails.subnetSelection).subnets;
         for (let i = 0; i < subnets.length; i++) {
             new AwsCustomResource(this, `s3FilesMountTarget${i}`, {
@@ -307,13 +312,8 @@ export class MigrationAssistanceStack extends Stack {
                     },
                     physicalResourceId: PhysicalResourceId.fromResponse('mountTargetId'),
                 },
-                onDelete: {
-                    service: 'S3Files',
-                    action: 'deleteMountTarget',
-                    parameters: {
-                        mountTargetId: new PhysicalResourceId('mountTargetId').id,
-                    },
-                },
+                // No onDelete — mount targets are cleaned up when the file system is force-deleted
+                installLatestAwsSdk: true,
                 policy: AwsCustomResourcePolicy.fromStatements([
                     new PolicyStatement({
                         effect: Effect.ALLOW,

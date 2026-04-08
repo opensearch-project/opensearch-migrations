@@ -3,11 +3,10 @@ set -e
 
 # Entrypoint for the snapshot-fuse sidecar.
 #
-# Two modes of S3 access:
-# 1. NFS PVC (S3 Files): /mnt/s3 is pre-mounted via NFS PersistentVolume.
-#    S3_BUCKET is not set — we just run snapshot-fuse directly.
-# 2. mount-s3 (default): S3_BUCKET is set — we mount S3 via mount-s3,
-#    then run snapshot-fuse on top.
+# Three modes of S3 access (checked in order):
+# 1. S3 Files (NFS): S3_FILES_FS_ID is set — mount via NFS, no mount-s3 needed.
+# 2. mount-s3 (FUSE): S3_BUCKET is set — mount S3 via mount-s3.
+# 3. Pre-mounted: Neither set — /mnt/s3 is already mounted (e.g. NFS PVC).
 
 S3_MOUNT="${S3_MOUNT_PATH:-/mnt/s3}"
 CACHE_DIR="${CACHE_DIR:-/cache}"
@@ -32,7 +31,17 @@ if [ -n "${POD_NAME:-}" ]; then
     set -- ${NEW_ARGS}
 fi
 
-if [ -n "${S3_BUCKET:-}" ]; then
+if [ -n "${S3_FILES_FS_ID:-}" ]; then
+    # Mode 1: S3 Files — mount the file system via NFS
+    echo "Mounting S3 Files filesystem '${S3_FILES_FS_ID}' at ${S3_MOUNT} via NFS"
+    mkdir -p "${S3_MOUNT}"
+    S3_FILES_DNS="${S3_FILES_FS_ID}.s3files.${AWS_REGION}.amazonaws.com"
+    mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport \
+        "${S3_FILES_DNS}:/" "${S3_MOUNT}"
+    echo "S3 Files NFS mount ready"
+
+elif [ -n "${S3_BUCKET:-}" ]; then
+    # Mode 2: mount-s3 — mount S3 bucket via FUSE
     echo "Mounting S3 bucket '${S3_BUCKET}' at ${S3_MOUNT} (cache: ${CACHE_DIR}, max ${MAX_CACHE_MB}MB)"
     mkdir -p "${S3_MOUNT}" "${CACHE_DIR}"
 

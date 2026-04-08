@@ -19,7 +19,7 @@ RUN cargo build --release && strip target/release/snapshot-fuse
 # the entrypoint detects the pre-mounted /mnt/s3 and skips it.
 FROM ${RUNTIME_IMAGE}
 
-RUN dnf install -y fuse fuse-libs util-linux && \
+RUN dnf install -y fuse fuse-libs util-linux nfs-utils && \
     ARCH=$(uname -m) && \
     case "$ARCH" in x86_64) S3_ARCH=x86_64;; aarch64) S3_ARCH=arm64;; *) echo "Unsupported arch: $ARCH" && exit 1;; esac && \
     curl --fail --silent --show-error --location --retry 5 --retry-delay 5 --retry-all-errors \

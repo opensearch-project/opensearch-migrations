@@ -137,86 +137,6 @@ export function setupLog4jConfigForContainer(
 }
 
 const S3_CACHE_VOLUME_NAME = "s3-cache";
-const S3_FILES_PV_NAME = "s3-files-pv";
-const S3_FILES_PVC_NAME = "s3-files-pvc";
-
-/**
- * Set up an NFS PersistentVolume + PersistentVolumeClaim for S3 Files.
- * When useS3Files is true, the snapshot-fuse sidecar skips mount-s3 and
- * reads directly from the NFS-mounted S3 bucket at /mnt/s3.
- *
- * This replaces the per-pod mount-s3 approach with a shared NFS mount
- * backed by S3 Files, which provides:
- * - No privileged containers needed for FUSE mount-s3
- * - Shared cache across pods via S3 Files high-performance storage
- * - Simpler pod spec (no hostPath, no Bidirectional mount propagation)
- */
-export function setupS3FilesNfsPv(
-    s3FilesFileSystemId: BaseExpression<string>,
-    snapshotLocalDir: BaseExpression<string>,
-    snapshotName: BaseExpression<string>,
-    sidecarImage: BaseExpression<string>,
-    sidecarImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-    def: ContainerVolumePair): ContainerVolumePair {
-
-    const {volumeMounts, ...restOfContainer} = def.container;
-    return {
-        volumes: [
-            ...def.volumes,
-            {
-                name: S3_FILES_PVC_NAME,
-                persistentVolumeClaim: { claimName: S3_FILES_PVC_NAME }
-            }
-        ],
-        container: {
-            ...restOfContainer,
-            volumeMounts: [
-                ...(volumeMounts === undefined ? [] : volumeMounts),
-                {
-                    name: S3_FILES_PVC_NAME,
-                    mountPath: "/mnt/lucene",
-                    readOnly: true
-                }
-            ]
-        },
-        sidecars: def.sidecars,
-        initContainers: [
-            ...def.initContainers,
-            {
-                name: "snapshot-fuse",
-                restartPolicy: "Always",
-                image: makeStringTypeProxy(sidecarImage),
-                imagePullPolicy: makeStringTypeProxy(sidecarImagePullPolicy),
-                args: [
-                    makeStringTypeProxy(expr.concat(expr.literal("--repo-root="), snapshotLocalDir)),
-                    makeStringTypeProxy(expr.concat(expr.literal("--snapshot-name="), snapshotName)),
-                    "--mount-point=/mnt/lucene"
-                ],
-                startupProbe: {
-                    exec: {
-                        command: ["sh", "-c", "mountpoint -q /mnt/lucene"]
-                    },
-                    initialDelaySeconds: 1,
-                    periodSeconds: 2,
-                    failureThreshold: 60
-                },
-                env: [
-                    { name: "RUST_LOG", value: "info" },
-                    { name: "FUSE_THREADS", value: "32" }
-                    // S3_BUCKET is NOT set — entrypoint.sh skips mount-s3
-                ],
-                securityContext: { privileged: true },
-                volumeMounts: [
-                    {
-                        name: S3_FILES_PVC_NAME,
-                        mountPath: "/mnt/s3",
-                        readOnly: true
-                    }
-                ]
-            }
-        ]
-    } as const;
-}
 
 /**
  * Add a snapshot-fuse native sidecar (init container with restartPolicy: Always) that:
@@ -245,6 +165,8 @@ export function setupSnapshotFuseSidecar(
     s3Bucket: BaseExpression<string>,
     s3Region: BaseExpression<string>,
     useLocalStack: BaseExpression<boolean>,
+    useS3Files: BaseExpression<boolean>,
+    s3FilesFileSystemId: BaseExpression<string>,
     sidecarImage: BaseExpression<string>,
     sidecarImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     def: ContainerVolumePair): ContainerVolumePair {
@@ -326,8 +248,18 @@ export function setupSnapshotFuseSidecar(
                     },
                     { name: "RUST_LOG", value: "info" },
                     { name: "FUSE_THREADS", value: "32" },
-                    { name: "S3_BUCKET", value: makeStringTypeProxy(s3Bucket) },
+                    { name: "S3_BUCKET", value: makeStringTypeProxy(
+                        expr.ternary(useS3Files, expr.literal(""), s3Bucket)
+                    ) },
                     { name: "AWS_REGION", value: makeStringTypeProxy(s3Region) },
+                    {
+                        name: "S3_FILES_FS_ID",
+                        value: makeStringTypeProxy(expr.ternary(
+                            useS3Files,
+                            s3FilesFileSystemId,
+                            expr.literal("")
+                        ))
+                    },
                     {
                         name: "S3_ENDPOINT_URL",
                         value: makeStringTypeProxy(expr.ternary(

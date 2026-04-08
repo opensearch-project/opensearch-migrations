@@ -113,13 +113,6 @@ defaultBucketConfiguration:
   bucketOperationImage: "amazon/aws-cli:2.34.26"
   bucketOperationImagePullPolicy: "IfNotPresent"
 
-# S3 Files: Mount S3 bucket as NFS via S3 Files instead of per-pod mount-s3.
-# Requires the EFS CSI driver installed on the cluster and an S3 Files file system
-# with mount targets in the same VPC. See s3-files-reference.md for setup details.
-s3Files:
-  enabled: false
-  fileSystemId: ""  # e.g. fs-0123456789abcdef0
-
 logs:
   sharedLogsVolume:
     enabled: true
