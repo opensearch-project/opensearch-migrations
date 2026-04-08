@@ -112,6 +112,11 @@ defaultBucketConfiguration:
   serviceAccountName: "migrations-service-account"
   bucketOperationImage: "amazon/aws-cli:2.25.11"
   bucketOperationImagePullPolicy: "IfNotPresent"
+  # S3 Files NFS configuration — enables NFS access to the snapshot bucket.
+  # Only applied when useLocalStack is false (real AWS).
+  s3Files:
+    enabled: false
+    cacheTTLSeconds: 86400  # 1 day — safe for immutable snapshot data
 
 logs:
   sharedLogsVolume:

@@ -96,4 +96,20 @@ spec:
               # List all buckets to confirm
               echo "Listing all buckets:"
               aws $S3_ENDPOINT_FLAG s3 ls
+
+              {{- if and .Values.defaultBucketConfiguration.s3Files.enabled (not .Values.defaultBucketConfiguration.useLocalStack) }}
+              # Enable S3 Files NFS access on the bucket
+              echo "Configuring S3 Files NFS on bucket $BUCKET_NAME (cacheTTL={{ .Values.defaultBucketConfiguration.s3Files.cacheTTLSeconds }}s)..."
+              aws s3api put-bucket-files-configuration \
+                --bucket "$BUCKET_NAME" \
+                --files-configuration '{
+                  "NFS": {
+                    "Enabled": true,
+                    "FileCacheConfiguration": {
+                      "CacheTTL": {{ .Values.defaultBucketConfiguration.s3Files.cacheTTLSeconds }}
+                    }
+                  }
+                }'
+              echo "S3 Files NFS configured."
+              {{- end }}
 {{- end }}
