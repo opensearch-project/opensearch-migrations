@@ -216,7 +216,7 @@ class ScriptRunner:
         try:
             logger.debug(f"Config file: {temp_file_path}")
             output = self.run_script("createMigrationWorkflowFromUserConfiguration.sh", None,
-                                     *([temp_file_path] + args), direct_output=True)
+                                     *([temp_file_path] + args), direct_output=False)
 
             # Parse kubectl output to extract workflow information
             # The script should output workflow creation details
