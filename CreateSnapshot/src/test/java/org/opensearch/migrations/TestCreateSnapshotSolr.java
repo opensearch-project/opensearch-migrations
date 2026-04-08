@@ -1,6 +1,5 @@
 package org.opensearch.migrations;
 
-import java.util.List;
 
 import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
