@@ -1,0 +1,77 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+}
+
+def venvDir = layout.buildDirectory.dir("pydantic-venv/venv").get().asFile
+def venvTarball = layout.buildDirectory.file("pydantic-venv.tar.gz").get().asFile
+def venvParent = layout.buildDirectory.dir("pydantic-venv").get().asFile
+def graalPyScript = layout.buildDirectory.file("graalpy-launcher.sh").get().asFile
+def customTransformDir = project(':transformation:transformationPlugins:jsonMessageTransformers:jsonPythonTransformerProvider')
+    .file('custom_transform')
+
+configurations {
+    graalPyRuntime
+}
+
+dependencies {
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonPythonTransformer')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonPythonTransformerProvider')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonGraalTransformerBase')
+
+    implementation libs.polyglot.python.community
+    implementation libs.python.embedding
+
+    graalPyRuntime libs.polyglot.python.community
+    graalPyRuntime libs.python.embedding
+    graalPyRuntime 'org.graalvm.python:python-launcher:25.0.2'
+
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.hamcrest
+    testRuntimeOnly libs.junit.jupiter.engine
+}
+
+// Generate a graalpy launcher script (same as what the GraalPy Gradle plugin generates)
+tasks.register('generateGraalPyLauncher') {
+    inputs.files configurations.graalPyRuntime
+    outputs.file graalPyScript
+    doLast {
+        def cp = configurations.graalPyRuntime.asPath
+        def java = org.gradle.internal.jvm.Jvm.current().javaExecutable.absolutePath
+        graalPyScript.text = """\
+#!/usr/bin/env bash
+${java} --enable-native-access=ALL-UNNAMED -classpath ${cp} com.oracle.graal.python.shell.GraalPythonMain --python.Executable="\$0" "\$@"
+"""
+        graalPyScript.setExecutable(true)
+    }
+}
+
+// Step 1: graalpy -m venv (exactly as a customer would)
+tasks.register('createGraalPyVenv', Exec) {
+    dependsOn generateGraalPyLauncher
+    commandLine 'bash', graalPyScript.absolutePath, '-m', 'venv', venvDir.absolutePath
+    outputs.dir venvDir
+    onlyIf { !venvDir.exists() }
+}
+
+// Step 2: pip install (exactly as a customer would)
+tasks.register('pipInstallPydantic', Exec) {
+    dependsOn createGraalPyVenv
+    commandLine "${venvDir}/bin/pip", 'install', 'pydantic', customTransformDir.absolutePath
+    outputs.file "${venvDir}/lib/python3.12/site-packages/pydantic/__init__.py"
+    onlyIf { !file("${venvDir}/lib/python3.12/site-packages/pydantic/__init__.py").exists() }
+}
+
+// Step 3: tar czf (exactly as a customer would ship it)
+tasks.register('packageVenvTarball', Exec) {
+    dependsOn pipInstallPydantic
+    commandLine 'tar', 'czf', venvTarball.absolutePath, '-C', layout.buildDirectory.get().asFile.absolutePath, venvParent.name
+    outputs.file venvTarball
+    onlyIf { !venvTarball.exists() || venvDir.lastModified() > venvTarball.lastModified() }
+}
+
+test {
+    dependsOn packageVenvTarball
+    systemProperty 'pydantic.venv.tarball', venvTarball.absolutePath
+    systemProperty 'custom.transform.dir', customTransformDir.absolutePath
+}

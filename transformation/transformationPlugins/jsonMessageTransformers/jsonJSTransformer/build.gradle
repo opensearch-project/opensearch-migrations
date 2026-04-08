@@ -5,14 +5,11 @@ plugins {
 }
 
 dependencies {
-    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    api project(':transformation:transformationPlugins:jsonMessageTransformers:jsonGraalTransformerBase')
 
     implementation libs.guava
     implementation libs.slf4j.api
 
-    implementation libs.jackson.databind
-    implementation libs.jackson.core
-    implementation libs.polyglot
     implementation libs.polyglot.js.community
 
     testImplementation project(':TrafficCapture:trafficReplayer')
