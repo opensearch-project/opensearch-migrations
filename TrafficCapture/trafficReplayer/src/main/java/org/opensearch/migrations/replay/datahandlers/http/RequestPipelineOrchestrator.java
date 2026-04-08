@@ -48,6 +48,8 @@ public class RequestPipelineOrchestrator<R> {
     private final IReplayContexts.IRequestTransformationContext httpTransactionContext;
     @Getter
     final IAuthTransformerFactory authTransfomerFactory;
+    @Getter
+    private boolean deferredSigningMode;
 
     public RequestPipelineOrchestrator(
         List<List<Integer>> chunkSizes,
@@ -166,7 +168,17 @@ public class RequestPipelineOrchestrator<R> {
         if (authTransfomer != null) {
             pipeline.addLast(new NettyJsonContentAuthSigner(authTransfomer));
             addLoggingHandler(pipeline, "G");
+            // Compression and stream-to-bytebuf run once in the static pipeline.
+            // Only header serialization (NettyJsonToByteBufHandler) is deferred to the producer.
+            pipeline.addLast(new NettyJsonContentCompressor());
+            pipeline.addLast(new NettyJsonContentStreamToByteBufHandler());
+            deferredSigningMode = true;
+        } else {
+            addTailHandlers(pipeline);
         }
+    }
+
+    private void addTailHandlers(ChannelPipeline pipeline) {
         pipeline.addLast(new LastHttpContentListener(httpTransactionContext::onPayloadParseSuccess));
         pipeline.addLast(new ReadMeteringHandler(httpTransactionContext::onUncompressedBytesOut));
         // IN: Netty HttpRequest(2) + HttpJsonRequest(3) with headers only + HttpContent(3) blocks
@@ -179,6 +191,10 @@ public class RequestPipelineOrchestrator<R> {
         pipeline.addLast(new NettyJsonContentStreamToByteBufHandler());
         addLoggingHandler(pipeline, "I");
         addBaselineHandlers(pipeline);
+    }
+
+    List<List<Integer>> getChunkSizes() {
+        return chunkSizes;
     }
 
     void addBaselineHandlers(ChannelPipeline pipeline) {

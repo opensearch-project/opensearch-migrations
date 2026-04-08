@@ -18,6 +18,7 @@ import java.util.stream.IntStream;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.http.retries.NoRetryEvaluatorFactory;
 import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
@@ -137,7 +138,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 requestContext,
                 startTimeForThisRequest,
                 Duration.ofMillis(1),
-                requestPackets,
+                ByteBufListProducer.of(requestPackets),
                 new NoRetryEvaluatorFactory.NoRetryVisitor()
             );
 
@@ -237,7 +238,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                     requestContext,
                     startTimeForThisRequest,
                     Duration.ofMillis(1),
-                    requestPackets,
+                    ByteBufListProducer.of(requestPackets),
                     new NoRetryEvaluatorFactory.NoRetryVisitor()
                 );
                 log.info("Scheduled item to run at " + startTimeForThisRequest);
