@@ -108,7 +108,7 @@ mirror.gcr.io/localstack/localstack:4.3.0
 mirror.gcr.io/amazon/aws-cli:latest
 
 # --- direct template references ---
-mirror.gcr.io/amazon/aws-cli:2.25.11
+mirror.gcr.io/amazon/aws-cli:2.34.26
 
 # --- coordinator cluster (used by RFS workflow) ---
 mirror.gcr.io/opensearchproject/opensearch:3.1.0

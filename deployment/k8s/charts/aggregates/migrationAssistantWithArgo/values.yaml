@@ -110,7 +110,7 @@ defaultBucketConfiguration:
   useLocalStack: true
   endpoint: localstack
   serviceAccountName: "migrations-service-account"
-  bucketOperationImage: "amazon/aws-cli:2.25.11"
+  bucketOperationImage: "amazon/aws-cli:2.34.26"
   bucketOperationImagePullPolicy: "IfNotPresent"
 
 logs:

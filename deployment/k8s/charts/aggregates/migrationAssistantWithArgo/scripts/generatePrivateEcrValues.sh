@@ -209,7 +209,7 @@ charts:
 
 # --- Direct template image overrides ---
 defaultBucketConfiguration:
-  bucketOperationImage: "${M}/mirror.gcr.io/amazon/aws-cli:2.25.11"
+  bucketOperationImage: "${M}/mirror.gcr.io/amazon/aws-cli:2.34.26"
 
 # --- Otel collector (hardcoded in template, override via values) ---
 otelCollectorImage: "${M}/public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3"
