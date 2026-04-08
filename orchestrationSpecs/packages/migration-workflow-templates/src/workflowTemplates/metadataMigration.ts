@@ -65,18 +65,7 @@ export function makeRepoParamDict(
 export const S3_MOUNT_PATH = "/mnt/s3";
 
 /**
- * Extract the S3 bucket name from an s3RepoPathUri.
- * Converts s3://bucket-name/path → bucket-name.
- */
-export function getS3BucketName(repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>) {
-    return new FunctionExpression<string, string, ExpressionType, "complicatedExpression">(
-        "sprig.regexReplaceAll",
-        [expr.literal("^s3://([^/]+).*$"), expr.get(repoConfig, "s3RepoPathUri"),
-         expr.literal("${1}")] as any);
-}
-
-/**
- * Compute the local filesystem path for a snapshot repo mounted via S3 CSI driver.
+ * Compute the local filesystem path for a snapshot repo mounted via NFS (S3 Files).
  * Converts s3://bucket/path → /mnt/s3/path.
  */
 export function getSnapshotLocalDir(repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>) {
@@ -90,9 +79,9 @@ export function getSnapshotLocalDir(repoConfig: BaseExpression<z.infer<typeof S3
 }
 
 /**
- * Build param dict for RFS when using S3 CSI driver PV/PVC mount.
+ * Build param dict for RFS when using NFS PV mount (S3 Files).
  * Emits snapshotLocalDir (for RFS) pointing to the mounted S3 path.
- * The S3 bucket is mounted at S3_MOUNT_PATH via a PersistentVolume backed by the S3 CSI driver,
+ * The S3 bucket is mounted at S3_MOUNT_PATH via an NFS PersistentVolume backed by S3 Files,
  * and the repo path is extracted from the s3RepoPathUri (s3://bucket/path → /mnt/s3/path).
  */
 export function makeMountpointRepoParamDict(

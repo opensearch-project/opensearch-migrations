@@ -22,7 +22,7 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {Deployment} from "@opensearch-migrations/argo-workflow-builders";
-import {makeMountpointRepoParamDict, getSnapshotLocalDir, getS3BucketName} from "./metadataMigration";
+import {makeMountpointRepoParamDict, getSnapshotLocalDir} from "./metadataMigration";
 import {
     setupLog4jConfigForContainer,
     setupTestCredsForContainer,
@@ -113,9 +113,6 @@ function getRfsDeploymentManifest
 
     snapshotLocalDir: BaseExpression<string>,
     snapshotName: BaseExpression<string>,
-    s3Bucket: BaseExpression<string>,
-    s3Region: BaseExpression<string>,
-    useLocalStack: BaseExpression<boolean>,
     fuseSidecarImage: BaseExpression<string>,
     fuseSidecarImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
 
@@ -157,9 +154,6 @@ function getRfsDeploymentManifest
         setupSnapshotFuseSidecar(
             args.snapshotLocalDir,
             args.snapshotName,
-            args.s3Bucket,
-            args.s3Region,
-            args.useLocalStack,
             args.fuseSidecarImage,
             args.fuseSidecarImagePullPolicy,
             setupLog4jConfigForContainer(
@@ -215,13 +209,8 @@ function getRfsDeploymentManifest
                 },
                 spec: {
                     serviceAccountName: "argo-workflow-executor",
-                    // Disable SELinux relabeling on volumes — the FUSE mount in the
-                    // shared emptyDir does not support lsetxattr and relabeling causes
-                    // CreateContainerError on Bottlerocket/SELinux-enabled nodes.
-                    securityContext: { seLinuxOptions: { type: "spc_t" } },
                     // Spread RFS pods across nodes to avoid CPU/memory oversubscription.
-                    // Each pod runs a Java bulk-loader (~3.5 cores), mount-s3 (~400 threads),
-                    // and a FUSE sidecar. Packing too many on one node causes CPU contention.
+                    // Each pod runs a Java bulk-loader (~3.5 cores) and a FUSE sidecar.
                     topologySpreadConstraints: [{
                         maxSkew: 1,
                         topologyKey: "kubernetes.io/hostname",
@@ -374,10 +363,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
-        .addRequiredInput("snapshotLocalDir", typeToken<string>(), "Local path within S3 mount for snapshot repo")
+        .addRequiredInput("snapshotLocalDir", typeToken<string>(), "Local path within NFS mount for snapshot repo")
         .addRequiredInput("snapshotName", typeToken<string>(), "Snapshot name for FUSE sidecar")
-        .addRequiredInput("s3Bucket", typeToken<string>(), "S3 bucket name for per-pod mount-s3")
-        .addRequiredInput("s3Region", typeToken<string>(), "AWS region for S3 bucket")
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("targetK8sLabel", typeToken<string>())
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
@@ -404,9 +391,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     resources: expr.deserializeRecord(b.inputs.resources),
                     snapshotLocalDir: b.inputs.snapshotLocalDir,
                     snapshotName: b.inputs.snapshotName,
-                    s3Bucket: b.inputs.s3Bucket,
-                    s3Region: b.inputs.s3Region,
-                    useLocalStack: expr.deserializeRecord(b.inputs.useLocalStack),
                     fuseSidecarImage: b.inputs.imageSnapshotFuseLocation,
                     fuseSidecarImagePullPolicy: b.inputs.imageSnapshotFusePullPolicy,
                     sourceK8sLabel: b.inputs.sourceK8sLabel,
@@ -454,11 +438,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     snapshotLocalDir: getSnapshotLocalDir(
                         expr.omit(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RoleArn")),
                     snapshotName: expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "snapshotName"),
-                    s3Bucket: getS3BucketName(
-                        expr.omit(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RoleArn")),
-                    s3Region: expr.get(
-                        expr.omit(expr.get(expr.deserializeRecord(b.inputs.snapshotConfig), "repoConfig"), "s3RoleArn"),
-                        "awsRegion"),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
@@ -538,7 +517,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     {when: {templateExp: createRfsCluster}}
                 )
 
-                // Run bulk load — each pod mounts S3 independently via mount-s3 sidecar
+                // Run bulk load — S3 data provided via NFS PV, snapshot-fuse translates blobs to Lucene files
                 .addStep("runBulkLoad", INTERNAL, "runBulkLoad", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
