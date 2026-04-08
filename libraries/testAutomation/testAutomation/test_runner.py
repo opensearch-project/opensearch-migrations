@@ -298,7 +298,8 @@ class TestRunner:
                 test_reports.append(test_report)
                 tests_failed = test_report.summary.failed > 0 or test_report.summary.passed == 0
 
-                if test_report.summary.expected is not None and test_report.summary.passed != test_report.summary.expected:
+                expected = test_report.summary.expected
+                if expected is not None and test_report.summary.passed != expected:
                     logger.warning(f"Expected {test_report.summary.expected} tests but only "
                                    f"{test_report.summary.passed} passed "
                                    f"({test_report.summary.failed} failed)")

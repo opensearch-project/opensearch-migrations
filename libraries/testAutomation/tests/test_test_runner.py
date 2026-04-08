@@ -105,6 +105,7 @@ class TestFailureDetection:
         with patch.object(runner, "run_tests", return_value=_make_report(passed=3, failed=0, expected=None)):
             runner.run()  # Should not raise
 
+
 from test_runner import get_version_combinations, TargetType, VALID_SOURCE_VERSIONS
 
 
