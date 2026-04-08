@@ -83,14 +83,46 @@ public class TestCreateSnapshotSolr {
         args.noWait = false;
 
         var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
-        // This exercises: version detection → discoverSolrCollections → parseJsonObjectKeys → standalone backup
         creator.run();
 
-        // Verify the backup was created by checking replication details
         var result = STANDALONE_SOLR.execInContainer("curl", "-s",
             "http://localhost:8983/solr/dummy/replication?command=details&wt=json");
         log.info("Replication details after backup: {}", result.getStdout());
         Assertions.assertTrue(result.getStdout().contains("backup"),
             "Replication details should show backup info");
+    }
+
+    @Test
+    public void testRunSolrBackup_cloud_discoversAndBacksUp() throws Exception {
+        var solrUrl = CLOUD_SOLR.getSolrUrl();
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+
+        // Create a collection with data
+        CLOUD_SOLR.execInContainer("curl", "-s",
+            "http://localhost:8983/solr/admin/collections?action=CREATE"
+                + "&name=cloudcoll&numShards=1&replicationFactor=1&wt=json");
+        CLOUD_SOLR.execInContainer("curl", "-s",
+            "http://localhost:8983/solr/cloudcoll/update?commit=true",
+            "-H", "Content-Type: application/json",
+            "-d", "[{\"id\":\"doc1\",\"title\":\"test\"}]");
+
+        var args = new CreateSnapshot.Args();
+        args.sourceArgs.host = solrUrl;
+        args.sourceArgs.insecure = true;
+        args.snapshotName = "test_cloud_backup";
+        args.fileSystemRepoPath = "/var/solr/data/backups";
+        args.noWait = false;
+
+        // Ensure backup location exists
+        CLOUD_SOLR.execInContainer("mkdir", "-p", "/var/solr/data/backups");
+
+        var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
+        creator.run();
+
+        // Verify backup directory was created
+        var result = CLOUD_SOLR.execInContainer("ls", "/var/solr/data/backups");
+        log.info("Cloud backup directory contents: {}", result.getStdout());
+        Assertions.assertTrue(result.getStdout().contains("test_cloud_backup"),
+            "Backup directory should contain the backup");
     }
 }
