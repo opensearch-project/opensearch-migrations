@@ -163,7 +163,8 @@ public class SolrStandaloneBackupCreator {
             var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
                 throw new SolrSnapshotCreator.SolrBackupFailed(
-                    "Solr returned HTTP " + response.statusCode() + " for " + url);
+                    "Solr returned HTTP " + response.statusCode() + " for " + url
+                    + " — response body: " + response.body());
             }
             return MAPPER.readTree(response.body());
         } catch (IOException e) {

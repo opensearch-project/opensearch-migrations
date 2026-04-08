@@ -387,8 +387,18 @@ public class CreateSnapshot {
 
     private void runSolrStandaloneBackup(String solrUrl, String backupLocation, String username, String password) {
         log.info("Detected standalone Solr — using replication API backup");
-        // When using S3, pass the snapshot repo name so Solr uses the configured S3BackupRepository
-        var repositoryName = (arguments.s3RepoUri != null) ? arguments.snapshotRepoName : null;
+        String repositoryName = null;
+        if (arguments.s3RepoUri != null) {
+            repositoryName = arguments.snapshotRepoName;
+            // When using S3BackupRepository, the location is a path prefix within the bucket
+            // (the bucket is configured in solr.xml). Extract just the path from the S3 URI.
+            var uri = java.net.URI.create(arguments.s3RepoUri);
+            backupLocation = uri.getPath();
+            if (backupLocation.startsWith("/")) {
+                backupLocation = backupLocation.substring(1);
+            }
+            log.info("Using S3 backup repository '{}' with location prefix '{}'", repositoryName, backupLocation);
+        }
         var creator = new SolrStandaloneBackupCreator(
             solrUrl, arguments.snapshotName, backupLocation,
             arguments.solrCollections, username, password, repositoryName
