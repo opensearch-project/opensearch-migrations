@@ -57,7 +57,7 @@ tasks.register('createGraalPyVenv', Exec) {
 // Step 2: pip install (exactly as a customer would)
 tasks.register('pipInstallPydantic', Exec) {
     dependsOn createGraalPyVenv
-    commandLine "${venvDir}/bin/pip", 'install', 'pydantic', customTransformDir.absolutePath
+    commandLine "${venvDir}/bin/graalpy", '-m', 'pip', 'install', 'pydantic', customTransformDir.absolutePath
     outputs.file "${venvDir}/lib/python3.12/site-packages/pydantic/__init__.py"
     onlyIf { !file("${venvDir}/lib/python3.12/site-packages/pydantic/__init__.py").exists() }
 }
@@ -65,7 +65,7 @@ tasks.register('pipInstallPydantic', Exec) {
 // Step 3: tar czf (exactly as a customer would ship it)
 tasks.register('packageVenvTarball', Exec) {
     dependsOn pipInstallPydantic
-    commandLine 'tar', 'czf', venvTarball.absolutePath, '-C', layout.buildDirectory.get().asFile.absolutePath, venvParent.name
+    commandLine 'tar', 'czf', venvTarball.absolutePath, '-C', venvParent.absolutePath, venvDir.name
     outputs.file venvTarball
     onlyIf { !venvTarball.exists() || venvDir.lastModified() > venvTarball.lastModified() }
 }
