@@ -27,6 +27,7 @@ class ValidationDocumentTest {
             12L, 15L, 3L,
             List.of(new ComparisonEntry("facet_field", "category", true, null, null,
                 List.of(new ValueDrift("books", 50, 48, 4.0)))),
+            null, null,
             Map.of("warn-offset", 1)
         );
     }
@@ -75,7 +76,9 @@ class ValidationDocumentTest {
         ValidationDocument doc = new ValidationDocument(
             "2025-03-17T10:00:00Z", "abc-123",
             null, null, null, null,
-            null, null, null, null, null, null, null, null
+            null, null, null, null, null, null, null,
+            null, null,
+            null
         );
         String json = MAPPER.writeValueAsString(doc);
         JsonNode tree = MAPPER.readTree(json);
