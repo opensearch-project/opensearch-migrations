@@ -7,6 +7,7 @@ import java.util.concurrent.TimeUnit;
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 
@@ -75,7 +76,7 @@ class CancelConnectionDrainTest extends InstrumentationTest {
                 reqCtx,
                 java.time.Instant.now().plusSeconds(60), // far future — won't fire naturally
                 Duration.ZERO,
-                packets,
+                ByteBufListProducer.of(packets),
                 new org.opensearch.migrations.replay.http.retries.NoRetryEvaluatorFactory.NoRetryVisitor()
             );
         }

@@ -6,7 +6,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
-import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
@@ -175,10 +175,10 @@ public class ReplayEngine {
         Instant originalStart,
         Instant originalEnd,
         int numPackets,
-        ByteBufList packets,
+        ByteBufListProducer packetProducer,
         RequestSenderOrchestrator.RetryVisitor<T> retryVisitor
     ) {
-        return scheduleRequest(ctx, originalStart, originalEnd, numPackets, packets, retryVisitor, null);
+        return scheduleRequest(ctx, originalStart, originalEnd, numPackets, packetProducer, retryVisitor, null);
     }
 
     public <T> TrackedFuture<String, T> scheduleRequest(
@@ -186,7 +186,7 @@ public class ReplayEngine {
         Instant originalStart,
         Instant originalEnd,
         int numPackets,
-        ByteBufList packets,
+        ByteBufListProducer packetProducer,
         RequestSenderOrchestrator.RetryVisitor<T> retryVisitor,
         Duration quiescentDurationForRequest
     ) {
@@ -213,7 +213,7 @@ public class ReplayEngine {
             .addArgument(interval)
             .addArgument(numPackets)
             .log();
-        var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets, retryVisitor);
+        var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packetProducer, retryVisitor);
         return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
     }
 

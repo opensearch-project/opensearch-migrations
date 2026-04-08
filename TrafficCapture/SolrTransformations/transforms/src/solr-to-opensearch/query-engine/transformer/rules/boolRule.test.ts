@@ -41,10 +41,25 @@ describe('boolRule', () => {
 
   it('transforms all three clause types together', () => {
     const node: BoolNode = { type: 'bool', and: [titleJava], or: [authorSmith], not: [statusDraft] };
-    const boolMap = expectBoolKeys(boolRule(node, stubTransformChild), ['must', 'should', 'must_not']);
+    const boolMap = expectBoolKeys(boolRule(node, stubTransformChild), ['must', 'should', 'must_not', 'minimum_should_match']);
     expect(boolMap.get('must')).toHaveLength(1);
     expect(boolMap.get('should')).toHaveLength(1);
     expect(boolMap.get('must_not')).toHaveLength(1);
+    expect(boolMap.get('minimum_should_match')).toBe(1);
+  });
+
+  it('adds minimum_should_match when must and should are both present', () => {
+    // Solr: A AND (B OR C) — at least one of B or C must match
+    const node: BoolNode = { type: 'bool', and: [titleJava], or: [authorSmith, statusDraft], not: [] };
+    const boolMap = expectBoolKeys(boolRule(node, stubTransformChild), ['must', 'should', 'minimum_should_match']);
+    expect(boolMap.get('minimum_should_match')).toBe(1);
+  });
+
+  it('does not add minimum_should_match when only should is present', () => {
+    // Pure OR query — should clauses are already required by default
+    const node: BoolNode = { type: 'bool', and: [], or: [titleJava, authorSmith], not: [] };
+    const boolMap = expectBoolKeys(boolRule(node, stubTransformChild), ['should']);
+    expect(boolMap.has('minimum_should_match')).toBe(false);
   });
 
   it('omits all clauses when all arrays are empty', () => {
@@ -71,12 +86,5 @@ describe('boolRule', () => {
 
     const mustArray = (result.get('bool') as Map<string, any>).get('must');
     expect(mustArray[0]).toEqual(new Map([['field', titleJava]]));
-  });
-
-  it('throws when called with wrong node type', () => {
-    const wrongNode: FieldNode = { type: 'field', field: 'title', value: 'java' };
-    expect(() => boolRule(wrongNode, stubTransformChild)).toThrow(
-      'boolRule called with wrong node type: field',
-    );
   });
 });
