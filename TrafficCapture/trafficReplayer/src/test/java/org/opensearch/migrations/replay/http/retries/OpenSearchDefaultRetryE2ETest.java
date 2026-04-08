@@ -11,6 +11,7 @@ import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.TransformedTargetRequestAndResponseList;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
@@ -91,14 +92,15 @@ public class OpenSearchDefaultRetryE2ETest {
         var sourceRequestPackets = new ByteBufList(
             Unpooled.wrappedBuffer(BULK_REQUEST.getBytes(StandardCharsets.UTF_8)));
         var sourceResponseBytes = bulkResponseNoErrors().getBytes(StandardCharsets.UTF_8);
+        var packetProducer = ByteBufListProducer.of(sourceRequestPackets);
         var retryVisitor = retryFactory.getRetryCheckVisitor(
-            new TransformedOutputAndResult<>(sourceRequestPackets, HttpRequestTransformationStatus.skipped()),
+            new TransformedOutputAndResult<>(packetProducer, HttpRequestTransformationStatus.skipped()),
             TextTrackedFuture.completedFuture(
                 new RetryTestUtils.TestRequestResponsePair(sourceResponseBytes), () -> "static rrp"));
         return senderOrchestrator.scheduleRequest(
             requestContext.getReplayerRequestKey(), requestContext,
             Instant.now().plus(Duration.ofMillis(10)), Duration.ofMillis(1),
-            sourceRequestPackets, retryVisitor)
+            packetProducer, retryVisitor)
             .whenComplete((v, t) -> {
                 requestContext.close();
                 clientConnectionPool.shutdownNow();
