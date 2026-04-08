@@ -85,3 +85,17 @@ class TestFailureDetection:
         with patch.object(runner, "run_tests", return_value=_make_report(passed=3, failed=1)):
             with pytest.raises(TestsFailed, match="test failures"):
                 runner.run()
+
+    def test_fewer_tests_than_test_ids_raises(self):
+        runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
+        runner.test_ids = ["test_a", "test_b", "test_c"]
+        # Only 2 of 3 requested tests ran
+        with patch.object(runner, "run_tests", return_value=_make_report(passed=2, failed=0)):
+            with pytest.raises(TestsFailed, match="test failures"):
+                runner.run()
+
+    def test_all_test_ids_present_succeeds(self):
+        runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
+        runner.test_ids = ["test_a", "test_b", "test_c"]
+        with patch.object(runner, "run_tests", return_value=_make_report(passed=3, failed=0)):
+            runner.run()  # Should not raise

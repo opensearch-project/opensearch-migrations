@@ -296,6 +296,11 @@ class TestRunner:
                 test_reports.append(test_report)
                 tests_failed = test_report.summary.failed > 0 or test_report.summary.passed == 0
 
+                if self.test_ids and len(test_report.tests) < len(self.test_ids):
+                    logger.warning(f"Expected {len(self.test_ids)} tests from --test-ids but only "
+                                   f"{len(test_report.tests)} ran. Missing tests were silently skipped.")
+                    tests_failed = True
+
                 if tests_failed:
                     logger.warning(f"Tests failed (or no tests executed) for migrations "
                                    f"from {source_version} to {target_version}.")
