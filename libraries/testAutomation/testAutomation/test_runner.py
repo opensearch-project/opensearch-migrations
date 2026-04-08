@@ -234,7 +234,7 @@ class TestRunner:
 
         combos_with_failures = []
         test_reports = []
-        last_combination = self.combinations[-1]
+        last_combination = self.combinations[-1] if self.combinations else None
         for source_version, target_version in self.combinations:
             is_last = (source_version, target_version) == last_combination
             try:
@@ -294,9 +294,7 @@ class TestRunner:
                                              reuse_clusters=reuse_clusters,
                                              test_reports_dir=test_reports_dir)
                 test_reports.append(test_report)
-                tests_failed = test_report.summary.failed > 0 or (
-                    test_report.summary.passed == 0 and len(test_report.tests) > 0
-                )
+                tests_failed = test_report.summary.failed > 0 or test_report.summary.passed == 0
 
                 if tests_failed:
                     logger.warning(f"Tests failed (or no tests executed) for migrations "
@@ -307,8 +305,10 @@ class TestRunner:
                                 f"from {source_version} to {target_version}.")
             except HelmCommandFailed as helmError:
                 logger.error(f"Helm command failed with error: {helmError}. Testing may be incomplete")
+                combos_with_failures.append(f"{source_version} -> {target_version}")
             except TimeoutError as timeoutError:
                 logger.error(f"Timeout error encountered: {timeoutError}. Testing may be incomplete")
+                combos_with_failures.append(f"{source_version} -> {target_version}")
 
             # We need to copy logs once and before the migration console is uninstalled
             if is_last and copy_logs:
@@ -318,9 +318,13 @@ class TestRunner:
                 self.cleanup_deployment()
 
         self._print_summary_table(reports=test_reports)
+        total_tests = sum(len(r.tests) for r in test_reports)
         if combos_with_failures:
             raise TestsFailed(f"The following combinations had test failures (or no test cases executed): "
                               f"{combos_with_failures}")
+        if total_tests == 0:
+            raise TestsFailed("No tests were executed. This likely indicates a configuration error "
+                              "(empty version matrix, missing test IDs, or infrastructure failure).")
         logger.info("Test execution completed.")
 
 
