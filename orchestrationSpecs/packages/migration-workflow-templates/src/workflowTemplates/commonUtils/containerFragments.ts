@@ -140,10 +140,11 @@ export function setupLog4jConfigForContainer(
  * Add a snapshot-fuse native sidecar that translates ES/OS snapshot blobs into
  * virtual Lucene files via FUSE.
  *
- * S3 data is provided by an NFS PersistentVolume backed by S3 Files, mounted
- * at /mnt/s3 as a ReadOnlyMany PVC ("snapshot-s3-nfs"). snapshot-fuse reads
- * the snapshot blobs from NFS and presents virtual Lucene segment files at
- * /mnt/lucene via a FUSE mount.
+ * S3 data is provided by an NFS PersistentVolume backed by an S3 Files access
+ * point. The access point creates ENIs in the EKS VPC that serve NFSv3,
+ * mounted at /mnt/s3 as a ReadOnlyMany PVC ("snapshot-s3-nfs"). snapshot-fuse
+ * reads the snapshot blobs from NFS and presents virtual Lucene segment files
+ * at /mnt/lucene via a FUSE mount.
  *
  * The FUSE mount point uses an emptyDir shared between the sidecar and the
  * bulk-loader via Bidirectional/HostToContainer mount propagation.
