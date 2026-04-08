@@ -10,6 +10,7 @@ conditionalPackageInstalls:
   # TLS certificate infrastructure for capture proxy
   ack-acmpca-controller: false  # opt-in: manages AWS PCA as K8s resources via ACK
   aws-privateca-issuer: false   # opt-in: bridges cert-manager to AWS PCA
+  ack-cloudwatch-controller: false  # opt-in: manages CloudWatch dashboards as K8s resources via ACK
 
   # Simpler alternative to the opentelemetry-operator.
   # ONLY set up the otel-collector and require manual instrumentation
@@ -269,6 +270,13 @@ charts:
     values:
       serviceAccount:
         name: ack-acmpca-controller
+
+  ack-cloudwatch-controller:
+    version: "1.4.2"
+    repository: "oci://public.ecr.aws/aws-controllers-k8s/cloudwatch-chart"
+    values:
+      serviceAccount:
+        name: ack-cloudwatch-controller
 
   opentelemetry-operator:
     version: "0.86.4"

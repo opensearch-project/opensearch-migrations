@@ -27,6 +27,7 @@ export interface EKSInfraProps {
     otelCollectorServiceAccountName?: string;
     enablePCA?: boolean;
     enableACKPCA?: boolean;
+    enableACKCloudWatch?: boolean;
 }
 
 export class EKSInfra extends Construct {
@@ -152,6 +153,15 @@ export class EKSInfra extends Construct {
             });
             ackAcmpcaPodIdentityAssociation.node.addDependency(this.cluster)
         }
+        if (props.enableACKCloudWatch) {
+            const ackCloudWatchPodIdentityAssociation = new CfnPodIdentityAssociation(this, 'AckCloudWatchPodIdentityAssociation', {
+                clusterName: props.clusterName,
+                namespace: namespace,
+                serviceAccount: 'ack-cloudwatch-controller',
+                roleArn: podIdentityRole.roleArn,
+            });
+            ackCloudWatchPodIdentityAssociation.node.addDependency(this.cluster)
+        }
     }
 
     createDefaultPodIdentityRole(clusterName: string) {
@@ -264,6 +274,19 @@ export class EKSInfra extends Construct {
                 effect: Effect.ALLOW,
                 actions: ['iam:PassRole'],
                 resources: [`arn:${Aws.PARTITION}:iam::${Stack.of(this).account}:role/*`]
+            }),
+            // CloudWatch dashboard management for Helm post-install/pre-delete hooks
+            // Note: dashboard resource type has no condition keys in IAM; scoped by ARN prefix MA-*
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
+                    'cloudwatch:PutDashboard',
+                    'cloudwatch:GetDashboard',
+                    'cloudwatch:DeleteDashboards',
+                ],
+                resources: [
+                    `arn:${Aws.PARTITION}:cloudwatch::${Stack.of(this).account}:dashboard/MA-*`
+                ],
             }),
             // ACM PCA permissions for TLS certificate issuance via cert-manager
             new PolicyStatement({

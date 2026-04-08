@@ -303,7 +303,8 @@ export class SolutionsInfrastructureEKSStack extends Stack {
             vpcSubnetIds,
             clusterName: eksClusterName,
             stackName: Fn.ref('AWS::StackName'),
-            ecrRepoName: `migration-ecr-${stackMarker}`
+            ecrRepoName: `migration-ecr-${stackMarker}`,
+            enableACKCloudWatch: true,
         });
 
         const exportString = generateExportString({

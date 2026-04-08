@@ -31,6 +31,7 @@ dependencies {
     implementation project(":transformation")
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
     runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
+    runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonPythonTransformerProvider')
 
     implementation libs.log4j.api
     implementation libs.log4j.core

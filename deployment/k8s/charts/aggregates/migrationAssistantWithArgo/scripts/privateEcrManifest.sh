@@ -25,6 +25,7 @@ jaeger|3.2.0|https://jaegertracing.github.io/helm-charts
 kyverno|3.7.1|https://kyverno.github.io/kyverno/
 aws-privateca-issuer|v1.4.0|https://cert-manager.github.io/aws-privateca-issuer
 acmpca-chart|1.2.2|oci://public.ecr.aws/aws-controllers-k8s
+cloudwatch-chart|1.4.2|oci://public.ecr.aws/aws-controllers-k8s
 "
 
 # ALL container images required for deployment.
@@ -40,6 +41,9 @@ public.ecr.aws/k1n1h4h4/cert-manager-aws-privateca-issuer:v1.4.0
 
 # --- ack-acmpca-controller ---
 public.ecr.aws/aws-controllers-k8s/acmpca-controller:1.2.2
+
+# --- ack-cloudwatch-controller ---
+public.ecr.aws/aws-controllers-k8s/cloudwatch-controller:1.4.2
 
 # --- strimzi (operator + runtime images) ---
 quay.io/strimzi/operator:0.50.0
