@@ -113,9 +113,11 @@ def call(Map config = [:]) {
                                     // so --build-cfn and --base-dir are not needed.
                                     def bootstrapScript
                                     if (params.USE_RELEASE_BOOTSTRAP) {
+                                        def downloadUrl = params.VERSION == 'latest'
+                                            ? "https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/aws-bootstrap.sh"
+                                            : "https://github.com/opensearch-project/opensearch-migrations/releases/download/${params.VERSION}/aws-bootstrap.sh"
                                         sh """
-                                            curl -sL -o /tmp/aws-bootstrap.sh \
-                                              "https://github.com/opensearch-project/opensearch-migrations/releases/download/${params.VERSION}/aws-bootstrap.sh"
+                                            curl -sL -o /tmp/aws-bootstrap.sh "${downloadUrl}"
                                             chmod +x /tmp/aws-bootstrap.sh
                                         """
                                         bootstrapScript = "/tmp/aws-bootstrap.sh"

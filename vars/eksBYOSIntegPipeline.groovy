@@ -217,9 +217,11 @@ def call(Map config = [:]) {
                                     // so --build-cfn and --base-dir are not needed.
                                     def bootstrapScript
                                     if (params.USE_RELEASE_BOOTSTRAP) {
+                                        def downloadUrl = params.VERSION == 'latest'
+                                            ? "https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/aws-bootstrap.sh"
+                                            : "https://github.com/opensearch-project/opensearch-migrations/releases/download/${params.VERSION}/aws-bootstrap.sh"
                                         sh """
-                                            curl -sL -o /tmp/aws-bootstrap.sh \
-                                              "https://github.com/opensearch-project/opensearch-migrations/releases/download/${params.VERSION}/aws-bootstrap.sh"
+                                            curl -sL -o /tmp/aws-bootstrap.sh "${downloadUrl}"
                                             chmod +x /tmp/aws-bootstrap.sh
                                         """
                                         bootstrapScript = "/tmp/aws-bootstrap.sh"
@@ -229,8 +231,10 @@ def call(Map config = [:]) {
                                     }
                                     def flags = []
                                     if (!params.USE_RELEASE_BOOTSTRAP) flags << '--build-cfn'
-                                    if (params.BUILD_IMAGES) flags << '--build-images'
-                                    flags << '--skip-test-images'
+                                    if (params.BUILD_IMAGES) {
+                                        flags << '--build-images'
+                                        flags << '--skip-test-images'
+                                    }
                                     if (params.BUILD_CHART_AND_DASHBOARDS) flags << '--build-chart-and-dashboards'
                                     if (!params.USE_RELEASE_BOOTSTRAP) flags << "--base-dir \"\$(pwd)\""
                                     flags << "--version ${params.VERSION}"
