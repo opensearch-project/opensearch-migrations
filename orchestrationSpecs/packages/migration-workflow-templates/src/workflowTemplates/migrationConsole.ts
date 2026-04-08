@@ -86,7 +86,7 @@ function makeOptionalDict<
     T extends PlainObject,
     SCHEMA extends PlainObject
 >(label: string, v: BaseExpression<T>, tt: TypeToken<SCHEMA>) {
-    return expr.ternary(expr.isEmpty(v), expr.literal({}),
+    return expr.ternary(expr.isEmpty(v), expr.makeDict({}),
         expr.makeDict({[label]: expr.stringToRecord(tt, expr.asString(v))}));
 }
 
@@ -114,7 +114,7 @@ export const MigrationConsole = WorkflowBuilder.create({
                             makeOptionalDict("snapshot", expr.asString(c.inputs.snapshotConfig), typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
                         )
                     ),
-                    expr.ternary(expr.isEmpty(c.inputs.backfillSession), expr.literal({}), expr.makeDict({
+                    expr.ternary(expr.isEmpty(c.inputs.backfillSession), expr.makeDict({}), expr.makeDict({
                         "backfill": expr.makeDict({
                             "reindex_from_snapshot": expr.makeDict({
                                 "k8s": expr.makeDict({

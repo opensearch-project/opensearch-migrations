@@ -45,9 +45,9 @@ function makeReplayerTargetParamDict(
                         expr.getLoose(expr.getLoose(safeAuth, "sigv4"), "region")
                     )
                 }),
-                expr.literal({})
+                expr.makeDict({})
             ),
-            expr.literal({})
+            expr.makeDict({})
         )
     );
 }
@@ -100,7 +100,7 @@ function makeReplayerParamsDict(
                 expr.makeDict({
                     kafkaTrafficPropertyFile: expr.literal(KAFKA_AUTH_CONFIG_FILE_PATH),
                 }),
-                expr.literal({})
+                expr.makeDict({})
             )
         )
     );

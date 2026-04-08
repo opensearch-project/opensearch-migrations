@@ -30,6 +30,7 @@ describe("setup-kafka retry flow", () => {
         expect(clusterTemplate?.steps?.[2]?.[0]?.when).toContain("scram-sha-512");
         expect(JSON.stringify(manifestTemplate)).toContain("KafkaUser");
         expect(JSON.stringify(manifestTemplate)).toContain("migration-app");
-        expect(JSON.stringify(manifestTemplate)).toContain("authentication");
+        expect(JSON.stringify(manifestTemplate)).toContain("{{inputs.parameters.userSpec}}");
+        expect(JSON.stringify(retryTemplate)).toContain("authentication");
     });
 });
