@@ -10,7 +10,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.IHttpMessage;
-import org.opensearch.migrations.aws.SigV4Signer;
+import org.opensearch.migrations.aws.SplittableSigV4Signer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonRequestWithFaultingPayload;
 
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
@@ -37,7 +37,7 @@ public class SigV4AuthTransformerFactory implements IAuthTransformerFactory {
 
     @Override
     public IAuthTransformer getAuthTransformer(HttpJsonRequestWithFaultingPayload httpMessage) {
-        SigV4Signer signer = new SigV4Signer(credentialsProvider, service, region, protocol, timestampSupplier);
+        var signer = new SplittableSigV4Signer(credentialsProvider, service, region, protocol, timestampSupplier);
         return new IAuthTransformer.StreamingFullMessageTransformer() {
             @Override
             public void consumeNextPayloadPart(ByteBuffer contentChunk) {
@@ -45,9 +45,13 @@ public class SigV4AuthTransformerFactory implements IAuthTransformerFactory {
             }
 
             @Override
-            public void finalizeSignature(HttpJsonRequestWithFaultingPayload msg) {
-                var signatureHeaders = signer.finalizeSignature(IHttpMessageAdapter.toIHttpMessage(httpMessage));
-                msg.headers().putAll(signatureHeaders);
+            public SignatureProducer finalizeContentHash() {
+                var contentHash = signer.computeContentHash();
+                var reentrantSigner = signer.createReentrantSigner(
+                    contentHash, IHttpMessageAdapter.toIHttpMessage(httpMessage));
+                return msg -> {
+                    return reentrantSigner.sign();
+                };
             }
         };
     }
@@ -93,7 +97,6 @@ public class SigV4AuthTransformerFactory implements IAuthTransformerFactory {
                     }
 
                     return Collections.unmodifiableMap(convertedHeaders);
-
                 }
             };
         }

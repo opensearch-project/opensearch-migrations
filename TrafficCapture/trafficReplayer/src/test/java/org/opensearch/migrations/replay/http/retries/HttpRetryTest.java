@@ -16,6 +16,7 @@ import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.TransformedTargetRequestAndResponseList;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.testutils.SharedDockerImageNames;
@@ -84,8 +85,9 @@ public class HttpRetryTest {
         var startTimeForThisRequest = baseTime.plus(Duration.ofMillis(10));
         var sourceRequestPackets = makeRequest();
         var sourceResponseBytes = RetryTestUtils.makeSlashResponse(200).getBytes(StandardCharsets.UTF_8);
+        var sourceRequestProducer = ByteBufListProducer.of(sourceRequestPackets);
         var retryVisitor = retryFactory.getRetryCheckVisitor(
-            new TransformedOutputAndResult<>(sourceRequestPackets, HttpRequestTransformationStatus.skipped()),
+            new TransformedOutputAndResult<>(sourceRequestProducer, HttpRequestTransformationStatus.skipped()),
             TextTrackedFuture.completedFuture(new RetryTestUtils.TestRequestResponsePair(sourceResponseBytes),
                 () -> "static rrp"));
         log.info("Scheduling item to run at " + startTimeForThisRequest);
@@ -94,7 +96,7 @@ public class HttpRetryTest {
             requestContext,
             startTimeForThisRequest,
             Duration.ofMillis(1),
-            sourceRequestPackets,
+            sourceRequestProducer,
             retryVisitor
         ).whenComplete((v,t) -> requestContext.close(), () -> "test request context closure");
     }
