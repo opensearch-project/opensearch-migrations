@@ -26,16 +26,17 @@
 
 ## Overview
 
-OpenSearch Migration Assistant is a comprehensive set of tools designed to facilitate upgrades, migrations, and comparisons for OpenSearch and Elasticsearch clusters. This project aims to simplify the process of moving between different versions and platforms while ensuring data integrity and performance.
+OpenSearch Migration Assistant is a comprehensive set of tools designed to facilitate upgrades, migrations, and comparisons for OpenSearch, Elasticsearch, and Apache Solr clusters. This project aims to simplify the process of moving between different versions and platforms while ensuring data integrity and performance.
 
 ## Key Features
 
-- **Upgrade and Migration Support**: Provides tools for migrating between different versions of Elasticsearch and OpenSearch.
+- **Upgrade and Migration Support**: Provides tools for migrating between different versions of Elasticsearch, OpenSearch, and Apache Solr.
   - **[Metadata Migration](MetadataMigration/README.md)**: Migrate essential cluster components such as configuration, settings, templates, and aliases.
   - **Multi-Version Upgrade**: Easily migrate across major versions (e.g., from Elasticsearch 6.8 to OpenSearch 2.15), skipping intermediate upgrades and reducing time and risk.
   - **Downgrade Support**: Downgrade to an earlier version if needed (e.g., from Elasticsearch 7.17 to 7.10.2).
   - **Existing Data Migration with [Reindex-from-Snapshot](RFS/docs/DESIGN.md)**: Migrate indices and documents using snapshots, updating your data to the latest Lucene version quickly without impacting the target cluster.
   - **Live Traffic Capture with [Capture-and-Replay](docs/TrafficCaptureAndReplayDesign.md)**: Capture live traffic from the source cluster and replay it on the target cluster for validation. This ensures the target cluster can handle real-world traffic patterns before fully migrating.
+  - **[Solr Query Translation Shim](https://github.com/opensearch-project/opensearch-migrations/wiki/Solr-Query-Translation-Shim)**: Transparent HTTP proxy that translates Solr API requests to OpenSearch, enabling incremental migration from Apache Solr 8.x to OpenSearch 3.x without application code changes. See the [Solr Migration Overview](https://github.com/opensearch-project/opensearch-migrations/wiki/Solr-Migration-Overview) for details.
   
 - **Zero-Downtime Migration with [Live Traffic Routing](docs/ClientTrafficSwinging.md)**: Tools to seamlessly switch client traffic between clusters while keeping services fully operational.
 
@@ -71,6 +72,7 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 <tr><td>OpenSearch 1.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
 <tr><td>OpenSearch 2.x</td><td></td><td>✅</td><td>✅</td></tr>
 <tr><td>OpenSearch 3.x</td><td></td><td></td><td>🔜 <a href="https://github.com/orgs/opensearch-project/projects/229?pane=issue&itemId=117495207">link</a></td></tr>
+<tr><td>Apache Solr 8.x</td><td></td><td></td><td>✅</td></tr>
 </table>
 
 Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
