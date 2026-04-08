@@ -214,7 +214,6 @@ charts:
       image:
         repository: "${M}/public.ecr.aws/aws-controllers-k8s/cloudwatch-controller"
         tag: "1.4.2"
-        tag: "1.4.2"
 
 # --- Direct template image overrides ---
 defaultBucketConfiguration:
