@@ -17,7 +17,7 @@ class MetricsReceiverTest {
     private static final MetricsExtractor SOLR_EXTRACTOR = new SolrMetricsExtractor();
 
     /** Simple in-memory sink for testing. */
-    static class CapturingSink implements MetricsSink {
+    static class CapturingSink implements ReportingSink {
         final List<ValidationDocument> documents = new ArrayList<>();
         @Override public void submit(ValidationDocument document) { documents.add(document); }
         @Override public void flush() {}
@@ -163,7 +163,7 @@ class MetricsReceiverTest {
 
     @Test
     void exceptionInCollectDoesNotPropagate() {
-        var throwingSink = new MetricsSink() {
+        var throwingSink = new ReportingSink() {
             @Override public void submit(ValidationDocument d) { throw new RuntimeException("boom"); }
             @Override public void flush() {}
             @Override public void close() {}
@@ -345,7 +345,7 @@ class MetricsReceiverTest {
 
     @Test
     void exceptionInResolvedCollectDoesNotPropagate() {
-        var throwingSink = new MetricsSink() {
+        var throwingSink = new ReportingSink() {
             @Override public void submit(ValidationDocument d) { throw new RuntimeException("boom"); }
             @Override public void flush() {}
             @Override public void close() {}
@@ -360,7 +360,7 @@ class MetricsReceiverTest {
 
     @Test
     void exceptionInMapOverloadDoesNotPropagate() {
-        var throwingSink = new MetricsSink() {
+        var throwingSink = new ReportingSink() {
             @Override public void submit(ValidationDocument d) { throw new RuntimeException("boom"); }
             @Override public void flush() {}
             @Override public void close() {}
