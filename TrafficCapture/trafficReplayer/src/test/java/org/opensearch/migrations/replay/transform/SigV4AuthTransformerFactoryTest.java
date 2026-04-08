@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.transform;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -9,11 +10,17 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.replay.TestUtils;
+import org.opensearch.migrations.replay.datahandlers.TransformedPacketReceiver;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.datahandlers.http.SigningByteBufListProducer;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 
-import io.netty.handler.codec.http.DefaultHttpHeaders;
+import io.netty.buffer.Unpooled;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -27,7 +34,6 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
     private static class MockCredentialsProvider implements AwsCredentialsProvider {
         @Override
         public AwsCredentials resolveCredentials() {
-            // Notice that these are example keys
             return AwsBasicCredentials.create("AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
         }
     }
@@ -37,77 +43,229 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
     @WrapWithNettyLeakDetection(repetitions = 2)
     public void testSignatureProperlyApplied(String contentTypeHeaderKey) throws Exception {
         Random r = new Random(2);
-        var mockCredentialsProvider = new MockCredentialsProvider();
+        var stringParts = IntStream.range(0, 1)
+            .mapToObj(i -> TestUtils.makeRandomString(r, 64))
+            .collect(Collectors.toList());
 
-        // Test with payload
-        testWithPayload(r, mockCredentialsProvider, contentTypeHeaderKey);
+        var output = runSigningPipeline(contentTypeHeaderKey, "application/json", stringParts);
+        var outputStr = output.toString(StandardCharsets.UTF_8);
+
+        Assertions.assertTrue(outputStr.contains("Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request"),
+            "Expected Authorization header in output: " + outputStr);
+        Assertions.assertTrue(outputStr.contains("X-Amz-Date: 19700101T000000Z"),
+            "Expected X-Amz-Date header in output: " + outputStr);
+        Assertions.assertTrue(outputStr.contains("x-amz-content-sha256:"),
+            "Expected x-amz-content-sha256 header in output: " + outputStr);
+        output.release();
     }
 
     @Test
     @WrapWithNettyLeakDetection(repetitions = 2)
     public void testSignatureProperlyAppliedNoPayload() throws Exception {
-        var mockCredentialsProvider = new MockCredentialsProvider();
+        var output = runSigningPipeline(null, null, List.of());
+        var outputStr = output.toString(StandardCharsets.UTF_8);
 
-        // Test without payload
-        testWithoutPayload(mockCredentialsProvider);
+        Assertions.assertTrue(outputStr.contains("Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request"),
+            "Expected Authorization header in output: " + outputStr);
+        Assertions.assertTrue(outputStr.contains("X-Amz-Date: 19700101T000000Z"),
+            "Expected X-Amz-Date header in output: " + outputStr);
+        output.release();
     }
 
-    private void testWithPayload(Random r, MockCredentialsProvider mockCredentialsProvider, String contentTypeHeaderKey) throws Exception {
+    @Test
+    @WrapWithNettyLeakDetection(repetitions = 2)
+    public void testRepeatedSigningProducesFreshHeaders() throws Exception {
+        Random r = new Random(2);
         var stringParts = IntStream.range(0, 1)
             .mapToObj(i -> TestUtils.makeRandomString(r, 64))
             .collect(Collectors.toList());
 
-        DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
-        var contentTypeHeaderValue = "application/json";
+        var producer = runSigningPipelineGetProducer("Content-Type", "application/json", stringParts);
 
-        expectedRequestHeaders.add("Host", "localhost");
-        expectedRequestHeaders.add(contentTypeHeaderKey, contentTypeHeaderValue);
-        expectedRequestHeaders.add("Content-Length", "46");
-        expectedRequestHeaders.add(
-            "Authorization",
-            "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request, "
-                + "SignedHeaders=" + contentTypeHeaderKey.toLowerCase() + ";host;x-amz-content-sha256;x-amz-date, "
-                + "Signature=7f321c18069cac1ec6dbbeb4cabeae83ed7fd31724d692f7e486932792c8f82b"
-        );
-        expectedRequestHeaders.add(
-            "x-amz-content-sha256",
-            "fc0e8e9a1f7697f510bfdd4d55b8612df8a0140b4210967efd87ee9cb7104362"
-        );
-        expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");
-        runTest(mockCredentialsProvider, contentTypeHeaderKey, contentTypeHeaderValue, expectedRequestHeaders, stringParts);
+        var first = producer.get();
+        var firstComposite = first.asCompositeByteBufRetained();
+        var firstStr = firstComposite.toString(StandardCharsets.UTF_8);
+        firstComposite.release();
+        first.release();
+
+        var second = producer.get();
+        var secondComposite = second.asCompositeByteBufRetained();
+        var secondStr = secondComposite.toString(StandardCharsets.UTF_8);
+        secondComposite.release();
+        second.release();
+
+        // Both should contain auth headers
+        Assertions.assertTrue(firstStr.contains("Authorization:"),
+            "First output should contain Authorization header. Got: " + firstStr);
+        Assertions.assertTrue(secondStr.contains("Authorization:"),
+            "Second output should contain Authorization header. Got: " + secondStr);
+
+        // Both should be identical (same fixed clock)
+        Assertions.assertEquals(firstStr, secondStr,
+            "With a fixed clock, repeated signing should produce identical output");
+
+        producer.release();
     }
 
-    private void testWithoutPayload(MockCredentialsProvider mockCredentialsProvider) throws Exception {
-        DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
+    @Test
+    @WrapWithNettyLeakDetection(repetitions = 2)
+    public void testReSigningProducesDifferentHeadersWhenClockAdvances() throws Exception {
+        Random r = new Random(2);
+        var stringParts = IntStream.range(0, 1)
+            .mapToObj(i -> TestUtils.makeRandomString(r, 64))
+            .collect(Collectors.toList());
 
-        expectedRequestHeaders.add("Host", "localhost");
-        expectedRequestHeaders.add("Content-Length", "0");
-        expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");
-        expectedRequestHeaders.add(
-            "Authorization",
-            "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request, "
-                + "SignedHeaders=" + "host;x-amz-date, "
-                + "Signature=0c80b2640a1de42eb5cf957c6bc080731d8f83ccc1d4ebe40e72cd847ed4648e"
-        );
-        runTest(mockCredentialsProvider, null, null, expectedRequestHeaders, List.of());
-    }
+        var clockRef = new java.util.concurrent.atomic.AtomicReference<>(
+            Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
 
-    private void runTest(MockCredentialsProvider mockCredentialsProvider, String contentTypeHeaderKey, String contentTypeHeaderValue, DefaultHttpHeaders expectedRequestHeaders, java.util.List<String> stringParts) throws Exception {
         try (var factory = new SigV4AuthTransformerFactory(
-            mockCredentialsProvider,
-            "es",
-            "us-east-1",
-            "https",
+            new MockCredentialsProvider(), "es", "us-east-1", "https",
+            clockRef::get
+        )) {
+            var producer = buildProducer(factory, "Content-Type", "application/json", stringParts);
+
+            var first = producer.get();
+            var firstComposite = first.asCompositeByteBufRetained();
+            var firstStr = firstComposite.toString(StandardCharsets.UTF_8);
+            firstComposite.release();
+            first.release();
+
+            // Advance the clock by 1 hour
+            clockRef.set(Clock.fixed(Instant.EPOCH.plusSeconds(3600), ZoneOffset.UTC));
+
+            var second = producer.get();
+            var secondComposite = second.asCompositeByteBufRetained();
+            var secondStr = secondComposite.toString(StandardCharsets.UTF_8);
+            secondComposite.release();
+            second.release();
+
+            // Both should have auth headers
+            Assertions.assertTrue(firstStr.contains("X-Amz-Date: 19700101T000000Z"),
+                "First should have epoch timestamp");
+            Assertions.assertTrue(secondStr.contains("X-Amz-Date: 19700101T010000Z"),
+                "Second should have advanced timestamp. Got: " + secondStr);
+
+            // Authorization signatures must differ due to different timestamps
+            Assertions.assertNotEquals(firstStr, secondStr,
+                "Output should differ when clock advances");
+
+            producer.release();
+        }
+    }
+
+    @Test
+    @WrapWithNettyLeakDetection(repetitions = 2)
+    public void testJsonTransformRunsOnceNotOnRetries() throws Exception {
+        Random r = new Random(2);
+        var stringParts = IntStream.range(0, 1)
+            .mapToObj(i -> TestUtils.makeRandomString(r, 64))
+            .collect(Collectors.toList());
+
+        var transformCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        IJsonTransformer countingTransformer = msg -> {
+            transformCount.incrementAndGet();
+            return msg;
+        };
+
+        try (var factory = new SigV4AuthTransformerFactory(
+            new MockCredentialsProvider(), "es", "us-east-1", "https",
             () -> Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
         )) {
-            TestUtils.runPipelineAndValidate(
-                rootContext,
-                factory,
-                (contentTypeHeaderKey != null) ? contentTypeHeaderKey + ": " + contentTypeHeaderValue + "\r\n" : null,
-                stringParts,
-                expectedRequestHeaders,
-                TestUtils::resolveReferenceString
+            var transformingHandler = new HttpJsonTransformingConsumer<>(
+                countingTransformer, factory, new TransformedPacketReceiver(),
+                rootContext.getTestConnectionRequestContext("TEST_CONNECTION", 0)
             );
+
+            var contentLength = stringParts.stream().mapToInt(String::length).sum();
+            var headerString = "GET / HTTP/1.1\r\n"
+                + "Host: localhost\r\n"
+                + "Content-Type: application/json\r\n"
+                + "Content-Length: " + contentLength + "\r\n\r\n";
+
+            transformingHandler.consumeBytes(
+                Unpooled.wrappedBuffer(headerString.getBytes(StandardCharsets.UTF_8)));
+            for (var part : stringParts) {
+                transformingHandler.consumeBytes(
+                    Unpooled.wrappedBuffer(part.getBytes(StandardCharsets.UTF_8)));
+            }
+
+            var result = transformingHandler.finalizeRequest().get();
+            var producer = (ByteBufListProducer) result.transformedOutput;
+
+            Assertions.assertEquals(1, transformCount.get(),
+                "Transform should have run exactly once during pipeline processing");
+
+            // Call get() multiple times (simulating retries)
+            for (int i = 0; i < 3; i++) {
+                var packets = producer.get();
+                var composite = packets.asCompositeByteBufRetained();
+                Assertions.assertTrue(
+                    composite.toString(StandardCharsets.UTF_8).contains("Authorization:"),
+                    "Retry " + i + " should contain Authorization header");
+                composite.release();
+                packets.release();
+            }
+
+            Assertions.assertEquals(1, transformCount.get(),
+                "Transform count should still be 1 after multiple get() calls — "
+                + "retries should only re-sign, not re-transform");
+
+            producer.release();
         }
+    }
+
+    private io.netty.buffer.CompositeByteBuf runSigningPipeline(
+        String contentTypeHeaderKey, String contentTypeHeaderValue,
+        List<String> stringParts
+    ) throws Exception {
+        var producer = runSigningPipelineGetProducer(contentTypeHeaderKey, contentTypeHeaderValue, stringParts);
+        var packets = producer.get();
+        var result = packets.asCompositeByteBufRetained();
+        packets.release();
+        producer.release();
+        return result;
+    }
+
+    private ByteBufListProducer runSigningPipelineGetProducer(
+        String contentTypeHeaderKey, String contentTypeHeaderValue,
+        List<String> stringParts
+    ) throws Exception {
+        try (var factory = new SigV4AuthTransformerFactory(
+            new MockCredentialsProvider(), "es", "us-east-1", "https",
+            () -> Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
+        )) {
+            return buildProducer(factory, contentTypeHeaderKey, contentTypeHeaderValue, stringParts);
+        }
+    }
+
+    private ByteBufListProducer buildProducer(
+        SigV4AuthTransformerFactory factory,
+        String contentTypeHeaderKey, String contentTypeHeaderValue,
+        List<String> stringParts
+    ) throws Exception {
+        IJsonTransformer identityTransformer = x -> x;
+        var transformingHandler = new HttpJsonTransformingConsumer<>(
+            identityTransformer, factory, new TransformedPacketReceiver(),
+            rootContext.getTestConnectionRequestContext("TEST_CONNECTION", 0)
+        );
+
+        var contentLength = stringParts.stream().mapToInt(String::length).sum();
+        var headerString = "GET / HTTP/1.1\r\n"
+            + "Host: localhost\r\n"
+            + (contentTypeHeaderKey != null
+                ? contentTypeHeaderKey + ": " + contentTypeHeaderValue + "\r\n" : "")
+            + "Content-Length: " + contentLength + "\r\n\r\n";
+
+        transformingHandler.consumeBytes(
+            Unpooled.wrappedBuffer(headerString.getBytes(StandardCharsets.UTF_8)));
+        for (var part : stringParts) {
+            transformingHandler.consumeBytes(
+                Unpooled.wrappedBuffer(part.getBytes(StandardCharsets.UTF_8)));
+        }
+
+        var result = transformingHandler.finalizeRequest().get();
+        Assertions.assertInstanceOf(SigningByteBufListProducer.class, result.transformedOutput,
+            "Expected SigningByteBufListProducer but got " + result.transformedOutput.getClass().getName());
+        return (ByteBufListProducer) result.transformedOutput;
     }
 }

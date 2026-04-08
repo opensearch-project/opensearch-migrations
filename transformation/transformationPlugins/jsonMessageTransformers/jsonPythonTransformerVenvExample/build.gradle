@@ -49,25 +49,26 @@ ${java} --enable-native-access=ALL-UNNAMED -classpath ${cp} com.oracle.graal.pyt
 // Step 1: graalpy -m venv (exactly as a customer would)
 tasks.register('createGraalPyVenv', Exec) {
     dependsOn generateGraalPyLauncher
+    inputs.file graalPyScript
     commandLine 'bash', graalPyScript.absolutePath, '-m', 'venv', venvDir.absolutePath
     outputs.dir venvDir
-    onlyIf { !venvDir.exists() }
 }
 
 // Step 2: pip install (exactly as a customer would)
 tasks.register('pipInstallPydantic', Exec) {
     dependsOn createGraalPyVenv
-    commandLine "${venvDir}/bin/pip", 'install', 'pydantic', customTransformDir.absolutePath
-    outputs.file "${venvDir}/lib/python3.12/site-packages/pydantic/__init__.py"
-    onlyIf { !file("${venvDir}/lib/python3.12/site-packages/pydantic/__init__.py").exists() }
+    inputs.dir venvDir
+    inputs.dir customTransformDir
+    commandLine 'bash', "${venvDir}/bin/graalpy", '-m', 'pip', 'install', 'pydantic', customTransformDir.absolutePath
+    outputs.dir venvDir
 }
 
 // Step 3: tar czf (exactly as a customer would ship it)
 tasks.register('packageVenvTarball', Exec) {
     dependsOn pipInstallPydantic
+    inputs.dir venvDir
     commandLine 'tar', 'czf', venvTarball.absolutePath, '-C', layout.buildDirectory.get().asFile.absolutePath, venvParent.name
     outputs.file venvTarball
-    onlyIf { !venvTarball.exists() || venvDir.lastModified() > venvTarball.lastModified() }
 }
 
 test {
