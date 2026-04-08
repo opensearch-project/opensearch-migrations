@@ -288,14 +288,29 @@ public class CreateSnapshot {
     private static List<String> parseJsonObjectKeys(String json, String fieldName) {
         var result = new java.util.ArrayList<String>();
         var key = "\"" + fieldName + "\"";
-        int idx = json.indexOf(key);
-        if (idx < 0) return result;
-        int objStart = json.indexOf('{', idx + key.length());
-        if (objStart < 0) return result;
-        int objEnd = findMatchingBrace(json, objStart);
-        var objContent = json.substring(objStart + 1, objEnd);
-        extractTopLevelKeys(objContent, result);
-        return result;
+        // Find the occurrence of "fieldName" whose value is a '{' (object), not a number/string.
+        // Solr responses have "status":0 in responseHeader AND "status":{...} at top level.
+        int idx = 0;
+        while (true) {
+            idx = json.indexOf(key, idx);
+            if (idx < 0) return result;
+            // Skip past the key and any whitespace/colon
+            int afterKey = idx + key.length();
+            int colon = json.indexOf(':', afterKey);
+            if (colon < 0) return result;
+            // Find first non-whitespace after colon
+            int valStart = colon + 1;
+            while (valStart < json.length() && Character.isWhitespace(json.charAt(valStart))) {
+                valStart++;
+            }
+            if (valStart < json.length() && json.charAt(valStart) == '{') {
+                int objEnd = findMatchingBrace(json, valStart);
+                var objContent = json.substring(valStart + 1, objEnd);
+                extractTopLevelKeys(objContent, result);
+                return result;
+            }
+            idx = afterKey; // try next occurrence
+        }
     }
 
     /** Find the position of the closing brace matching the opening brace at {@code openPos}. */
