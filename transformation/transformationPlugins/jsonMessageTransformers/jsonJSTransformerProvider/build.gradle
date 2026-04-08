@@ -4,11 +4,8 @@ plugins {
 }
 
 dependencies {
-    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonGraalTransformerBase')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformer')
-
-    implementation libs.jackson.core
-    implementation libs.jackson.databind
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))

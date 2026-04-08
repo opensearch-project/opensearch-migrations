@@ -428,8 +428,9 @@ export const SetupCapture = WorkflowBuilder.create({
         .addSteps(b => {
             const config = expr.deserializeRecord(b.inputs.proxyConfig);
             const proxyOpts = expr.get(config, "proxyConfig");
-            // Use dig so generated `when` expressions stay null-safe and avoid bracket-heavy
-            // nested indexing that Argo fails to parse here.
+            // Use dig for ALL tls field accesses so expressions are null-safe.
+            // Argo evaluates step parameter expressions BEFORE checking `when` conditions,
+            // so expr.get() on a nil tls block crashes even when the step is guarded.
             const tlsMode = expr.dig(proxyOpts, ["tls", "mode"], expr.literal(""));
             const hasCertManagerTls = expr.equals(tlsMode, "certManager");
             const hasExistingSecretTls = expr.equals(tlsMode, "existingSecret");
