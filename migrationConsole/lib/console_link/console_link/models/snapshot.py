@@ -820,7 +820,7 @@ def _get_solr_standalone_snapshot_status(cluster: Cluster) -> SnapshotStatus:
 def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotStatus:
     """Build a SnapshotStatus — auto-detects standalone vs SolrCloud."""
     if _is_solr_standalone(cluster):
-        return _get_solr_standalone_snapshot_status(cluster, snapshot_name)
+        return _get_solr_standalone_snapshot_status(cluster)
 
     # SolrCloud path: use Collections API REQUESTSTATUS
     r = cluster.call_api(SOLR_LIST_COLLECTIONS_API, timeout=30)
@@ -1205,4 +1205,4 @@ class FailedToDeleteSnapshot(Exception):
 
 class FailedToDeleteSnapshotRepo(Exception):
     pass
-pass
+
