@@ -7,7 +7,7 @@ import {Cluster} from "aws-cdk-lib/aws-ecs";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
-import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId} from "aws-cdk-lib/custom-resources";
+import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId, PhysicalResourceIdReference} from "aws-cdk-lib/custom-resources";
 import {
     ScalableTarget, 
     TargetTrackingScalingPolicy, 
@@ -272,10 +272,9 @@ export class MigrationAssistanceStack extends Stack {
                 service: 'S3Files',
                 action: 'deleteFileSystem',
                 parameters: {
-                    // PhysicalResourceId.fromResponse stores the fileSystemId from onCreate;
-                    // on delete, the custom resource framework passes it as the physical resource ID.
-                    // We reference it via getResponseField which reads the stored onCreate response.
-                    fileSystemId: new PhysicalResourceId('dummy').id, // placeholder — see installLatestAwsSdk
+                    // PhysicalResourceIdReference resolves to the physical resource ID
+                    // stored from onCreate (the fileSystemId).
+                    fileSystemId: new PhysicalResourceIdReference(),
                     forceDelete: true,
                 },
             },

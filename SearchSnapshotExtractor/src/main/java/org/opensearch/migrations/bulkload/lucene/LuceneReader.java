@@ -38,9 +38,9 @@ public class LuceneReader {
     public static Flux<LuceneDocumentChange> readWithSegmentSplitReaders(
             java.util.List<LuceneDirectoryReader> readers, int startDocId) {
         var primary = readers.get(0);
-        // All readers opened the same commit — same segments in same order
-        var allSegments = getSegmentsFromStartingSegment(primary.leaves(), startDocId)
-            .collectList().block();
+        // All readers opened the same commit — same segments in same order.
+        // getSegmentListFromStartingSegment is purely synchronous (in-memory sort + filter).
+        var allSegments = getSegmentListFromStartingSegment(primary.leaves(), startDocId);
 
         log.atInfo().setMessage("{} documents in {} segments, split across {} readers")
             .addArgument(primary::maxDoc)
@@ -51,9 +51,7 @@ public class LuceneReader {
         // Build per-reader segment lists — each reader opens the same commit so segments match.
         var perReaderSegments = new java.util.ArrayList<java.util.List<ReaderAndBase>>();
         for (var reader : readers) {
-            perReaderSegments.add(
-                getSegmentsFromStartingSegment(reader.leaves(), startDocId).collectList().block()
-            );
+            perReaderSegments.add(getSegmentListFromStartingSegment(reader.leaves(), startDocId));
         }
 
         // Iterate segments in global order, round-robin across readers.
@@ -113,8 +111,15 @@ public class LuceneReader {
      *         wrapped in {@link ReaderAndBase}.
      */
     static Flux<ReaderAndBase> getSegmentsFromStartingSegment(List<? extends LuceneLeafReaderContext> originalLeaves, int startDocId) {
+        return Flux.fromIterable(getSegmentListFromStartingSegment(originalLeaves, startDocId));
+    }
+
+    /**
+     * Synchronous version: retrieves, sorts, and filters document segments into a List.
+     */
+    static List<ReaderAndBase> getSegmentListFromStartingSegment(List<? extends LuceneLeafReaderContext> originalLeaves, int startDocId) {
         if (originalLeaves.isEmpty()) {
-            return Flux.empty();
+            return List.of();
         }
 
         // Step 1: Sort the segments by name
@@ -146,7 +151,7 @@ public class LuceneReader {
         }
 
         // Step 5: Return the sublist starting from the first valid segment
-        return Flux.fromIterable(sortedReaderAndBase.subList(index, sortedReaderAndBase.size()));
+        return sortedReaderAndBase.subList(index, sortedReaderAndBase.size());
     }
 
     /** Number of parallel sub-range readers per segment — each gets its own thread + ThreadLocal StoredFields. */

@@ -471,6 +471,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                             "default": ""
                           },
+                          "useS3Files": {
+                            "type": "boolean",
+                            "default": true
+                          },
+                          "s3FilesFileSystemId": {
+                            "type": "string",
+                            "pattern": "^(fs-[0-9a-f]{17,40})?$",
+                            "default": ""
+                          },
                           "useLocalStack": {
                             "type": "boolean",
                             "default": false
@@ -1059,6 +1068,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "s3RoleArn": {
                           "type": "string",
                           "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "default": ""
+                        },
+                        "useS3Files": {
+                          "type": "boolean",
+                          "default": true
+                        },
+                        "s3FilesFileSystemId": {
+                          "type": "string",
+                          "pattern": "^(fs-[0-9a-f]{17,40})?$",
                           "default": ""
                         },
                         "useLocalStack": {
@@ -1688,6 +1706,17 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
                       "default": "",
                       "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. This is passed to the cluster when registering the snapshot repository. Leave empty if the cluster's own IAM role already has S3 access."
+                    },
+                    "useS3Files": {
+                      "type": "boolean",
+                      "default": true,
+                      "description": "When true, mount the S3 bucket via S3 Files (NFS PV) instead of per-pod mount-s3. Requires an S3 Files file system and mount target in the same VPC. The s3FilesFileSystemId must be set when this is true."
+                    },
+                    "s3FilesFileSystemId": {
+                      "type": "string",
+                      "pattern": "^(fs-[0-9a-f]{17,40})?$",
+                      "default": "",
+                      "description": "S3 Files file system ID (e.g. 'fs-0123456789abcdef0'). Required when useS3Files is true."
                     }
                   },
                   "required": [
