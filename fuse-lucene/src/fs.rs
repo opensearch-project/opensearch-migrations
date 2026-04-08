@@ -2,7 +2,7 @@
 ///
 /// Uses fuser 0.17's multi-threaded dispatch (`&self` + `n_threads` + `clone_fd`)
 /// so multiple FUSE read requests are served concurrently — critical when the
-/// underlying I/O goes through NFS (S3 Files).
+/// underlying I/O goes through mount-s3.
 use crate::metadata::{self, ShardFileEntry};
 use crate::repo::ResolvedRepo;
 use fuser::{

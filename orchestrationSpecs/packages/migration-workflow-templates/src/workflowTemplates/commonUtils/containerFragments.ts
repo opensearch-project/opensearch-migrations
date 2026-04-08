@@ -136,45 +136,84 @@ export function setupLog4jConfigForContainer(
     } as const;
 }
 
+const S3_CACHE_VOLUME_NAME = "s3-cache";
+
 /**
- * Add a snapshot-fuse native sidecar that translates ES/OS snapshot blobs into
- * virtual Lucene files via FUSE.
- *
- * S3 data is provided by an NFS PersistentVolume backed by an S3 Files access
- * point. The access point creates ENIs in the EKS VPC that serve NFSv3,
- * mounted at /mnt/s3 as a ReadOnlyMany PVC ("snapshot-s3-nfs"). snapshot-fuse
- * reads the snapshot blobs from NFS and presents virtual Lucene segment files
- * at /mnt/lucene via a FUSE mount.
- *
- * The FUSE mount point uses an emptyDir shared between the sidecar and the
- * bulk-loader via Bidirectional/HostToContainer mount propagation.
+ * Add a snapshot-fuse native sidecar (init container with restartPolicy: Always) that:
+ * 1. Runs mount-s3 to mount the S3 bucket at /mnt/s3 (with local cache)
+ * 2. Runs snapshot-fuse FUSE to translate ES/OS snapshot blobs into virtual Lucene files at /mnt/lucene
  *
  * As a native sidecar (K8s 1.29+), kubelet guarantees it starts and passes its
- * startupProbe before any regular containers start.
+ * startupProbe before any regular containers start — eliminating race conditions.
+ *
+ * Each pod independently mounts S3 and caches hot blocks locally. No PV/PVC or CSI driver required.
+ * This enables horizontal scaling — each pod gets its own mount-s3 process and cache.
+ *
+ * Uses a hostPath volume for the FUSE and S3 mount points.
+ * This avoids SELinux relabeling failures — containerd tries to lsetxattr on
+ * emptyDir contents when starting subsequent containers, which fails on FUSE
+ * mount points. hostPath volumes are not subject to SELinux relabeling.
+ *
+ * The init container creates per-pod subdirectories (using POD_NAME) inside
+ * the hostPath and mounts FUSE/S3 there, then creates symlinks at the
+ * well-known paths (/mnt/lucene, /mnt/s3) pointing to the pod-specific mounts.
+ * The bulk-loader sees these symlinks via HostToContainer mount propagation.
  */
 export function setupSnapshotFuseSidecar(
     snapshotLocalDir: BaseExpression<string>,
     snapshotName: BaseExpression<string>,
+    s3Bucket: BaseExpression<string>,
+    s3Region: BaseExpression<string>,
+    useLocalStack: BaseExpression<boolean>,
     sidecarImage: BaseExpression<string>,
     sidecarImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     def: ContainerVolumePair): ContainerVolumePair {
 
-    const NFS_PVC_VOLUME = "snapshot-s3-nfs";
-    const FUSE_MOUNT_VOLUME = "fuse-lucene";
-    const {volumeMounts, ...restOfContainer} = def.container;
+    const SHARED_HOSTPATH_VOLUME = "snapshot-mnt";
+    const {volumeMounts, command, args, env, ...restOfContainer} = def.container;
+    const podNameEnv = {
+        name: "POD_NAME",
+        valueFrom: { fieldRef: { fieldPath: "metadata.name" } }
+    };
     return {
         volumes: [
             ...def.volumes,
-            { name: NFS_PVC_VOLUME, persistentVolumeClaim: { claimName: "snapshot-s3-nfs", readOnly: true } },
-            { name: FUSE_MOUNT_VOLUME, emptyDir: {} }
+            { name: SHARED_HOSTPATH_VOLUME, hostPath: { path: "/var/tmp/snapshot-mnt", type: "DirectoryOrCreate" } },
+            { name: S3_CACHE_VOLUME_NAME, emptyDir: { sizeLimit: "10Gi" } }
         ],
         container: {
             ...restOfContainer,
+            // Wrap the original command to rewrite /mnt/lucene and /mnt/s3 paths
+            // to per-pod paths (/mnt/.pods/$POD_NAME/{lucene,s3}) at runtime.
+            // This is needed because multiple pods share the same hostPath volume
+            // and each pod has its own FUSE mount in a per-pod subdirectory.
+            command: ["sh", "-c"],
+            args: [
+                "P=/mnt/.pods/${POD_NAME}; " +
+                "NEW_ARGS=''; " +
+                "NEXT_IS_JSON=false; " +
+                "for a do " +
+                "  if $NEXT_IS_JSON; then " +
+                "    a=$(printf '%s' \"$a\" | base64 -d | " +
+                "      sed \"s|/mnt/lucene|$P/lucene|g;s|/mnt/s3/|$P/s3/|g\" | base64 -w0); " +
+                "    NEXT_IS_JSON=false; " +
+                "  fi; " +
+                "  case $a in ---INLINE-JSON) NEXT_IS_JSON=true;; esac; " +
+                "  NEW_ARGS=\"$NEW_ARGS \\\"$a\\\"\"; " +
+                "done; " +
+                "eval exec " + (command ?? []).join(" ") + " $NEW_ARGS",
+                "--",
+                ...(args ?? [])
+            ],
+            env: [
+                ...(env === undefined ? [] : env),
+                podNameEnv
+            ],
             volumeMounts: [
                 ...(volumeMounts === undefined ? [] : volumeMounts),
                 {
-                    name: FUSE_MOUNT_VOLUME,
-                    mountPath: "/mnt/lucene",
+                    name: SHARED_HOSTPATH_VOLUME,
+                    mountPath: "/mnt",
                     mountPropagation: "HostToContainer"
                 }
             ]
@@ -194,27 +233,61 @@ export function setupSnapshotFuseSidecar(
                 ],
                 startupProbe: {
                     exec: {
-                        command: ["mountpoint", "-q", "/mnt/lucene"]
+                        command: ["sh", "-c", "mountpoint -q /mnt/.pods/${POD_NAME}/lucene"]
                     },
                     initialDelaySeconds: 1,
                     periodSeconds: 2,
                     failureThreshold: 60
                 },
                 env: [
+                    {
+                        name: "POD_NAME",
+                        valueFrom: { fieldRef: { fieldPath: "metadata.name" } }
+                    },
                     { name: "RUST_LOG", value: "info" },
-                    { name: "FUSE_THREADS", value: "32" }
+                    { name: "FUSE_THREADS", value: "32" },
+                    { name: "S3_BUCKET", value: makeStringTypeProxy(s3Bucket) },
+                    { name: "AWS_REGION", value: makeStringTypeProxy(s3Region) },
+                    {
+                        name: "S3_ENDPOINT_URL",
+                        value: makeStringTypeProxy(expr.ternary(
+                            useLocalStack,
+                            expr.literal("http://localstack:4566"),
+                            expr.literal("")
+                        ))
+                    },
+                    {
+                        name: "S3_FORCE_PATH_STYLE",
+                        value: makeStringTypeProxy(expr.ternary(
+                            useLocalStack,
+                            expr.literal("true"),
+                            expr.literal("false")
+                        ))
+                    },
+                    {
+                        name: "AWS_SHARED_CREDENTIALS_FILE",
+                        value: makeStringTypeProxy(expr.ternary(
+                            useLocalStack,
+                            expr.literal("/config/credentials/configuration"),
+                            expr.literal("")
+                        ))
+                    }
                 ],
                 securityContext: { privileged: true },
                 volumeMounts: [
                     {
-                        name: NFS_PVC_VOLUME,
-                        mountPath: "/mnt/s3",
-                        readOnly: true
+                        name: SHARED_HOSTPATH_VOLUME,
+                        mountPath: "/mnt",
+                        mountPropagation: "Bidirectional"
                     },
                     {
-                        name: FUSE_MOUNT_VOLUME,
-                        mountPath: "/mnt/lucene",
-                        mountPropagation: "Bidirectional"
+                        name: S3_CACHE_VOLUME_NAME,
+                        mountPath: "/cache"
+                    },
+                    {
+                        name: "localstack-test-creds",
+                        mountPath: "/config/credentials",
+                        readOnly: true
                     }
                 ]
             }

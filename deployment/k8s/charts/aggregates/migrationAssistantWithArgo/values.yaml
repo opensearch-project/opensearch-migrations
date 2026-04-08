@@ -112,22 +112,6 @@ defaultBucketConfiguration:
   serviceAccountName: "migrations-service-account"
   bucketOperationImage: "amazon/aws-cli:2.25.11"
   bucketOperationImagePullPolicy: "IfNotPresent"
-  # S3 Files access point — creates an NFS endpoint for the snapshot bucket.
-  # Requires VpcId and SubnetIds where NFS ENIs will be placed.
-  # Only applied when useLocalStack is false (real AWS).
-  s3Files:
-    enabled: false
-    cacheTTLSeconds: 86400  # 1 day — safe for immutable snapshot data
-    # VPC and subnets where the S3 Files access point ENIs will be created.
-    # These must be the same VPC/subnets where EKS worker nodes run.
-    vpcId: ""
-    subnetIds: []
-    # Access point name — auto-generated from bucket name if empty
-    accessPointName: ""
-    # NFS endpoint from the S3 Files access point (set after access point creation).
-    # The bucket creation Job stores this in the migrations-s3-files-config ConfigMap.
-    # Used by the NFS PV to mount the bucket.
-    nfsEndpoint: ""
 
 logs:
   sharedLogsVolume:
