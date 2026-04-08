@@ -396,7 +396,6 @@ def call(Map config = [:]) {
                                         sh "pipenv install --deploy"
                                         sh "kubectl --context=${env.eksKubeContext} -n ma get pods || true"
                                         sh "pipenv run app --delete-only --kube-context=${env.eksKubeContext}"
-                                        sh "kubectl --context=${env.eksKubeContext} delete namespace ma --ignore-not-found --timeout=60s || true"
                                     }
 
                                     // Revoke security group rule added during setup
@@ -419,6 +418,12 @@ def call(Map config = [:]) {
                                           fi
                                         """
                                     }
+
+                                    eksCleanupStep(
+                                        stackName: maStackName,
+                                        eksClusterName: env.eksClusterName,
+                                        kubeContext: env.eksKubeContext
+                                    )
                                 }
 
                                 // Destroy domain stacks via CDK (uses same context file from deploy)
