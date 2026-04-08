@@ -1,4 +1,3 @@
-
 description: "Config for claude agent based migration advisor tests"
 
 providers:
@@ -20,7 +19,6 @@ prompts:
     label: "Migration advisor requests"
     raw: "{{query}}"
 
-
 tests:
 
   # Note the sequence of continue: False to start new session, and continue: True if building on the previous prompts
@@ -33,8 +31,8 @@ tests:
     assert:
       - type: llm-rubric
         value: >-
-          Response clarifies the actual role of the user. Provides at least 6 explicit role examples to choose from,
-          which distinguish engineers / developers, platform / ops engineers, data engineers, architects and product manager roles.
+          Response clarifies the actual role of the user. Provides 2 explicit role examples to choose from: 
+          search relevance engineer and devops / platform engineer.
         metric: clarify-role
 
   - description: "Ask for Solr version"
@@ -60,7 +58,6 @@ tests:
         value: >-
           Response acknowledges Solr version 6.6 response then asks the user to provide their Solr schema.
         metric: solr-version-acknowledged
-
   - description: "Provide Solr 6 schema and verify OpenSearch mapping is generated correctly"
     metadata:
       continue: true
