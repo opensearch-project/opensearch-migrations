@@ -251,15 +251,21 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ { "expression": "METRICS()/PERIOD(m1)*60", "id" : "e1", "region": "REGION" } ],
-                    [ "AWS/ECS", "CPUUtilization", "ServiceName", "migration-MA_STAGE-reindex-from-snapshot", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "region": "REGION", "label": "RFS Workers - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}", "id": "m1", "visible": false } ]
+                    [ { "expression": "SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_cpu_usage_seconds_total\" container=\"bulk-loader\" namespace=\"ma\"', 'SampleCount', 60)", "id": "e1", "region": "REGION", "label": "${PROP('Dim.pod')}" } ]
                 ],
                 "period": 60,
                 "region": "REGION",
                 "stacked": false,
                 "title": "RFS Workers Reporting In",
                 "view": "timeSeries",
-                "stat": "SampleCount"
+                "stat": "SampleCount",
+                "yAxis": {
+                    "left": {
+                        "label": "Workers",
+                        "min": 0,
+                        "showUnits": false
+                    }
+                }
             }
         },
         {
@@ -270,15 +276,20 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "AWS/ECS", "CPUUtilization", "ServiceName", "migration-MA_STAGE-reindex-from-snapshot", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "stat": "Minimum", "region": "REGION", "color": "#2ca02c" } ],
-                    [ "...", { "stat": "Average", "region": "REGION", "color": "#1f77b4" } ],
-                    [ "...", { "stat": "Maximum", "region": "REGION", "color": "#d62728" } ]
+                    [ { "expression": "SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_cpu_usage_seconds_total\" container=\"bulk-loader\" namespace=\"ma\"', 'Average', 60)", "id": "e1", "region": "REGION", "label": "${PROP('Dim.pod')}" } ]
                 ],
                 "period": 60,
                 "region": "REGION",
                 "stacked": false,
                 "title": "RFS CPU utilization",
-                "view": "timeSeries"
+                "view": "timeSeries",
+                "yAxis": {
+                    "left": {
+                        "label": "CPU (cores)",
+                        "min": 0,
+                        "showUnits": false
+                    }
+                }
             }
         },
         {
@@ -289,15 +300,20 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "AWS/ECS", "MemoryUtilization", "ServiceName", "migration-MA_STAGE-reindex-from-snapshot", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "stat": "Minimum", "region": "REGION", "color": "#2ca02c" } ],
-                    [ "...", { "stat": "Average", "region": "REGION", "color": "#1f77b4" } ],
-                    [ "...", { "stat": "Maximum", "region": "REGION", "color": "#d62728" } ]
+                    [ { "expression": "SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_memory_working_set_bytes\" container=\"bulk-loader\" namespace=\"ma\"', 'Average', 60) / 1048576", "id": "e1", "region": "REGION", "label": "${PROP('Dim.pod')}" } ]
                 ],
                 "period": 60,
                 "region": "REGION",
                 "stacked": false,
                 "title": "RFS Memory utilization",
-                "view": "timeSeries"
+                "view": "timeSeries",
+                "yAxis": {
+                    "left": {
+                        "label": "MB",
+                        "min": 0,
+                        "showUnits": false
+                    }
+                }
             }
         }
     ]

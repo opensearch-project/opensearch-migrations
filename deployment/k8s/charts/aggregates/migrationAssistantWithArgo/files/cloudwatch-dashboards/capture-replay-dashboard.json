@@ -51,10 +51,8 @@
                     [ "OpenSearchMigrations", "bytesRead", "qualifier", "MA_QUALIFIER", "OTelLib", "captureProxy", { "label": "Response Bytes", "region": "REGION", "id": "c1", "visible": false } ],
                     [ "OpenSearchMigrations", "bytesWritten", "qualifier", "MA_QUALIFIER", { "label": "Request Bytes", "region": "REGION", "id": "c2", "visible": false } ],
                     [ { "expression": "(c1 + c2) / 1048576 / PERIOD(c1)", "label": "Proxy", "id": "e1", "region": "REGION", "color": "#7f7f7f" } ],
-                    [ { "expression": "SEARCH('{AWS/Kafka,\"Broker ID\",\"Cluster Name\",Topic} Topic=\"logging-traffic-topic\" MetricName=\"BytesInPerSec\" \"Cluster Name\"=\"migration-msk-cluster-MA_STAGE\"', 'Average', 60)", "id": "k1", "region": "REGION", "visible": false, "label": "Kafka Bytes In Per Second", "period": 60 } ],
-                    [ { "expression": "SUM(k1) / 1048576", "label": "Kafka", "id": "k2", "region": "REGION" } ],
-                    [ { "expression": "SEARCH('{AWS/ApplicationELB,LoadBalancer} app/MigrationAssistant-MA_STAGE MetricName=\"ProcessedBytes\"', 'Sum', 60)", "id": "b2", "period": 60, "region": "REGION", "visible": false, "label": "ALB Bytes per Period" } ],
-                    [ { "expression": "SUM(b2)/1048576 / PERIOD(c1)", "label": "ALB", "id": "e2", "region": "REGION" } ]
+                    [ { "expression": "SEARCH('{AWS/NetworkELB,LoadBalancer} MetricName=\"ProcessedBytes\"', 'Sum', 60)", "id": "n1", "period": 60, "region": "REGION", "visible": false, "label": "NLB Bytes per Period" } ],
+                    [ { "expression": "SUM(n1)/1048576 / PERIOD(c1)", "label": "NLB", "id": "n2", "region": "REGION" } ]
                 ],
                 "view": "timeSeries",
                 "stacked": false,
@@ -118,9 +116,7 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "AWS/ECS", "MemoryUtilization", "ServiceName", "migration-MA_STAGE-traffic-replayer-default", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "stat": "Minimum", "label": "Memory Min", "region": "REGION" } ],
-                    [ "...", { "stat": "Maximum", "label": "Memory Max", "region": "REGION" } ],
-                    [ "...", { "stat": "Average", "label": "Memory Avg", "region": "REGION" } ]
+                    [ { "expression": "SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_memory_working_set_bytes\" container=\"replayer\" namespace=\"ma\"', 'Average', 60) / 1048576", "id": "e1", "region": "REGION", "label": "${PROP('Dim.pod')}" } ]
                 ],
                 "view": "timeSeries",
                 "stacked": false,
@@ -129,10 +125,9 @@
                 "period": 60,
                 "yAxis": {
                     "left": {
-                        "label": "Utilization",
+                        "label": "MB",
                         "min": 0,
-                        "max": 100,
-                        "showUnits": true
+                        "showUnits": false
                     }
                 },
                 "setPeriodToTimeRange": true
@@ -146,21 +141,18 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "AWS/ECS", "CPUUtilization", "ServiceName", "migration-MA_STAGE-traffic-replayer-default", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "stat": "Minimum", "label": "CPU Min", "region": "REGION" } ],
-                    [ "...", { "stat": "Maximum", "label": "CPU Max", "region": "REGION" } ],
-                    [ "...", { "stat": "Average", "label": "CPU Avg", "region": "REGION" } ]
+                    [ { "expression": "SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_cpu_usage_seconds_total\" container=\"replayer\" namespace=\"ma\"', 'Average', 60)", "id": "e1", "region": "REGION", "label": "${PROP('Dim.pod')}" } ]
                 ],
                 "view": "timeSeries",
                 "stacked": false,
                 "title": "Replayer CPU Utilization",
                 "region": "REGION",
-                "stat": "Average",
                 "period": 60,
                 "yAxis": {
                     "left": {
-                        "label": "Utilization",
+                        "label": "CPU (cores)",
                         "min": 0,
-                        "max": 100
+                        "showUnits": false
                     }
                 },
                 "liveData": true
