@@ -228,7 +228,9 @@ public class LuceneDocumentsReaderTest {
         var concurrentDocReads = new AtomicInteger(0);
         var segmentReadTracker = new ConcurrentHashMap<String, AtomicBoolean>();
         var concurrentSegmentReads = new AtomicInteger(0);
-        var expectedConcurrentDocReads = 100;
+        // With multi-reader architecture, all segments are read concurrently.
+        // Each segment has 100 docs (< MIN_DOCS_FOR_PARALLEL), so 1 rail each → 10 concurrent doc reads.
+        var expectedConcurrentDocReads = numSegments;
 
         var allReadsStarted = new CountDownLatch(expectedConcurrentDocReads);
 
@@ -298,11 +300,11 @@ public class LuceneDocumentsReaderTest {
             .block(Duration.ofSeconds(10));
 
         // Verify results
-        var expectedConcurrentSegments = 1; // Segment concurrency disabled for preserved ordering
+        var expectedConcurrentSegments = numSegments; // All segments read concurrently via flatMapSequential
         assertNotNull(actualDocuments);
         assertEquals(numSegments * docsPerSegment, actualDocuments.size());
         assertEquals(expectedConcurrentSegments, observedConcurrentSegments.get(), "Expected concurrent open segments equal to " + expectedConcurrentSegments);
-        assertEquals(expectedConcurrentDocReads, observedConcurrentDocReads.get(), "Expected concurrent document reads to equal DEFAULT_BOUNDED_ELASTIC_SIZE");
+        assertEquals(expectedConcurrentDocReads, observedConcurrentDocReads.get(), "Expected concurrent document reads to equal numSegments");
     }
 
     @Test
