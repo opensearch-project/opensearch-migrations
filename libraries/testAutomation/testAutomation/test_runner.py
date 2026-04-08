@@ -206,6 +206,7 @@ class TestRunner:
 
     def cleanup_deployment(self) -> None:
         helm_uninstall_error = None
+        self.k8s_service.remove_ack_dashboard_finalizers()
         try:
             self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         except Exception as e:

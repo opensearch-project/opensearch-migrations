@@ -407,6 +407,23 @@ class K8sService:
         logger.info(f"Uninstalling {release_name}...")
         return self.run_command(self._helm_base() + ["uninstall", release_name, "-n", self.namespace])
 
+    def remove_ack_dashboard_finalizers(self) -> None:
+        """Remove ACK finalizers from Dashboard CRs to prevent namespace deletion from hanging."""
+        result = self.run_command(
+            self._kubectl_base() + ["get", "dashboards.cloudwatch.services.k8s.aws",
+                                    "-n", self.namespace, "-o", "name"],
+            ignore_errors=True
+        )
+        if not result or not result.stdout.strip():
+            return
+        for resource in result.stdout.strip().splitlines():
+            logger.info(f"Removing finalizers from {resource}")
+            self.run_command(
+                self._kubectl_base() + ["patch", resource, "-n", self.namespace,
+                                        "--type=merge", "-p", '{"metadata":{"finalizers":[]}}'],
+                ignore_errors=True
+            )
+
     def get_helm_installations(self) -> List[str]:
         target_namespace = self.namespace
         # Use helm list with short output format to get just the release names
