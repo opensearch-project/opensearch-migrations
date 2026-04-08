@@ -18,6 +18,7 @@ from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME
 logger = logging.getLogger(__name__)
 
 SOLR_NO_DELETE_MSG = "Solr backups are managed as files; no delete API available."
+SOLR_LIST_COLLECTIONS_API = "/solr/admin/collections?action=LIST&wt=json"
 
 
 # Define the models first to avoid forward reference issues
@@ -113,7 +114,7 @@ class Snapshot(ABC):
     def _get_solr_collections(self) -> list:
         """Fetch collection/core names. Tries SolrCloud first, falls back to standalone."""
         try:
-            r = self.source_cluster.call_api("/solr/admin/collections?action=LIST&wt=json")
+            r = self.source_cluster.call_api(SOLR_LIST_COLLECTIONS_API)
             if r.status_code == 200:
                 collections = r.json().get("collections", [])
                 if collections:
@@ -752,7 +753,7 @@ def _accumulate_collection_result(result: dict, accum: dict) -> None:
 def _is_solr_standalone(cluster: Cluster) -> bool:
     """Return True if Solr is running in standalone (non-SolrCloud) mode."""
     try:
-        r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json", timeout=10)
+        r = cluster.call_api(SOLR_LIST_COLLECTIONS_API, timeout=10)
         return r.status_code != 200
     except Exception:
         return True
@@ -764,7 +765,7 @@ def _get_solr_cores(cluster: Cluster) -> list:
     return list(r.json().get("status", {}).keys())
 
 
-def _poll_standalone_core_status(cluster: Cluster, snapshot_name: str, core: str) -> Optional[dict]:
+def _poll_standalone_core_status(cluster: Cluster, core: str) -> Optional[dict]:
     """Check backup status for a standalone Solr core via the replication handler."""
     try:
         r = cluster.call_api(f"/solr/{core}/replication?command=details&wt=json", timeout=30)
@@ -794,7 +795,7 @@ def _get_solr_standalone_snapshot_status(cluster: Cluster, snapshot_name: str) -
     any_failed = False
 
     for core in cores:
-        result = _poll_standalone_core_status(cluster, snapshot_name, core)
+        result = _poll_standalone_core_status(cluster, core)
         if result is None:
             continue
         status = result["status"]
@@ -822,7 +823,7 @@ def _get_solr_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotS
         return _get_solr_standalone_snapshot_status(cluster, snapshot_name)
 
     # SolrCloud path: use Collections API REQUESTSTATUS
-    r = cluster.call_api("/solr/admin/collections?action=LIST&wt=json", timeout=30)
+    r = cluster.call_api(SOLR_LIST_COLLECTIONS_API, timeout=30)
     collections = r.json().get("collections", [])
 
     accum = {
