@@ -6,7 +6,7 @@ import {CfnConfiguration} from "aws-cdk-lib/aws-msk";
 import {Cluster} from "aws-cdk-lib/aws-ecs";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
-import {Effect, ManagedPolicy, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
+import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId} from "aws-cdk-lib/custom-resources";
 import {
     ScalableTarget, 
@@ -30,7 +30,6 @@ import {
 import {VpcDetails} from "./network-stack";
 import {StackPropsExt} from "./stack-composer";
 import {StreamingSourceType} from "./streaming-source-type";
-import {KafkaYaml} from "./migration-services-yaml";
 import {KafkaYaml} from "./migration-services-yaml";
 
 export interface MigrationStackProps extends StackPropsExt {

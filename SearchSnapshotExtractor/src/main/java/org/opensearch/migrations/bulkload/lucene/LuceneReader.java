@@ -25,17 +25,8 @@ public class LuceneReader {
         200, Integer.MAX_VALUE, "lucene-io", 60, true
     );
 
-    /** Concurrency for flatMapSequential within a segment — matches the scheduler thread count. */
-    private static final int SEGMENT_READ_CONCURRENCY = 200;
-
-    /** Number of documents to prefetch per segment reader — keeps the FUSE pipeline fed. */
-    private static final int SEGMENT_PREFETCH = 512;
-
     /** Max segments to read in parallel — read ALL segments concurrently for max FUSE throughput. */
     private static final int SEGMENT_CONCURRENCY = Integer.MAX_VALUE;
-
-    /** Parallel rails per segment — each rail gets its own ThreadLocal StoredFields clone. */
-    private static final int PARALLEL_RAILS_PER_SEGMENT = 16;
 
     private LuceneReader() {}
 
@@ -93,7 +84,7 @@ public class LuceneReader {
 
         // Each segment's reader serializes document() calls internally.
         // To get more parallelism, we split each segment's doc range across
-        // PARALLEL_RAILS_PER_SEGMENT sub-ranges, each read by its own thread.
+        // multiple sub-ranges, each read by its own thread.
         // All rails share the same reader — the lock contention is the cost we pay,
         // but having multiple threads waiting means the reader is always busy.
         return getSegmentsFromStartingSegment(reader.leaves(), startDocId)
@@ -203,52 +194,85 @@ public class LuceneReader {
             .flatMap(railIdx -> {
                 int railStart = startDoc + railIdx * docsPerRail;
                 int railEnd = (railIdx == rails - 1) ? endDoc : railStart + docsPerRail;
-                final int[] cursor = {railStart};
-
-                return Flux.<LuceneDocumentChange>generate(sink -> {
-                    while (cursor[0] < railEnd) {
-                        int docIdx = cursor[0]++;
-                        if (liveDocs != null && !liveDocs.stream().anyMatch(x -> x == docIdx)) {
-                            continue;
-                        }
-                        try {
-                            var doc = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase,
-                                getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext);
-                            if (doc != null) {
-                                long count = totalDocCount.incrementAndGet();
-                                if (count == 1 && firstDocLogged.compareAndSet(0, 1)) {
-                                    long firstDocMs = (System.nanoTime() - segmentStartNanos) / 1_000_000;
-                                    log.atInfo().setMessage("Segment {} first doc read in {}ms (docBase={}, rails={})")
-                                        .addArgument(getSegmentReaderDebugInfo)
-                                        .addArgument(firstDocMs)
-                                        .addArgument(segmentDocBase)
-                                        .addArgument(rails)
-                                        .log();
-                                }
-                                sink.next(doc);
-                                return;
-                            }
-                        } catch (Exception e) {
-                            log.atError().setMessage("Error reading doc {} from segment {}")
-                                .addArgument(docIdx).addArgument(getSegmentReaderDebugInfo).setCause(e).log();
-                        }
-                    }
-                    sink.complete();
-                }).subscribeOn(LUCENE_IO_SCHEDULER);
+                return generateDocsForRail(railStart, railEnd, liveDocs, segmentReader, segmentDocBase,
+                    getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext,
+                    totalDocCount, firstDocLogged, segmentStartNanos, rails);
             }, rails)
-            .doOnComplete(() -> {
-                long totalMs = (System.nanoTime() - segmentStartNanos) / 1_000_000;
-                long docsRead = totalDocCount.get();
-                long docsPerSec = totalMs > 0 ? docsRead * 1000 / totalMs : 0;
-                log.atInfo().setMessage("Segment {} complete: {} docs in {}ms ({} docs/sec, docBase={}, rails={})")
-                    .addArgument(getSegmentReaderDebugInfo)
-                    .addArgument(docsRead)
-                    .addArgument(totalMs)
-                    .addArgument(docsPerSec)
-                    .addArgument(segmentDocBase)
-                    .addArgument(rails)
-                    .log();
-            });
+            .doOnComplete(() -> logSegmentCompletion(getSegmentReaderDebugInfo, totalDocCount.get(),
+                segmentStartNanos, segmentDocBase, rails));
+    }
+
+    private static Flux<LuceneDocumentChange> generateDocsForRail(
+            int railStart, int railEnd, BitSetConverter.FixedLengthBitSet liveDocs,
+            LuceneLeafReader segmentReader, int segmentDocBase,
+            Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath,
+            DocumentChangeType operation, FieldMappingContext mappingContext,
+            AtomicLong totalDocCount, AtomicLong firstDocLogged,
+            long segmentStartNanos, int rails) {
+        final int[] cursor = {railStart};
+        return Flux.<LuceneDocumentChange>generate(sink -> {
+            while (cursor[0] < railEnd) {
+                int docIdx = cursor[0]++;
+                if (isDocDeleted(liveDocs, docIdx)) {
+                    continue;
+                }
+                var doc = readSingleDoc(segmentReader, docIdx, segmentDocBase,
+                    getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext);
+                if (doc != null) {
+                    logFirstDocIfNeeded(totalDocCount, firstDocLogged, segmentStartNanos,
+                        getSegmentReaderDebugInfo, segmentDocBase, rails);
+                    sink.next(doc);
+                    return;
+                }
+            }
+            sink.complete();
+        }).subscribeOn(LUCENE_IO_SCHEDULER);
+    }
+
+    private static boolean isDocDeleted(BitSetConverter.FixedLengthBitSet liveDocs, int docIdx) {
+        return liveDocs != null && !liveDocs.stream().anyMatch(x -> x == docIdx);
+    }
+
+    private static LuceneDocumentChange readSingleDoc(LuceneLeafReader segmentReader, int docIdx,
+            int segmentDocBase, Supplier<String> getSegmentReaderDebugInfo,
+            Path indexDirectoryPath, DocumentChangeType operation, FieldMappingContext mappingContext) {
+        try {
+            return LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase,
+                getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext);
+        } catch (Exception e) {
+            log.atError().setMessage("Error reading doc {} from segment {}")
+                .addArgument(docIdx).addArgument(getSegmentReaderDebugInfo).setCause(e).log();
+            return null;
+        }
+    }
+
+    private static void logFirstDocIfNeeded(AtomicLong totalDocCount, AtomicLong firstDocLogged,
+            long segmentStartNanos, Supplier<String> getSegmentReaderDebugInfo,
+            int segmentDocBase, int rails) {
+        long count = totalDocCount.incrementAndGet();
+        if (count == 1 && firstDocLogged.compareAndSet(0, 1)) {
+            long firstDocMs = (System.nanoTime() - segmentStartNanos) / 1_000_000;
+            log.atInfo().setMessage("Segment {} first doc read in {}ms (docBase={}, rails={})")
+                .addArgument(getSegmentReaderDebugInfo)
+                .addArgument(firstDocMs)
+                .addArgument(segmentDocBase)
+                .addArgument(rails)
+                .log();
+        }
+    }
+
+    private static void logSegmentCompletion(Supplier<String> getSegmentReaderDebugInfo,
+            long docsRead, long segmentStartNanos, int segmentDocBase, int rails) {
+        long totalMs = (System.nanoTime() - segmentStartNanos) / 1_000_000;
+        long docsPerSec = totalMs > 0 ? docsRead * 1000 / totalMs : 0;
+        log.atInfo().setMessage("Segment {} complete: {} docs in {}ms ({} docs/sec, docBase={}, rails={})")
+            .addArgument(getSegmentReaderDebugInfo)
+            .addArgument(docsRead)
+            .addArgument(totalMs)
+            .addArgument(docsPerSec)
+            .addArgument(segmentDocBase)
+            .addArgument(rails)
+            .log();
     }
 
     /** Backwards-compatible overload without mapping context */

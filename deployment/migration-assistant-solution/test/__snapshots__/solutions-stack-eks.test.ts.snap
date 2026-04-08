@@ -1139,6 +1139,15 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
             },
             {
               "Action": [
+                "s3files:ClientMount",
+                "s3files:ClientWrite",
+                "s3files:ClientRootAccess",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
                 "logs:PutLogEvents",
                 "logs:DescribeLogStreams",
                 "logs:DescribeLogGroups",
@@ -2343,6 +2352,15 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                 "s3:AbortMultipartUpload",
                 "s3:CreateBucket",
                 "s3:DeleteBucket",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "s3files:ClientMount",
+                "s3files:ClientWrite",
+                "s3files:ClientRootAccess",
               ],
               "Effect": "Allow",
               "Resource": "*",
