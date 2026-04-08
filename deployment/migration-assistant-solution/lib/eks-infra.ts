@@ -233,6 +233,15 @@ export class EKSInfra extends Construct {
             new PolicyStatement({
                 effect: Effect.ALLOW,
                 actions: [
+                    's3files:ClientMount',
+                    's3files:ClientWrite',
+                    's3files:ClientRootAccess',
+                ],
+                resources: ['*'],
+            }),
+            new PolicyStatement({
+                effect: Effect.ALLOW,
+                actions: [
                     "logs:PutLogEvents",
                     "logs:DescribeLogStreams",
                     "logs:DescribeLogGroups",

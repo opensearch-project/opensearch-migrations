@@ -345,6 +345,7 @@ def call(Map config = [:]) {
                                             BYOS_SNAPSHOT_NAME='${env.resolvedSnapshotName}' \
                                             BYOS_S3_REPO_URI='${s3RepoUri}' \
                                             BYOS_S3_REGION='${params.REGION}' \
+                                            BYOS_USE_S3_FILES='true' \
                                             BYOS_POD_REPLICAS='${env.resolvedRfsWorkers}' \
                                             BYOS_MONITOR_RETRY_LIMIT='${params.MONITOR_RETRY_LIMIT}'
                                         kubectl --context=${env.eksKubeContext} -n ma rollout status statefulset/migration-console --timeout=120s

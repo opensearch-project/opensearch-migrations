@@ -118,7 +118,7 @@ export const S3_REPO_CONFIG = z.object({
         .describe("IAM role ARN that the source cluster will assume to read/write snapshots to S3. " +
             "This is passed to the cluster when registering the snapshot repository. " +
             "Leave empty if the cluster's own IAM role already has S3 access."),
-    useS3Files: z.boolean().default(false).optional()
+    useS3Files: z.boolean().default(true).optional()
         .describe("When true, mount the S3 bucket via S3 Files (NFS PV) instead of per-pod mount-s3. " +
             "Requires an S3 Files file system and mount target in the same VPC. " +
             "The s3FilesFileSystemId must be set when this is true."),

@@ -62,6 +62,8 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         self.s3_repo_uri = os.environ['BYOS_S3_REPO_URI']
         self.s3_region = os.environ.get('BYOS_S3_REGION', 'us-west-2')
         self.s3_endpoint = os.environ.get('BYOS_S3_ENDPOINT', '')
+        self.use_s3_files = os.environ.get('BYOS_USE_S3_FILES', 'true').lower() == 'true'
+        self.s3_files_file_system_id = os.environ.get('BYOS_S3_FILES_FS_ID', '')
         self.pod_replicas = int(os.environ.get('BYOS_POD_REPLICAS', '1'))
         # Monitor retry limit: ~1 retry/min after backoff cap. Default 33 (~30 min), 900 for ~15 hours
         self.monitor_retry_limit = int(os.environ.get('BYOS_MONITOR_RETRY_LIMIT', '900'))
@@ -101,6 +103,9 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         snapshot_repo = {"awsRegion": self.s3_region, "s3RepoPathUri": self.s3_repo_uri}
         if self.s3_endpoint:
             snapshot_repo["endpoint"] = self.s3_endpoint
+        snapshot_repo["useS3Files"] = self.use_s3_files
+        if self.s3_files_file_system_id:
+            snapshot_repo["s3FilesFileSystemId"] = self.s3_files_file_system_id
 
         source_config = {
             "endpoint": "",

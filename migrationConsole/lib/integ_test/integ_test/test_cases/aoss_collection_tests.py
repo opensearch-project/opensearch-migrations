@@ -116,7 +116,8 @@ class AOSSTestBase(MATestBase):
                        f"{self.source_version.major_version}.{self.source_version.minor_version}",
             "snapshotRepo": {
                 "awsRegion": self.s3_region,
-                "s3RepoPathUri": self.s3_repo_uri
+                "s3RepoPathUri": self.s3_repo_uri,
+                "useS3Files": True
             }
         }
 
