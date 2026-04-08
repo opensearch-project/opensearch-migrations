@@ -387,9 +387,11 @@ public class CreateSnapshot {
 
     private void runSolrStandaloneBackup(String solrUrl, String backupLocation, String username, String password) {
         log.info("Detected standalone Solr — using replication API backup");
+        // When using S3, pass the snapshot repo name so Solr uses the configured S3BackupRepository
+        var repositoryName = (arguments.s3RepoUri != null) ? arguments.snapshotRepoName : null;
         var creator = new SolrStandaloneBackupCreator(
             solrUrl, arguments.snapshotName, backupLocation,
-            arguments.solrCollections, username, password
+            arguments.solrCollections, username, password, repositoryName
         );
         creator.createBackup();
         waitForCompletion(creator::isBackupFinished);

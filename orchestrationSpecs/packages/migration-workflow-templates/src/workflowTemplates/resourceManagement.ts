@@ -118,7 +118,12 @@ export const ResourceManagement = WorkflowBuilder.create({
                     failureCondition: "status.phase == Failed"
                 }
             })
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+            // Use OnError so transient pod issues (OOM, eviction, resource-not-found) are retried,
+            // but a matched failureCondition (phase==Failed) fails immediately without retrying.
+            .addRetryParameters({
+                ...K8S_RESOURCE_RETRY_STRATEGY,
+                retryPolicy: "OnError"
+            })
         )
     )
 

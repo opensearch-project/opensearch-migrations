@@ -31,6 +31,7 @@ public class SolrStandaloneBackupCreator {
     @Getter
     private final String backupName;
     private final String backupLocation;
+    private final String repositoryName;
     private final List<String> cores;
     private final String authHeader;
 
@@ -40,7 +41,7 @@ public class SolrStandaloneBackupCreator {
         String backupLocation,
         List<String> cores
     ) {
-        this(solrBaseUrl, backupName, backupLocation, cores, null, null);
+        this(solrBaseUrl, backupName, backupLocation, cores, null, null, null);
     }
 
     public SolrStandaloneBackupCreator(
@@ -51,10 +52,23 @@ public class SolrStandaloneBackupCreator {
         String username,
         String password
     ) {
+        this(solrBaseUrl, backupName, backupLocation, cores, username, password, null);
+    }
+
+    public SolrStandaloneBackupCreator(
+        String solrBaseUrl,
+        String backupName,
+        String backupLocation,
+        List<String> cores,
+        String username,
+        String password,
+        String repositoryName
+    ) {
         this.solrBaseUrl = solrBaseUrl.endsWith("/")
             ? solrBaseUrl.substring(0, solrBaseUrl.length() - 1) : solrBaseUrl;
         this.backupName = backupName;
         this.backupLocation = backupLocation;
+        this.repositoryName = repositoryName;
         this.cores = cores;
         this.httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -71,7 +85,11 @@ public class SolrStandaloneBackupCreator {
                 "%s/solr/%s/replication?command=backup&location=%s&name=%s&wt=json",
                 solrBaseUrl, core, backupLocation, backupName
             );
-            log.info("Initiating standalone backup for core '{}' to {}", core, backupLocation);
+            if (repositoryName != null) {
+                url += "&repository=" + repositoryName;
+            }
+            log.info("Initiating standalone backup for core '{}' to {} (repository={})",
+                core, backupLocation, repositoryName != null ? repositoryName : "local");
             var response = getJson(url);
             var status = response.path("status").asText("");
             if (!"OK".equalsIgnoreCase(status)) {
