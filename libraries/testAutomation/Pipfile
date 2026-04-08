@@ -15,6 +15,9 @@ python_version = "3.11"
 
 [scripts]
 app = "python3 testAutomation/test_runner.py"
+test = "coverage run -m pytest tests/"
+coverage = "coverage"
 
 [dev-packages]
 pytest = "*"
+coverage = "*"
