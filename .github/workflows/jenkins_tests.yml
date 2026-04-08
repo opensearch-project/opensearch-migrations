@@ -261,3 +261,24 @@ jobs:
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
           jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
           job_timeout_minutes: "120"
+
+  all-jenkins-checks-pass:
+    needs:
+      - full-es68-e2e-aws-test
+      - elasticsearch-5x-k8s-local-test
+      - eks-integ-test
+      - eks-aoss-search-integ-test
+      - eks-aoss-timeseries-integ-test
+      - eks-aoss-vector-integ-test
+      - eks-byos-integ-test
+      - eks-cdc-only-integ-test
+      - eks-cfn-create-vpc-test
+      - eks-cfn-import-vpc-test
+    if: always()
+    runs-on: ubuntu-22.04
+    steps:
+      - if: ${{ contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'failure') }}
+        run: |
+          echo "One or more job cancelled or failed" && exit 1
+      - run: |
+          echo '## :heavy_check_mark: All Jenkins checks pass' >> $GITHUB_STEP_SUMMARY
