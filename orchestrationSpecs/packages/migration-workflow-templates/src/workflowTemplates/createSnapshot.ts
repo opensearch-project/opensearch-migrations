@@ -212,12 +212,31 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
                     targetK8sLabel: b.inputs.targetLabel,
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
-                }))
+                }), {continueOn: {failed: true}})
+
+            .addStep("patchDataSnapshotFailed", ResourceManagement, "patchDataSnapshotFailed", c =>
+                c.register({
+                    resourceName: expr.concat(
+                        expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
+                        expr.literal("-"),
+                        expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
+                    )
+                }), {
+                    when: {templateExp: expr.equals(
+                        expr.taskData<string>("steps", "createSnapshot", "status"),
+                        "Failed"
+                    )}
+                })
 
             .addStep("getConsoleConfig", MigrationConsole, "getConsoleConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c)
-                }))
+                }), {
+                    when: {templateExp: expr.equals(
+                        expr.taskData<string>("steps", "createSnapshot", "status"),
+                        "Succeeded"
+                    )}
+                })
 
             .addStep("waitForCompletion", INTERNAL, "checkSnapshotStatus", c =>
                 c.register({
