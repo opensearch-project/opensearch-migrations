@@ -265,7 +265,7 @@ public class CreateSnapshot {
     }
 
     /** Extract string array values from a top-level JSON field, e.g. {"collections":["a","b"]} → ["a","b"] */
-    private static List<String> parseJsonStringArray(String json, String fieldName) {
+    static List<String> parseJsonStringArray(String json, String fieldName) {
         var result = new java.util.ArrayList<String>();
         var key = "\"" + fieldName + "\"";
         int idx = json.indexOf(key);
@@ -285,7 +285,7 @@ public class CreateSnapshot {
     }
 
     /** Extract top-level keys from a JSON object field, e.g. {"status":{"core1":{},"core2":{}}} → ["core1","core2"] */
-    private static List<String> parseJsonObjectKeys(String json, String fieldName) {
+    static List<String> parseJsonObjectKeys(String json, String fieldName) {
         var result = new java.util.ArrayList<String>();
         var key = "\"" + fieldName + "\"";
         // Find the occurrence of "fieldName" whose value is a '{' (object), not a number/string.
@@ -314,7 +314,7 @@ public class CreateSnapshot {
     }
 
     /** Find the position of the closing brace matching the opening brace at {@code openPos}. */
-    private static int findMatchingBrace(String s, int openPos) {
+    static int findMatchingBrace(String s, int openPos) {
         int depth = 1;
         int pos = openPos + 1;
         while (pos < s.length() && depth > 0) {
@@ -327,7 +327,7 @@ public class CreateSnapshot {
     }
 
     /** Extract top-level quoted keys (followed by ':') from the content of a JSON object. */
-    private static void extractTopLevelKeys(String objContent, List<String> result) {
+    static void extractTopLevelKeys(String objContent, List<String> result) {
         int i = 0;
         while (i < objContent.length()) {
             int qStart = objContent.indexOf('"', i);
@@ -339,7 +339,7 @@ public class CreateSnapshot {
     }
 
     /** Check if the quoted string is a key (followed by ':') and advance past its value. Returns next scan position. */
-    private static int processKeyCandidate(String objContent, int qStart, int qEnd, List<String> result) {
+    static int processKeyCandidate(String objContent, int qStart, int qEnd, List<String> result) {
         int colon = objContent.indexOf(':', qEnd);
         if (colon < 0 || !objContent.substring(qEnd + 1, colon).trim().isEmpty()) {
             return qEnd + 1;
