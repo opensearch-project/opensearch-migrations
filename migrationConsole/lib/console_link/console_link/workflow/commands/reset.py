@@ -65,6 +65,46 @@ def _get_resource_completions(ctx, _param, incomplete):
         return []
 
 
+def _reset_all(namespace, resources):
+    """Delete all migration resources."""
+    if not resources:
+        click.echo("No migration resources found.")
+        return
+    for plural, name, _phase, _fin in resources:
+        if _delete_crd(namespace, plural, name):
+            click.echo(f"✓ Deleted {name}")
+        else:
+            click.echo(f"✗ Failed to delete {name}", err=True)
+
+
+def _list_resources(namespace, resources):
+    """Display all migration resources."""
+    if not resources:
+        click.echo("No migration resources found.")
+        return
+    click.echo("Migration resources:\n")
+    for plural, name, phase, _fin in resources:
+        friendly = MIGRATION_CRD_TYPES.get(plural, plural)
+        click.echo(f"  {friendly:20s} {name:30s} {phase}")
+    click.echo(f"\nTo delete all: workflow reset --all --namespace {namespace}")
+
+
+def _delete_matching(namespace, resources, resource_name):
+    """Delete resources matching the given name or glob pattern."""
+    matches = [(p, n) for p, n, _ph, _f in resources if n == resource_name]
+    if not matches:
+        matches = [(p, n) for p, n, _ph, _f in resources
+                   if fnmatch.fnmatch(n, resource_name)]
+    if not matches:
+        click.echo(f"No resources matching '{resource_name}' found.")
+        return
+    for plural, name in matches:
+        if _delete_crd(namespace, plural, name):
+            click.echo(f"✓ Deleted {name}")
+        else:
+            click.echo(f"✗ Failed to delete {name}", err=True)
+
+
 @click.command(name="reset")
 @click.argument("resource-name", required=False, default=None,
                 shell_complete=_get_resource_completions)
@@ -87,41 +127,8 @@ def reset_command(ctx, resource_name, reset_all, namespace):
     resources = _list_migration_resources(namespace)
 
     if reset_all:
-        if not resources:
-            click.echo("No migration resources found.")
-            return
-        for plural, name, _phase, _fin in resources:
-            if _delete_crd(namespace, plural, name):
-                click.echo(f"✓ Deleted {name}")
-            else:
-                click.echo(f"✗ Failed to delete {name}", err=True)
-        return
-
-    if resource_name is None:
-        # List mode
-        if not resources:
-            click.echo("No migration resources found.")
-            return
-        click.echo("Migration resources:\n")
-        for plural, name, phase, _fin in resources:
-            friendly = MIGRATION_CRD_TYPES.get(plural, plural)
-            click.echo(f"  {friendly:20s} {name:30s} {phase}")
-        click.echo(f"\nTo delete all: workflow reset --all --namespace {namespace}")
-        return
-
-    # Single resource mode — find matching resource across all CRD types
-    matches = [(p, n) for p, n, _ph, _f in resources if n == resource_name]
-    if not matches:
-        # Try glob matching
-        matches = [(p, n) for p, n, _ph, _f in resources
-                   if fnmatch.fnmatch(n, resource_name)]
-
-    if not matches:
-        click.echo(f"No resources matching '{resource_name}' found.")
-        return
-
-    for plural, name in matches:
-        if _delete_crd(namespace, plural, name):
-            click.echo(f"✓ Deleted {name}")
-        else:
-            click.echo(f"✗ Failed to delete {name}", err=True)
+        _reset_all(namespace, resources)
+    elif resource_name is None:
+        _list_resources(namespace, resources)
+    else:
+        _delete_matching(namespace, resources, resource_name)

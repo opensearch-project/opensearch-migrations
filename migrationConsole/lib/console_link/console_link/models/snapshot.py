@@ -784,7 +784,7 @@ def _poll_standalone_core_status(cluster: Cluster, core: str) -> Optional[dict]:
         return {"status": "error"}
 
 
-def _get_solr_standalone_snapshot_status(cluster: Cluster, snapshot_name: str) -> SnapshotStatus:
+def _get_solr_standalone_snapshot_status(cluster: Cluster) -> SnapshotStatus:
     """Build a SnapshotStatus from standalone Solr replication API responses."""
     cores = _get_solr_cores(cluster)
     if not cores:
@@ -1205,3 +1205,4 @@ class FailedToDeleteSnapshot(Exception):
 
 class FailedToDeleteSnapshotRepo(Exception):
     pass
+pass
