@@ -104,3 +104,24 @@ class TestFailureDetection:
         runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
         with patch.object(runner, "run_tests", return_value=_make_report(passed=3, failed=0, expected=None)):
             runner.run()  # Should not raise
+
+from test_runner import get_version_combinations, TargetType, VALID_SOURCE_VERSIONS
+
+
+class TestVersionCombinations:
+    def test_same_version_filtered(self):
+        combos = get_version_combinations("all", "all", TargetType.OPENSEARCH)
+        assert ("OS_1.3", "OS_1.3") not in combos
+
+    def test_aoss_ignores_target_version(self):
+        combos = get_version_combinations("ES_7.10", "OS_2.19", TargetType.AOSS)
+        assert combos == [("ES_7.10", "AOSS")]
+
+    def test_single_versions(self):
+        combos = get_version_combinations("ES_7.10", "OS_2.19", TargetType.OPENSEARCH)
+        assert combos == [("ES_7.10", "OS_2.19")]
+
+    def test_aoss_all_sources(self):
+        combos = get_version_combinations("all", "OS_2.19", TargetType.AOSS)
+        assert all(t == "AOSS" for _, t in combos)
+        assert len(combos) == len(VALID_SOURCE_VERSIONS)

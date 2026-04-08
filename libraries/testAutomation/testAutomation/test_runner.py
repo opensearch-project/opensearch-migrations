@@ -116,8 +116,9 @@ class TestRunner:
 
     def _parse_test_report(self, data: dict) -> TestReport:
         tests = [TestEntry(**test) for test in data.get("tests", [])]
-        summary = TestSummary(**data.get("summary"))
-        return TestReport(tests=tests, summary=summary)
+        summary_fields = {f.name for f in TestSummary.__dataclass_fields__.values()}
+        summary_data = {k: v for k, v in data.get("summary", {}).items() if k in summary_fields}
+        return TestReport(tests=tests, summary=TestSummary(**summary_data))
 
     def write_report_to_file(self, base_dir: str, report_data: dict, source_version: str, target_version: str):
         dir_normal = base_dir.rstrip("/")
