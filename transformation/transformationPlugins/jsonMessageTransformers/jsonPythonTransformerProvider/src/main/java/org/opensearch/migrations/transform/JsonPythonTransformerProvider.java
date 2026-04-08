@@ -72,12 +72,22 @@ public class JsonPythonTransformerProvider extends ScriptTransformerProvider {
                 }
             }
         }
-        try (var children = Files.list(extractDir)) {
-            var entries = children.toList();
-            if (entries.size() == 1 && Files.isDirectory(entries.get(0))) {
-                return entries.get(0);
-            }
+        return findVenvRoot(extractDir);
+    }
+
+    /**
+     * Find the GraalPy resources root — the directory that contains {@code venv/pyvenv.cfg}.
+     * GraalPyResources.contextBuilder(Path) expects this directory and looks for {@code venv/}
+     * underneath it.
+     */
+    static Path findVenvRoot(Path searchRoot) throws IOException {
+        try (var stream = Files.walk(searchRoot)) {
+            return stream
+                .filter(p -> p.getFileName().toString().equals("pyvenv.cfg"))
+                .filter(p -> p.getParent() != null && p.getParent().getFileName().toString().equals("venv"))
+                .map(p -> p.getParent().getParent()) // venv/pyvenv.cfg -> parent of venv/
+                .findFirst()
+                .orElse(searchRoot);
         }
-        return extractDir;
     }
 }
