@@ -13,7 +13,6 @@ import click
 from click.shell_completion import CompletionItem
 import requests
 from kubernetes import client
-from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode
 from ..services.workflow_service import WorkflowService
@@ -49,6 +48,7 @@ def approve_gate(namespace, name):
         body={"status": {"phase": "Approved"}},
     )
     return True
+
 
 _AUTOCOMPLETE_APPROVAL_CACHE_TTL_SECONDS = 10
 

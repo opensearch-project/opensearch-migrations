@@ -114,7 +114,7 @@ def reset_command(ctx, resource_name, reset_all, namespace):
     if not matches:
         # Try glob matching
         matches = [(p, n) for p, n, _ph, _f in resources
-                    if fnmatch.fnmatch(n, resource_name)]
+                   if fnmatch.fnmatch(n, resource_name)]
 
     if not matches:
         click.echo(f"No resources matching '{resource_name}' found.")
