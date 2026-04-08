@@ -1443,18 +1443,18 @@ spec:
                         - name: S3_BUCKET_NAME
                           valueFrom:
                             configMapKeyRef:
-                              name: s3-snapshot-config
+                              name: migrations-default-s3-config
                               key: BUCKET_NAME
                         - name: S3_REGION
                           valueFrom:
                             configMapKeyRef:
-                              name: s3-snapshot-config
+                              name: migrations-default-s3-config
                               key: AWS_REGION
                         - name: S3_ENDPOINT
                           valueFrom:
                             configMapKeyRef:
-                              name: s3-snapshot-config
-                              key: ENDPOINT
+                              name: migrations-default-s3-config
+                              key: ENDPOINT_HTTP
                               optional: true
                       command:
                         - solr-precreate
