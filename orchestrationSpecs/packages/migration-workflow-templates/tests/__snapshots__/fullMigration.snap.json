@@ -893,12 +893,6 @@
               "name": "groupName_view"
             },
             {
-              "name": "coordinatorName"
-            },
-            {
-              "name": "coordinatorUid"
-            },
-            {
               "name": "crdName"
             },
             {
@@ -1047,14 +1041,6 @@
                     "value": "{{inputs.parameters.migrationLabel}}"
                   },
                   {
-                    "name": "coordinatorName",
-                    "value": "{{inputs.parameters.coordinatorName}}"
-                  },
-                  {
-                    "name": "coordinatorUid",
-                    "value": "{{inputs.parameters.coordinatorUid}}"
-                  },
-                  {
                     "name": "crdName",
                     "value": "{{inputs.parameters.crdName}}"
                   },
@@ -1118,12 +1104,6 @@
               "name": "resolvedSnapshotName"
             },
             {
-              "name": "coordinatorName"
-            },
-            {
-              "name": "coordinatorUid"
-            },
-            {
               "name": "crdName"
             },
             {
@@ -1173,14 +1153,6 @@
               "withParam": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrations']}}",
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "coordinatorName",
-                    "value": "{{inputs.parameters.coordinatorName}}"
-                  },
-                  {
-                    "name": "coordinatorUid",
-                    "value": "{{inputs.parameters.coordinatorUid}}"
-                  },
                   {
                     "name": "crdName",
                     "value": "{{inputs.parameters.crdName}}"
@@ -1546,14 +1518,6 @@
                   {
                     "name": "resolvedSnapshotName",
                     "value": "{{=(('externalSnapshotName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']) ? (fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']['externalSnapshotName']) : (steps.readSnapshotName.outputs.parameters.snapshotName))}}"
-                  },
-                  {
-                    "name": "coordinatorName",
-                    "value": "{{inputs.parameters.resourceName}}"
-                  },
-                  {
-                    "name": "coordinatorUid",
-                    "value": "{{steps.getCrdUid.outputs.parameters.uid}}"
                   },
                   {
                     "name": "crdName",

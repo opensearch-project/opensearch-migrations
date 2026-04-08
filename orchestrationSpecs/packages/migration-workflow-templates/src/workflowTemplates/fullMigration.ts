@@ -361,8 +361,6 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("groupName_view", typeToken<string>())
-        .addRequiredInput("coordinatorName", typeToken<string>())
-        .addRequiredInput("coordinatorUid", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
         .addRequiredInput("crdUid", typeToken<string>())
         .addOptionalInput("sourceEndpoint", c => expr.literal(""))
@@ -402,8 +400,6 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("resolvedSnapshotName", typeToken<string>())
-        .addRequiredInput("coordinatorName", typeToken<string>())
-        .addRequiredInput("coordinatorUid", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
         .addRequiredInput("crdUid", typeToken<string>())
         .addInputsFromRecord(uniqueRunNonceParam)
@@ -532,8 +528,6 @@ export const FullMigration = WorkflowBuilder.create({
                                 expr.getLoose(snapshotNameResolution, "externalSnapshotName"),
                                 c.steps.readSnapshotName.outputs.snapshotName
                             ),
-                            coordinatorName: b.inputs.resourceName,
-                            coordinatorUid: c.steps.getCrdUid.outputs.uid,
                             crdName: b.inputs.resourceName,
                             crdUid: c.steps.getCrdUid.outputs.uid,
                         });
