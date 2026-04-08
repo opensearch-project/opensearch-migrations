@@ -57,6 +57,7 @@ def pytest_configure(config):
     config.test_summary = {
         "passed": 0,
         "failed": 0,
+        "expected": 0,
         "source_version": "",
         "target_version": ""
     }
@@ -82,6 +83,13 @@ def pytest_generate_tests(metafunc):
                                         target_type=target_type, unique_id=unique_id, reuse_clusters=reuse_clusters,
                                         image_registry_prefix=image_registry_prefix)
         test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
+        metafunc.config.test_summary["expected"] = len(test_cases_param)
+        if not test_cases_param and not test_ids_list:
+            target_label = target_version if target_type != "AOSS" else "AOSS"
+            metafunc.config.test_summary["error"] = (
+                f"No default test cases compatible with {source_version} → {target_label}. "
+                f"Version pair may be untested."
+            )
         metafunc.parametrize("test_case", test_cases_param)
 
 
@@ -91,6 +99,8 @@ def _filter_test_cases(test_ids_list: List[str]) -> List:
     
     - If test_ids_list is empty: return all tests EXCEPT those with requires_explicit_selection=True
     - If test_ids_list is provided: return only tests matching the IDs (including explicit-only tests)
+    
+    Note: Matching uses substring search (e.g., '000' matches Test0001, Test0002, etc.).
     """
     if not test_ids_list:
         # Default run: exclude tests that require explicit selection
@@ -144,6 +154,18 @@ def pytest_runtest_makereport(item, call):
 
 
 def pytest_sessionfinish(session, exitstatus):
+    # If no compatible tests were found, record it as a failure in the report
+    error = session.config.test_summary.get("error")
+    if error:
+        session.config.test_summary["failed"] += 1
+        session.config.collected_data.append({
+            "name": "test_compatibility_check",
+            "description": error,
+            "result": "failed",
+            "duration": 0.0,
+            "error": error,
+        })
+
     # Write test report file at end of test session
     unique_id = session.config.getoption("unique_id")
     results = {

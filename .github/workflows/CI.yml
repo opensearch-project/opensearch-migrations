@@ -51,6 +51,18 @@ jobs:
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
+  gradle-build-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: false
+      - name: Run Gradle build on macOS
+        run: ./gradlew build
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+
   python-lint:
     runs-on: ubuntu-22.04
     steps:
@@ -74,8 +86,9 @@ jobs:
           - migrationConsole/cluster_tools
           - k8sConfigMapUtilScripts
           - AIAdvisor/skills/solr-opensearch-migration-advisor
+          - libraries/testAutomation
     env:
-      WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'AIAdvisor/') && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
+      WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'AIAdvisor/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'libraries/') && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
@@ -367,6 +380,7 @@ jobs:
       - python-e2e-tests
       - python-lint
       - gradle-extended-check
+      - gradle-build-macos
     if: always()
     runs-on: ubuntu-22.04
     steps:

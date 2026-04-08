@@ -43,6 +43,7 @@ class TestSummary:
     failed: int
     source_version: str
     target_version: str
+    expected: Optional[int] = None
 
 
 @dataclass
@@ -115,8 +116,9 @@ class TestRunner:
 
     def _parse_test_report(self, data: dict) -> TestReport:
         tests = [TestEntry(**test) for test in data.get("tests", [])]
-        summary = TestSummary(**data.get("summary"))
-        return TestReport(tests=tests, summary=summary)
+        summary_fields = {f.name for f in TestSummary.__dataclass_fields__.values()}
+        summary_data = {k: v for k, v in data.get("summary", {}).items() if k in summary_fields}
+        return TestReport(tests=tests, summary=TestSummary(**summary_data))
 
     def write_report_to_file(self, base_dir: str, report_data: dict, source_version: str, target_version: str):
         dir_normal = base_dir.rstrip("/")
@@ -206,6 +208,7 @@ class TestRunner:
 
     def cleanup_deployment(self) -> None:
         helm_uninstall_error = None
+        self.k8s_service.cleanup_ack_dashboard_crs()
         try:
             self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         except Exception as e:
@@ -242,7 +245,7 @@ class TestRunner:
 
         combos_with_failures = []
         test_reports = []
-        last_combination = self.combinations[-1]
+        last_combination = self.combinations[-1] if self.combinations else None
         for source_version, target_version in self.combinations:
             is_last = (source_version, target_version) == last_combination
             try:
@@ -302,9 +305,14 @@ class TestRunner:
                                              reuse_clusters=reuse_clusters,
                                              test_reports_dir=test_reports_dir)
                 test_reports.append(test_report)
-                tests_failed = test_report.summary.failed > 0 or (
-                    test_report.summary.passed == 0 and len(test_report.tests) > 0
-                )
+                tests_failed = test_report.summary.failed > 0 or test_report.summary.passed == 0
+
+                expected = test_report.summary.expected
+                if expected is not None and test_report.summary.passed != expected:
+                    logger.warning(f"Expected {test_report.summary.expected} tests but only "
+                                   f"{test_report.summary.passed} passed "
+                                   f"({test_report.summary.failed} failed)")
+                    tests_failed = True
 
                 if tests_failed:
                     logger.warning(f"Tests failed (or no tests executed) for migrations "
@@ -315,8 +323,10 @@ class TestRunner:
                                 f"from {source_version} to {target_version}.")
             except HelmCommandFailed as helmError:
                 logger.error(f"Helm command failed with error: {helmError}. Testing may be incomplete")
+                combos_with_failures.append(f"{source_version} -> {target_version}")
             except TimeoutError as timeoutError:
                 logger.error(f"Timeout error encountered: {timeoutError}. Testing may be incomplete")
+                combos_with_failures.append(f"{source_version} -> {target_version}")
 
             # We need to copy logs once and before the migration console is uninstalled
             if is_last and copy_logs:
@@ -327,9 +337,13 @@ class TestRunner:
                 self.cleanup_deployment()
 
         self._print_summary_table(reports=test_reports)
+        total_tests = sum(len(r.tests) for r in test_reports)
         if combos_with_failures:
             raise TestsFailed(f"The following combinations had test failures (or no test cases executed): "
                               f"{combos_with_failures}")
+        if total_tests == 0:
+            raise TestsFailed("No tests were executed. This likely indicates a configuration error "
+                              "(empty version matrix, missing test IDs, or infrastructure failure).")
         logger.info("Test execution completed.")
 
 
