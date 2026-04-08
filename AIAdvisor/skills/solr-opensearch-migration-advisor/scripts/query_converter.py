@@ -329,73 +329,92 @@ class QueryConverter:
             raise ValueError("q must not be empty")
 
         query_text = q.strip()
-        should_clauses: list[dict[str, Any]] = []
 
         # --- Main query clause ---
-        if qf:
-            fields = _parse_qf(qf)
-            main_clause: dict[str, Any] = {
-                "multi_match": {
-                    "query": query_text,
-                    "fields": fields,
-                    "type": "best_fields",
-                }
-            }
-            if tie is not None:
-                main_clause["multi_match"]["tie_breaker"] = tie
-            if qs is not None:
-                main_clause["multi_match"]["slop"] = qs
-        else:
-            # Fall back to standard query conversion
-            main_clause = self.convert(query_text)["query"]
+        main_clause = _build_edismax_main_clause(
+            query_text, qf=qf, tie=tie, qs=qs,
+            fallback=self.convert(query_text)["query"] if not qf else None,
+        )
 
         # --- Phrase boost clauses (pf / pf2 / pf3) ---
+        should_clauses: list[dict[str, Any]] = []
         for phrase_field_str in filter(None, [pf, pf2, pf3]):
             should_clauses.extend(
                 _build_phrase_should_clauses(phrase_field_str, query_text, ps)
             )
 
         # --- Boost queries (bq) ---
-        bq_list: list[str] = (
-            [bq] if isinstance(bq, str) else list(bq) if bq else []
-        )
+        if isinstance(bq, str):
+            bq_list: list[str] = [bq]
+        elif bq:
+            bq_list = list(bq)
+        else:
+            bq_list = []
         for bq_item in bq_list:
-            bq_clause = self.convert(bq_item.strip())["query"]
-            should_clauses.append(bq_clause)
+            should_clauses.append(self.convert(bq_item.strip())["query"])
 
         # --- Assemble bool query ---
-        if should_clauses:
-            bool_query: dict[str, Any] = {
-                "bool": {
-                    "must": [main_clause],
-                    "should": should_clauses,
-                }
-            }
-            if mm is not None:
-                bool_query["bool"]["minimum_should_match"] = mm
-            assembled: dict[str, Any] = bool_query
-        else:
-            if mm is not None and isinstance(main_clause, dict) and "bool" in main_clause:
-                main_clause["bool"]["minimum_should_match"] = mm
-                assembled = main_clause
-            elif mm is not None:
-                # Wrap in a bool so mm can be applied
-                assembled = {"bool": {"must": [main_clause], "minimum_should_match": mm}}
-            else:
-                assembled = main_clause
+        assembled = _assemble_edismax_bool(main_clause, should_clauses, mm)
 
         # --- Boost function (bf) wraps everything in script_score ---
         if bf:
             assembled = {
                 "script_score": {
                     "query": assembled,
-                    "script": {
-                        "source": bf,
-                    },
+                    "script": {"source": bf},
                 }
             }
 
         return {"query": assembled}
+
+
+def _build_edismax_main_clause(
+    query_text: str,
+    *,
+    qf: str | None,
+    tie: float | None,
+    qs: int | None,
+    fallback: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the main query clause for an eDisMax query."""
+    if not qf:
+        return fallback  # type: ignore[return-value]
+    clause: dict[str, Any] = {
+        "multi_match": {
+            "query": query_text,
+            "fields": _parse_qf(qf),
+            "type": "best_fields",
+        }
+    }
+    if tie is not None:
+        clause["multi_match"]["tie_breaker"] = tie
+    if qs is not None:
+        clause["multi_match"]["slop"] = qs
+    return clause
+
+
+def _assemble_edismax_bool(
+    main_clause: dict[str, Any],
+    should_clauses: list[dict[str, Any]],
+    mm: str | None,
+) -> dict[str, Any]:
+    """Assemble the final bool query from main + should clauses, applying mm."""
+    if should_clauses:
+        bool_query: dict[str, Any] = {
+            "bool": {"must": [main_clause], "should": should_clauses}
+        }
+        if mm is not None:
+            bool_query["bool"]["minimum_should_match"] = mm
+        return bool_query
+
+    # No should clauses — apply mm directly if possible
+    if mm is not None:
+        if isinstance(main_clause, dict) and "bool" in main_clause:
+            main_clause["bool"]["minimum_should_match"] = mm
+            return main_clause
+        return {"bool": {"must": [main_clause], "minimum_should_match": mm}}
+
+    return main_clause
 
 
 def _unwrap_parens(query: str) -> str:
