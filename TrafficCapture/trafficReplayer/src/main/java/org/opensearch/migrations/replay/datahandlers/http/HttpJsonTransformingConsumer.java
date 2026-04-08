@@ -2,12 +2,14 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
 
 import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -19,6 +21,7 @@ import org.opensearch.migrations.utils.TrackedFuture;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.HttpRequestDecoder;
+import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -113,7 +116,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     }
 
     public TrackedFuture<String, TransformedOutputAndResult<R>> finalizeRequest() {
-        var offloadingHandler = getOffloadingHandler();
         try {
             channel.checkException();
             if (lastConsumeException != null) {
@@ -125,18 +127,131 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         } catch (Exception e) {
             this.transformationContext.addCaughtException(e);
             log.atWarn().setCause(e)
-                .setMessage("Caught IncompleteJsonBodyException when sending the end of content").log();
+                .setMessage("Caught exception when sending the end of content").log();
+            channel.finishAndReleaseAll();
+            channel.close();
             return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver, e);
+        }
+
+        if (pipelineOrchestrator.isDeferredSigningMode()) {
+            return finalizeDeferredSigning();
+        }
+
+        return finalizeNormalPath();
+    }
+
+    @SuppressWarnings("unchecked")
+    private TrackedFuture<String, TransformedOutputAndResult<R>> finalizeDeferredSigning() {
+        try {
+            // Read unsigned output from the embedded channel's inbound queue.
+            // After compressor + stream-to-bytebuf, the queue contains:
+            // HttpJsonRequestWithFaultingPayload (with Content-Length/Transfer-Encoding set)
+            // + body ByteBufs (compressed, chunked/fixed-encoded)
+            // + possibly other messages (HttpRequest from decoder, LastHttpContent)
+            HttpJsonRequestWithFaultingPayload unsignedHeaders = null;
+            var bodyByteBufs = new ArrayList<ByteBuf>();
+            Object msg;
+            while ((msg = channel.readInbound()) != null) {
+                if (msg instanceof HttpJsonRequestWithFaultingPayload) {
+                    unsignedHeaders = (HttpJsonRequestWithFaultingPayload) msg;
+                } else if (msg instanceof ByteBuf) {
+                    bodyByteBufs.add(((ByteBuf) msg).retain());
+                } else {
+                    ReferenceCountUtil.release(msg);
+                }
+            }
+
+            if (unsignedHeaders == null) {
+                // No output from auth signer — fall back to redrive
+                bodyByteBufs.forEach(ByteBuf::release);
+                channel.finishAndReleaseAll();
+                channel.close();
+                return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver, null);
+            }
+
+            // Get the reentrant SignatureProducer from the auth signer
+            var authSigner = channel.pipeline().get(NettyJsonContentAuthSigner.class);
+            var signatureProducer = authSigner.getSignatureProducer();
+
+            // Save a read-only deep copy of the unsigned headers as the template
+            var templateHeaders = deepCopyHeaders(unsignedHeaders);
+
+            var snapshotChunkSizes = Collections.unmodifiableList(chunkSizes);
+            var producer = new SigningByteBufListProducer(
+                templateHeaders, bodyByteBufs, signatureProducer, snapshotChunkSizes,
+                signedHeaders -> serializeHeadersAndPrependToBody(signedHeaders, bodyByteBufs, snapshotChunkSizes)
+            );
+
+            transformationContext.onTransformSuccess();
+            transformationContext.close();
+
+            // R is ByteBufListProducer in production — this cast is safe because
+            // SigningByteBufListProducer extends ByteBufListProducer
+            var result = (TransformedOutputAndResult<R>) (TransformedOutputAndResult<?>)
+                new TransformedOutputAndResult<>(producer, HttpRequestTransformationStatus.completed());
+            return TextTrackedFuture.completedFuture(result,
+                () -> "deferred signing producer created");
         } finally {
             channel.finishAndReleaseAll();
-            var cf = channel.close();
-            if (cf.cause() != null) {
-                log.atInfo().setCause(cf.cause()).setMessage("Exception encountered during write").log();
+            channel.close();
+        }
+    }
+
+
+    static ByteBufList serializeHeadersAndPrependToBody(
+        HttpJsonRequestWithFaultingPayload signedHeaders,
+        List<ByteBuf> bodyByteBufs,
+        List<List<Integer>> chunkSizes
+    ) {
+        // Only run NettyJsonToByteBufHandler to serialize headers into ByteBuf(s).
+        // Body ByteBufs are already compressed and serialized — just append them.
+        var ch = new EmbeddedChannel(
+            new NettyJsonToByteBufHandler(Collections.unmodifiableList(chunkSizes))
+        );
+        ch.writeInbound(signedHeaders);
+        ch.writeInbound(io.netty.handler.codec.http.LastHttpContent.EMPTY_LAST_CONTENT);
+        ch.finish();
+
+        var packets = new ByteBufList();
+        Object out;
+        while ((out = ch.readInbound()) != null) {
+            if (out instanceof ByteBuf) {
+                packets.add((ByteBuf) out);
+                ((ByteBuf) out).release();
+            } else {
+                ReferenceCountUtil.release(out);
             }
         }
+        // Append the pre-serialized body ByteBufs
+        for (var bodyBuf : bodyByteBufs) {
+            packets.add(bodyBuf.duplicate());
+        }
+        return packets;
+    }
+    static HttpJsonRequestWithFaultingPayload deepCopyHeaders(HttpJsonRequestWithFaultingPayload original) {
+        var copy = new HttpJsonRequestWithFaultingPayload();
+        copy.setMethod(original.method());
+        copy.setPath(original.path());
+        copy.setProtocol(original.protocol());
+        // Deep copy headers preserving LinkedHashMap insertion order
+        var originalStrictMap = original.headers().asStrictMap();
+        var newStrictMap = new StrictCaseInsensitiveHttpHeadersMap();
+        for (var entry : originalStrictMap.entrySet()) {
+            newStrictMap.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+        }
+        copy.setHeaders(new ListKeyAdaptingCaseInsensitiveHeadersMap(newStrictMap));
+        return copy;
+    }
+
+    private TrackedFuture<String, TransformedOutputAndResult<R>> finalizeNormalPath() {
+        var offloadingHandler = getOffloadingHandler();
+        channel.finishAndReleaseAll();
+        var cf = channel.close();
+        if (cf.cause() != null) {
+            log.atInfo().setCause(cf.cause()).setMessage("Exception encountered during write").log();
+        }
+
         if (offloadingHandler == null) {
-            // the NettyDecodedHttpRequestHandler gave up and didn't bother installing the baseline handlers -
-            // redrive the chunks
             return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver, null);
         }
         return offloadingHandler.getPacketReceiverCompletionFuture().getDeferredFutureThroughHandle((v, t) -> {
