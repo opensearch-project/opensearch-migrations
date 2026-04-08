@@ -424,10 +424,12 @@ class TestApproveIntegration:
 class TestAutocompleteIntegration:
 
     def test_autocomplete_returns_non_teardown_resources(self, reset_ns):
-        from console_link.workflow.commands.reset import _get_resource_completions
+        from console_link.workflow.commands.reset import _get_resource_completions, _get_reset_cache_file
 
         _create_crd_instance(reset_ns, "capturedtraffics", "proxy-ac", phase="Ready")
         _create_crd_instance(reset_ns, "snapshotmigrations", "snap-ac", phase="Teardown")
+
+        _get_reset_cache_file(reset_ns).unlink(missing_ok=True)
 
         class FakeCtx:
             params = {'namespace': reset_ns}
@@ -437,10 +439,12 @@ class TestAutocompleteIntegration:
         assert "snap-ac" not in completions  # already Teardown
 
     def test_autocomplete_filters_by_prefix(self, reset_ns):
-        from console_link.workflow.commands.reset import _get_resource_completions
+        from console_link.workflow.commands.reset import _get_resource_completions, _get_reset_cache_file
 
         _create_crd_instance(reset_ns, "capturedtraffics", "proxy-x", phase="Ready")
         _create_crd_instance(reset_ns, "capturedtraffics", "other-y", phase="Ready")
+
+        _get_reset_cache_file(reset_ns).unlink(missing_ok=True)
 
         class FakeCtx:
             params = {'namespace': reset_ns}
