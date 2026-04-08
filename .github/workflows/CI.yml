@@ -51,6 +51,18 @@ jobs:
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
+  gradle-clean-build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: false
+      - name: Run clean build without cache
+        run: ./gradlew clean build
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+
   python-lint:
     runs-on: ubuntu-22.04
     steps:
@@ -367,6 +379,7 @@ jobs:
       - python-e2e-tests
       - python-lint
       - gradle-extended-check
+      - gradle-clean-build
     if: always()
     runs-on: ubuntu-22.04
     steps:
