@@ -222,8 +222,7 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
         var packets = producer.get();
         var result = packets.asCompositeByteBufRetained();
         packets.release();
-        // Don't release producer here — caller didn't retain it, and the signing producer
-        // manages its own body chunk lifecycle. The test just needs the output bytes.
+        producer.release();
         return result;
     }
 

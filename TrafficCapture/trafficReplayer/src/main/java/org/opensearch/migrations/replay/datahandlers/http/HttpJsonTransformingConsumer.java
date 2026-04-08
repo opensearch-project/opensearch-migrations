@@ -155,7 +155,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 if (msg instanceof HttpJsonRequestWithFaultingPayload) {
                     unsignedHeaders = (HttpJsonRequestWithFaultingPayload) msg;
                 } else if (msg instanceof ByteBuf) {
-                    bodyByteBufs.add(((ByteBuf) msg).retain());
+                    bodyByteBufs.add((ByteBuf) msg);
                 } else {
                     ReferenceCountUtil.release(msg);
                 }
