@@ -1393,7 +1393,7 @@ spec:
               </solrcloud>
 
               <backup>
-                <repository name="default-s3" class="org.apache.solr.s3.S3BackupRepository" default="true">
+                <repository name="default" class="org.apache.solr.s3.S3BackupRepository" default="true">
                   <str name="s3.bucket.name">${S3_BUCKET_NAME:}</str>
                   <str name="s3.region">${S3_REGION:us-east-2}</str>
                   <str name="s3.endpoint">${S3_ENDPOINT:}</str>

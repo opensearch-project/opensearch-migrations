@@ -31,6 +31,7 @@ public class SolrSnapshotCreator {
     private final String backupLocation;
     private final List<String> collections;
     private final String authHeader;
+    private final String repositoryName;
 
     public SolrSnapshotCreator(
         String solrBaseUrl,
@@ -38,7 +39,7 @@ public class SolrSnapshotCreator {
         String backupLocation,
         List<String> collections
     ) {
-        this(solrBaseUrl, backupName, backupLocation, collections, null, null);
+        this(solrBaseUrl, backupName, backupLocation, collections, null, null, null);
     }
 
     public SolrSnapshotCreator(
@@ -48,6 +49,18 @@ public class SolrSnapshotCreator {
         List<String> collections,
         String username,
         String password
+    ) {
+        this(solrBaseUrl, backupName, backupLocation, collections, username, password, null);
+    }
+
+    public SolrSnapshotCreator(
+        String solrBaseUrl,
+        String backupName,
+        String backupLocation,
+        List<String> collections,
+        String username,
+        String password,
+        String repositoryName
     ) {
         this.solrBaseUrl = solrBaseUrl.endsWith("/")
             ? solrBaseUrl.substring(0, solrBaseUrl.length() - 1) : solrBaseUrl;
@@ -62,6 +75,7 @@ public class SolrSnapshotCreator {
         } else {
             this.authHeader = null;
         }
+        this.repositoryName = repositoryName;
     }
 
     /** No-op for SolrCloud — backup location is specified per-request. */
@@ -77,9 +91,9 @@ public class SolrSnapshotCreator {
                 "%s/solr/admin/collections?action=BACKUP&name=%s&collection=%s&async=%s&wt=json",
                 solrBaseUrl, backupName, collection, asyncId
             ));
-            if (backupLocation != null && backupLocation.startsWith("s3://")) {
+            if (backupLocation != null && backupLocation.startsWith("s3://") && repositoryName != null) {
                 // S3 backups use the configured repository; location is a path within the bucket
-                urlBuilder.append("&repository=default-s3&location=/");
+                urlBuilder.append("&repository=").append(repositoryName).append("&location=/");
             } else if (backupLocation != null) {
                 urlBuilder.append("&location=").append(backupLocation);
             }
