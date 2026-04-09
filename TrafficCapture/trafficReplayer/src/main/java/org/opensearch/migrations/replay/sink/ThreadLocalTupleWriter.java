@@ -58,7 +58,6 @@ public class ThreadLocalTupleWriter implements AutoCloseable {
         var future = new CompletableFuture<Void>();
         var map = parsed.toTupleMap(tuple);
         sink.accept(map, future);
-        sink.onEndOfBatch();
         return future;
     }
 

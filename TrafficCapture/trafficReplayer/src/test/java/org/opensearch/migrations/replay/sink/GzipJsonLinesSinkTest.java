@@ -42,10 +42,10 @@ class GzipJsonLinesSinkTest {
             sink.accept(makeTuple("conn1.0"), f1);
             sink.accept(makeTuple("conn2.0"), f2);
 
-            assertFalse(f1.isDone());
-            assertFalse(f2.isDone());
+            assertFalse(f1.isDone(), "Future should be pending before flush");
+            assertFalse(f2.isDone(), "Future should be pending before flush");
 
-            // onEndOfBatch rotates: finish + fsync + close + open new
+            // onEndOfBatch forces rotation: finish + fsync + close + open new
             sink.onEndOfBatch();
             assertTrue(f1.isDone(), "Future should complete on onEndOfBatch");
             assertTrue(f2.isDone(), "Future should complete on onEndOfBatch");
@@ -64,19 +64,66 @@ class GzipJsonLinesSinkTest {
         var gzFiles = Files.list(tempDir).filter(p -> p.toString().endsWith(".log.gz")).sorted().toList();
         assertTrue(gzFiles.size() >= 2, "Expected at least 2 files from rotation, got " + gzFiles.size());
 
-        int totalLines = 0;
-        for (var file : gzFiles) {
-            try (var reader = new BufferedReader(
-                new InputStreamReader(new GZIPInputStream(new FileInputStream(file.toFile()))))) {
-                String line;
-                while ((line = reader.readLine()) != null && !line.isEmpty()) {
-                    var parsed = MAPPER.readValue(line, Map.class);
-                    assertTrue(((String) parsed.get("connectionId")).startsWith("conn"));
-                    totalLines++;
-                }
+        assertEquals(3, countTotalLines(gzFiles));
+    }
+
+    @Test
+    void batchesMultipleTuplesPerFileWhenBelowThreshold() throws Exception {
+        // Large thresholds — tuples should accumulate without rotation
+        try (var sink = new GzipJsonLinesSink(tempDir, 10 * 1024 * 1024, Duration.ofMinutes(10))) {
+            var futures = new CompletableFuture[5];
+            for (int i = 0; i < 5; i++) {
+                futures[i] = new CompletableFuture<Void>();
+                sink.accept(makeTuple("conn" + i + ".0"), futures[i]);
+                // No onEndOfBatch — futures should stay pending
+                assertFalse(futures[i].isDone(), "Future " + i + " should be pending (below threshold)");
             }
         }
-        assertEquals(3, totalLines);
+        // close() flushes all pending futures and produces one file with all 5 tuples
+        var gzFiles = Files.list(tempDir).filter(p -> p.toString().endsWith(".log.gz")).sorted().toList();
+        // One data file (with 5 tuples) + one empty file opened after close-rotation = 1 file from openNewFile()
+        // Actually close() doesn't openNewFile, it just finishes+syncs+closes. So just 1 file.
+        assertEquals(5, countTotalLines(gzFiles));
+    }
+
+    @Test
+    void autoRotatesOnSizeThreshold() throws Exception {
+        // 100 byte threshold — each tuple is ~40 bytes uncompressed, so ~3 tuples triggers rotation
+        try (var sink = new GzipJsonLinesSink(tempDir, 100, Duration.ofMinutes(10))) {
+            var futures = new CompletableFuture[5];
+            for (int i = 0; i < 5; i++) {
+                futures[i] = new CompletableFuture<Void>();
+                sink.accept(makeTuple("conn" + i + ".0"), futures[i]);
+            }
+            // At least the first batch should have auto-rotated inside accept()
+            // The last tuples may still be pending (below threshold in the new file)
+        }
+
+        var gzFiles = Files.list(tempDir).filter(p -> p.toString().endsWith(".log.gz")).toList();
+        assertTrue(gzFiles.size() > 1, "Expected multiple files from size-based rotation, got " + gzFiles.size());
+        assertEquals(5, countTotalLines(gzFiles));
+    }
+
+    @Test
+    void autoRotatesOnTimeThreshold() throws Exception {
+        try (var sink = new GzipJsonLinesSink(tempDir, 10 * 1024 * 1024, Duration.ofMillis(1))) {
+            var f1 = new CompletableFuture<Void>();
+            sink.accept(makeTuple("conn1.0"), f1);
+            // Future pending — time threshold not yet hit at accept time
+            // Force flush so f1 completes
+            sink.onEndOfBatch();
+            assertTrue(f1.isDone());
+
+            Thread.sleep(10); // let the age threshold expire
+
+            var f2 = new CompletableFuture<Void>();
+            sink.accept(makeTuple("conn2.0"), f2);
+            // accept() should detect age threshold and auto-rotate
+            assertTrue(f2.isDone(), "Future should complete when age threshold triggers rotation in accept()");
+        }
+
+        var gzFiles = Files.list(tempDir).filter(p -> p.toString().endsWith(".log.gz")).toList();
+        assertTrue(gzFiles.size() >= 2, "Expected at least 2 files from time rotation, got " + gzFiles.size());
     }
 
     @Test
@@ -93,21 +140,16 @@ class GzipJsonLinesSinkTest {
     }
 
     @Test
-    void rotatesOnSizeThreshold() throws Exception {
-        // 100 byte threshold — each tuple is ~40 bytes, so 3 tuples should trigger rotation
-        try (var sink = new GzipJsonLinesSink(tempDir, 100, Duration.ofMinutes(10))) {
-            var futures = new CompletableFuture[5];
-            for (int i = 0; i < 5; i++) {
-                futures[i] = new CompletableFuture<Void>();
-                sink.accept(makeTuple("conn" + i + ".0"), futures[i]);
-                sink.onEndOfBatch();
-                assertTrue(futures[i].isDone(), "Future " + i + " should be done after onEndOfBatch");
-            }
-        }
+    void constructorThrowsForInvalidPath() {
+        var badPath = Path.of("/dev/null/impossible");
+        var ex = org.junit.jupiter.api.Assertions.assertThrows(
+            java.io.UncheckedIOException.class,
+            () -> new GzipJsonLinesSink(badPath, 1024, Duration.ofMinutes(1))
+        );
+        assertTrue(ex.getMessage().contains("Failed to"));
+    }
 
-        var gzFiles = Files.list(tempDir).filter(p -> p.toString().endsWith(".log.gz")).toList();
-        assertTrue(gzFiles.size() > 1, "Expected multiple files from rotation, got " + gzFiles.size());
-
+    private int countTotalLines(java.util.List<Path> gzFiles) throws Exception {
         int totalLines = 0;
         for (var file : gzFiles) {
             try (var reader = new BufferedReader(
@@ -120,37 +162,6 @@ class GzipJsonLinesSinkTest {
                 }
             }
         }
-        assertEquals(5, totalLines);
-    }
-
-    @Test
-    void rotatesOnTimeThreshold() throws Exception {
-        try (var sink = new GzipJsonLinesSink(tempDir, 10 * 1024 * 1024, Duration.ofMillis(1))) {
-            var f1 = new CompletableFuture<Void>();
-            sink.accept(makeTuple("conn1.0"), f1);
-            sink.onEndOfBatch();
-            assertTrue(f1.isDone());
-            f1.get(1, TimeUnit.SECONDS);
-
-            Thread.sleep(10);
-
-            var f2 = new CompletableFuture<Void>();
-            sink.accept(makeTuple("conn2.0"), f2);
-            sink.onEndOfBatch();
-            assertTrue(f2.isDone());
-        }
-
-        var gzFiles = Files.list(tempDir).filter(p -> p.toString().endsWith(".log.gz")).toList();
-        assertTrue(gzFiles.size() >= 2, "Expected at least 2 files from time rotation, got " + gzFiles.size());
-    }
-
-    @Test
-    void constructorThrowsForInvalidPath() {
-        var badPath = Path.of("/dev/null/impossible");
-        var ex = org.junit.jupiter.api.Assertions.assertThrows(
-            java.io.UncheckedIOException.class,
-            () -> new GzipJsonLinesSink(badPath, 1024, Duration.ofMinutes(1))
-        );
-        assertTrue(ex.getMessage().contains("Failed to"));
+        return totalLines;
     }
 }
