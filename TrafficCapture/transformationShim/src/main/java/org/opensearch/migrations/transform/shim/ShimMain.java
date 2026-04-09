@@ -20,7 +20,7 @@ import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
-import org.opensearch.migrations.transform.JavascriptTransformer;
+import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.transform.shim.netty.BasicAuthSigningHandler;
@@ -37,7 +37,6 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.converters.IParameterSplitter;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.channel.ChannelHandler;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -46,15 +45,19 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 /**
  * CLI entry point for the multi-target validation shim proxy.
  *
+ * <p>Uses the same {@code --transformerConfig} pattern as the traffic replayer.
+ * Transforms are created via {@link TransformationLoader} and ServiceLoader-discovered
+ * providers (e.g. {@link SolrTransformerProvider}).
+ *
  * <p>Example usage:
  * <pre>{@code
  * --listenPort 8080 \
  * --target solr=http://solr:8983 \
  * --target opensearch=https://opensearch:9200 \
- * --targetTransform opensearch=request:req.js,response:resp.js \
- * --targetAuth opensearch=sigv4:es,us-east-1 \
  * --primary solr \
- * --transformerConfig '{"solrConfig":{"/select":{"defaults":{"df":"title"}}}}' \
+ * --transformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/request.js","bindingsObject":"{}"}}]' \
+ * --responseTransformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/response.js","bindingsObject":"{}"}}]' \
+ * --targetAuth opensearch=sigv4:es,us-east-1 \
  * --validator field-equality:solr,opensearch:ignore=responseHeader.QTime \
  * --timeout 5000
  * }</pre>
@@ -62,14 +65,52 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 @Slf4j
 public class ShimMain {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
-
     /** Prevents JCommander from splitting parameter values on commas. */
     public static class NoSplitter implements IParameterSplitter {
         @Override
         public List<String> split(String value) {
             return List.of(value);
         }
+    }
+
+    @Getter
+    public static class RequestTransformationParams implements TransformerParams {
+        @Override
+        public String getTransformerConfigParameterArgPrefix() { return ""; }
+
+        @Parameter(names = {"--transformer-config", "--transformerConfig"},
+            description = "Request transformer config JSON array (same format as traffic replayer). "
+                + "Example: '[{\"SolrTransformerProvider\":{\"initializationScriptFile\":\"/path/to/request.js\",\"bindingsObject\":\"{}\"}}]'")
+        String transformerConfig;
+
+        @Parameter(names = {"--transformer-config-encoded", "--transformerConfigEncoded"},
+            description = "Base64-encoded request transformer config.")
+        String transformerConfigEncoded;
+
+        @Parameter(names = {"--transformer-config-file", "--transformerConfigFile"},
+            description = "Path to JSON file containing request transformer config.")
+        String transformerConfigFile;
+    }
+
+    @Getter
+    public static class ResponseTransformationParams implements TransformerParams {
+        private static final String PREFIX = "response-";
+        private static final String CAMEL_PREFIX = "response";
+
+        @Override
+        public String getTransformerConfigParameterArgPrefix() { return PREFIX; }
+
+        @Parameter(names = {"--" + PREFIX + "transformer-config", "--" + CAMEL_PREFIX + "TransformerConfig"},
+            description = "Response transformer config JSON array (same format as request transformer config).")
+        String transformerConfig;
+
+        @Parameter(names = {"--" + PREFIX + "transformer-config-encoded", "--" + CAMEL_PREFIX + "TransformerConfigEncoded"},
+            description = "Base64-encoded response transformer config.")
+        String transformerConfigEncoded;
+
+        @Parameter(names = {"--" + PREFIX + "transformer-config-file", "--" + CAMEL_PREFIX + "TransformerConfigFile"},
+            description = "Path to JSON file containing response transformer config.")
+        String transformerConfigFile;
     }
 
     public static class Parameters {
@@ -89,9 +130,9 @@ public class ShimMain {
             description = "Comma-separated list of active targets. Defaults to all defined targets.")
         public String active;
 
-        @Parameter(names = {"--targetTransform"}, splitter = NoSplitter.class,
-            description = "Per-target transforms: name=request:file.js,response:file.js. Repeatable.")
-        public List<String> targetTransforms = new ArrayList<>();
+        @Parameter(names = {"--transformTarget"},
+            description = "Name of the target to apply transforms to. Defaults to all non-primary targets.")
+        public String transformTarget;
 
         @Parameter(names = {"--targetAuth"}, splitter = NoSplitter.class,
             description = "Per-target auth: name=sigv4:service,region | name=basic:user:pass | "
@@ -127,34 +168,20 @@ public class ShimMain {
                 + "If not set, instrumentation runs in no-op mode.")
         public String otelCollectorEndpoint;
 
-        @Parameter(names = {"--watchTransforms"},
-            description = "Watch transform JS files for changes and hot-reload them.")
-        public boolean watchTransforms;
-
-        @Getter
-        @Parameter(names = {"--transformer-config", "--transformerConfig"},
-            description = "JSON bindings object for transforms (e.g. solrConfig). "
-                + "Same content as the replayer's bindingsObject in --transformerConfig.")
-        String transformerConfig;
-
-        @Getter
-        @Parameter(names = {"--transformer-config-encoded", "--transformerConfigEncoded"},
-            description = "Base64-encoded JSON bindings object for transforms.")
-        String transformerConfigEncoded;
-
-        @Getter
-        @Parameter(names = {"--transformer-config-file", "--transformerConfigFile"},
-            description = "Path to a JSON file containing the bindings object for transforms. "
-                + "Supports .json (parsed as bindings) or .xml (parsed as solrconfig.xml).")
-        String transformerConfigFile;
-
         @Parameter(names = {"--help", "-h"}, help = true, description = "Show usage.")
         public boolean help;
+
+        public RequestTransformationParams requestTransformationParams = new RequestTransformationParams();
+        public ResponseTransformationParams responseTransformationParams = new ResponseTransformationParams();
     }
 
     public static void main(String[] args) throws Exception {
         var params = new Parameters();
-        var jCommander = JCommander.newBuilder().addObject(params).build();
+        var jCommander = JCommander.newBuilder()
+            .addObject(params)
+            .addObject(params.requestTransformationParams)
+            .addObject(params.responseTransformationParams)
+            .build();
         jCommander.setProgramName("Shim");
         try {
             jCommander.parse(args);
@@ -168,8 +195,7 @@ public class ShimMain {
             return;
         }
 
-        Map<Path, ReloadableTransformer> watchedTransforms = new LinkedHashMap<>();
-        Map<String, Target> targets = parseTargets(params, watchedTransforms);
+        Map<String, Target> targets = parseTargets(params);
         Set<String> activeTargets = parseActiveTargets(params, targets);
         List<ValidationRule> validators = parseValidators(params);
 
@@ -183,19 +209,9 @@ public class ShimMain {
             null, params.insecureBackend, Duration.ofMillis(params.timeoutMs), params.maxContentLength,
             rootContext);
 
-        TransformFileWatcher watcher = null;
-        if (params.watchTransforms && !watchedTransforms.isEmpty()) {
-            watcher = new TransformFileWatcher(watchedTransforms);
-            var watcherThread = new Thread(watcher, "transform-file-watcher");
-            watcherThread.setDaemon(true);
-            watcherThread.start();
-        }
-
-        final TransformFileWatcher watcherRef = watcher;
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
                 log.info("Shutdown signal received, stopping proxy...");
-                if (watcherRef != null) watcherRef.close();
                 proxy.stop();
             } catch (Exception e) {
                 if (e instanceof InterruptedException) Thread.currentThread().interrupt();
@@ -210,8 +226,20 @@ public class ShimMain {
         proxy.waitForClose();
     }
 
-    static Map<String, Target> parseTargets(Parameters params,
-            Map<Path, ReloadableTransformer> watchedTransforms) throws IOException {
+    /**
+     * Create a transformer from a TransformerParams config using TransformationLoader.
+     * This is the same mechanism the traffic replayer uses.
+     */
+    static IJsonTransformer createTransformer(TransformerParams transformerParams) {
+        String configStr = TransformerConfigUtils.getTransformerConfig(transformerParams);
+        if (configStr == null) {
+            return null;
+        }
+        log.info("Creating transformer from config: {}", configStr);
+        return new TransformationLoader().getTransformerFactoryLoader(configStr);
+    }
+
+    static Map<String, Target> parseTargets(Parameters params) {
         // Parse base targets: name=uri
         Map<String, URI> uris = new LinkedHashMap<>();
         for (String spec : params.targets) {
@@ -220,27 +248,20 @@ public class ShimMain {
             uris.put(spec.substring(0, eq), URI.create(spec.substring(eq + 1)));
         }
 
-        Map<String, Object> bindings = resolveTransformBindings(params);
+        // Create transformers via TransformationLoader (same as replayer)
+        IJsonTransformer requestTransform = createTransformer(params.requestTransformationParams);
+        IJsonTransformer responseTransform = createTransformer(params.responseTransformationParams);
 
-        // Parse per-target transforms
-        Map<String, IJsonTransformer> reqTransforms = new LinkedHashMap<>();
-        Map<String, IJsonTransformer> respTransforms = new LinkedHashMap<>();
-        for (String spec : params.targetTransforms) {
-            int eq = spec.indexOf('=');
-            if (eq <= 0) throw new ParameterException("Invalid --targetTransform: " + spec);
-            String name = spec.substring(0, eq);
-            if (!uris.containsKey(name)) throw new ParameterException("Unknown target in --targetTransform: " + name);
-            for (String part : spec.substring(eq + 1).split(",")) {
-                if (part.startsWith("request:")) {
-                    reqTransforms.put(name, loadTransformer(
-                        part.substring("request:".length()), params.watchTransforms, watchedTransforms, bindings));
-                } else if (part.startsWith("response:")) {
-                    respTransforms.put(name, loadTransformer(
-                        part.substring("response:".length()), params.watchTransforms, watchedTransforms, bindings));
-                } else {
-                    throw new ParameterException("Invalid transform part: " + part + " (expected request:file or response:file)");
-                }
-            }
+        // Determine which target gets transforms
+        String transformTargetName = params.transformTarget;
+        if (transformTargetName == null) {
+            // Default: apply to all non-primary targets
+            transformTargetName = uris.keySet().stream()
+                .filter(name -> !name.equals(params.primary))
+                .findFirst().orElse(null);
+        }
+        if (transformTargetName != null && !uris.containsKey(transformTargetName)) {
+            throw new ParameterException("Unknown target in --transformTarget: " + transformTargetName);
         }
 
         // Parse per-target auth
@@ -257,8 +278,11 @@ public class ShimMain {
         Map<String, Target> targets = new LinkedHashMap<>();
         for (var entry : uris.entrySet()) {
             String name = entry.getKey();
+            boolean isTransformTarget = name.equals(transformTargetName);
             targets.put(name, new Target(name, entry.getValue(),
-                reqTransforms.get(name), respTransforms.get(name), authHandlers.get(name)));
+                isTransformTarget ? requestTransform : null,
+                isTransformTarget ? responseTransform : null,
+                authHandlers.get(name)));
         }
         return targets;
     }
@@ -282,15 +306,6 @@ public class ShimMain {
         return rules;
     }
 
-    /**
-     * Parse a validator spec string. Formats:
-     * <ul>
-     *   <li>field-equality:targetA,targetB:ignore=path1,path2</li>
-     *   <li>doc-count:targetA,targetB:assert=a&lt;=b</li>
-     *   <li>doc-ids:targetA,targetB[:ordered]</li>
-     *   <li>js:targetA,targetB:script=file.js</li>
-     * </ul>
-     */
     static ValidationRule parseValidatorSpec(String spec) throws IOException {
         String[] parts = spec.split(":", 3);
         if (parts.length < 2) throw new ParameterException("Invalid --validator: " + spec);
@@ -366,90 +381,5 @@ public class ShimMain {
             return () -> new BasicAuthSigningHandler(headerValue);
         }
         throw new ParameterException("Unknown auth type: " + authSpec);
-    }
-
-    public static final String JS_POLYFILL =
-        "if (typeof URLSearchParams === 'undefined') {\n" +
-        "  globalThis.URLSearchParams = function(qs) {\n" +
-        "    this._map = {};\n" +
-        "    if (!qs) return;\n" +
-        "    qs.split('&').forEach(function(pair) {\n" +
-        "      var idx = pair.indexOf('=');\n" +
-        "      if (idx < 0) return;\n" +
-        "      var k = decodeURIComponent(pair.slice(0, idx));\n" +
-        "      var v = decodeURIComponent(pair.slice(idx + 1));\n" +
-        "      if (!this._map[k]) this._map[k] = [];\n" +
-        "      this._map[k].push(v);\n" +
-        "    }.bind(this));\n" +
-        "  };\n" +
-        "  URLSearchParams.prototype.get = function(k) { return this._map[k] ? this._map[k][0] : null; };\n" +
-        "  URLSearchParams.prototype.has = function(k) { return k in this._map; };\n" +
-        "  URLSearchParams.prototype.set = function(k, v) { this._map[k] = [String(v)]; };\n" +
-        "  URLSearchParams.prototype.append = function(k, v) { if (!this._map[k]) this._map[k] = []; this._map[k].push(String(v)); };\n" +
-        "  URLSearchParams.prototype.getAll = function(k) { return this._map[k] || []; };\n" +
-        "  URLSearchParams.prototype.forEach = function(cb) { for (var k in this._map) { this._map[k].forEach(function(v) { cb(v, k); }); } };\n" +
-        "  URLSearchParams.prototype.keys = function() { return Object.keys(this._map); };\n" +
-        "  URLSearchParams.prototype.values = function() { var r = []; for (var k in this._map) { this._map[k].forEach(function(v) { r.push(v); }); } return r; };\n" +
-        "  URLSearchParams.prototype.entries = function() { var r = []; for (var k in this._map) { this._map[k].forEach(function(v) { r.push([k, v]); }); } return r; };\n" +
-        "  URLSearchParams.prototype.delete = function(k) { delete this._map[k]; };\n" +
-        "  URLSearchParams.prototype.toString = function() { var r = []; for (var k in this._map) { this._map[k].forEach(function(v) { r.push(encodeURIComponent(k) + '=' + encodeURIComponent(v)); }); } return r.join('&'); };\n" +
-        "}\n";
-
-    private static IJsonTransformer loadTransformer(String pathStr, boolean watch,
-            Map<Path, ReloadableTransformer> watchedTransforms,
-            Map<String, Object> bindings) throws IOException {
-        Path path = Path.of(pathStr).toAbsolutePath();
-        String script = JS_POLYFILL + Files.readString(path);
-        if (watch) {
-            var reloadable = new ReloadableTransformer(
-                () -> new JavascriptTransformer(script, bindings));
-            watchedTransforms.put(path, reloadable);
-            return reloadable;
-        }
-        return new JavascriptTransformer(script, bindings);
-    }
-
-    /**
-     * Resolve transform bindings from --transformerConfig, --transformerConfigEncoded,
-     * or --transformerConfigFile. Follows the same pattern as the traffic replayer's
-     * {@link TransformerConfigUtils}. The config file may be .xml (parsed via
-     * {@link SolrConfigProvider}) or .json (parsed as bindings directly).
-     *
-     * @return parsed bindings map, or empty map if no config is provided
-     */
-    @SuppressWarnings("unchecked")
-    static Map<String, Object> resolveTransformBindings(Parameters params) {
-        // Handle .xml files specially before delegating to TransformerConfigUtils
-        if (params.transformerConfigFile != null && params.transformerConfigFile.endsWith(".xml")) {
-            var solrConfig = SolrConfigProvider.fromXmlFile(Path.of(params.transformerConfigFile));
-            if (solrConfig.isEmpty()) {
-                return new LinkedHashMap<>();
-            }
-            var bindings = new LinkedHashMap<String, Object>();
-            bindings.put("solrConfig", solrConfig);
-            log.info("Loaded solrconfig from XML file {}", params.transformerConfigFile);
-            return bindings;
-        }
-
-        // Use TransformerConfigUtils for JSON/base64/file resolution (same as replayer)
-        var transformerParams = new TransformerParams() {
-            @Override public String getTransformerConfigParameterArgPrefix() { return ""; }
-            @Override public String getTransformerConfigEncoded() { return params.transformerConfigEncoded; }
-            @Override public String getTransformerConfig() { return params.transformerConfig; }
-            @Override public String getTransformerConfigFile() { return params.transformerConfigFile; }
-        };
-
-        String configJson = TransformerConfigUtils.getTransformerConfig(transformerParams);
-        if (configJson == null) {
-            return new LinkedHashMap<>();
-        }
-
-        try {
-            var parsed = MAPPER.readValue(configJson, Map.class);
-            log.info("Loaded transformer config bindings");
-            return parsed;
-        } catch (Exception e) {
-            throw new ParameterException("Invalid JSON in transformer config: " + e.getMessage());
-        }
     }
 }

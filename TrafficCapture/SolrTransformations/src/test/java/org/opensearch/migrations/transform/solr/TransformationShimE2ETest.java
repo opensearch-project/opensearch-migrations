@@ -17,7 +17,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JavascriptTransformer;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
-import org.opensearch.migrations.transform.shim.ShimMain;
+import org.opensearch.migrations.transform.shim.SolrTransformerProvider;
 import org.opensearch.testcontainers.OpensearchContainer;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -313,7 +313,7 @@ class TransformationShimE2ETest {
         var transformers = new IJsonTransformer[names.size()];
         for (int i = 0; i < names.size(); i++) {
             transformers[i] = new JavascriptTransformer(
-                ShimMain.JS_POLYFILL + loadTransformJs(names.get(i) + ".js"), bindings);
+                SolrTransformerProvider.JS_POLYFILL + loadTransformJs(names.get(i) + ".js"), bindings);
         }
         return transformers.length == 1 ? transformers[0] : new JsonCompositeTransformer(transformers);
     }

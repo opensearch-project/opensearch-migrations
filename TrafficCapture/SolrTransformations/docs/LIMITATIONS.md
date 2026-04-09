@@ -178,26 +178,29 @@ The traffic replayer uses `JsonJSTransformerProvider` which does not have
 access to `SolrConfigProvider` for XML parsing. The solrConfig must be
 provided as pre-built JSON in the `bindingsObject` of `--transformerConfig`.
 
-Both the shim proxy and the traffic replayer accept `--transformerConfig`
-(or `--transformerConfigEncoded` / `--transformerConfigFile`) following the
-same pattern. The shim interprets the config as a bindings object directly:
+Both the shim proxy and the traffic replayer use `--transformerConfig`
+with the same provider-based JSON array format. The shim uses
+`SolrTransformerProvider` which auto-prepends the GraalVM polyfill and
+supports `solrConfigXmlFile` for automatic XML parsing.
 
-**Example (shim proxy — inline JSON):**
+**Example (shim proxy — with solrconfig.xml auto-parsing):**
 ```
---transformerConfig '{"solrConfig":{"/select":{"defaults":{"df":"title"}}}}'
-```
-
-**Example (shim proxy — base64 encoded):**
-```
---transformerConfigEncoded 'eyJzb2xyQ29uZmlnIjp7Ii9zZWxlY3QiOnsiZGVmYXVsdHMiOnsiZGYiOiJ0aXRsZSJ9fX19'
-```
-
-**Example (shim proxy — XML file, auto-parsed):**
-```
---transformerConfigFile /path/to/solrconfig.xml
+--transformerConfig '[{"SolrTransformerProvider": {
+  "initializationScriptFile": "/path/to/request.js",
+  "bindingsObject": "{}",
+  "solrConfigXmlFile": "/path/to/solrconfig.xml"
+}}]'
 ```
 
-**Example (traffic replayer):**
+**Example (shim proxy — with inline solrConfig JSON in bindings):**
+```
+--transformerConfig '[{"SolrTransformerProvider": {
+  "initializationScriptFile": "/path/to/request.js",
+  "bindingsObject": "{\"solrConfig\": {\"/select\": {\"defaults\": {\"df\": \"title\"}}}}"
+}}]'
+```
+
+**Example (traffic replayer — uses JsonJSTransformerProvider):**
 ```
 --transformerConfig '[{"JsonJSTransformerProvider": {
   "initializationScriptFile": "/path/to/request.js",
@@ -205,7 +208,6 @@ same pattern. The shim interprets the config as a bindings object directly:
 }}]'
 ```
 
-**Cause:**
-`SolrConfigProvider` lives in the `transformationShim` module. Adding it
-as a dependency to `JsonJSTransformerProvider` would create a circular
-dependency. A future PR can move it to a shared module.
+**Note:** The traffic replayer cannot use `SolrTransformerProvider` directly
+because `SolrConfigProvider` lives in the `transformationShim` module.
+A future PR can move it to a shared module.

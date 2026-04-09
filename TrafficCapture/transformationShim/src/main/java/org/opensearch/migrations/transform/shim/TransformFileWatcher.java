@@ -89,7 +89,7 @@ public class TransformFileWatcher implements Runnable, AutoCloseable {
 
     private void reloadTransformer(Path path, ReloadableTransformer transformer) {
         try {
-            String script = ShimMain.JS_POLYFILL + Files.readString(path);
+            String script = SolrTransformerProvider.JS_POLYFILL + Files.readString(path);
             transformer.reload(
                 () -> new JavascriptTransformer(script, new LinkedHashMap<>()));
             log.info("Hot-reloaded transform: {}", path);

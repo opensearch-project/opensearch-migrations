@@ -77,10 +77,10 @@ services:
       - opensearch=http://opensearch:9200
       - --primary
       - opensearch
-      - --targetTransform
-      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
-      - --transformerConfigFile
-      - /solr-config/solrconfig.xml
+      - --transformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}","solrConfigXmlFile":"/solr-config/solrconfig.xml"}}]'
+      - --responseTransformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
 
@@ -111,18 +111,18 @@ services:
       - solr=http://solr:8983
       - --target
       - opensearch=http://opensearch:9200
-      - --targetTransform
-      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
       - --primary
       - solr
+      - --transformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}","solrConfigXmlFile":"/solr-config/solrconfig.xml"}}]'
+      - --responseTransformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
       - --validator
       - field-equality:solr,opensearch:ignore=responseHeader.QTime,responseHeader.params.NOW
       - --validator
       - doc-count:solr,opensearch:assert=solr==opensearch
       - --timeout
       - "5000"
-      - --transformerConfigFile
-      - /solr-config/solrconfig.xml
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
 
@@ -153,18 +153,18 @@ services:
       - solr=http://solr:8983
       - --target
       - opensearch=http://opensearch:9200
-      - --targetTransform
-      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
       - --primary
       - opensearch
+      - --transformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}","solrConfigXmlFile":"/solr-config/solrconfig.xml"}}]'
+      - --responseTransformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
       - --validator
       - field-equality:solr,opensearch:ignore=responseHeader.QTime,responseHeader.params.NOW
       - --validator
       - doc-count:solr,opensearch:assert=solr==opensearch
       - --timeout
       - "5000"
-      - --transformerConfigFile
-      - /solr-config/solrconfig.xml
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
 
