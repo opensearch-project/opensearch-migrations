@@ -378,7 +378,7 @@ public class CreateSnapshot {
         log.info("Detected SolrCloud — using Collections API backup");
         var solrCreator = new SolrSnapshotCreator(
             solrUrl, arguments.snapshotName, backupLocation,
-            arguments.solrCollections, username, password
+            arguments.solrCollections, username, password, arguments.snapshotRepoName
         );
         solrCreator.registerRepo();
         solrCreator.createSnapshot();
