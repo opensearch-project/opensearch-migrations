@@ -7,7 +7,7 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
@@ -27,7 +27,7 @@ public class RequestTransformerAndSender<T> {
     protected final IRetryVisitorFactory<T> retryVisitorFactory;
 
     RequestSenderOrchestrator.RetryVisitor<T>
-    getRetryCheckVisitor(TransformedOutputAndResult<ByteBufList> transformedResult,
+    getRetryCheckVisitor(TransformedOutputAndResult<ByteBufListProducer> transformedResult,
                          TrackedFuture<String, ? extends IRequestResponsePacketPair> finishedAccumulatingResponseFuture,
                          Consumer<AggregatedRawResponse> resultsConsumer) {
         var perRequestStatefulVisitor =
@@ -129,7 +129,7 @@ public class RequestTransformerAndSender<T> {
                     ctx,
                     start,
                     end,
-                    transformedRequest.transformedOutput.size(),
+                    transformedRequest.transformedOutput.numByteBufs(),
                     transformedRequest.transformedOutput,
                     getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
                         arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx)),
