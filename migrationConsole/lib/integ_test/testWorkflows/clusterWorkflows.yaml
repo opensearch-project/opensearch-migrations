@@ -1531,13 +1531,10 @@ spec:
 
             # Create the 'dummy' collection via Collections API (SolrCloud mode)
             echo "Creating 'dummy' collection..."
-            SOLR_URL="http://${CLUSTER_NAME}:8983"
+            SOLR_URL="http://${CLUSTER_NAME}.${NAMESPACE}.svc.cluster.local:8983"
             for i in $(seq 1 30); do
-              if kubectl exec -n ${NAMESPACE} deploy/${CLUSTER_NAME} -- curl -sf "${SOLR_URL}/solr/admin/collections?action=CREATE&name=dummy&numShards=1&replicationFactor=1&wt=json" 2>/dev/null; then
-                echo "Collection 'dummy' created successfully"
-                break
-              fi
-              echo "Waiting for Solr to accept collection creation (attempt $i/30)..."
+              RESULT=$(curl -s "${SOLR_URL}/solr/admin/collections?action=CREATE&name=dummy&numShards=1&replicationFactor=1&wt=json" 2>&1) && echo "$RESULT" | grep -q '"status":0' && echo "Collection 'dummy' created successfully" && break
+              echo "Attempt $i/30 - response: $RESULT"
               sleep 5
             done
 
