@@ -1429,6 +1429,8 @@ spec:
                   containers:
                     - name: solr
                       image: mirror.gcr.io/library/solr:8.11.4
+                      securityContext:
+                        runAsUser: 0
                       ports:
                         - containerPort: 8983
                           name: http
