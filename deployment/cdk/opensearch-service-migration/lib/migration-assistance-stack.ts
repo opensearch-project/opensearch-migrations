@@ -209,8 +209,11 @@ export class MigrationAssistanceStack extends Stack {
             parameter: MigrationSSMParameter.ARTIFACT_S3_ARN
         });
 
-        // S3 Files: Create an IAM role, file system, security group, and mount targets
+        // S3 Files: Optionally create an IAM role, file system, security group, and mount targets
         // so that snapshot data can be accessed via NFS instead of per-pod mount-s3.
+        // Enabled via CDK context: -c enableS3Files=true
+        const enableS3Files = this.node.tryGetContext('enableS3Files') === 'true';
+        if (enableS3Files) {
         const s3FilesRole = new Role(this, 's3FilesRole', {
             assumedBy: new ServicePrincipal('elasticfilesystem.amazonaws.com'),
             description: 'Role for S3 Files to sync with the artifact S3 bucket',
@@ -335,6 +338,7 @@ export class MigrationAssistanceStack extends Stack {
             ...props,
             parameter: MigrationSSMParameter.S3_FILES_FILE_SYSTEM_ID
         });
+        } // end enableS3Files
 
         new Cluster(this, 'migrationECSCluster', {
             vpc: props.vpcDetails.vpc,
