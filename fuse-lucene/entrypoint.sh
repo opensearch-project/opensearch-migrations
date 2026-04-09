@@ -31,7 +31,19 @@ if [ -n "${POD_NAME:-}" ]; then
     set -- ${NEW_ARGS}
 fi
 
-if [ -n "${S3_FILES_FS_ID:-}" ]; then
+if [ -z "${S3_FILES_FS_ID:-}" ] && [ -z "${S3_BUCKET:-}" ]; then
+    # Mode 0: No S3 source configured — create dummy mount point and sleep.
+    # This allows the sidecar to pass its startupProbe without blocking the pod.
+    echo "No S3_FILES_FS_ID or S3_BUCKET set — snapshot-fuse sidecar not needed, sleeping."
+    MOUNT_POINT="/mnt/lucene"
+    if [ -n "${POD_NAME:-}" ]; then
+        MOUNT_POINT="/mnt/.pods/${POD_NAME}/lucene"
+    fi
+    mkdir -p "${MOUNT_POINT}"
+    # Create a marker so startupProbe's mountpoint check passes (bind-mount to self)
+    mount --bind "${MOUNT_POINT}" "${MOUNT_POINT}"
+    exec sleep infinity
+elif [ -n "${S3_FILES_FS_ID:-}" ]; then
     # Mode 1: S3 Files — mount the file system via NFS
     echo "Mounting S3 Files filesystem '${S3_FILES_FS_ID}' at ${S3_MOUNT} via NFS"
     mkdir -p "${S3_MOUNT}"
