@@ -1431,7 +1431,7 @@ spec:
                       image: mirror.gcr.io/library/solr:8.11.4
                       command: ["sh", "-c"]
                       args:
-                        - cp /opt/solr/server/lib/ext/*.jar /extra-libs/ && cp /opt/solr/contrib/s3-repository/lib/*.jar /extra-libs/
+                        - cp /opt/solr/contrib/s3-repository/lib/*.jar /extra-libs/
                       volumeMounts:
                         - name: extra-libs
                           mountPath: /extra-libs
@@ -1466,9 +1466,9 @@ spec:
                               name: migrations-default-s3-config
                               key: ENDPOINT_HTTP
                               optional: true
-                      command:
-                        - solr-precreate
-                        - dummy
+                      command: ["sh", "-c"]
+                      args:
+                        - cp /extra-libs/*.jar /opt/solr/server/solr-webapp/webapp/WEB-INF/lib/ && exec solr-precreate dummy
                       readinessProbe:
                         httpGet:
                           path: /solr/admin/info/system?wt=json
@@ -1490,7 +1490,7 @@ spec:
                           mountPath: /opt/solr/server/solr/solr.xml
                           subPath: solr.xml
                         - name: extra-libs
-                          mountPath: /opt/solr/server/lib/ext
+                          mountPath: /extra-libs
                   volumes:
                     - name: solr-data
                       emptyDir: {}
