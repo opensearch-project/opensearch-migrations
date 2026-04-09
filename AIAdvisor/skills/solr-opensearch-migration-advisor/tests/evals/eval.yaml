@@ -285,3 +285,43 @@ tests:
            │ spellcheck component                     │ "suggest" with term suggester                                           │
            └──────────────────────────────────────────┴─────────────────────────────────────────────────────────────────────────┘
         metric: assess-customizations-search-handler
+  - description: "Migrate Kerberos auth"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        I am a Search Engineer and want to migrate solr to opensearch. 
+        In our current solr setup we use kerberos auth. Help me migrate this to opensearch.
+    assert:
+      - type: llm-rubric
+        value: >-
+          The answer mentions a range of steps to configure kerberos in opensearch, representing the following steps:
+          
+          ### Opensearch Node Configuration Steps:
+          1) Create a service principal and keytab for your OpenSearch nodes.
+          2) Within opensearch.yml:
+          Configure the following attributes (the response should also include descriptions of the attributes similar to what is provided below):
+          - `plugins.security.kerberos.krb5_filepath`: The path to your Kerberos configuration file.
+          - `plugins.security.kerberos.acceptor_keytab_filepath`: The path to the keytab file, which contains the principal that the Security plugin uses to issue requests through Kerberos.
+          - `plugins.security.kerberos.acceptor_principal`: The principal that the Security plugin uses to issue requests through Kerberos. This value must be present in the keytab file.
+          
+          The response should highlight that both keytab and krb5 config file must be placed in the `config` directory of opensearch or a subdirectory.
+          Further the response should mention that their paths in opensearch.yml must be relative, not absolute.
+
+          ### Cluster security configuration steps:
+          1) Configure Kerberos authentication domain in the config.yml.
+          An example is given below. The specific settings might differ, but ensure its a valid configuration for a Kerberos authentication domain:
+          ```yaml
+          kerberos_auth_domain:
+            enabled: true
+            order: 1
+            http_authenticator:
+              type: kerberos
+              challenge: true
+              config:
+                krb_debug: false
+                strip_realm_from_principal: true
+            authentication_backend:
+              type: noop
+          ```
+        metric: assess-customizations-kerberos-auth
