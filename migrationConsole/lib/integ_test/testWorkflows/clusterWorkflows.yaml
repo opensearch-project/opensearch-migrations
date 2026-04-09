@@ -1431,7 +1431,7 @@ spec:
                       image: mirror.gcr.io/library/solr:8.11.4
                       command: ["sh", "-c"]
                       args:
-                        - cp /opt/solr/contrib/s3-repository/lib/*.jar /extra-libs/
+                        - cp /opt/solr/server/lib/ext/*.jar /extra-libs/ && cp /opt/solr/contrib/s3-repository/lib/*.jar /extra-libs/
                       volumeMounts:
                         - name: extra-libs
                           mountPath: /extra-libs
