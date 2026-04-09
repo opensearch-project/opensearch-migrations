@@ -1461,7 +1461,7 @@ spec:
                               optional: true
                       command: ["bash", "-c"]
                       args:
-                        - cp /opt/solr/contrib/s3-repository/lib/*.jar /opt/solr/server/lib/ext/ && /opt/docker-solr/scripts/init-var-solr && /opt/docker-solr/scripts/precreate-core dummy && exec solr -f -force
+                        - cp /opt/solr/contrib/s3-repository/lib/*.jar /opt/solr/server/solr-webapp/webapp/WEB-INF/lib/ && /opt/docker-solr/scripts/init-var-solr && /opt/docker-solr/scripts/precreate-core dummy && exec solr -f -force
                       readinessProbe:
                         httpGet:
                           path: /solr/admin/info/system?wt=json
