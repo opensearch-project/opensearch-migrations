@@ -106,14 +106,7 @@ public class FileSystemReportingSink implements ReportingSink {
         }
         this.flushFuture.set(new CompletableFuture<>());
         enqueuePoisonPill();
-        try {
-            this.flushFuture.get().get(30, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("Flush interrupted", e);
-        } catch (Exception e) {
-            log.warn("Flush timed out", e);
-        }
+        awaitFlushFuture();
     }
 
     @Override
@@ -123,13 +116,18 @@ public class FileSystemReportingSink implements ReportingSink {
         }
         this.flushFuture.set(new CompletableFuture<>());
         enqueuePoisonPill();
+        awaitFlushFuture();
+    }
+
+    @SuppressWarnings({"java:S2142", "java:S2925"}) // interrupt handling is in enqueuePoisonPill; timeout is intentional safety net
+    private void awaitFlushFuture() {
         try {
             this.flushFuture.get().get(30, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("Close interrupted", e);
         } catch (Exception e) {
-            log.warn("Close flush timed out", e);
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            log.warn("Flush did not complete normally", e);
         }
     }
 
