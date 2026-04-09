@@ -131,11 +131,28 @@ export interface BoostNode {
   value: number;
 }
 
+/**
+ * Filter node — Solr's inline filter caching syntax.
+ *
+ * The filter(...) wrapper tells Solr to cache the inner clause in the filter
+ * cache and execute it as a constant-score (non-scoring) clause.
+ *
+ * Example: `filter(inStock:true)` → child=FieldNode(inStock,true)
+ *
+ * In OpenSearch, this maps to bool.filter for equivalent non-scoring behavior.
+ * See: https://solr.apache.org/guide/solr/latest/query-guide/standard-query-parser.html
+ */
+export interface FilterNode {
+  type: 'filter';
+  child: ASTNode;
+}
+
 /** Union of all AST node types. Every node in the parsed Solr query tree is one of these variants. */
 export type ASTNode =
   | BareNode
   | BoolNode
   | FieldNode
+  | FilterNode
   | PhraseNode
   | RangeNode
   | MatchAllNode
