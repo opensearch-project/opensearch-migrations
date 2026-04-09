@@ -630,12 +630,36 @@ class MetricsReceiverResponseTest {
         var collector = new MetricsReceiver(sink, SOLR_EXTRACTOR, false, true);
         var original = new ValidationDocument.RequestRecord("GET", "/solr/c/select", Map.of(), null);
         var transformed = new ValidationDocument.RequestRecord("GET", "/c/_search", Map.of(), null);
-        var baseline = successResponse("solr", solrResponseBody(10, 1));
-        var candidate = successResponse("opensearch", solrResponseBody(10, 1));
+        // Realistic Solr response with docs and facets
+        var solrBody = Map.<String, Object>of(
+            "responseHeader", Map.of("status", 0, "QTime", 5),
+            "response", Map.of("numFound", 2, "start", 0,
+                "docs", List.of(
+                    Map.of("id", "doc-1", "title", "First Document"),
+                    Map.of("id", "doc-2", "title", "Second Document"))),
+            "facet_counts", Map.of("facet_fields", Map.of("category", List.of("books", 10, "movies", 5)))
+        );
+        var osBody = Map.<String, Object>of(
+            "responseHeader", Map.of("status", 0, "QTime", 7),
+            "response", Map.of("numFound", 2, "start", 0,
+                "docs", List.of(
+                    Map.of("id", "doc-1", "title", "First Document"),
+                    Map.of("id", "doc-2", "title", "Second Document")))
+        );
+        var baseline = successResponse("solr", solrBody);
+        var candidate = successResponse("opensearch", osBody);
         collector.process(original, transformed, baseline, candidate, Map.of());
 
-        assertNotNull(sink.documents.get(0).baselineResponse().body());
-        assertTrue(sink.documents.get(0).baselineResponse().body().contains("numFound"));
+        var baselineBody = sink.documents.get(0).baselineResponse().body();
+        var candidateBody = sink.documents.get(0).candidateResponse().body();
+        assertNotNull(baselineBody);
+        assertNotNull(candidateBody);
+        // Verify actual document content is captured
+        assertTrue(baselineBody.contains("First Document"));
+        assertTrue(baselineBody.contains("doc-2"));
+        assertTrue(baselineBody.contains("facet_counts"));
+        assertTrue(candidateBody.contains("Second Document"));
+        assertFalse(candidateBody.contains("facet_counts")); // OS response had no facets
     }
 
     @Test
