@@ -2,11 +2,11 @@
 // Returns a map with 'script' (path to bootstrap) and 'flags' (joined string of args).
 def call(Map config = [:]) {
     def bootstrapScript
-    def version = config.version ?: 'latest'
-    def useRelease = config.useReleaseBootstrap ?: false
-    def buildImages = config.buildImages ?: false
-    def buildChart = config.buildChartAndDashboards ?: false
-    def skipTestImages = config.skipTestImages ?: false
+    def version = config.containsKey('version') ? config.version : 'latest'
+    def useRelease = config.containsKey('useReleaseBootstrap') ? config.useReleaseBootstrap : false
+    def buildImages = config.containsKey('buildImages') ? config.buildImages : false
+    def buildChart = config.containsKey('buildChartAndDashboards') ? config.buildChartAndDashboards : false
+    def skipTestImages = config.containsKey('skipTestImages') ? config.skipTestImages : false
 
     if (useRelease) {
         // Download the self-contained aws-bootstrap.sh from the GitHub release.
