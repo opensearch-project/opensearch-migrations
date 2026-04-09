@@ -167,7 +167,7 @@ services:
       - "18084:8080"
     volumes:
       - transform-dist:/transforms:ro
-      - ./reporting-config.yaml:/config/reporting-config.yaml:ro
+      - ./reporting-config.json:/config/reporting-config.json:ro
     depends_on:
       solr:
         condition: service_healthy
@@ -199,7 +199,7 @@ services:
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
       - --reporting-config
-      - /config/reporting-config.yaml
+      - /config/reporting-config.json
 
 volumes:
   transform-dist:

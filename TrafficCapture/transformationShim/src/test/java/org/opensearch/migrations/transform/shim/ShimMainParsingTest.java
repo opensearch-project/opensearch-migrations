@@ -274,19 +274,24 @@ class ShimMainParsingTest {
 
     @Test
     void initReportingWithAuthConfig() throws IOException {
-        Path config = tempDir.resolve("reporting.yaml");
+        Path config = tempDir.resolve("reporting.json");
         Files.writeString(config, """
-            enabled: true
-            include_request_body: true
-            sink:
-              opensearch:
-                uri: http://localhost:1
-                index_prefix: test
-                bulk_size: 10
-                flush_interval_ms: 60000
-                auth:
-                  username: admin
-                  password: secret
+            {
+              "enabled": true,
+              "include_request_body": true,
+              "sink": {
+                "opensearch": {
+                  "uri": "http://localhost:1",
+                  "index_prefix": "test",
+                  "bulk_size": 10,
+                  "flush_interval_ms": 60000,
+                  "auth": {
+                    "username": "admin",
+                    "password": "secret"
+                  }
+                }
+              }
+            }
             """);
 
         Object[] result = ShimMain.initReporting(config.toString());

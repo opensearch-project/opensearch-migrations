@@ -129,7 +129,7 @@ public class ShimMain {
         public boolean watchTransforms;
 
         @Parameter(names = {"--reporting-config"},
-            description = "Path to YAML configuration file for the validation reporting framework.")
+            description = "Path to JSON configuration file for the validation reporting framework.")
         public String reportingConfig;
 
         @Parameter(names = {"--help", "-h"}, help = true, description = "Show usage.")
@@ -209,18 +209,15 @@ public class ShimMain {
         try {
             ReportingConfig reportingConfig = ReportingConfig.parse(Path.of(configPath));
             if (reportingConfig.isEnabled() && reportingConfig.hasSink()) {
+                var connectionContext = reportingConfig.toConnectionContext();
                 var metricsSink = new OpenSearchMetricsSink(
-                    reportingConfig.getUri(),
+                    connectionContext,
                     reportingConfig.getIndexPrefix(),
                     reportingConfig.getBulkSize(),
-                    reportingConfig.getFlushIntervalMs(),
-                    reportingConfig.getUsername(),
-                    reportingConfig.getPassword(),
-                    reportingConfig.isInsecureTls()
+                    reportingConfig.getFlushIntervalMs()
                 );
                 var metricsReceiver = new MetricsReceiver(metricsSink, new SolrMetricsExtractor(),
                     reportingConfig.isIncludeRequestBody());
-                // Preflight: create index template before shim starts
                 metricsSink.createIndexTemplate();
                 log.info("Validation reporting enabled, sink: {} index prefix: {}",
                     reportingConfig.getUri(), reportingConfig.getIndexPrefix());

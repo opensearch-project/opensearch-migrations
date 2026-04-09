@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "include_request_body": true,
+  "sink": {
+    "type": "opensearch",
+    "opensearch": {
+      "uri": "http://opensearch-reporting:9200",
+      "index_prefix": "shim-metrics",
+      "bulk_size": 1,
+      "flush_interval_ms": 5000
+    }
+  }
+}

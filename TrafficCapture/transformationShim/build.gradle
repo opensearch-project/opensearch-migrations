@@ -6,6 +6,10 @@ plugins {
 
 dependencies {
     implementation project(':coreUtilities')
+    implementation project(':RfsHttp')
+    implementation project(':RFS')
+    implementation project(':RfsCommon')
+    implementation libs.reactor.core
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformer')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
@@ -13,7 +17,6 @@ dependencies {
 
     implementation libs.netty.all
     implementation libs.jackson.databind
-    implementation libs.jackson.dataformat.yaml
     implementation libs.jcommander
     implementation libs.slf4j.api
     implementation libs.log4j.api
@@ -26,6 +29,7 @@ dependencies {
 
     testImplementation libs.junit.jupiter.api
     testImplementation testFixtures(project(':coreUtilities'))
+    testImplementation testFixtures(project(':RFS'))
     testImplementation libs.testcontainers
     testImplementation libs.testcontainers.junit.jupiter
     testImplementation libs.testcontainers.opensearch

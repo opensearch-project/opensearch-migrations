@@ -99,25 +99,8 @@ class OpenSearchMetricsSinkTest {
     }
 
     @Test
-    void constructorWithCredentials() {
-        var sink = new OpenSearchMetricsSink(NON_ROUTABLE, "test", 100, 60000,
-            "admin", "password", false);
-        assertDoesNotThrow(() -> sink.submit(minimalDoc()));
-        sink.close();
-    }
-
-    @Test
-    void constructorWithNullCredentials() {
-        var sink = new OpenSearchMetricsSink(NON_ROUTABLE, "test", 100, 60000,
-            null, null, false);
-        assertDoesNotThrow(() -> sink.submit(minimalDoc()));
-        sink.close();
-    }
-
-    @Test
-    void constructorWithInsecureTls() {
-        var sink = new OpenSearchMetricsSink(NON_ROUTABLE, "test", 100, 60000,
-            null, null, true);
+    void constructorWithConnectionContext() {
+        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
         assertDoesNotThrow(() -> sink.submit(minimalDoc()));
         sink.close();
     }
@@ -153,8 +136,9 @@ class OpenSearchMetricsSinkTest {
 
     @Test
     void createIndexTemplateWithCredentials() {
-        var sink = new OpenSearchMetricsSink(NON_ROUTABLE, "test", 100, 60000,
-            "admin", "password", false);
+        var sink = new OpenSearchMetricsSink(
+            createConnectionContext(NON_ROUTABLE, "admin", "password"),
+            "test", 100, 60000);
         assertDoesNotThrow(sink::createIndexTemplate);
         sink.close();
     }
@@ -250,59 +234,6 @@ class OpenSearchMetricsSinkTest {
         sink.close();
     }
 
-    @Test
-    void checkPartialFailuresNoErrors() {
-        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
-        String response = "{\"errors\":false,\"items\":[{\"index\":{\"status\":201}}]}";
-        assertDoesNotThrow(() -> sink.checkPartialFailures(response, 1));
-        sink.close();
-    }
-
-    @Test
-    void checkPartialFailuresWithErrors() {
-        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
-        String response = "{\"errors\":true,\"items\":[{\"index\":{\"error\":{\"type\":\"mapper_parsing_exception\",\"reason\":\"failed\"}}}]}";
-        assertDoesNotThrow(() -> sink.checkPartialFailures(response, 1));
-        sink.close();
-    }
-
-    @Test
-    void checkPartialFailuresInvalidJson() {
-        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
-        assertDoesNotThrow(() -> sink.checkPartialFailures("not json", 1));
-        sink.close();
-    }
-
-    @Test
-    void countAndLogFailuresReturnsCount() throws Exception {
-        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
-        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-        var tree = mapper.readTree("{\"items\":[{\"index\":{\"error\":{\"type\":\"err\"}}},{\"index\":{\"status\":201}},{\"index\":{\"error\":{\"type\":\"err2\"}}}]}");
-        int count = sink.countAndLogFailures(tree);
-        assertEquals(2, count);
-        sink.close();
-    }
-
-    @Test
-    void countAndLogFailuresNoFailures() throws Exception {
-        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
-        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-        var tree = mapper.readTree("{\"items\":[{\"index\":{\"status\":201}},{\"index\":{\"status\":201}}]}");
-        int count = sink.countAndLogFailures(tree);
-        assertEquals(0, count);
-        sink.close();
-    }
-
-    @Test
-    void countAndLogFailuresNullItems() throws Exception {
-        var sink = createSink(NON_ROUTABLE, "test", 100, 60000);
-        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-        var tree = mapper.readTree("{}");
-        int count = sink.countAndLogFailures(tree);
-        assertEquals(0, count);
-        sink.close();
-    }
-
     private static ValidationDocument minimalDoc() {
         return new ValidationDocument(
             "2025-03-17T10:00:00Z", "test-" + System.nanoTime(),
@@ -313,6 +244,28 @@ class OpenSearchMetricsSinkTest {
 
     private static OpenSearchMetricsSink createSink(String uri, String prefix,
             int bulkSize, long flushMs) {
-        return new OpenSearchMetricsSink(uri, prefix, bulkSize, flushMs, null, null, false);
+        return new OpenSearchMetricsSink(
+            createConnectionContext(uri),
+            prefix, bulkSize, flushMs);
+    }
+
+    private static org.opensearch.migrations.bulkload.common.http.ConnectionContext createConnectionContext(String uri) {
+        return createConnectionContext(uri, null, null);
+    }
+
+    private static org.opensearch.migrations.bulkload.common.http.ConnectionContext createConnectionContext(
+            String uri, String username, String password) {
+        return new org.opensearch.migrations.bulkload.common.http.ConnectionContext.IParams() {
+            @Override public String getHost() { return uri; }
+            @Override public String getUsername() { return username; }
+            @Override public String getPassword() { return password; }
+            @Override public String getAwsRegion() { return null; }
+            @Override public String getAwsServiceSigningName() { return null; }
+            @Override public java.nio.file.Path getCaCert() { return null; }
+            @Override public java.nio.file.Path getClientCert() { return null; }
+            @Override public java.nio.file.Path getClientCertKey() { return null; }
+            @Override public boolean isDisableCompression() { return true; }
+            @Override public boolean isInsecure() { return true; }
+        }.toConnectionContext();
     }
 }

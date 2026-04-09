@@ -3,21 +3,22 @@ package org.opensearch.migrations.transform.shim.reporting;
 import java.io.IOException;
 import java.nio.file.Path;
 
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ReportingConfig {
-    private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory());
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private boolean enabled = true;
     @JsonProperty("include_request_body") private boolean includeRequestBody;
     private SinkConfig sink;
 
     public static ReportingConfig parse(Path path) throws IOException {
-        return YAML_MAPPER.readValue(path.toFile(), ReportingConfig.class);
+        return JSON_MAPPER.readValue(path.toFile(), ReportingConfig.class);
     }
 
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -40,6 +41,23 @@ public class ReportingConfig {
     public boolean isInsecureTls() {
         var os = sink.getOpensearch();
         return os.getAuth() != null && os.getAuth().getTls() != null && os.getAuth().getTls().isInsecure();
+    }
+
+    /** Build a {@link ConnectionContext} from this config's sink settings. */
+    public ConnectionContext toConnectionContext() {
+        var auth = sink.getOpensearch().getAuth();
+        return new ConnectionContext.IParams() {
+            @Override public String getHost() { return getUri(); }
+            @Override public String getUsername() { return auth != null ? auth.getUsername() : null; }
+            @Override public String getPassword() { return auth != null ? auth.getPassword() : null; }
+            @Override public String getAwsRegion() { return auth != null ? auth.getAwsRegion() : null; }
+            @Override public String getAwsServiceSigningName() { return auth != null ? auth.getAwsServiceSigningName() : null; }
+            @Override public Path getCaCert() { return null; }
+            @Override public Path getClientCert() { return null; }
+            @Override public Path getClientCertKey() { return null; }
+            @Override public boolean isDisableCompression() { return true; }
+            @Override public boolean isInsecure() { return isInsecureTls(); }
+        }.toConnectionContext();
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -75,11 +93,17 @@ public class ReportingConfig {
     public static class AuthConfig {
         private String username;
         private String password;
+        @JsonProperty("aws_region") private String awsRegion;
+        @JsonProperty("aws_service_signing_name") private String awsServiceSigningName;
         private TlsConfig tls;
         public String getUsername() { return username; }
         public void setUsername(String username) { this.username = username; }
         public String getPassword() { return password; }
         public void setPassword(String password) { this.password = password; }
+        public String getAwsRegion() { return awsRegion; }
+        public void setAwsRegion(String awsRegion) { this.awsRegion = awsRegion; }
+        public String getAwsServiceSigningName() { return awsServiceSigningName; }
+        public void setAwsServiceSigningName(String awsServiceSigningName) { this.awsServiceSigningName = awsServiceSigningName; }
         public TlsConfig getTls() { return tls; }
         public void setTls(TlsConfig tls) { this.tls = tls; }
     }

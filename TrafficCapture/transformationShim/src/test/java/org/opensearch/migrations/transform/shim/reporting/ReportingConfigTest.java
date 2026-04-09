@@ -15,7 +15,7 @@ class ReportingConfigTest {
     Path tempDir;
 
     private Path writeConfig(String content) throws IOException {
-        Path file = tempDir.resolve("reporting-config.yaml");
+        Path file = tempDir.resolve("reporting-config.json");
         Files.writeString(file, content);
         return file;
     }
@@ -23,20 +23,24 @@ class ReportingConfigTest {
     @Test
     void parsesFullConfig() throws IOException {
         var config = ReportingConfig.parse(writeConfig("""
-            enabled: true
-            include_request_body: true
-            sink:
-              type: opensearch
-              opensearch:
-                uri: http://localhost:9200
-                index_prefix: test-metrics
-                bulk_size: 50
-                flush_interval_ms: 3000
-                auth:
-                  username: admin
-                  password: secret
-                  tls:
-                    insecure: true
+            {
+              "enabled": true,
+              "include_request_body": true,
+              "sink": {
+                "type": "opensearch",
+                "opensearch": {
+                  "uri": "http://localhost:9200",
+                  "index_prefix": "test-metrics",
+                  "bulk_size": 50,
+                  "flush_interval_ms": 3000,
+                  "auth": {
+                    "username": "admin",
+                    "password": "secret",
+                    "tls": { "insecure": true }
+                  }
+                }
+              }
+            }
             """));
 
         assertTrue(config.isEnabled());
@@ -54,10 +58,12 @@ class ReportingConfigTest {
     @Test
     void parsesMinimalConfig() throws IOException {
         var config = ReportingConfig.parse(writeConfig("""
-            enabled: true
-            sink:
-              opensearch:
-                uri: http://reporting:9200
+            {
+              "enabled": true,
+              "sink": {
+                "opensearch": { "uri": "http://reporting:9200" }
+              }
+            }
             """));
 
         assertTrue(config.isEnabled());
@@ -75,7 +81,7 @@ class ReportingConfigTest {
     @Test
     void disabledConfig() throws IOException {
         var config = ReportingConfig.parse(writeConfig("""
-            enabled: false
+            { "enabled": false }
             """));
 
         assertFalse(config.isEnabled());
@@ -85,7 +91,7 @@ class ReportingConfigTest {
     @Test
     void noSinkConfig() throws IOException {
         var config = ReportingConfig.parse(writeConfig("""
-            enabled: true
+            { "enabled": true }
             """));
 
         assertTrue(config.isEnabled());
@@ -95,13 +101,17 @@ class ReportingConfigTest {
     @Test
     void ignoresUnknownFields() throws IOException {
         var config = ReportingConfig.parse(writeConfig("""
-            enabled: true
-            unknown_field: value
-            sink:
-              type: opensearch
-              opensearch:
-                uri: http://localhost:9200
-                extra_field: ignored
+            {
+              "enabled": true,
+              "unknown_field": "value",
+              "sink": {
+                "type": "opensearch",
+                "opensearch": {
+                  "uri": "http://localhost:9200",
+                  "extra_field": "ignored"
+                }
+              }
+            }
             """));
 
         assertTrue(config.hasSink());
@@ -111,13 +121,15 @@ class ReportingConfigTest {
     @Test
     void authWithTlsNullReturnsNotInsecure() throws IOException {
         var config = ReportingConfig.parse(writeConfig("""
-            enabled: true
-            sink:
-              opensearch:
-                uri: http://localhost:9200
-                auth:
-                  username: admin
-                  password: pass
+            {
+              "enabled": true,
+              "sink": {
+                "opensearch": {
+                  "uri": "http://localhost:9200",
+                  "auth": { "username": "admin", "password": "pass" }
+                }
+              }
+            }
             """));
         assertTrue(config.hasSink());
         assertEquals("admin", config.getUsername());
@@ -128,10 +140,12 @@ class ReportingConfigTest {
     @Test
     void authNullReturnsNullCredentials() throws IOException {
         var config = ReportingConfig.parse(writeConfig("""
-            enabled: true
-            sink:
-              opensearch:
-                uri: http://localhost:9200
+            {
+              "enabled": true,
+              "sink": {
+                "opensearch": { "uri": "http://localhost:9200" }
+              }
+            }
             """));
         assertNull(config.getUsername());
         assertNull(config.getPassword());
@@ -141,15 +155,19 @@ class ReportingConfigTest {
     @Test
     void tlsInsecureFalseExplicitly() throws IOException {
         var config = ReportingConfig.parse(writeConfig("""
-            enabled: true
-            sink:
-              opensearch:
-                uri: http://localhost:9200
-                auth:
-                  username: u
-                  password: p
-                  tls:
-                    insecure: false
+            {
+              "enabled": true,
+              "sink": {
+                "opensearch": {
+                  "uri": "http://localhost:9200",
+                  "auth": {
+                    "username": "u",
+                    "password": "p",
+                    "tls": { "insecure": false }
+                  }
+                }
+              }
+            }
             """));
         assertFalse(config.isInsecureTls());
     }

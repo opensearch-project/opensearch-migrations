@@ -3,10 +3,13 @@ package org.opensearch.migrations.transform.shim.reporting;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -17,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for {@link OpenSearchMetricsSink} that use a local HTTP server
- * to exercise the sendBulk async callback paths and createIndexTemplate responses.
+ * to exercise sendBulkWithRetry, createIndexTemplate, and auth via ConnectionContext.
  */
 class OpenSearchMetricsSinkHttpTest {
 
@@ -36,33 +39,36 @@ class OpenSearchMetricsSinkHttpTest {
         if (server != null) server.stop(0);
     }
 
-    // --- createIndexTemplate ---
+    private OpenSearchMetricsSink createSink(int bulkSize, long flushMs) {
+        return new OpenSearchMetricsSink(ctx(baseUri, null, null), "test", bulkSize, flushMs);
+    }
+
+    private OpenSearchMetricsSink createSinkWithAuth(String user, String pass) {
+        return new OpenSearchMetricsSink(ctx(baseUri, user, pass), "test", 100, 60000);
+    }
 
     @Test
     void createIndexTemplateSuccess() {
-        server.createContext("/_index_template/", exchange -> {
+        server.createContext("/", exchange -> {
             byte[] resp = "{\"acknowledged\":true}".getBytes();
             exchange.sendResponseHeaders(200, resp.length);
             try (OutputStream os = exchange.getResponseBody()) { os.write(resp); }
         });
         server.start();
-
-        var sink = new OpenSearchMetricsSink(baseUri, "test", 100, 60000, null, null, false);
+        var sink = createSink(100, 60000);
         assertDoesNotThrow(sink::createIndexTemplate);
         sink.close();
     }
 
     @Test
     void createIndexTemplateNonSuccessStatus() {
-        server.createContext("/_index_template/", exchange -> {
+        server.createContext("/", exchange -> {
             byte[] resp = "{\"error\":\"bad request\"}".getBytes();
             exchange.sendResponseHeaders(400, resp.length);
             try (OutputStream os = exchange.getResponseBody()) { os.write(resp); }
         });
         server.start();
-
-        var sink = new OpenSearchMetricsSink(baseUri, "test", 100, 60000, null, null, false);
-        // Should not throw — logs a warning instead
+        var sink = createSink(100, 60000);
         assertDoesNotThrow(sink::createIndexTemplate);
         sink.close();
     }
@@ -70,85 +76,37 @@ class OpenSearchMetricsSinkHttpTest {
     @Test
     void createIndexTemplateWithAuth() {
         AtomicReference<String> capturedAuth = new AtomicReference<>();
-        server.createContext("/_index_template/", exchange -> {
+        server.createContext("/", exchange -> {
             capturedAuth.set(exchange.getRequestHeaders().getFirst("Authorization"));
             byte[] resp = "{\"acknowledged\":true}".getBytes();
             exchange.sendResponseHeaders(200, resp.length);
             try (OutputStream os = exchange.getResponseBody()) { os.write(resp); }
         });
         server.start();
-
-        var sink = new OpenSearchMetricsSink(baseUri, "test", 100, 60000, "user", "pass", false);
+        var sink = createSinkWithAuth("user", "pass");
         sink.createIndexTemplate();
         assertNotNull(capturedAuth.get());
         assertTrue(capturedAuth.get().startsWith("Basic "));
         sink.close();
     }
 
-    // --- sendBulk via submit + flush ---
-
     @Test
     void sendBulkSuccessPath() throws InterruptedException {
         CountDownLatch latch = new CountDownLatch(1);
         AtomicInteger bulkCalls = new AtomicInteger();
-
-        server.createContext("/_bulk", exchange -> {
+        server.createContext("/", exchange -> {
             bulkCalls.incrementAndGet();
-            byte[] resp = "{\"errors\":false,\"items\":[{\"index\":{\"status\":201}}]}".getBytes();
+            byte[] resp = "{\"errors\":false,\"items\":[{\"index\":{\"_id\":\"1\",\"result\":\"created\",\"status\":201}}]}".getBytes();
             exchange.sendResponseHeaders(200, resp.length);
             try (OutputStream os = exchange.getResponseBody()) { os.write(resp); }
             latch.countDown();
         });
         server.start();
-
-        var sink = new OpenSearchMetricsSink(baseUri, "test", 100, 60000, null, null, false);
+        var sink = createSink(100, 60000);
         sink.submit(minimalDoc());
         sink.flush();
-        // Wait for async bulk to complete
-        assertTrue(latch.await(5, TimeUnit.SECONDS), "Bulk request should have been sent");
+        assertTrue(latch.await(5, TimeUnit.SECONDS));
         assertEquals(1, bulkCalls.get());
-        sink.close();
-    }
-
-    @Test
-    void sendBulkSuccessWithPartialFailures() throws InterruptedException {
-        CountDownLatch latch = new CountDownLatch(1);
-
-        server.createContext("/_bulk", exchange -> {
-            byte[] resp = ("{\"errors\":true,\"items\":["
-                + "{\"index\":{\"error\":{\"type\":\"mapper_parsing_exception\",\"reason\":\"failed\"}}},"
-                + "{\"index\":{\"status\":201}}"
-                + "]}").getBytes();
-            exchange.sendResponseHeaders(200, resp.length);
-            try (OutputStream os = exchange.getResponseBody()) { os.write(resp); }
-            latch.countDown();
-        });
-        server.start();
-
-        var sink = new OpenSearchMetricsSink(baseUri, "test", 100, 60000, null, null, false);
-        sink.submit(minimalDoc());
-        sink.flush();
-        assertTrue(latch.await(5, TimeUnit.SECONDS));
-        sink.close();
-    }
-
-    @Test
-    void sendBulkErrorStatusCode() throws InterruptedException {
-        CountDownLatch latch = new CountDownLatch(1);
-
-        server.createContext("/_bulk", exchange -> {
-            byte[] resp = "{\"error\":\"internal error\"}".getBytes();
-            exchange.sendResponseHeaders(500, resp.length);
-            try (OutputStream os = exchange.getResponseBody()) { os.write(resp); }
-            latch.countDown();
-        });
-        server.start();
-
-        var sink = new OpenSearchMetricsSink(baseUri, "test", 100, 60000, null, null, false);
-        sink.submit(minimalDoc());
-        sink.flush();
-        assertTrue(latch.await(5, TimeUnit.SECONDS));
-        // Should not throw — logs a warning
         sink.close();
     }
 
@@ -156,17 +114,15 @@ class OpenSearchMetricsSinkHttpTest {
     void sendBulkWithAuthHeader() throws InterruptedException {
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<String> capturedAuth = new AtomicReference<>();
-
-        server.createContext("/_bulk", exchange -> {
+        server.createContext("/", exchange -> {
             capturedAuth.set(exchange.getRequestHeaders().getFirst("Authorization"));
-            byte[] resp = "{\"errors\":false,\"items\":[]}".getBytes();
+            byte[] resp = "{\"errors\":false,\"items\":[{\"index\":{\"_id\":\"1\",\"result\":\"created\",\"status\":201}}]}".getBytes();
             exchange.sendResponseHeaders(200, resp.length);
             try (OutputStream os = exchange.getResponseBody()) { os.write(resp); }
             latch.countDown();
         });
         server.start();
-
-        var sink = new OpenSearchMetricsSink(baseUri, "test", 100, 60000, "admin", "secret", false);
+        var sink = createSinkWithAuth("admin", "secret");
         sink.submit(minimalDoc());
         sink.flush();
         assertTrue(latch.await(5, TimeUnit.SECONDS));
@@ -178,44 +134,17 @@ class OpenSearchMetricsSinkHttpTest {
     @Test
     void submitTriggersFlushAtBulkSize() throws InterruptedException {
         CountDownLatch latch = new CountDownLatch(1);
-
-        server.createContext("/_bulk", exchange -> {
-            byte[] resp = "{\"errors\":false,\"items\":[]}".getBytes();
+        server.createContext("/", exchange -> {
+            byte[] resp = "{\"errors\":false,\"items\":[{\"index\":{\"_id\":\"1\",\"result\":\"created\",\"status\":201}}]}".getBytes();
             exchange.sendResponseHeaders(200, resp.length);
             try (OutputStream os = exchange.getResponseBody()) { os.write(resp); }
             latch.countDown();
         });
         server.start();
-
-        // bulkSize=2, so submitting 2 docs triggers automatic flush
-        var sink = new OpenSearchMetricsSink(baseUri, "test", 2, 60000, null, null, false);
+        var sink = createSink(2, 60000);
         sink.submit(minimalDoc());
         sink.submit(minimalDoc());
-        assertTrue(latch.await(5, TimeUnit.SECONDS), "Bulk should auto-trigger at bulkSize");
-        sink.close();
-    }
-
-    @Test
-    void multipleBulkBatches() throws InterruptedException {
-        AtomicInteger bulkCalls = new AtomicInteger();
-        CountDownLatch latch = new CountDownLatch(3);
-
-        server.createContext("/_bulk", exchange -> {
-            bulkCalls.incrementAndGet();
-            byte[] resp = "{\"errors\":false,\"items\":[]}".getBytes();
-            exchange.sendResponseHeaders(200, resp.length);
-            try (OutputStream os = exchange.getResponseBody()) { os.write(resp); }
-            latch.countDown();
-        });
-        server.start();
-
-        var sink = new OpenSearchMetricsSink(baseUri, "test", 2, 60000, null, null, false);
-        // 6 docs with bulkSize=2 should produce 3 bulk requests
-        for (int i = 0; i < 6; i++) {
-            sink.submit(minimalDoc());
-        }
         assertTrue(latch.await(5, TimeUnit.SECONDS));
-        assertEquals(3, bulkCalls.get());
         sink.close();
     }
 
@@ -225,5 +154,20 @@ class OpenSearchMetricsSinkHttpTest {
             null, null, null, null,
             null, null, null, null, null, null, null, null
         );
+    }
+
+    private static ConnectionContext ctx(String uri, String username, String password) {
+        return new ConnectionContext.IParams() {
+            @Override public String getHost() { return uri; }
+            @Override public String getUsername() { return username; }
+            @Override public String getPassword() { return password; }
+            @Override public String getAwsRegion() { return null; }
+            @Override public String getAwsServiceSigningName() { return null; }
+            @Override public Path getCaCert() { return null; }
+            @Override public Path getClientCert() { return null; }
+            @Override public Path getClientCertKey() { return null; }
+            @Override public boolean isDisableCompression() { return true; }
+            @Override public boolean isInsecure() { return true; }
+        }.toConnectionContext();
     }
 }

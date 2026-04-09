@@ -23,8 +23,8 @@ class ShimMainReportingTest {
 
     @Test
     void initReportingReturnsNullForDisabledConfig() throws IOException {
-        Path config = tempDir.resolve("reporting.yaml");
-        Files.writeString(config, "enabled: false\n");
+        Path config = tempDir.resolve("reporting.json");
+        Files.writeString(config, "{\"enabled\": false}");
 
         Object[] result = ShimMain.initReporting(config.toString());
         assertNull(result[0]);
@@ -33,8 +33,8 @@ class ShimMainReportingTest {
 
     @Test
     void initReportingReturnsNullForMissingSink() throws IOException {
-        Path config = tempDir.resolve("reporting.yaml");
-        Files.writeString(config, "enabled: true\n");
+        Path config = tempDir.resolve("reporting.json");
+        Files.writeString(config, "{\"enabled\": true}");
 
         Object[] result = ShimMain.initReporting(config.toString());
         assertNull(result[0]);
@@ -43,16 +43,20 @@ class ShimMainReportingTest {
 
     @Test
     void initReportingReturnsReceiversForValidConfig() throws IOException {
-        Path config = tempDir.resolve("reporting.yaml");
+        Path config = tempDir.resolve("reporting.json");
         Files.writeString(config, """
-            enabled: true
-            include_request_body: false
-            sink:
-              opensearch:
-                uri: http://localhost:1
-                index_prefix: test
-                bulk_size: 10
-                flush_interval_ms: 60000
+            {
+              "enabled": true,
+              "include_request_body": false,
+              "sink": {
+                "opensearch": {
+                  "uri": "http://localhost:1",
+                  "index_prefix": "test",
+                  "bulk_size": 10,
+                  "flush_interval_ms": 60000
+                }
+              }
+            }
             """);
 
         Object[] result = ShimMain.initReporting(config.toString());
@@ -67,7 +71,7 @@ class ShimMainReportingTest {
 
     @Test
     void initReportingHandlesInvalidPath() {
-        Object[] result = ShimMain.initReporting("/nonexistent/path/config.yaml");
+        Object[] result = ShimMain.initReporting("/nonexistent/path/config.json");
         assertNull(result[0]);
         assertNull(result[1]);
     }

@@ -52,19 +52,24 @@ The `MetricsReceiver` runs inline on the Netty event loop after validators but b
 
 ## Configuration
 
-Add `--reporting-config path/to/config.yaml` to the shim startup command. See `src/main/resources/reporting-config-sample.yaml` for a fully commented example.
+Add `--reporting-config path/to/config.json` to the shim startup command.
 
 Minimal config:
 
-```yaml
-enabled: true
-sink:
-  type: opensearch
-  opensearch:
-    uri: https://reporting-cluster:9200
-    auth:
-      username: admin
-      password: admin
+```json
+{
+  "enabled": true,
+  "sink": {
+    "type": "opensearch",
+    "opensearch": {
+      "uri": "https://reporting-cluster:9200",
+      "auth": {
+        "username": "admin",
+        "password": "admin"
+      }
+    }
+  }
+}
 ```
 
 TLS is enabled by default. When `--reporting-config` is not provided, reporting is disabled and no sink is initialized.
@@ -96,7 +101,7 @@ All in `org.opensearch.migrations.transform.shim.reporting`:
 | `OpenSearchMetricsSink` | Bulk-indexes documents into the reporting cluster |
 | `MetricsExtractor` | Interface — field path resolution, URI parsing, result comparison; `SolrMetricsExtractor` is the Solr implementation |
 | `FacetComparator` | Compares Solr-format facet structures (used internally by `SolrMetricsExtractor`) |
-| `ReportingConfig` | YAML config POJO, parsed at startup |
+| `ReportingConfig` | JSON config POJO, parsed at startup |
 
 ## OpenSearch Index
 
