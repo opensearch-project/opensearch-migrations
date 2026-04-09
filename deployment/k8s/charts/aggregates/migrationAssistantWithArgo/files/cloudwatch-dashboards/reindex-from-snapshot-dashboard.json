@@ -251,8 +251,8 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ { "expression": "METRICS()/PERIOD(m1)*60", "id": "e1", "region": "REGION" } ],
-                    [ "OpenSearchMigrations", "container_cpu_usage_seconds_total", "container", "bulk-loader", "namespace", "ma", { "region": "REGION", "label": "RFS Workers - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}", "id": "m1", "visible": false } ]
+                    [ { "expression": "FLOOR(m1 / (PERIOD(m1) / 5) + 0.5)", "id": "e1", "region": "REGION", "label": "Workers", "period": 60 } ],
+                    [ "OpenSearchMigrations", "container_cpu_usage_seconds_total", "container", "bulk-loader", "namespace", "ma", { "region": "REGION", "id": "m1", "visible": false, "period": 60 } ]
                 ],
                 "period": 60,
                 "region": "REGION",
@@ -277,9 +277,8 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "OpenSearchMigrations", "container_cpu_usage_seconds_total", "container", "bulk-loader", "namespace", "ma", { "stat": "Minimum", "region": "REGION", "color": "#2ca02c", "label": "Min" } ],
-                    [ "...", { "stat": "Average", "region": "REGION", "color": "#1f77b4", "label": "Avg" } ],
-                    [ "...", { "stat": "Maximum", "region": "REGION", "color": "#d62728", "label": "Max" } ]
+                    [ "OpenSearchMigrations", "container_cpu_usage_seconds_total", "container", "bulk-loader", "namespace", "ma", { "stat": "Sum", "region": "REGION", "id": "m1", "visible": false } ],
+                    [ { "expression": "m1 / PERIOD(m1)", "label": "CPU (cores)", "id": "e1", "region": "REGION", "color": "#1f77b4" } ]
                 ],
                 "period": 60,
                 "region": "REGION",
