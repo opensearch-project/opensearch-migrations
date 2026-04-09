@@ -300,22 +300,27 @@ class TestRunner:
                                              reuse_clusters=reuse_clusters,
                                              test_reports_dir=test_reports_dir)
                 test_reports.append(test_report)
-                tests_failed = test_report.summary.failed > 0 or test_report.summary.passed == 0
 
                 expected = test_report.summary.expected
-                if expected is not None and test_report.summary.passed != expected:
-                    logger.warning(f"Expected {test_report.summary.expected} tests but only "
-                                   f"{test_report.summary.passed} passed "
-                                   f"({test_report.summary.failed} failed)")
-                    tests_failed = True
-
-                if tests_failed:
-                    logger.warning(f"Tests failed (or no tests executed) for migrations "
-                                   f"from {source_version} to {target_version}.")
-                    combos_with_failures.append(f"{source_version} -> {target_version}")
+                # Version pairs with no compatible tests (expected==0) are not failures
+                if expected is not None and expected == 0 and test_report.summary.failed == 0:
+                    logger.info(f"No compatible tests for {source_version} → {target_version}, skipping")
                 else:
-                    logger.info(f"Tests passed successfully for migrations "
-                                f"from {source_version} to {target_version}.")
+                    tests_failed = test_report.summary.failed > 0 or test_report.summary.passed == 0
+
+                    if expected is not None and test_report.summary.passed != expected:
+                        logger.warning(f"Expected {test_report.summary.expected} tests but only "
+                                       f"{test_report.summary.passed} passed "
+                                       f"({test_report.summary.failed} failed)")
+                        tests_failed = True
+
+                    if tests_failed:
+                        logger.warning(f"Tests failed (or no tests executed) for migrations "
+                                       f"from {source_version} to {target_version}.")
+                        combos_with_failures.append(f"{source_version} -> {target_version}")
+                    else:
+                        logger.info(f"Tests passed successfully for migrations "
+                                    f"from {source_version} to {target_version}.")
             except HelmCommandFailed as helmError:
                 logger.error(f"Helm command failed with error: {helmError}. Testing may be incomplete")
                 combos_with_failures.append(f"{source_version} -> {target_version}")
@@ -332,10 +337,14 @@ class TestRunner:
 
         self._print_summary_table(reports=test_reports)
         total_tests = sum(len(r.tests) for r in test_reports)
+        all_expected_zero = all(
+            r.summary.expected is not None and r.summary.expected == 0
+            for r in test_reports
+        ) if test_reports else False
         if combos_with_failures:
             raise TestsFailed(f"The following combinations had test failures (or no test cases executed): "
                               f"{combos_with_failures}")
-        if total_tests == 0:
+        if total_tests == 0 and not all_expected_zero:
             raise TestsFailed("No tests were executed. This likely indicates a configuration error "
                               "(empty version matrix, missing test IDs, or infrastructure failure).")
         logger.info("Test execution completed.")
