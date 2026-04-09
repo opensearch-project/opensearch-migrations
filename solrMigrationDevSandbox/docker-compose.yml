@@ -60,6 +60,7 @@ services:
       - "18080:8080"
     volumes:
       - transform-dist:/transforms:ro
+      - ./config/solr/solrconfig.xml:/solr-config/solrconfig.xml:ro
     depends_on:
       opensearch:
         condition: service_healthy
@@ -78,6 +79,8 @@ services:
       - opensearch
       - --targetTransform
       - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
+      - --solr-config-path
+      - /solr-config/solrconfig.xml
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
 
@@ -91,6 +94,7 @@ services:
       - "18083:8080"
     volumes:
       - transform-dist:/transforms:ro
+      - ./config/solr/solrconfig.xml:/solr-config/solrconfig.xml:ro
     depends_on:
       solr:
         condition: service_healthy
@@ -117,6 +121,8 @@ services:
       - doc-count:solr,opensearch:assert=solr==opensearch
       - --timeout
       - "5000"
+      - --solr-config-path
+      - /solr-config/solrconfig.xml
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
 
@@ -130,6 +136,7 @@ services:
       - "18084:8080"
     volumes:
       - transform-dist:/transforms:ro
+      - ./config/solr/solrconfig.xml:/solr-config/solrconfig.xml:ro
     depends_on:
       solr:
         condition: service_healthy
@@ -156,6 +163,8 @@ services:
       - doc-count:solr,opensearch:assert=solr==opensearch
       - --timeout
       - "5000"
+      - --solr-config-path
+      - /solr-config/solrconfig.xml
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
 

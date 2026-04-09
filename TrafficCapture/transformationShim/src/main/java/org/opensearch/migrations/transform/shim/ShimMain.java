@@ -124,6 +124,16 @@ public class ShimMain {
             description = "Watch transform JS files for changes and hot-reload them.")
         public boolean watchTransforms;
 
+        @Parameter(names = {"--solr-config-path", "--solrConfigPath"},
+            description = "Path to solrconfig file. Supports solrconfig.xml (parsed for requestHandler "
+                + "defaults/invariants/appends) or a JSON file with pre-built solrConfig bindings.")
+        public String solrConfigPath;
+
+        @Parameter(names = {"--solr-config-inline", "--solrConfigInline"},
+            description = "Inline JSON string for solrConfig transform bindings. "
+                + "Format: '{\"solrConfig\":{\"/select\":{\"defaults\":{\"df\":\"title\"}}}}'")
+        public String solrConfigInline;
+
         @Parameter(names = {"--help", "-h"}, help = true, description = "Show usage.")
         public boolean help;
     }
@@ -196,6 +206,8 @@ public class ShimMain {
             uris.put(spec.substring(0, eq), URI.create(spec.substring(eq + 1)));
         }
 
+        Map<String, Object> bindings = buildTransformBindings(params);
+
         // Parse per-target transforms
         Map<String, IJsonTransformer> reqTransforms = new LinkedHashMap<>();
         Map<String, IJsonTransformer> respTransforms = new LinkedHashMap<>();
@@ -207,10 +219,10 @@ public class ShimMain {
             for (String part : spec.substring(eq + 1).split(",")) {
                 if (part.startsWith("request:")) {
                     reqTransforms.put(name, loadTransformer(
-                        part.substring("request:".length()), params.watchTransforms, watchedTransforms));
+                        part.substring("request:".length()), params.watchTransforms, watchedTransforms, bindings));
                 } else if (part.startsWith("response:")) {
                     respTransforms.put(name, loadTransformer(
-                        part.substring("response:".length()), params.watchTransforms, watchedTransforms));
+                        part.substring("response:".length()), params.watchTransforms, watchedTransforms, bindings));
                 } else {
                     throw new ParameterException("Invalid transform part: " + part + " (expected request:file or response:file)");
                 }
@@ -358,6 +370,8 @@ public class ShimMain {
         "  };\n" +
         "  URLSearchParams.prototype.get = function(k) { return this._map[k] ? this._map[k][0] : null; };\n" +
         "  URLSearchParams.prototype.has = function(k) { return k in this._map; };\n" +
+        "  URLSearchParams.prototype.set = function(k, v) { this._map[k] = [String(v)]; };\n" +
+        "  URLSearchParams.prototype.append = function(k, v) { if (!this._map[k]) this._map[k] = []; this._map[k].push(String(v)); };\n" +
         "  URLSearchParams.prototype.getAll = function(k) { return this._map[k] || []; };\n" +
         "  URLSearchParams.prototype.forEach = function(cb) { for (var k in this._map) { this._map[k].forEach(function(v) { cb(v, k); }); } };\n" +
         "  URLSearchParams.prototype.keys = function() { return Object.keys(this._map); };\n" +
@@ -368,15 +382,59 @@ public class ShimMain {
         "}\n";
 
     private static IJsonTransformer loadTransformer(String pathStr, boolean watch,
-            Map<Path, ReloadableTransformer> watchedTransforms) throws IOException {
+            Map<Path, ReloadableTransformer> watchedTransforms,
+            Map<String, Object> bindings) throws IOException {
         Path path = Path.of(pathStr).toAbsolutePath();
         String script = JS_POLYFILL + Files.readString(path);
         if (watch) {
             var reloadable = new ReloadableTransformer(
-                () -> new JavascriptTransformer(script, new java.util.LinkedHashMap<>()));
+                () -> new JavascriptTransformer(script, bindings));
             watchedTransforms.put(path, reloadable);
             return reloadable;
         }
-        return new JavascriptTransformer(script, new java.util.LinkedHashMap<>());
+        return new JavascriptTransformer(script, bindings);
+    }
+
+    /**
+     * Build transform bindings from explicit CLI params.
+     * Supports --solr-config-path (XML or JSON file) and --solr-config-inline (JSON string).
+     * Returns empty bindings if neither is provided (no-op for transforms).
+     */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> buildTransformBindings(Parameters params) {
+        if (params.solrConfigPath != null && params.solrConfigInline != null) {
+            throw new ParameterException(
+                "Specify only one of --solr-config-path or --solr-config-inline, not both.");
+        }
+        Map<String, Object> bindings = new LinkedHashMap<>();
+        if (params.solrConfigPath != null) {
+            Path path = Path.of(params.solrConfigPath);
+            if (params.solrConfigPath.endsWith(".xml")) {
+                var solrConfig = SolrConfigProvider.fromXmlFile(path);
+                if (!solrConfig.isEmpty()) {
+                    bindings.put("solrConfig", solrConfig);
+                }
+            } else {
+                try {
+                    var json = Files.readString(path);
+                    var parsed = new com.fasterxml.jackson.databind.ObjectMapper()
+                        .readValue(json, Map.class);
+                    bindings.putAll(parsed);
+                } catch (Exception e) {
+                    throw new ParameterException("Failed to read JSON from " + path + ": " + e.getMessage());
+                }
+            }
+            log.info("Loaded solrconfig from {}", params.solrConfigPath);
+        } else if (params.solrConfigInline != null) {
+            try {
+                var parsed = new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readValue(params.solrConfigInline, Map.class);
+                bindings.putAll(parsed);
+                log.info("Loaded solrconfig from inline JSON");
+            } catch (Exception e) {
+                throw new ParameterException("Invalid JSON in --solr-config-inline: " + e.getMessage());
+            }
+        }
+        return bindings;
     }
 }
