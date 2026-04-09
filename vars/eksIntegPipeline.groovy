@@ -15,7 +15,7 @@ static def expandVersionString(String input) {
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksint"
     def jobName = config.jobName ?: "eks-integ-test"
-    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
     def sourceVersion = config.sourceVersion ?: ""
     def targetVersion = config.targetVersion ?: ""
     def sourceClusterType = config.sourceClusterType ?: ""

@@ -6,7 +6,7 @@ def call(Map config = [:]) {
     def endpointEnvVar = envVarMap[collectionType]
     def defaultStageId = config.defaultStageId ?: "aosss"
     def jobName = config.jobName ?: "eks-aoss-${collectionType.toLowerCase()}-integ-test"
-    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
     def clusterContextFilePath = "tmp/cluster-context-aoss-${currentBuild.number}.json"
 
     pipeline {

@@ -7,7 +7,7 @@ def call(Map config = [:]) {
     def vpcMode = config.vpcMode ?: 'create'
     def isImportVpc = (vpcMode == 'import')
     def jobName = config.jobName ?: (isImportVpc ? "eksImportVPCSolutionsCFNTest" : "eksCreateVPCSolutionsCFNTest")
-    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
