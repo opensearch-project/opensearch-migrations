@@ -21,6 +21,8 @@ import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JavascriptTransformer;
+import org.opensearch.migrations.transform.TransformerConfigUtils;
+import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.transform.shim.netty.BasicAuthSigningHandler;
 import org.opensearch.migrations.transform.shim.netty.SigV4SigningHandler;
 import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
@@ -35,7 +37,9 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.converters.IParameterSplitter;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.channel.ChannelHandler;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
@@ -50,12 +54,15 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
  * --targetTransform opensearch=request:req.js,response:resp.js \
  * --targetAuth opensearch=sigv4:es,us-east-1 \
  * --primary solr \
+ * --transformerConfig '{"solrConfig":{"/select":{"defaults":{"df":"title"}}}}' \
  * --validator field-equality:solr,opensearch:ignore=responseHeader.QTime \
  * --timeout 5000
  * }</pre>
  */
 @Slf4j
 public class ShimMain {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** Prevents JCommander from splitting parameter values on commas. */
     public static class NoSplitter implements IParameterSplitter {
@@ -124,15 +131,22 @@ public class ShimMain {
             description = "Watch transform JS files for changes and hot-reload them.")
         public boolean watchTransforms;
 
-        @Parameter(names = {"--solr-config-path", "--solrConfigPath"},
-            description = "Path to solrconfig file. Supports solrconfig.xml (parsed for requestHandler "
-                + "defaults/invariants/appends) or a JSON file with pre-built solrConfig bindings.")
-        public String solrConfigPath;
+        @Getter
+        @Parameter(names = {"--transformer-config", "--transformerConfig"},
+            description = "JSON bindings object for transforms (e.g. solrConfig). "
+                + "Same content as the replayer's bindingsObject in --transformerConfig.")
+        String transformerConfig;
 
-        @Parameter(names = {"--solr-config-inline", "--solrConfigInline"},
-            description = "Inline JSON string for solrConfig transform bindings. "
-                + "Format: '{\"solrConfig\":{\"/select\":{\"defaults\":{\"df\":\"title\"}}}}'")
-        public String solrConfigInline;
+        @Getter
+        @Parameter(names = {"--transformer-config-encoded", "--transformerConfigEncoded"},
+            description = "Base64-encoded JSON bindings object for transforms.")
+        String transformerConfigEncoded;
+
+        @Getter
+        @Parameter(names = {"--transformer-config-file", "--transformerConfigFile"},
+            description = "Path to a JSON file containing the bindings object for transforms. "
+                + "Supports .json (parsed as bindings) or .xml (parsed as solrconfig.xml).")
+        String transformerConfigFile;
 
         @Parameter(names = {"--help", "-h"}, help = true, description = "Show usage.")
         public boolean help;
@@ -206,7 +220,7 @@ public class ShimMain {
             uris.put(spec.substring(0, eq), URI.create(spec.substring(eq + 1)));
         }
 
-        Map<String, Object> bindings = buildTransformBindings(params);
+        Map<String, Object> bindings = resolveTransformBindings(params);
 
         // Parse per-target transforms
         Map<String, IJsonTransformer> reqTransforms = new LinkedHashMap<>();
@@ -396,45 +410,46 @@ public class ShimMain {
     }
 
     /**
-     * Build transform bindings from explicit CLI params.
-     * Supports --solr-config-path (XML or JSON file) and --solr-config-inline (JSON string).
-     * Returns empty bindings if neither is provided (no-op for transforms).
+     * Resolve transform bindings from --transformerConfig, --transformerConfigEncoded,
+     * or --transformerConfigFile. Follows the same pattern as the traffic replayer's
+     * {@link TransformerConfigUtils}. The config file may be .xml (parsed via
+     * {@link SolrConfigProvider}) or .json (parsed as bindings directly).
+     *
+     * @return parsed bindings map, or empty map if no config is provided
      */
     @SuppressWarnings("unchecked")
-    static Map<String, Object> buildTransformBindings(Parameters params) {
-        if (params.solrConfigPath != null && params.solrConfigInline != null) {
-            throw new ParameterException(
-                "Specify only one of --solr-config-path or --solr-config-inline, not both.");
-        }
-        Map<String, Object> bindings = new LinkedHashMap<>();
-        if (params.solrConfigPath != null) {
-            Path path = Path.of(params.solrConfigPath);
-            if (params.solrConfigPath.endsWith(".xml")) {
-                var solrConfig = SolrConfigProvider.fromXmlFile(path);
-                if (!solrConfig.isEmpty()) {
-                    bindings.put("solrConfig", solrConfig);
-                }
-            } else {
-                try {
-                    var json = Files.readString(path);
-                    var parsed = new com.fasterxml.jackson.databind.ObjectMapper()
-                        .readValue(json, Map.class);
-                    bindings.putAll(parsed);
-                } catch (Exception e) {
-                    throw new ParameterException("Failed to read JSON from " + path + ": " + e.getMessage());
-                }
+    static Map<String, Object> resolveTransformBindings(Parameters params) {
+        // Handle .xml files specially before delegating to TransformerConfigUtils
+        if (params.transformerConfigFile != null && params.transformerConfigFile.endsWith(".xml")) {
+            var solrConfig = SolrConfigProvider.fromXmlFile(Path.of(params.transformerConfigFile));
+            if (solrConfig.isEmpty()) {
+                return new LinkedHashMap<>();
             }
-            log.info("Loaded solrconfig from {}", params.solrConfigPath);
-        } else if (params.solrConfigInline != null) {
-            try {
-                var parsed = new com.fasterxml.jackson.databind.ObjectMapper()
-                    .readValue(params.solrConfigInline, Map.class);
-                bindings.putAll(parsed);
-                log.info("Loaded solrconfig from inline JSON");
-            } catch (Exception e) {
-                throw new ParameterException("Invalid JSON in --solr-config-inline: " + e.getMessage());
-            }
+            var bindings = new LinkedHashMap<String, Object>();
+            bindings.put("solrConfig", solrConfig);
+            log.info("Loaded solrconfig from XML file {}", params.transformerConfigFile);
+            return bindings;
         }
-        return bindings;
+
+        // Use TransformerConfigUtils for JSON/base64/file resolution (same as replayer)
+        var transformerParams = new TransformerParams() {
+            @Override public String getTransformerConfigParameterArgPrefix() { return ""; }
+            @Override public String getTransformerConfigEncoded() { return params.transformerConfigEncoded; }
+            @Override public String getTransformerConfig() { return params.transformerConfig; }
+            @Override public String getTransformerConfigFile() { return params.transformerConfigFile; }
+        };
+
+        String configJson = TransformerConfigUtils.getTransformerConfig(transformerParams);
+        if (configJson == null) {
+            return new LinkedHashMap<>();
+        }
+
+        try {
+            var parsed = MAPPER.readValue(configJson, Map.class);
+            log.info("Loaded transformer config bindings");
+            return parsed;
+        } catch (Exception e) {
+            throw new ParameterException("Invalid JSON in transformer config: " + e.getMessage());
+        }
     }
 }

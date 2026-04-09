@@ -79,7 +79,7 @@ services:
       - opensearch
       - --targetTransform
       - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
-      - --solr-config-path
+      - --transformerConfigFile
       - /solr-config/solrconfig.xml
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
@@ -121,7 +121,7 @@ services:
       - doc-count:solr,opensearch:assert=solr==opensearch
       - --timeout
       - "5000"
-      - --solr-config-path
+      - --transformerConfigFile
       - /solr-config/solrconfig.xml
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
@@ -163,7 +163,7 @@ services:
       - doc-count:solr,opensearch:assert=solr==opensearch
       - --timeout
       - "5000"
-      - --solr-config-path
+      - --transformerConfigFile
       - /solr-config/solrconfig.xml
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317

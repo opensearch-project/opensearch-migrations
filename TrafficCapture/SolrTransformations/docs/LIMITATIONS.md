@@ -178,9 +178,24 @@ The traffic replayer uses `JsonJSTransformerProvider` which does not have
 access to `SolrConfigProvider` for XML parsing. The solrConfig must be
 provided as pre-built JSON in the `bindingsObject` of `--transformerConfig`.
 
-**Note:** The shim proxy supports both XML and JSON via explicit CLI params:
-- `--solr-config-path /path/to/solrconfig.xml` (or `.json`)
-- `--solr-config-inline '{"solrConfig":{...}}'`
+Both the shim proxy and the traffic replayer accept `--transformerConfig`
+(or `--transformerConfigEncoded` / `--transformerConfigFile`) following the
+same pattern. The shim interprets the config as a bindings object directly:
+
+**Example (shim proxy — inline JSON):**
+```
+--transformerConfig '{"solrConfig":{"/select":{"defaults":{"df":"title"}}}}'
+```
+
+**Example (shim proxy — base64 encoded):**
+```
+--transformerConfigEncoded 'eyJzb2xyQ29uZmlnIjp7Ii9zZWxlY3QiOnsiZGVmYXVsdHMiOnsiZGYiOiJ0aXRsZSJ9fX19'
+```
+
+**Example (shim proxy — XML file, auto-parsed):**
+```
+--transformerConfigFile /path/to/solrconfig.xml
+```
 
 **Example (traffic replayer):**
 ```
