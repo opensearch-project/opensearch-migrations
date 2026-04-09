@@ -2,10 +2,7 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y \
-    curl \
-    ca-certificates \
-    jq
+RUN apt-get update && apt-get install -y ca-certificates curl jq && && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -s /bin/bash user && \
     mkdir -p /home/user/claude/.claude/skills/solr-opensearch-migration-advisor && \
