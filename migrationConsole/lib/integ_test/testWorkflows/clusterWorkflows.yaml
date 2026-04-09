@@ -1426,15 +1426,6 @@ spec:
                     cluster-name: ${CLUSTER_NAME}
                 spec:
                   serviceAccountName: migration-console-access-role
-                  initContainers:
-                    - name: install-s3-plugin
-                      image: mirror.gcr.io/library/solr:8.11.4
-                      command: ["sh", "-c"]
-                      args:
-                        - cp /opt/solr/contrib/s3-repository/lib/*.jar /extra-libs/
-                      volumeMounts:
-                        - name: extra-libs
-                          mountPath: /extra-libs
                   containers:
                     - name: solr
                       image: mirror.gcr.io/library/solr:8.11.4
@@ -1468,7 +1459,7 @@ spec:
                               optional: true
                       command: ["sh", "-c"]
                       args:
-                        - cp /extra-libs/*.jar /opt/solr/server/solr-webapp/webapp/WEB-INF/lib/ && exec solr-precreate dummy
+                        - cp /opt/solr/contrib/s3-repository/lib/*.jar /opt/solr/server/lib/ext/ && exec solr-precreate dummy
                       readinessProbe:
                         httpGet:
                           path: /solr/admin/info/system?wt=json
@@ -1489,12 +1480,8 @@ spec:
                         - name: solr-xml
                           mountPath: /opt/solr/server/solr/solr.xml
                           subPath: solr.xml
-                        - name: extra-libs
-                          mountPath: /extra-libs
                   volumes:
                     - name: solr-data
-                      emptyDir: {}
-                    - name: extra-libs
                       emptyDir: {}
                     - name: solr-xml
                       configMap:
