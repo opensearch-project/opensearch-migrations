@@ -179,6 +179,7 @@ jobs:
         uses: helm/kind-action@v1.14.0
         with:
           cluster_name: release-schema-verification
+          node_image: kindest/node:v1.33.1
       - name: Deploy Helm chart and copy generated workflow schema
         if: ${{ !github.event.act }}
         run: |

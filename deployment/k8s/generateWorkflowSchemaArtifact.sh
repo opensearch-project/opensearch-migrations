@@ -17,18 +17,15 @@ IMAGE_REPOSITORY_PREFIX="${IMAGE_REPOSITORY_PREFIX:-}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 IMAGE_PULL_POLICY="${IMAGE_PULL_POLICY:-Always}"
 
-CAPTURE_PROXY_IMAGE_REPOSITORY="${CAPTURE_PROXY_IMAGE_REPOSITORY:-${IMAGE_REPOSITORY_PREFIX:+${IMAGE_REPOSITORY_PREFIX}/opensearch-migrations-traffic-capture-proxy}}"
-TRAFFIC_REPLAYER_IMAGE_REPOSITORY="${TRAFFIC_REPLAYER_IMAGE_REPOSITORY:-${IMAGE_REPOSITORY_PREFIX:+${IMAGE_REPOSITORY_PREFIX}/opensearch-migrations-traffic-replayer}}"
-REINDEX_FROM_SNAPSHOT_IMAGE_REPOSITORY="${REINDEX_FROM_SNAPSHOT_IMAGE_REPOSITORY:-${IMAGE_REPOSITORY_PREFIX:+${IMAGE_REPOSITORY_PREFIX}/opensearch-migrations-reindex-from-snapshot}}"
 MIGRATION_CONSOLE_IMAGE_REPOSITORY="${MIGRATION_CONSOLE_IMAGE_REPOSITORY:-${IMAGE_REPOSITORY_PREFIX:+${IMAGE_REPOSITORY_PREFIX}/opensearch-migrations-console}}"
 INSTALLER_IMAGE_REPOSITORY="${INSTALLER_IMAGE_REPOSITORY:-${MIGRATION_CONSOLE_IMAGE_REPOSITORY}}"
 
-if [[ -z "${CAPTURE_PROXY_IMAGE_REPOSITORY}" || -z "${TRAFFIC_REPLAYER_IMAGE_REPOSITORY}" || -z "${REINDEX_FROM_SNAPSHOT_IMAGE_REPOSITORY}" || -z "${MIGRATION_CONSOLE_IMAGE_REPOSITORY}" || -z "${INSTALLER_IMAGE_REPOSITORY}" ]]; then
-  echo "Either IMAGE_REPOSITORY_PREFIX or all component image repositories must be provided" >&2
+if [[ -z "${MIGRATION_CONSOLE_IMAGE_REPOSITORY}" || -z "${INSTALLER_IMAGE_REPOSITORY}" ]]; then
+  echo "Either IMAGE_REPOSITORY_PREFIX or the console and installer image repositories must be provided" >&2
   exit 1
 fi
 
-TEMP_VALUES_FILE="$(mktemp /tmp/schema-verification-values.XXXXXX.yaml)"
+TEMP_VALUES_FILE="$(mktemp "${TMPDIR:-/tmp}/schema-verification-values.XXXXXX")"
 cleanup() {
   rm -f "${TEMP_VALUES_FILE}"
 }
@@ -42,22 +39,15 @@ conditionalPackageInstalls:
   fluent-bit: false
   kube-prometheus-stack: false
   strimzi-kafka-operator: true
+  otel-collector-daemonset: false
+  opentelemetry-operator: false
   migration-console: true
   localstack: false
   jaeger: false
+defaultBucketConfiguration:
+  create: false
+  useLocalStack: false
 images:
-  captureProxy:
-    repository: ${CAPTURE_PROXY_IMAGE_REPOSITORY}
-    tag: ${IMAGE_TAG}
-    pullPolicy: ${IMAGE_PULL_POLICY}
-  trafficReplayer:
-    repository: ${TRAFFIC_REPLAYER_IMAGE_REPOSITORY}
-    tag: ${IMAGE_TAG}
-    pullPolicy: ${IMAGE_PULL_POLICY}
-  reindexFromSnapshot:
-    repository: ${REINDEX_FROM_SNAPSHOT_IMAGE_REPOSITORY}
-    tag: ${IMAGE_TAG}
-    pullPolicy: ${IMAGE_PULL_POLICY}
   migrationConsole:
     repository: ${MIGRATION_CONSOLE_IMAGE_REPOSITORY}
     tag: ${IMAGE_TAG}
@@ -78,7 +68,7 @@ HELM_ARGS=(
   -n "${NAMESPACE}"
   "${RELEASE_NAME}"
   "${CHART_PATH}"
-  --wait --timeout "${HELM_TIMEOUT}"
+  --timeout "${HELM_TIMEOUT}"
 )
 
 if [[ -n "${CHART_VALUES_FILE}" ]]; then

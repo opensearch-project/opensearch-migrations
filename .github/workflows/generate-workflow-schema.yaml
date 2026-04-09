@@ -80,10 +80,11 @@ jobs:
         uses: helm/kind-action@v1.14.0
         with:
           cluster_name: generate-workflow-schema
+          node_image: kindest/node:v1.33.1
 
-      - name: Build images to local registry with buildImages
+      - name: Build migration console image to local registry
         run: |
-          ./gradlew :buildImages:buildImagesToRegistry_amd64 \
+          ./gradlew buildKit_migrationConsole_amd64 \
             -Pbuilder=local-remote-builder \
             -PintermediateRegistry=localhost:5000 \
             -PregistryEndpoint=localhost:5000 \
@@ -94,18 +95,12 @@ jobs:
             --no-continue \
             --info
 
-      - name: Pull built images from local registry
+      - name: Pull built console image from local registry
         run: |
-          docker pull localhost:5000/opensearch-migrations-traffic-capture-proxy:latest
-          docker pull localhost:5000/opensearch-migrations-traffic-replayer:latest
-          docker pull localhost:5000/opensearch-migrations-reindex-from-snapshot:latest
           docker pull localhost:5000/opensearch-migrations-console:latest
 
-      - name: Load images into Kind
+      - name: Load console image into Kind
         run: |
-          kind load docker-image localhost:5000/opensearch-migrations-traffic-capture-proxy:latest --name generate-workflow-schema
-          kind load docker-image localhost:5000/opensearch-migrations-traffic-replayer:latest --name generate-workflow-schema
-          kind load docker-image localhost:5000/opensearch-migrations-reindex-from-snapshot:latest --name generate-workflow-schema
           kind load docker-image localhost:5000/opensearch-migrations-console:latest --name generate-workflow-schema
 
       - name: Generate workflow schema artifact
