@@ -50,7 +50,7 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     script {
-                        def pool = jobName.startsWith("main-") ? "m" : "p"
+                        def pool = jobName.startsWith("main-") ? "m" : jobName.startsWith("release-") ? "r" : "p"
                         env.maStageName = "${params.STAGE}-${pool}${currentBuild.number}"
                         env.TEST_VPC_STACK_NAME = "test-vpc-${env.maStageName}-${params.REGION}"
                         echo """

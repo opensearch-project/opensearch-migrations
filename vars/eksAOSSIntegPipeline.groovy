@@ -55,7 +55,7 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
                     script {
-                        def pool = jobName.startsWith("main-") ? "m" : "p"
+                        def pool = jobName.startsWith("main-") ? "m" : jobName.startsWith("release-") ? "r" : "p"
                         env.maStageName = "${params.STAGE ?: defaultStageId}-${pool}${currentBuild.number}"
                         env.STACK_NAME = "MA-Serverless-${maStageName}-${params.REGION}"
                         env.eksClusterName = "migration-eks-cluster-${maStageName}-${params.REGION}"
