@@ -340,4 +340,68 @@ class FileSystemReportingSinkTest {
             sink.close();
         });
     }
+
+    @Test
+    void defaultConstructorUsesDefaultCapacity(@TempDir Path tempDir) throws Exception {
+        try (var sink = new FileSystemReportingSink(tempDir)) {
+            sink.submit(sampleDocument());
+            sink.flush();
+            assertEquals(1, jsonFileCount(tempDir));
+        }
+    }
+
+    @Test
+    void constructorThrowsWhenDirectoryCreationFails(@TempDir Path tempDir) throws Exception {
+        // Create a file, then try to create a subdirectory under it — impossible
+        Path blockingFile = tempDir.resolve("blocker");
+        Files.writeString(blockingFile, "I block directory creation");
+        Path impossible = blockingFile.resolve("subdir");
+        assertThrows(Exception.class, () -> new FileSystemReportingSink(impossible, 16));
+    }
+
+    @Test
+    void nullTimestampUsesUnknownInFileName(@TempDir Path tempDir) throws Exception {
+        var doc = new ValidationDocument(
+            null, "req-123",
+            null, null, null, null,
+            null, null, null, null, null, null, null, null
+        );
+        try (var sink = new FileSystemReportingSink(tempDir, 16)) {
+            sink.submit(doc);
+            sink.flush();
+        }
+        Path[] files;
+        try (var stream = Files.list(tempDir)) {
+            files = stream.filter(p -> p.toString().endsWith(".json")).toArray(Path[]::new);
+        }
+        assertEquals(1, files.length);
+        assertTrue(files[0].getFileName().toString().startsWith("unknown_"));
+    }
+
+    @Test
+    void nullRequestIdUsesUnknownInFileName(@TempDir Path tempDir) throws Exception {
+        var doc = new ValidationDocument(
+            "2025-01-01T00:00:00Z", null,
+            null, null, null, null,
+            null, null, null, null, null, null, null, null
+        );
+        try (var sink = new FileSystemReportingSink(tempDir, 16)) {
+            sink.submit(doc);
+            sink.flush();
+        }
+        Path[] files;
+        try (var stream = Files.list(tempDir)) {
+            files = stream.filter(p -> p.toString().endsWith(".json")).toArray(Path[]::new);
+        }
+        assertEquals(1, files.length);
+        assertTrue(files[0].getFileName().toString().endsWith("_unknown.json"));
+    }
+
+    @Test
+    void flushAfterCloseIsNoop(@TempDir Path tempDir) throws Exception {
+        var sink = new FileSystemReportingSink(tempDir, 16);
+        sink.close();
+        assertDoesNotThrow(sink::flush);
+        assertEquals(0, jsonFileCount(tempDir));
+    }
 }

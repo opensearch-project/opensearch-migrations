@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -105,7 +106,14 @@ public class FileSystemReportingSink implements ReportingSink {
         }
         this.flushFuture.set(new CompletableFuture<>());
         enqueuePoisonPill();
-        this.flushFuture.get().join();
+        try {
+            this.flushFuture.get().get(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Flush interrupted", e);
+        } catch (Exception e) {
+            log.warn("Flush timed out", e);
+        }
     }
 
     @Override
@@ -115,12 +123,21 @@ public class FileSystemReportingSink implements ReportingSink {
         }
         this.flushFuture.set(new CompletableFuture<>());
         enqueuePoisonPill();
-        this.flushFuture.get().join();
+        try {
+            this.flushFuture.get().get(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Close interrupted", e);
+        } catch (Exception e) {
+            log.warn("Close flush timed out", e);
+        }
     }
 
     private void enqueuePoisonPill() {
         try {
-            queue.put(POISON_PILL);
+            if (!queue.offer(POISON_PILL, 10, TimeUnit.SECONDS)) {
+                log.warn("Timed out enqueuing poison pill, queue may be full");
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
