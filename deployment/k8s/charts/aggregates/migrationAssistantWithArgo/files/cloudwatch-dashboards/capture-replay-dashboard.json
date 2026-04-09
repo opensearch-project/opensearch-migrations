@@ -26,6 +26,17 @@
             "label": "Migration Qualifier",
             "defaultValue": "placeholder-qualifier",
             "visible": false
+        },
+        {
+            "type": "property",
+            "property": "LoadBalancer",
+            "inputType": "select",
+            "id": "NLB_NAME",
+            "label": "Capture Proxy NLB",
+            "search": "{AWS/NetworkELB,LoadBalancer} MetricName=\"ProcessedBytes\"",
+            "populateFrom": "LoadBalancer",
+            "defaultValue": "",
+            "visible": true
         }
     ],
     "widgets": [
@@ -51,8 +62,8 @@
                     [ "OpenSearchMigrations", "bytesRead", "qualifier", "MA_QUALIFIER", "OTelLib", "captureProxy", { "label": "Response Bytes", "region": "REGION", "id": "c1", "visible": false } ],
                     [ "OpenSearchMigrations", "bytesWritten", "qualifier", "MA_QUALIFIER", { "label": "Request Bytes", "region": "REGION", "id": "c2", "visible": false } ],
                     [ { "expression": "(c1 + c2) / 1048576 / PERIOD(c1)", "label": "Proxy", "id": "e1", "region": "REGION", "color": "#7f7f7f" } ],
-                    [ { "expression": "SEARCH('{AWS/NetworkELB,LoadBalancer} MetricName=\"ProcessedBytes\"', 'Sum', 60)", "id": "n1", "period": 60, "region": "REGION", "visible": false, "label": "NLB Bytes per Period" } ],
-                    [ { "expression": "SUM(n1)/1048576 / PERIOD(c1)", "label": "NLB", "id": "n2", "region": "REGION" } ]
+                    [ "AWS/NetworkELB", "ProcessedBytes", "LoadBalancer", "NLB_NAME", { "id": "n1", "period": 60, "region": "REGION", "visible": false, "label": "NLB Bytes per Period" } ],
+                    [ { "expression": "n1/1048576 / PERIOD(n1)", "label": "NLB", "id": "n2", "region": "REGION" } ]
                 ],
                 "view": "timeSeries",
                 "stacked": false,
@@ -116,7 +127,10 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ { "expression": "SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_memory_working_set_bytes\" container=\"replayer\" namespace=\"ma\"', 'Average', 60) / 1048576", "id": "e1", "region": "REGION", "label": "${PROP('Dim.pod')}" } ]
+                    [ { "expression": "METRICS()/1048576", "id": "e1", "region": "REGION" } ],
+                    [ "OpenSearchMigrations", "container_memory_working_set_bytes", "container", "replayer", "namespace", "ma", { "stat": "Minimum", "region": "REGION", "color": "#2ca02c", "label": "Min", "id": "m1", "visible": false } ],
+                    [ "...", { "stat": "Average", "region": "REGION", "color": "#1f77b4", "label": "Avg", "id": "m2", "visible": false } ],
+                    [ "...", { "stat": "Maximum", "region": "REGION", "color": "#d62728", "label": "Max", "id": "m3", "visible": false } ]
                 ],
                 "view": "timeSeries",
                 "stacked": false,
@@ -141,7 +155,9 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ { "expression": "SEARCH('{OpenSearchMigrations,container,namespace,pod} MetricName=\"container_cpu_usage_seconds_total\" container=\"replayer\" namespace=\"ma\"', 'Average', 60)", "id": "e1", "region": "REGION", "label": "${PROP('Dim.pod')}" } ]
+                    [ "OpenSearchMigrations", "container_cpu_usage_seconds_total", "container", "replayer", "namespace", "ma", { "stat": "Minimum", "region": "REGION", "color": "#2ca02c", "label": "Min" } ],
+                    [ "...", { "stat": "Average", "region": "REGION", "color": "#1f77b4", "label": "Avg" } ],
+                    [ "...", { "stat": "Maximum", "region": "REGION", "color": "#d62728", "label": "Max" } ]
                 ],
                 "view": "timeSeries",
                 "stacked": false,

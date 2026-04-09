@@ -116,7 +116,7 @@ otelConfiguration:
         namespace: 'OpenSearchMigrations'
         dimension_rollup_option: NoDimensionRollup
         metric_declarations:
-          - dimensions: [[container, pod, namespace]]
+          - dimensions: [[container, namespace]]
             metric_name_selectors:
               - container_cpu_usage_seconds_total
               - container_memory_working_set_bytes
