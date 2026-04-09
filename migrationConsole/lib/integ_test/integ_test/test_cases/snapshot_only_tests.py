@@ -62,7 +62,7 @@ class Test0010ExternalSnapshotMigration(MATestBase):
         self.s3_repo_uri = os.environ['BYOS_S3_REPO_URI']
         self.s3_region = os.environ.get('BYOS_S3_REGION', 'us-west-2')
         self.s3_endpoint = os.environ.get('BYOS_S3_ENDPOINT', '')
-        self.use_s3_files = os.environ.get('BYOS_USE_S3_FILES', 'true').lower() == 'true'
+        self.use_s3_files = os.environ.get('BYOS_USE_S3_FILES', 'false').lower() == 'true'
         self.s3_files_file_system_id = os.environ.get('BYOS_S3_FILES_FS_ID', '')
         self.pod_replicas = int(os.environ.get('BYOS_POD_REPLICAS', '1'))
         # Monitor retry limit: ~1 retry/min after backoff cap. Default 33 (~30 min), 900 for ~15 hours

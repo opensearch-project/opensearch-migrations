@@ -473,7 +473,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "useS3Files": {
                             "type": "boolean",
-                            "default": true
+                            "default": false
                           },
                           "s3FilesFileSystemId": {
                             "type": "string",
@@ -1072,7 +1072,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         },
                         "useS3Files": {
                           "type": "boolean",
-                          "default": true
+                          "default": false
                         },
                         "s3FilesFileSystemId": {
                           "type": "string",
@@ -1709,7 +1709,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     },
                     "useS3Files": {
                       "type": "boolean",
-                      "default": true,
+                      "default": false,
                       "description": "When true, mount the S3 bucket via S3 Files (NFS PV) instead of per-pod mount-s3. Requires an S3 Files file system and mount target in the same VPC. The s3FilesFileSystemId must be set when this is true."
                     },
                     "s3FilesFileSystemId": {
