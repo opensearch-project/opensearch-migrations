@@ -127,3 +127,154 @@ def test_split_boolean_or():
 
 def test_split_boolean_none():
     assert _split_boolean("a:1") is None
+
+
+# ---------------------------------------------------------------------------
+# convert_edismax tests
+# ---------------------------------------------------------------------------
+
+def test_edismax_empty_query_raises(converter):
+    with pytest.raises(ValueError):
+        converter.convert_edismax("")
+
+
+def test_edismax_whitespace_query_raises(converter):
+    with pytest.raises(ValueError):
+        converter.convert_edismax("   ")
+
+
+def test_edismax_q_only_no_qf(converter):
+    # Without qf, falls back to standard query conversion
+    result = converter.convert_edismax("opensearch")
+    assert result == {"query": {"query_string": {"query": "opensearch"}}}
+
+
+def test_edismax_qf_single_field(converter):
+    result = converter.convert_edismax("opensearch", qf="title")
+    mm = result["query"]["multi_match"]
+    assert mm["query"] == "opensearch"
+    assert mm["fields"] == ["title"]
+    assert mm["type"] == "best_fields"
+
+
+def test_edismax_qf_multiple_fields_with_boosts(converter):
+    result = converter.convert_edismax("search", qf="title^2 body^0.5 description")
+    mm = result["query"]["multi_match"]
+    assert mm["fields"] == ["title^2", "body^0.5", "description"]
+
+
+def test_edismax_tie(converter):
+    result = converter.convert_edismax("search", qf="title body", tie=0.3)
+    assert result["query"]["multi_match"]["tie_breaker"] == 0.3
+
+
+def test_edismax_qs_slop(converter):
+    result = converter.convert_edismax("search", qf="title body", qs=2)
+    assert result["query"]["multi_match"]["slop"] == 2
+
+
+def test_edismax_mm_with_qf(converter):
+    result = converter.convert_edismax("search", qf="title body", mm="75%")
+    bool_q = result["query"]["bool"]
+    assert bool_q["minimum_should_match"] == "75%"
+    assert any("multi_match" in c for c in bool_q["must"])
+
+
+def test_edismax_mm_without_qf_wraps_in_bool(converter):
+    result = converter.convert_edismax("title:search", mm="2")
+    bool_q = result["query"]["bool"]
+    assert bool_q["minimum_should_match"] == "2"
+    assert {"match": {"title": "search"}} in bool_q["must"]
+
+
+def test_edismax_pf_adds_phrase_should(converter):
+    result = converter.convert_edismax("hello world", qf="title body", pf="title^1.5")
+    bool_q = result["query"]["bool"]
+    phrase_clause = bool_q["should"][0]["multi_match"]
+    assert phrase_clause["type"] == "phrase"
+    assert phrase_clause["query"] == "hello world"
+    assert "title^1.5" in phrase_clause["fields"]
+
+
+def test_edismax_pf2_adds_phrase_should(converter):
+    result = converter.convert_edismax("hello world", qf="title", pf2="title body")
+    should = result["query"]["bool"]["should"]
+    assert any(c["multi_match"]["type"] == "phrase" for c in should)
+
+
+def test_edismax_pf3_adds_phrase_should(converter):
+    result = converter.convert_edismax("hello world", qf="title", pf3="title")
+    should = result["query"]["bool"]["should"]
+    assert any(c["multi_match"]["type"] == "phrase" for c in should)
+
+
+def test_edismax_ps_slop_on_phrase_clauses(converter):
+    result = converter.convert_edismax("hello world", qf="title", pf="title body", ps=3)
+    should = result["query"]["bool"]["should"]
+    phrase_clauses = [c for c in should if c["multi_match"]["type"] == "phrase"]
+    assert all(c["multi_match"]["slop"] == 3 for c in phrase_clauses)
+
+
+def test_edismax_pf_pf2_pf3_all_present(converter):
+    result = converter.convert_edismax(
+        "hello world", qf="title", pf="title", pf2="body", pf3="description"
+    )
+    should = result["query"]["bool"]["should"]
+    # One phrase clause per pf/pf2/pf3
+    phrase_clauses = [c for c in should if c["multi_match"]["type"] == "phrase"]
+    assert len(phrase_clauses) == 3
+
+
+def test_edismax_bq_string(converter):
+    result = converter.convert_edismax("search", qf="title", bq="category:docs")
+    should = result["query"]["bool"]["should"]
+    assert {"match": {"category": "docs"}} in should
+
+
+def test_edismax_bq_list(converter):
+    result = converter.convert_edismax(
+        "search", qf="title", bq=["category:docs", "status:published"]
+    )
+    should = result["query"]["bool"]["should"]
+    assert {"match": {"category": "docs"}} in should
+    assert {"match": {"status": "published"}} in should
+
+
+def test_edismax_bf_wraps_in_script_score(converter):
+    result = converter.convert_edismax("search", qf="title", bf="log(popularity)")
+    ss = result["query"]["script_score"]
+    assert ss["script"]["source"] == "log(popularity)"
+    # Inner query should still be the assembled bool/multi_match
+    assert "multi_match" in ss["query"] or "bool" in ss["query"]
+
+
+def test_edismax_bf_with_pf_wraps_bool_in_script_score(converter):
+    result = converter.convert_edismax(
+        "search", qf="title", pf="title", bf="doc['rank'].value"
+    )
+    ss = result["query"]["script_score"]
+    assert ss["script"]["source"] == "doc['rank'].value"
+    assert "bool" in ss["query"]
+
+
+def test_edismax_combined_params(converter):
+    # Smoke test: all major params together
+    result = converter.convert_edismax(
+        "hello world",
+        qf="title^2 body",
+        mm="1",
+        pf="title^1.5",
+        ps=2,
+        tie=0.1,
+        bq="featured:true",
+    )
+    bool_q = result["query"]["bool"]
+    assert bool_q["minimum_should_match"] == "1"
+    main = bool_q["must"][0]["multi_match"]
+    assert main["tie_breaker"] == 0.1
+    assert main["fields"] == ["title^2", "body"]
+    should = bool_q["should"]
+    phrase_clauses = [c for c in should if "multi_match" in c and c["multi_match"]["type"] == "phrase"]
+    assert len(phrase_clauses) == 1
+    assert phrase_clauses[0]["multi_match"]["slop"] == 2
+    assert {"match": {"featured": "true"}} in should

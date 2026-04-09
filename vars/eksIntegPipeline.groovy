@@ -304,11 +304,6 @@ def call(Map config = [:]) {
                                         sh "pipenv run app --delete-only --kube-context=${env.eksKubeContext}"
                                         echo "List resources not removed by helm uninstall:"
                                         sh "kubectl --context=${env.eksKubeContext} get all,pvc,configmap,secret,workflow -n ma -o wide --ignore-not-found || true"
-                                        sh "kubectl --context=${env.eksKubeContext} delete namespace ma --ignore-not-found --timeout=60s || true"
-                                        // Wait for namespace to fully terminate so Kubernetes-managed ENIs/LBs are
-                                        // cleaned up before CloudFormation tries to delete the VPC/EKS cluster.
-                                        // Without this, lingering ENIs cause DELETE_FAILED on the CloudFormation stack.
-                                        sh "kubectl --context=${env.eksKubeContext} wait --for=delete namespace/ma --timeout=300s || true"
                                     }
 
                                     // Revoke security group rule added during setup
@@ -331,17 +326,24 @@ def call(Map config = [:]) {
                                           fi
                                         """
                                     }
+
+                                    eksCleanupStep(
+                                        stackName: maStackName,
+                                        eksClusterName: env.eksClusterName,
+                                        kubeContext: env.eksKubeContext
+                                    )
                                 }
 
-                                // Delete all deployed CloudFormation stacks
-                                // Order: MA stack first, then domain stacks, then network stack (VPC dependencies)
+                                // Destroy domain stacks via CDK (uses same context file from deploy)
+                                dir('test') {
+                                    echo "CLEANUP: Destroying domain stacks via CDK"
+                                    sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath} --destroy || true"
+                                }
+
+                                // Delete MA CloudFormation stack
                                 echo "CLEANUP: Deleting MA stack ${maStackName}"
                                 sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
                                 sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
-
-                                echo "CLEANUP: Deleting cluster stack ${clusterStackName}"
-                                sh "aws cloudformation delete-stack --stack-name ${clusterStackName} --region ${region} || true"
-                                sh "aws cloudformation wait stack-delete-complete --stack-name ${clusterStackName} --region ${region} || true"
                             }
                         }
                     }

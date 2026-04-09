@@ -153,38 +153,43 @@ def call(Map config = [:]) {
             always {
                 timeout(time: 60, unit: 'MINUTES') {
                     script {
-                        echo "Cleaning up CloudFormation stack: ${env.STACK_NAME}"
+                        def eksClusterName = "migration-eks-cluster-${maStageName}-${params.REGION}"
+                        def eksKubeContext = eksClusterName
+
                         withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                             withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                echo "Destroying CloudFormation stack ${env.STACK_NAME} in region ${params.REGION}."
+                                eksCleanupStep(
+                                    stackName: env.STACK_NAME,
+                                    eksClusterName: eksClusterName,
+                                    kubeContext: eksKubeContext
+                                )
+
+                                echo "CLEANUP: Deleting MA stack ${env.STACK_NAME}"
                                 sh """
-                                    set -euo pipefail
                                     aws cloudformation delete-stack \
                                         --stack-name "${env.STACK_NAME}" \
-                                        --region "${params.REGION}"
+                                        --region "${params.REGION}" || true
 
-                                    echo "Waiting for stack DELETE_COMPLETE..."
                                     aws cloudformation wait stack-delete-complete \
                                         --stack-name "${env.STACK_NAME}" \
-                                        --region "${params.REGION}"
+                                        --region "${params.REGION}" || true
 
-                                    echo "CloudFormation stack ${env.STACK_NAME} has been deleted."
+                                    echo "CloudFormation stack ${env.STACK_NAME} deleted."
                                 """
 
                                 // Cleanup test VPC if import-vpc mode
                                 if (isImportVpc) {
-                                    echo "Cleaning up test VPC stack: ${env.TEST_VPC_STACK_NAME}"
+                                    echo "CLEANUP: Deleting test VPC stack ${env.TEST_VPC_STACK_NAME}"
                                     sh """
-                                        set -euo pipefail
                                         aws cloudformation delete-stack \
                                             --stack-name "${env.TEST_VPC_STACK_NAME}" \
-                                            --region "${params.REGION}"
+                                            --region "${params.REGION}" || true
 
                                         aws cloudformation wait stack-delete-complete \
                                             --stack-name "${env.TEST_VPC_STACK_NAME}" \
-                                            --region "${params.REGION}"
+                                            --region "${params.REGION}" || true
 
-                                        echo "Test VPC stack ${env.TEST_VPC_STACK_NAME} has been deleted."
+                                        echo "Test VPC stack ${env.TEST_VPC_STACK_NAME} deleted."
                                     """
                                 }
                             }
@@ -194,7 +199,7 @@ def call(Map config = [:]) {
                         // Clean up the kubeconfig context entry created by aws-bootstrap.sh
                         sh """
                             if command -v kubectl >/dev/null 2>&1; then
-                                kubectl config delete-context migration-eks-cluster-${maStageName}-${params.REGION} 2>/dev/null || echo "No kubectl context to clean up"
+                                kubectl config delete-context ${eksKubeContext} 2>/dev/null || echo "No kubectl context to clean up"
                             else
                                 echo "kubectl not found on agent; skipping context cleanup"
                             fi
