@@ -26,11 +26,18 @@ public class MetricsReceiver {
     private final ReportingSink sink;
     private final MetricsExtractor extractor;
     private final boolean includeRequestBody;
+    private final boolean includeResponseBody;
 
     public MetricsReceiver(ReportingSink sink, MetricsExtractor extractor, boolean includeRequestBody) {
+        this(sink, extractor, includeRequestBody, false);
+    }
+
+    public MetricsReceiver(ReportingSink sink, MetricsExtractor extractor,
+                           boolean includeRequestBody, boolean includeResponseBody) {
         this.sink = sink;
         this.extractor = extractor;
         this.includeRequestBody = includeRequestBody;
+        this.includeResponseBody = includeResponseBody;
     }
 
     /**
@@ -129,6 +136,9 @@ public class MetricsReceiver {
             Map<String, Object> customMetrics = transformMetrics != null
                     ? new LinkedHashMap<>(transformMetrics) : new LinkedHashMap<>();
 
+            ValidationDocument.ResponseRecord baselineResponseRecord = buildResponseRecord(baselineResponse);
+            ValidationDocument.ResponseRecord candidateResponseRecord = buildResponseRecord(candidateResponse);
+
             ValidationDocument doc = new ValidationDocument(
                     Instant.now().toString(),
                     UUID.randomUUID().toString(),
@@ -143,6 +153,8 @@ public class MetricsReceiver {
                     candidateQtime,
                     responseTimeDelta,
                     comparisons.isEmpty() ? null : comparisons,
+                    baselineResponseRecord,
+                    candidateResponseRecord,
                     customMetrics
             );
 
@@ -150,6 +162,20 @@ public class MetricsReceiver {
         } catch (Exception e) {
             log.error("Error collecting validation metrics", e);
         }
+    }
+
+    ValidationDocument.ResponseRecord buildResponseRecord(TargetResponse response) {
+        if (response == null) return null;
+        String errorMsg = response.error() != null ? response.error().getMessage() : null;
+        String body = null;
+        if (includeResponseBody && response.parsedBody() != null) {
+            body = toJsonString(response.parsedBody());
+        }
+        return new ValidationDocument.ResponseRecord(
+                response.statusCode(),
+                errorMsg,
+                body
+        );
     }
 
     @SuppressWarnings("unchecked")

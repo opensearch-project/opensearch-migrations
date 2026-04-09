@@ -42,6 +42,8 @@ class FileSystemReportingSinkTest {
             100L, 95L, 5.0,
             12L, 15L, 3L,
             List.of(comparison),
+            new ValidationDocument.ResponseRecord(200, null, null),
+            new ValidationDocument.ResponseRecord(200, null, null),
             Map.of("warn-offset", 1)
         );
     }
@@ -307,6 +309,8 @@ class FileSystemReportingSinkTest {
             null, // candidateResponseTimeMs
             null, // responseTimeDeltaMs
             null, // comparisons
+            null, // baselineResponse
+            null, // candidateResponse
             null  // customMetrics
         );
         try (var sink = new FileSystemReportingSink(tempDir, 16)) {
@@ -364,7 +368,8 @@ class FileSystemReportingSinkTest {
         var doc = new ValidationDocument(
             null, "req-123",
             null, null, null, null,
-            null, null, null, null, null, null, null, null
+            null, null, null, null, null, null, null,
+            null, null, null
         );
         try (var sink = new FileSystemReportingSink(tempDir, 16)) {
             sink.submit(doc);
@@ -383,7 +388,8 @@ class FileSystemReportingSinkTest {
         var doc = new ValidationDocument(
             "2025-01-01T00:00:00Z", null,
             null, null, null, null,
-            null, null, null, null, null, null, null, null
+            null, null, null, null, null, null, null,
+            null, null, null
         );
         try (var sink = new FileSystemReportingSink(tempDir, 16)) {
             sink.submit(doc);

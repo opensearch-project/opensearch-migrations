@@ -17,8 +17,9 @@ describe('fieldRule', () => {
 
     const result = fieldRule(node, stubTransformChild);
 
+    // Uses expanded form: {"match": {"field": {"query": "value"}}}
     expect(result).toEqual(
-      new Map([['match', new Map([[field, value]])]]),
+      new Map([['match', new Map([[field, new Map([['query', value]])]])]]),
     );
   });
 

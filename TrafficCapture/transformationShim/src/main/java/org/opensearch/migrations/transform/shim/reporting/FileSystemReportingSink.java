@@ -35,7 +35,8 @@ public class FileSystemReportingSink implements ReportingSink {
      */
     private static final ValidationDocument POISON_PILL = new ValidationDocument(
         null, null, null, null, null, null,
-        null, null, null, null, null, null, null, null
+        null, null, null, null, null, null, null,
+        null, null, null
     );
 
     private final Path outputDirectory;
