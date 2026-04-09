@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     jq
 
 RUN useradd -m -s /bin/bash user && \
-    mkdir -p /home/user/claude/.claude/skills/migration-advisor && \
+    mkdir -p /home/user/claude/.claude/skills/solr-opensearch-migration-advisor && \
     mkdir -p /home/user/claude/processing/.claude/skills
 
 # we copy only entrypoint.sh to the main folder, which will switch cwd to
@@ -21,7 +21,7 @@ RUN useradd -m -s /bin/bash user && \
 # NOTE that the docker build assumes we are in the solr-opensearch-migration-advisor root to be
 # able to copy agent files, thus we need to add the path to entrypoint.sh in the below.
 COPY ./setup/docker/claude/entrypoint.sh /home/user/entrypoint.sh
-COPY SKILL.md /home/user/claude/.claude/skills/migration-advisor/SKILL.md
+COPY SKILL.md /home/user/claude/.claude/skills/solr-opensearch-migration-advisor/SKILL.md
 COPY references /home/user/claude/references
 COPY scripts /home/user/claude/scripts
 COPY steering /home/user/claude/steering
