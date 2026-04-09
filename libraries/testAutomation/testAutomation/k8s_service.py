@@ -116,6 +116,72 @@ class K8sService:
         console_pod_id = pods[-1].metadata.name
         return console_pod_id
 
+    def exec_background_cmd(self, command_list: List, log_file: str, exit_code_file: str) -> None:
+        """Launch a command in the background inside the migration console pod.
+
+        The command's stdout/stderr are tee'd to log_file so Jenkins can tail them.
+        On completion, the exit code is written to exit_code_file.
+        """
+        inner_cmd = " ".join(command_list)
+        wrapper = (
+            f"nohup bash -c '"
+            f"{inner_cmd} 2>&1 | tee {log_file}; "
+            f"echo ${{PIPESTATUS[0]}} > {exit_code_file}"
+            f"' > /dev/null 2>&1 &"
+        )
+        self.exec_migration_console_cmd(command_list=["sh", "-c", wrapper], unbuffered=False)
+        logger.info(f"Background command launched. Log: {log_file}, exit code: {exit_code_file}")
+
+    def poll_cmd_completion(self, log_file: str, exit_code_file: str,
+                            poll_interval: int = 30, tail_lines: int = 50) -> int:
+        """Poll until a background command completes, tailing its log for Jenkins console output.
+
+        Returns the exit code of the background command.
+        """
+        last_offset = 0
+        while True:
+            time.sleep(poll_interval)
+
+            # Tail new log lines for Jenkins console visibility
+            try:
+                tail_cmd = ["sh", "-c",
+                            f"wc -c < {log_file} 2>/dev/null && "
+                            f"tail -n {tail_lines} {log_file} 2>/dev/null"]
+                resp = self.exec_migration_console_cmd(command_list=tail_cmd, unbuffered=False)
+                lines = resp.strip().split("\n") if resp and resp.strip() else []
+                if lines:
+                    # First line is byte count; rest is tail output
+                    try:
+                        current_size = int(lines[0].strip())
+                    except ValueError:
+                        current_size = last_offset
+                    tail_output = "\n".join(lines[1:])
+                    if current_size != last_offset and tail_output:
+                        print(tail_output)
+                        last_offset = current_size
+            except Exception as e:
+                logger.debug(f"Log tail failed (may be transient): {e}")
+
+            # Check if the command has finished
+            try:
+                result = self.exec_migration_console_cmd(
+                    command_list=["cat", exit_code_file], unbuffered=False)
+                if result and result.strip():
+                    exit_code = int(result.strip())
+                    # Print any remaining log output
+                    try:
+                        final = self.exec_migration_console_cmd(
+                            command_list=["tail", "-n", str(tail_lines), log_file], unbuffered=False)
+                        if final and final.strip():
+                            print(final)
+                    except Exception:
+                        pass
+                    logger.info(f"Background command completed with exit code: {exit_code}")
+                    return exit_code
+            except Exception:
+                # exit_code_file doesn't exist yet — command still running
+                pass
+
     def exec_migration_console_cmd(self, command_list: List, unbuffered: bool = True) -> str | WSClient:
         """Executes a command inside the latest migration console pod"""
         console_pod_id = self.get_migration_console_pod_id()
