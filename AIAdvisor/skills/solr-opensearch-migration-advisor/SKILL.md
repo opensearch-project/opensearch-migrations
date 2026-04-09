@@ -405,7 +405,6 @@ You have access to a verified knowledge base of technical information about Apac
 #[[file:references/08-query-behavior-edge-cases.md]]
 #[[file:references/09-sizing-and-performance.md]]
 #[[file:references/10-validation-parity-checklist.md]]
-#[[file:steering/stakeholders.md]]
 
 ## Instructions
 
