@@ -9,6 +9,11 @@
  * Using `term` would require exact matches against the indexed tokens,
  * which could fail for analyzed fields (e.g., case differences).
  *
+ * Output uses the expanded match query form with nested field object:
+ *   `{"match": {"field": {"query": "value"}}}`
+ * This allows boostRule to add boost inside the field object:
+ *   `{"match": {"field": {"query": "value", "boost": 2}}}`
+ *
  * Examples:
  *   `title:java` → Map{"match" → Map{"title" → Map{"query" → "java"}}}
  *   `title:*` → Map{"exists" → Map{"field" → "title"}}
@@ -58,5 +63,7 @@ export const fieldRule: TransformRuleFn = (
     throw new Error(msg);
   }
 
-  return new Map([['match', new Map([[field, value]])]]);
+  // Use expanded form: {"match": {"field": {"query": "value"}}}
+  // This allows boostRule to add boost inside the field object
+  return new Map([['match', new Map([[field, new Map([['query', value]])]])]]);
 };
