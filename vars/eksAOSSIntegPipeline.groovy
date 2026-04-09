@@ -73,6 +73,10 @@ def call(Map config = [:]) {
                             Test ID:          ${testId}
                             Source:           ${params.SOURCE_VERSION}
                             Workers:          ${params.RFS_WORKERS}
+                            Build Images:           ${params.BUILD_IMAGES}
+                            Build Chart:            ${params.BUILD_CHART_AND_DASHBOARDS}
+                            Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
+                            Version:                ${params.VERSION}
                             ================================================================
                         """
                     }
@@ -106,39 +110,20 @@ def call(Map config = [:]) {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 7200, roleSessionName: 'jenkins-session') {
-                                    // Compute bootstrap script path and flags.
-                                    // When USE_RELEASE_BOOTSTRAP is true, download the self-contained
-                                    // aws-bootstrap.sh from the GitHub release. This script downloads
-                                    // all artifacts (CFN templates, images, chart) from the release,
-                                    // so --build-cfn and --base-dir are not needed.
-                                    def bootstrapScript
-                                    if (params.USE_RELEASE_BOOTSTRAP) {
-                                        def downloadUrl = params.VERSION == 'latest'
-                                            ? "https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/aws-bootstrap.sh"
-                                            : "https://github.com/opensearch-project/opensearch-migrations/releases/download/${params.VERSION}/aws-bootstrap.sh"
-                                        sh """
-                                            curl -sL -o /tmp/aws-bootstrap.sh "${downloadUrl}"
-                                            chmod +x /tmp/aws-bootstrap.sh
-                                        """
-                                        bootstrapScript = "/tmp/aws-bootstrap.sh"
-                                    } else {
-                                        sh "./deployment/k8s/aws/assemble-bootstrap.sh"
-                                        bootstrapScript = "./deployment/k8s/aws/dist/aws-bootstrap.sh"
-                                    }
-                                    def flags = []
-                                    if (!params.USE_RELEASE_BOOTSTRAP) flags << '--build-cfn'
-                                    if (params.BUILD_IMAGES) flags << '--build-images'
-                                    if (params.BUILD_CHART_AND_DASHBOARDS) flags << '--build-chart-and-dashboards'
-                                    if (!params.USE_RELEASE_BOOTSTRAP) flags << "--base-dir \"\$(pwd)\""
-                                    flags << "--version ${params.VERSION}"
+                                    def bootstrap = resolveBootstrap(
+                                        useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
+                                        buildImages: params.BUILD_IMAGES,
+                                        buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
+                                        version: params.VERSION
+                                    )
                                     sh """
-                                        ${bootstrapScript} \
+                                        ${bootstrap.script} \
                                           --deploy-create-vpc-cfn \
                                           --stack-name "${env.STACK_NAME}" \
                                           --stage "${maStageName}" \
                                           --region "${params.REGION}" \
                                           --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          ${flags.join(' ')} \
+                                          ${bootstrap.flags} \
                                           --skip-console-exec \
                                           --skip-setting-k8s-context \
                                           2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}

@@ -53,6 +53,19 @@ def call(Map config = [:]) {
                         def pool = jobName.startsWith("main-") ? "m" : "p"
                         env.maStageName = "${params.STAGE}-${pool}${currentBuild.number}"
                         env.TEST_VPC_STACK_NAME = "test-vpc-${env.maStageName}-${params.REGION}"
+                        echo """
+    ================================================================
+    EKS Solutions CFN Test (${vpcMode} VPC)
+    ================================================================
+    Git:                    ${params.GIT_REPO_URL} @ ${params.GIT_BRANCH}
+    Stage:                  ${env.maStageName}
+    Region:                 ${params.REGION}
+    Build Images:           ${params.BUILD_IMAGES}
+    Build Chart:            ${params.BUILD_CHART_AND_DASHBOARDS}
+    Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
+    Version:                ${params.VERSION}
+    ================================================================
+"""
                     }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
@@ -104,44 +117,25 @@ def call(Map config = [:]) {
                                 "--deploy-import-vpc-cfn --vpc-id ${env.TEST_VPC_ID} --subnet-ids ${env.TEST_SUBNET_IDS}" :
                                 "--deploy-create-vpc-cfn"
 
-                            // Compute bootstrap script path and flags.
-                            // When USE_RELEASE_BOOTSTRAP is true, download the self-contained
-                            // aws-bootstrap.sh from the GitHub release. This script downloads
-                            // all artifacts (CFN templates, images, chart) from the release,
-                            // so --build-cfn and --base-dir are not needed.
-                            def bootstrapScript
-                            if (params.USE_RELEASE_BOOTSTRAP) {
-                                def downloadUrl = params.VERSION == 'latest'
-                                    ? "https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/aws-bootstrap.sh"
-                                    : "https://github.com/opensearch-project/opensearch-migrations/releases/download/${params.VERSION}/aws-bootstrap.sh"
-                                sh """
-                                    curl -sL -o /tmp/aws-bootstrap.sh "${downloadUrl}"
-                                    chmod +x /tmp/aws-bootstrap.sh
-                                """
-                                bootstrapScript = "/tmp/aws-bootstrap.sh"
-                            } else {
-                                sh "./deployment/k8s/aws/assemble-bootstrap.sh"
-                                bootstrapScript = "./deployment/k8s/aws/dist/aws-bootstrap.sh"
-                            }
-                            def flags = []
-                            if (!params.USE_RELEASE_BOOTSTRAP) flags << '--build-cfn'
-                            if (params.BUILD_IMAGES) flags << '--build-images'
-                            if (params.BUILD_CHART_AND_DASHBOARDS) flags << '--build-chart-and-dashboards'
-                            if (!params.USE_RELEASE_BOOTSTRAP) flags << "--base-dir \"\$(pwd)\""
-                            flags << "--version ${params.VERSION}"
+                            def bootstrap = resolveBootstrap(
+                                useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
+                                buildImages: params.BUILD_IMAGES,
+                                buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
+                                version: params.VERSION
+                            )
 
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 7200, roleSessionName: 'jenkins-session') {
                                     sh """
                                         set -euo pipefail
-                                        ${bootstrapScript} \
+                                        ${bootstrap.script} \
                                           ${bootstrapArgs} \
                                           --stack-name "${env.STACK_NAME}" \
                                           --stage "${maStageName}" \
                                           --region "${params.REGION}" \
                                           --skip-console-exec \
                                           --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          ${flags.join(' ')}
+                                          ${bootstrap.flags}
                                     """
                                 }
                             }

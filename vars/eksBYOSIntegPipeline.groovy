@@ -127,6 +127,19 @@ def call(Map config = [:]) {
                     script {
                         def pool = jobName.startsWith("main-") ? "m" : "p"
                         env.maStageName = "${params.STAGE}-${pool}${currentBuild.number}"
+                        echo """
+    ================================================================
+    EKS BYOS Integration Test
+    ================================================================
+    Git:                    ${params.GIT_REPO_URL} @ ${params.GIT_BRANCH}
+    Stage:                  ${env.maStageName}
+    Region:                 ${params.REGION}
+    Build Images:           ${params.BUILD_IMAGES}
+    Build Chart:            ${params.BUILD_CHART_AND_DASHBOARDS}
+    Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
+    Version:                ${params.VERSION}
+    ================================================================
+"""
                         // Resolve TEST_PRESET → effective parameter values
                         def testPresets = [
                             'large-es7x-24B': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es7x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_7.10', rfsWorkers: '90', targetClusterSize: 'large'],
@@ -210,41 +223,20 @@ def call(Map config = [:]) {
 
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    // Compute bootstrap script path and flags.
-                                    // When USE_RELEASE_BOOTSTRAP is true, download the self-contained
-                                    // aws-bootstrap.sh from the GitHub release. This script downloads
-                                    // all artifacts (CFN templates, images, chart) from the release,
-                                    // so --build-cfn and --base-dir are not needed.
-                                    def bootstrapScript
-                                    if (params.USE_RELEASE_BOOTSTRAP) {
-                                        def downloadUrl = params.VERSION == 'latest'
-                                            ? "https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/aws-bootstrap.sh"
-                                            : "https://github.com/opensearch-project/opensearch-migrations/releases/download/${params.VERSION}/aws-bootstrap.sh"
-                                        sh """
-                                            curl -sL -o /tmp/aws-bootstrap.sh "${downloadUrl}"
-                                            chmod +x /tmp/aws-bootstrap.sh
-                                        """
-                                        bootstrapScript = "/tmp/aws-bootstrap.sh"
-                                    } else {
-                                        sh "./deployment/k8s/aws/assemble-bootstrap.sh"
-                                        bootstrapScript = "./deployment/k8s/aws/dist/aws-bootstrap.sh"
-                                    }
-                                    def flags = []
-                                    if (!params.USE_RELEASE_BOOTSTRAP) flags << '--build-cfn'
-                                    if (params.BUILD_IMAGES) {
-                                        flags << '--build-images'
-                                        flags << '--skip-test-images'
-                                    }
-                                    if (params.BUILD_CHART_AND_DASHBOARDS) flags << '--build-chart-and-dashboards'
-                                    if (!params.USE_RELEASE_BOOTSTRAP) flags << "--base-dir \"\$(pwd)\""
-                                    flags << "--version ${params.VERSION}"
+                                    def bootstrap = resolveBootstrap(
+                                        useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
+                                        buildImages: params.BUILD_IMAGES,
+                                        buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
+                                        skipTestImages: true,
+                                        version: params.VERSION
+                                    )
                                     sh """
-                                        ${bootstrapScript} \
+                                        ${bootstrap.script} \
                                           --deploy-create-vpc-cfn \
                                           --stack-name "${env.MA_STACK_NAME}" \
                                           --stage "${maStageName}" \
                                           --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          ${flags.join(' ')} \
+                                          ${bootstrap.flags} \
                                           --skip-console-exec \
                                           --skip-setting-k8s-context \
                                           --region ${params.REGION} \
