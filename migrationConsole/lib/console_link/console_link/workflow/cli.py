@@ -9,7 +9,7 @@ from .models.utils import ExitCode
 from .commands.configure import configure_group
 from .commands.submit import submit_command
 from .commands.stop import stop_command
-from .commands.approve import approve_command
+from .commands.approve import approve_crd_command
 from .commands.reset import reset_command
 from .commands.status import status_command
 from .commands.output import output_command
@@ -90,7 +90,7 @@ def completion(ctx, shell):
 workflow_cli.add_command(configure_group)
 workflow_cli.add_command(submit_command)
 workflow_cli.add_command(stop_command)
-workflow_cli.add_command(approve_command)
+workflow_cli.add_command(approve_crd_command)
 workflow_cli.add_command(reset_command)
 workflow_cli.add_command(status_command)
 workflow_cli.add_command(output_command)
