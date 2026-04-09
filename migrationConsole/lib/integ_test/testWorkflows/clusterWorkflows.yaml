@@ -1378,7 +1378,7 @@ spec:
             <solr>
               <int name="maxBooleanClauses">${solr.max.booleanClauses:1024}</int>
               <str name="allowPaths">${solr.allowPaths:}</str>
-              <str name="sharedLib">/opt/solr/contrib/s3-repository/lib</str>
+              <str name="sharedLib">/opt/solr/dist,/opt/solr/contrib/s3-repository/lib</str>
 
               <solrcloud>
                 <str name="host">${host:}</str>
@@ -1477,7 +1477,8 @@ spec:
                       command: ["bash", "-c"]
                       args:
                         - |
-                          # Start SolrCloud with embedded ZooKeeper
+                          # Copy S3 repository jars to dist dir and start SolrCloud with embedded ZooKeeper
+                          cp /opt/solr/contrib/s3-repository/lib/*.jar /opt/solr/dist/
                           /opt/docker-solr/scripts/init-var-solr
                           exec solr -f -force -cloud -DzkRun
                       readinessProbe:
