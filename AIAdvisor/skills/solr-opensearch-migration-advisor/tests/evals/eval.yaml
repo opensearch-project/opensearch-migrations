@@ -58,6 +58,7 @@ tests:
         value: >-
           Response acknowledges Solr version 6.6 response then asks the user to provide their Solr schema.
         metric: solr-version-acknowledged
+
   - description: "Provide Solr 6 schema and verify OpenSearch mapping is generated correctly"
     metadata:
       continue: true
@@ -97,6 +98,7 @@ tests:
       - type: llm-rubric
         value: >-
           Response produces a valid OpenSearch index mapping JSON that satisfies all of the following:
+          (0) '_version_' is not included in the OpenSearch mapping.
           (1) 'id' is mapped to type 'keyword';
           (2) 'product_name' is mapped to type 'text' with a standard or equivalent analyzer;
           (3) The response should note that the TrieLongField type has no direct OpenSearch equivalent, 
@@ -106,6 +108,45 @@ tests:
           (6) the response notes the TF-IDF to BM25 similarity change as a behavioral incompatibility
               given the source is Solr 6.x.
         metric: solr6-schema-mapping-correct
+
+  - description: "Translate Solr queries to OpenSearch"
+    metadata:
+      continue: true
+    vars:
+      query: |
+        My Solr queries to translate are:
+        Query #1: title:opensearch AND price:[10 TO 100]
+        Query #2: defType=edismax&q=the dark knight&qf=title^10 tagline^2 overview^1 cast^0.5&pf=title^20 overview^5&mm=2<-25%
+
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response translates Query #1 to an OpenSearch bool query with a must clause containing
+          a match on the title field for "opensearch" and a range on the price field with gte 10 and lte 100.
+        metric: query1-bool-match-range
+
+      - type: llm-rubric
+        value: >-
+          Response translates Query #2 using multi_match with type best_fields across the fields
+          title (boost 10), tagline (boost 2), overview (boost 1), and cast (boost 0.5).
+        metric: query2-multimatch-qf-fields
+
+      - type: llm-rubric
+        value: >-
+          Response translates Query #2 with phrase boost (pf) clauses for title (boost 20) and
+          overview (boost 5) expressed as multi_match with type phrase in a should clause.
+        metric: query2-pf-phrase-boost
+
+      - type: llm-rubric
+        value: >-
+          Response translates Query #2 with minimum_should_match set to reflect the mm value of "2<-25%".
+        metric: query2-mm-minimum-should-match
+
+      - type: llm-rubric
+        value: >-
+          Response notes that eDisMax pf phrase boost fields have no direct OpenSearch equivalent
+          and that the translation is a behavioral approximation.
+        metric: query2-edismax-behavioral-note
 
   - description: "Create migration plan"
     metadata:
