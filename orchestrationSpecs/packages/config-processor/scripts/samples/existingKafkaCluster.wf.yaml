@@ -5,6 +5,10 @@ kafkaClusterConfiguration:
       enableMSKAuth: true
       kafkaConnection: "broker.a:9092,broker.b:9092"
       kafkaTopic: ""
+      auth:
+        type: "scram-sha-512"
+        secretName: "existing-kafka-user-secret"
+        caSecretName: "existing-kafka-cluster-ca"
 
 sourceClusters:
   source:
@@ -24,7 +28,6 @@ sourceClusters:
         snap1:
           config:
             createSnapshotConfig: {}
-            requiredForCompleteMigration: true
           repoName: "default"
 
 targetClusters:

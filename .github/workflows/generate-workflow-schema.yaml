@@ -1,0 +1,134 @@
+name: Generate workflow schema standalone
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'deployment/k8s/**'
+      - 'packages/schemas/**'
+      - 'packages/config-processor/**'
+      - 'migrationConsole/**'
+      - '.github/workflows/generate-workflow-schema.yaml'
+      - '.github/workflows/release-drafter.yml'
+  pull_request:
+    paths:
+      - 'deployment/k8s/**'
+      - 'packages/schemas/**'
+      - 'packages/config-processor/**'
+      - 'migrationConsole/**'
+      - '.github/workflows/generate-workflow-schema.yaml'
+      - '.github/workflows/release-drafter.yml'
+
+jobs:
+  generate-cache-key:
+    runs-on: ubuntu-22.04
+    outputs:
+      docker_cache_key: ${{ steps.generate_docker_cache_key.outputs.key }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Generate Docker Cache Key
+        id: generate_docker_cache_key
+        run: |
+          files=$(find . -type f \( -name 'docker-compose.yml' -o -name 'Dockerfile' \))
+          file_contents=$(cat $files)
+          key=$(echo "${file_contents}" | sha1sum | awk '{print $1}')
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
+
+  generate-workflow-schema:
+    needs: [generate-cache-key]
+    name: Generate workflow schema artifact
+    runs-on: ubuntu-22.04
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: 'true'
+          gradle-cache-read-only: 'false'
+
+      - name: Alias docker-registry to 127.0.0.1
+        run: |
+          echo "127.0.0.1 docker-registry" | sudo tee -a /etc/hosts
+          getent hosts docker-registry
+          curl -sS http://docker-registry:5000/v2/ || true
+
+      - name: Restore Docker Cache
+        uses: AndreKurait/docker-cache@0.6.0
+        with:
+          key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
+          read-only: ${{ github.event_name != 'push' }}
+
+      - name: Set up Buildx builder (BuildKit)
+        uses: docker/setup-buildx-action@v4
+        with:
+          driver: docker-container
+          name: local-remote-builder
+          install: true
+          driver-opts: network=host
+          buildkitd-config-inline: |
+            [registry."docker-registry:5000"]
+              http = true
+              insecure = true
+
+      - name: Set up Kind cluster
+        uses: helm/kind-action@v1.14.0
+        with:
+          cluster_name: generate-workflow-schema
+          node_image: kindest/node:v1.33.1
+
+      - name: Build migration console image to local registry
+        run: |
+          ./gradlew buildKit_migrationConsole_amd64 \
+            -Pbuilder=local-remote-builder \
+            -PintermediateRegistry=localhost:5000 \
+            -PregistryEndpoint=localhost:5000 \
+            -PimageVersion=latest \
+            -PpublishStyle='separateRepos' \
+            --no-build-cache \
+            --no-daemon \
+            --no-continue \
+            --info
+
+      - name: Pull built console image from local registry
+        run: |
+          docker pull localhost:5000/opensearch-migrations-console:latest
+
+      - name: Load console image into Kind
+        run: |
+          kind load docker-image localhost:5000/opensearch-migrations-console:latest --name generate-workflow-schema
+
+      - name: Generate workflow schema artifact
+        run: |
+          chmod +x ./deployment/k8s/generateWorkflowSchemaArtifact.sh
+          KUBE_CONTEXT=kind-generate-workflow-schema \
+          IMAGE_REPOSITORY_PREFIX=localhost:5000 \
+          IMAGE_TAG=latest \
+          IMAGE_PULL_POLICY=IfNotPresent \
+          OUTPUT_PATH="${PWD}/workflowMigration.schema.json" \
+          ./deployment/k8s/generateWorkflowSchemaArtifact.sh
+
+      - name: Upload workflow schema artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflowMigration-schema-${{ github.sha }}
+          path: workflowMigration.schema.json
+
+      - name: Clean up migrations docker images before caching
+        if: always()
+        run: |
+          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E '^(migrations/|localhost:5000/opensearch-migrations-)' | xargs -r -I {} docker image rm {}
+
+      - name: Dump schema generation diagnostics
+        if: ${{ failure() }}
+        run: |
+          kubectl --context kind-generate-workflow-schema get pods -A
+          kubectl --context kind-generate-workflow-schema -n ma describe statefulset migration-console || true
+          kubectl --context kind-generate-workflow-schema -n ma describe pod migration-console-0 || true
+          kubectl --context kind-generate-workflow-schema -n ma logs migration-console-0 -c workflow-schema-generator || true
+          kubectl --context kind-generate-workflow-schema -n ma logs migration-console-0 -c console || true

@@ -29,6 +29,7 @@
     "build:k8s-types": "npm run -w @opensearch-migrations/k8s-types build",
     "build:argo-types": "npm run -w @opensearch-migrations/argo-types build",
     "build:strimzi-types": "npm run -w @opensearch-migrations/strimzi-types build",
+    "build:unified-schema": "npm run -w @opensearch-migrations/schemas build-unified-schema -- ",
     "build:schemas": "npm run -w @opensearch-migrations/schemas build",
     "build:builders": "npm run -w @opensearch-migrations/argo-workflow-builders build",
     "build:templates": "npm run -w @opensearch-migrations/migration-workflow-templates build",
@@ -50,6 +51,7 @@
     "make-templates": "npm run dev-make-templates -- ",
     "schema": "npm run dev-schema",
     "argo-schema": "npm run dev-argo-schema",
+    "unified-schema": "npm run build:unified-schema -- ",
     "make-sample": "npm run dev-make-sample",
     "transform-config": "npm run dev-transform-config -- ",
     "initialize-workflow-state": "npm run dev-initialize-workflow-state -- "

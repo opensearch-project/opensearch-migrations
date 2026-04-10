@@ -1,7 +1,37 @@
-# Capture proxy with self-signed TLS certificate (for minikube / non-AWS)
+# Capture proxy without frontside TLS using an auto-created Strimzi Kafka cluster.
+# This is the workflow-managed Kafka default variant.
+# It omits autoCreate.auth and relies on transform-time policy, which currently
+# resolves workflow-managed Kafka auth to SCRAM-SHA-512. That means the
+# migration applications use the TLS listener, bootstrap on 9093, and generated
+# Kafka user / secret resources.
 kafkaClusterConfiguration:
-  default:
-    autoCreate: {}
+  custom:
+    autoCreate:
+      clusterSpecOverrides:
+        kafka:
+          config:
+            auto.create.topics.enable: false
+            add.partitions.to.txn.retry.backoff.max.ms: 100
+            offsets.topic.replication.factor: 1
+            transaction.state.log.replication.factor: 1
+            transaction.state.log.min.isr: 1
+            default.replication.factor: 1
+            min.insync.replicas: 1
+      nodePoolSpecOverrides:
+        replicas: 1
+        roles:
+          - controller
+          - broker
+        storage:
+          type: persistent-claim
+          size: 1Gi
+          deleteClaim: true
+      topicSpecOverrides:
+        partitions: 1
+        replicas: 1
+        config:
+          retention.ms: 604800000
+          segment.bytes: 1073741824
 
 sourceClusters:
   source:
@@ -25,6 +55,7 @@ snapshotMigrationConfigs: []
 traffic:
   proxies:
     capture-proxy:
+      kafka: custom
       source: "source"
       proxyConfig:
         listenPort: 9201
