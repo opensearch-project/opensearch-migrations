@@ -13,6 +13,7 @@
     - [Performance Limitations](#performance-limitations)
       - [Test Results](#test-results)
   - [Issue Tracking](#issue-tracking)
+  - [Roadmap](#roadmap)
   - [User Guide Documentation](#user-guide-documentation)
   - [Getting Started](#getting-started)
     - [Local Deployment](#local-deployment)
@@ -118,6 +119,10 @@ We encourage users to open bugs and feature requests in this GitHub repository.
 For issue prioritization and management, the migrations team uses Jira, but uses GitHub issues for community intake:
 
 https://opensearch.atlassian.net/
+
+## Roadmap
+
+For upcoming features, enhancements, and priorities, check out the [OpenSearch Migrations Project Board](https://github.com/orgs/opensearch-project/projects/229/views/1).
 
 ## User Guide Documentation
 
