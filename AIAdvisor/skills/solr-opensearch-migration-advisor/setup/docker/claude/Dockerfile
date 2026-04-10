@@ -1,8 +1,6 @@
-FROM ubuntu:24.04
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && apt-get install -y ca-certificates curl jq && && rm -rf /var/lib/apt/lists/*
+RUN dnf install -y jq shadow-utils && dnf clean all
 
 RUN useradd -m -s /bin/bash user && \
     mkdir -p /home/user/claude/.claude/skills/solr-opensearch-migration-advisor && \
