@@ -26,12 +26,12 @@ public class CallbackTupleSink implements TupleSink {
     }
 
     @Override
-    public void onEndOfBatch() {
+    public void flush() {
         // No batching needed — futures are completed immediately in accept()
     }
 
     @Override
-    public void onIdle() {
+    public void periodicFlush() {
         // No time-based thresholds — futures are completed immediately in accept()
     }
 

@@ -14,11 +14,11 @@ public interface TupleSink extends AutoCloseable {
     /** Accept one tuple. The sink owns the future and must complete it when durability is confirmed. */
     void accept(Map<String, Object> tupleMap, CompletableFuture<Void> future);
 
-    /** Hint that no more items are immediately available. Batch sinks should flush buffers. */
-    void onEndOfBatch();
+    /** Flush any buffered data. Called when no more items are immediately available. */
+    void flush();
 
-    /** Periodic callback even when no events arrive. Batch sinks should check time-based thresholds. */
-    void onIdle();
+    /** Periodic callback even when no events arrive. Implementations should check time-based thresholds. */
+    void periodicFlush();
 
     /** Finalize: flush, commit, complete all outstanding futures, release resources. */
     @Override

@@ -88,7 +88,7 @@ public class GzipJsonLinesSink implements TupleSink {
     }
 
     @Override
-    public void onEndOfBatch() {
+    public void flush() {
         if (pendingFutures.isEmpty()) {
             return;
         }
@@ -96,7 +96,7 @@ public class GzipJsonLinesSink implements TupleSink {
     }
 
     @Override
-    public void onIdle() {
+    public void periodicFlush() {
         if (!pendingFutures.isEmpty()) {
             rotate();
         }

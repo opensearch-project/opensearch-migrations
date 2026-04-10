@@ -45,22 +45,22 @@ class GzipJsonLinesSinkTest {
             assertFalse(f1.isDone(), "Future should be pending before flush");
             assertFalse(f2.isDone(), "Future should be pending before flush");
 
-            // onEndOfBatch forces rotation: finish + fsync + close + open new
-            sink.onEndOfBatch();
-            assertTrue(f1.isDone(), "Future should complete on onEndOfBatch");
-            assertTrue(f2.isDone(), "Future should complete on onEndOfBatch");
+            // flush forces rotation: finish + fsync + close + open new
+            sink.flush();
+            assertTrue(f1.isDone(), "Future should complete on flush");
+            assertTrue(f2.isDone(), "Future should complete on flush");
             f1.get(1, TimeUnit.SECONDS);
             f2.get(1, TimeUnit.SECONDS);
 
             // Write more — goes to a new file since previous batch rotated
             var f3 = new CompletableFuture<Void>();
             sink.accept(makeTuple("conn3.0"), f3);
-            sink.onEndOfBatch();
+            sink.flush();
             assertTrue(f3.isDone());
             f3.get(1, TimeUnit.SECONDS);
         }
 
-        // Each onEndOfBatch rotates, so we get 2 data files (close() produces an empty file that's also valid)
+        // Each flush rotates, so we get 2 data files (close() produces an empty file that's also valid)
         var gzFiles = Files.list(tempDir).filter(p -> p.toString().endsWith(".log.gz")).sorted().toList();
         assertTrue(gzFiles.size() >= 2, "Expected at least 2 files from rotation, got " + gzFiles.size());
 
@@ -75,7 +75,7 @@ class GzipJsonLinesSinkTest {
             for (int i = 0; i < 5; i++) {
                 futures[i] = new CompletableFuture<Void>();
                 sink.accept(makeTuple("conn" + i + ".0"), futures[i]);
-                // No onEndOfBatch — futures should stay pending
+                // No flush — futures should stay pending
                 assertFalse(futures[i].isDone(), "Future " + i + " should be pending (below threshold)");
             }
         }
@@ -111,7 +111,7 @@ class GzipJsonLinesSinkTest {
             sink.accept(makeTuple("conn1.0"), f1);
             // Future pending — time threshold not yet hit at accept time
             // Force flush so f1 completes
-            sink.onEndOfBatch();
+            sink.flush();
             assertTrue(f1.isDone());
 
             Thread.sleep(10); // let the age threshold expire
@@ -127,14 +127,14 @@ class GzipJsonLinesSinkTest {
     }
 
     @Test
-    void onIdleFlushesUncommittedTuples() throws Exception {
+    void periodicFlushFlushesUncommittedTuples() throws Exception {
         try (var sink = new GzipJsonLinesSink(tempDir, 10 * 1024 * 1024, Duration.ofMinutes(10))) {
             var f1 = new CompletableFuture<Void>();
             sink.accept(makeTuple("conn1.0"), f1);
             assertFalse(f1.isDone());
 
-            sink.onIdle();
-            assertTrue(f1.isDone(), "Future should complete on onIdle when tuples are pending");
+            sink.periodicFlush();
+            assertTrue(f1.isDone(), "Future should complete on periodicFlush when tuples are pending");
             f1.get(1, TimeUnit.SECONDS);
         }
     }

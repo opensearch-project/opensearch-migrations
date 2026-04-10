@@ -188,6 +188,10 @@ public class ParsedHttpMessagesAsDicts {
         @NonNull List<byte[]> data
     ) {
         return makeSafeMap(context, () -> {
+            // Pass null context to Netty handlers: these are only parsing HTTP bytes for
+            // tuple output, not performing request transformations. Creating a real
+            // transformationContext here would produce spurious 'transformation' tracing
+            // spans that break span-count assertions in tests.
             try (var messageHolder = RefSafeHolder.create(
                     RefSafeStreamUtils.refSafeTransform(
                     data.stream(),
@@ -227,6 +231,7 @@ public class ParsedHttpMessagesAsDicts {
         Duration latency
     ) {
         return makeSafeMap(context, () -> {
+            // Null context — same rationale as convertRequest: parsing only, no transformation spans.
             try (var messageHolder = RefSafeHolder.create(
                     RefSafeStreamUtils.refSafeTransform(
                         data.stream(),

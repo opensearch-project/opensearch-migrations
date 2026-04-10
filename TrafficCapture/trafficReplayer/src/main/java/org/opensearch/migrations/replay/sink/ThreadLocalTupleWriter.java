@@ -1,7 +1,5 @@
 package org.opensearch.migrations.replay.sink;
 
-import java.nio.file.Path;
-import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -13,47 +11,31 @@ import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Per-thread tuple writer that eliminates the need for a shared Disruptor.
+ * Per-thread sink registry that assigns each calling thread its own {@link TupleSink}.
  *
- * <p>Each calling thread gets its own {@link TupleSink} instance (typically a
- * {@link GzipJsonLinesSink}). Since each Netty event loop is single-threaded,
- * the per-thread sink requires no synchronization — both the gzip write and the
- * flush+fsync happen on the calling thread.</p>
- *
- * <p>The fsync cost (~1ms for small writes to Mountpoint S3) is comparable to the
- * Disruptor publish latency it replaces, and keeps the single-threaded invariant
- * that {@link GzipJsonLinesSink} depends on.</p>
+ * <p>Since each Netty event loop is single-threaded, the per-thread sink requires
+ * no synchronization.</p>
  */
 @Slf4j
 public class ThreadLocalTupleWriter implements AutoCloseable {
     private final ConcurrentHashMap<Long, TupleSink> sinks = new ConcurrentHashMap<>();
-    private final AtomicInteger threadIndexCounter = new AtomicInteger();
+    private final AtomicInteger sinkIndexCounter = new AtomicInteger();
     private final IntFunction<TupleSink> sinkFactory;
 
     /**
-     * @param sinkFactory creates a new sink for each thread, given a thread index
+     * @param sinkFactory creates a new sink for each thread, given a sink index
      */
     public ThreadLocalTupleWriter(IntFunction<TupleSink> sinkFactory) {
         this.sinkFactory = sinkFactory;
     }
 
     /**
-     * Convenience constructor for the common GzipJsonLinesSink case.
-     */
-    public ThreadLocalTupleWriter(Path outputDir, long maxFileSizeBytes, Duration maxFileAge) {
-        this(threadIndex -> new GzipJsonLinesSink(outputDir, maxFileSizeBytes, maxFileAge, threadIndex));
-    }
-
-    /**
      * Write a tuple. Called on a Netty event loop thread.
-     *
-     * <p>Both the gzip write and the flush+fsync happen synchronously on the calling
-     * thread, preserving the single-threaded invariant that the sink depends on.</p>
      */
     public CompletableFuture<Void> writeTuple(SourceTargetCaptureTuple tuple, ParsedHttpMessagesAsDicts parsed) {
         var sink = sinks.computeIfAbsent(
             Thread.currentThread().getId(),
-            id -> sinkFactory.apply(threadIndexCounter.getAndIncrement())
+            id -> sinkFactory.apply(sinkIndexCounter.getAndIncrement())
         );
         var future = new CompletableFuture<Void>();
         var map = parsed.toTupleMap(tuple);

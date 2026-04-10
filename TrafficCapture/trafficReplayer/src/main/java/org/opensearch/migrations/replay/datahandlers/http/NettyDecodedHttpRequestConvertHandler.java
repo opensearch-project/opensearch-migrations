@@ -31,6 +31,7 @@ public class NettyDecodedHttpRequestConvertHandler extends ChannelInboundHandler
     @Override
     public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
         if (msg instanceof HttpRequest) {
+            // Null when called from ParsedHttpMessagesAsDicts (parse-only, no transformation context)
             if (httpTransactionContext != null) {
                 httpTransactionContext.onHeaderParse();
             }

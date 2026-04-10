@@ -11,7 +11,6 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
 import org.opensearch.migrations.replay.TestHttpServerContext;
@@ -42,7 +41,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Verifies that the ThreadLocalTupleWriter architecture correctly:
  * <ol>
- *   <li>Blocks Kafka commits until tuple futures are completed (durability confirmed)</li>
+ *   <li>Blocks offset commits until tuple futures are completed (durability confirmed)</li>
  *   <li>Does NOT block subsequent requests while tuple writes are pending</li>
  * </ol>
  */
@@ -54,11 +53,10 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
 
     /**
      * A TupleSink that holds futures without completing them until explicitly released.
-     * This lets us observe whether Kafka commits are gated on future completion.
+     * This lets us observe whether offset commits are gated on future completion.
      */
     static class LatchedTupleSink implements TupleSink {
         final List<CompletableFuture<Void>> heldFutures = Collections.synchronizedList(new ArrayList<>());
-        final AtomicInteger acceptCount = new AtomicInteger();
         final CountDownLatch allAccepted;
 
         LatchedTupleSink(int expectedCount) {
@@ -68,17 +66,16 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
         @Override
         public void accept(Map<String, Object> tupleMap, CompletableFuture<Void> future) {
             heldFutures.add(future);
-            acceptCount.incrementAndGet();
             allAccepted.countDown();
         }
 
         @Override
-        public void onEndOfBatch() {
+        public void flush() {
             // Intentionally do NOT complete futures here — we control completion externally
         }
 
         @Override
-        public void onIdle() {}
+        public void periodicFlush() {}
 
         @Override
         public void close() {
@@ -125,14 +122,14 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
     }
 
     /**
-     * Verifies that Kafka commits are blocked until tuple futures complete.
+     * Verifies that offset commits are blocked until tuple futures complete.
      *
      * Strategy: use a LatchedTupleSink that holds futures indefinitely. After all tuples
-     * are accepted (proving requests flowed through), check that Kafka has NOT committed.
+     * are accepted (proving requests flowed through), check that offsets have NOT been committed.
      * Then release the futures and verify commits happen.
      */
     @Test
-    public void tupleWriteBlocksKafkaCommit() throws Throwable {
+    public void tupleWriteBlocksOffsetCommit() throws Throwable {
         var random = new Random(1);
         var latchedSink = new LatchedTupleSink(NUM_REQUESTS);
 
@@ -172,11 +169,11 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                     latchedSink.allAccepted.await(30, TimeUnit.SECONDS),
                     "Timed out waiting for all tuples to be accepted"
                 );
-                Assertions.assertEquals(NUM_REQUESTS, latchedSink.acceptCount.get());
+                Assertions.assertEquals(0, latchedSink.allAccepted.getCount());
 
-                // Kafka should NOT have committed yet — futures are still held
+                // Offsets should NOT have been committed yet — futures are still held
                 Assertions.assertEquals(0, sourceContext.nextReadCursor.get(),
-                    "Kafka should not have committed while tuple futures are pending");
+                    "Offsets should not have been committed while tuple futures are pending");
 
                 // Now release all futures
                 latchedSink.releaseAll();
@@ -185,9 +182,9 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 replayThread.join(30_000);
                 Assertions.assertFalse(replayThread.isAlive(), "Replay thread should have finished");
 
-                // Kafka should now be committed
+                // Offsets should now be committed
                 Assertions.assertEquals(1, sourceContext.nextReadCursor.get(),
-                    "Kafka should have committed after tuple futures completed");
+                    "Offsets should have been committed after tuple futures completed");
 
                 tr.shutdown(null).get();
             }
@@ -246,7 +243,7 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                         + "no tuple futures have been completed — tuple writes must not block "
                         + "subsequent request processing"
                 );
-                Assertions.assertEquals(NUM_REQUESTS, latchedSink.acceptCount.get(),
+                Assertions.assertEquals(0, latchedSink.allAccepted.getCount(),
                     "All requests should have been accepted by the sink without waiting for future completion");
 
                 // Clean up
