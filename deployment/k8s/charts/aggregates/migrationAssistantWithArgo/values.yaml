@@ -414,6 +414,15 @@ charts:
       resources:
         requests: { cpu: 50m, memory: 32Mi }
         limits:   { cpu: 200m, memory: 64Mi }
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: NotIn
+                    values:
+                      - dedicated-small-instance-migration-console-pool
       env:
         - name: OUTPUT_FORMAT
           valueFrom:
