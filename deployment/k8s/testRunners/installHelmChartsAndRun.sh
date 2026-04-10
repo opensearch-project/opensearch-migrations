@@ -3,13 +3,15 @@
 ORIGINAL_DIR=$(pwd)
 cd "$(dirname "$0")/../" || exit
 
-helm install -n ma ma charts/aggregates/migrationAssistant
+helm install -n ma ma charts/aggregates/migrationAssistantWithArgo \
+  -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
 if [ $? -eq 0 ]; then
-  echo "installed migrationAssistant in 'ma' namespace"
+  echo "installed migrationAssistantWithArgo in 'ma' namespace"
 else
   echo Rebuilding dependency
-  helm dependency build charts/aggregates/migrationAssistant
-  helm install -n ma ma charts/aggregates/migrationAssistant
+  helm dependency build charts/aggregates/migrationAssistantWithArgo
+  helm install -n ma ma charts/aggregates/migrationAssistantWithArgo \
+    -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
 fi
 
 helm install -n ma tc charts/aggregates/testClusters

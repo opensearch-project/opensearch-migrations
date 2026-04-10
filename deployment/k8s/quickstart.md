@@ -88,7 +88,9 @@ minikube image ls
 This will deploy our main Migration Assistant Helm chart which will create the needed resources to perform the Migration Assistant suite of migration tooling
 
 ```shell
-helm install ma -n ma charts/aggregates/migrationAssistantWithArgo --create-namespace
+helm install ma -n ma charts/aggregates/migrationAssistantWithArgo \
+  --create-namespace \
+  -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
 ```
 
 To see all helm deployments for this namespace

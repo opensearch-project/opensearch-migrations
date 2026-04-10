@@ -243,28 +243,11 @@ def call(Map config = [:]) {
                                     echo "Cluster stack deleted."
                                 """
 
-                                // 2. Cleanup orphaned EKS security groups
-                                sh """
-                                    echo "CLEANUP: Finding orphaned EKS security groups for cluster ${eksClusterName}"
-                                    eks_sgs=\$(aws ec2 describe-security-groups \
-                                        --filters "Name=tag:aws:eks:cluster-name,Values=${eksClusterName}" \
-                                        --query 'SecurityGroups[*].GroupId' --output text 2>/dev/null || echo "")
-                                    if [ -z "\$eks_sgs" ]; then
-                                        echo "CLEANUP: No orphaned EKS security groups found"
-                                    else
-                                        for sg in \$eks_sgs; do
-                                            echo "CLEANUP: Deleting EKS security group \$sg"
-                                            for i in 1 2 3 4 5; do
-                                                if aws ec2 delete-security-group --group-id "\$sg" >/dev/null 2>&1; then
-                                                    echo "CLEANUP: Deleted SG \$sg"
-                                                    break
-                                                fi
-                                                echo "CLEANUP: SG \$sg delete failed (attempt \$i), waiting for ENIs to drain..."
-                                                sleep 30
-                                            done
-                                        done
-                                    fi
-                                """
+                                // 2. Clean up EKS resources (namespace, instance profiles, security groups)
+                                eksCleanupStep(
+                                    stackName: env.STACK_NAME,
+                                    eksClusterName: eksClusterName
+                                )
 
                                 // 3. Delete MA stack last (owns the VPC)
                                 echo "CLEANUP: Deleting MA stack ${env.STACK_NAME}"

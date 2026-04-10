@@ -15,10 +15,13 @@ Each proxied request produces a single **ValidationDocument** indexed into the r
 | Request context | `original_request`, `transformed_request`, `collection_name`, `normalized_endpoint`, `timestamp`, `request_id` | Always |
 | Hit count drift | `baseline_hit_count`, `candidate_hit_count`, `hit_count_drift_percentage` | Always (null if target errored) |
 | Response latency | `baseline_response_time_ms`, `candidate_response_time_ms`, `response_time_delta_ms` | Always (null if target errored) |
+| Response context | `baseline_response`, `candidate_response` | Always (null if target missing) |
 | Comparisons | `comparisons` list (typed entries, e.g., facet bucket diffs) | Only when the query has facets |
 | Custom metrics | `custom_metrics` map | Always (empty if no transform metrics emitted) |
 
 Both `original_request` and `transformed_request` use a generic `RequestRecord` structure: `method`, `uri`, `headers`, and optionally `body`.
+
+Both `baseline_response` and `candidate_response` use a `ResponseRecord` structure: `status_code`, `error` (non-null only on failure), and optionally `body` (controlled by the `includeResponseBody` flag on `MetricsReceiver`).
 
 Hit counts and latencies are extracted from the **post-transform** response bodies via a pluggable `MetricsExtractor` interface. Each implementation defines the field paths and URI patterns for its source system. For example, the Solr implementation uses `response.numFound` and `responseHeader.QTime`. Result comparisons (e.g. facet diffs) are also delegated to the extractor, making the framework reusable across different source and target systems.
 
@@ -90,7 +93,7 @@ All in `org.opensearch.migrations.transform.shim.reporting`:
 
 | Class | Role |
 |---|---|
-| `ValidationDocument` | Java record — the document schema with nested `RequestRecord`, `ComparisonEntry`, `ValueDrift` |
+| `ValidationDocument` | Java record — the document schema with nested `RequestRecord`, `ResponseRecord`, `ComparisonEntry`, `ValueDrift` |
 | `MetricsReceiver` | Extracts metrics from target responses, builds document, submits to sink |
 | `MetricsSink` | Interface — `submit()`, `flush()`, `close()` |
 | `OpenSearchMetricsSink` | Bulk-indexes documents into the reporting cluster |

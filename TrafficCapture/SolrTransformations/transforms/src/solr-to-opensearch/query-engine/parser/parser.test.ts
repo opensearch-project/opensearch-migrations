@@ -130,161 +130,7 @@ describe('parseSolrQuery', () => {
   });
 
   // ─── BoolNode ────────────────────────────────────────────────────────────
-
-  describe('BoolNode', () => {
-    it('parses AND', () => {
-      const { ast, errors } = parseSolrQuery('title:java AND author:smith', emptyParams);
-      expect(errors).toEqual([]);
-      expect(ast).toEqual({
-        type: 'bool',
-        and: [
-          { type: 'field', field: 'title', value: 'java' },
-          { type: 'field', field: 'author', value: 'smith' },
-        ],
-        or: [],
-        not: [],
-      });
-    });
-
-    it('parses OR', () => {
-      const { ast, errors } = parseSolrQuery('title:java OR title:python', emptyParams);
-      expect(errors).toEqual([]);
-      expect(ast).toEqual({
-        type: 'bool',
-        and: [],
-        or: [
-          { type: 'field', field: 'title', value: 'java' },
-          { type: 'field', field: 'title', value: 'python' },
-        ],
-        not: [],
-      });
-    });
-
-    it('parses implicit OR (adjacency)', () => {
-      const { ast, errors } = parseSolrQuery('title:java title:python', emptyParams);
-      expect(errors).toEqual([]);
-      expect(ast).toEqual({
-        type: 'bool',
-        and: [],
-        or: [
-          { type: 'field', field: 'title', value: 'java' },
-          { type: 'field', field: 'title', value: 'python' },
-        ],
-        not: [],
-      });
-    });
-
-    it('parses NOT', () => {
-      const { ast, errors } = parseSolrQuery('NOT status:draft', emptyParams);
-      expect(errors).toEqual([]);
-      expect(ast).toEqual({
-        type: 'bool',
-        and: [],
-        or: [],
-        not: [{ type: 'field', field: 'status', value: 'draft' }],
-      });
-    });
-
-    it('respects precedence: AND binds tighter than OR', () => {
-      const { ast, errors } = parseSolrQuery('title:java OR author:smith AND year:2024', emptyParams);
-      expect(errors).toEqual([]);
-      // title:java OR (author:smith AND year:2024)
-      expect(ast).toEqual({
-        type: 'bool',
-        and: [],
-        or: [
-          { type: 'field', field: 'title', value: 'java' },
-          {
-            type: 'bool',
-            and: [
-              { type: 'field', field: 'author', value: 'smith' },
-              { type: 'field', field: 'year', value: '2024' },
-            ],
-            or: [],
-            not: [],
-          },
-        ],
-        not: [],
-      });
-    });
-
-    it('respects precedence: NOT binds tighter than AND', () => {
-      const { ast, errors } = parseSolrQuery('title:java AND NOT status:draft', emptyParams);
-      expect(errors).toEqual([]);
-      // title:java AND (NOT status:draft)
-      expect(ast).toEqual({
-        type: 'bool',
-        and: [
-          { type: 'field', field: 'title', value: 'java' },
-          { type: 'bool', and: [], or: [], not: [{ type: 'field', field: 'status', value: 'draft' }] },
-        ],
-        or: [],
-        not: [],
-      });
-    });
-
-    it('respects full precedence chain: OR < AND < NOT', () => {
-      const { ast, errors } = parseSolrQuery('title:java OR author:smith AND NOT status:draft', emptyParams);
-      expect(errors).toEqual([]);
-      // title:java OR (author:smith AND (NOT status:draft))
-      expect(ast).toEqual({
-        type: 'bool',
-        and: [],
-        or: [
-          { type: 'field', field: 'title', value: 'java' },
-          {
-            type: 'bool',
-            and: [
-              { type: 'field', field: 'author', value: 'smith' },
-              { type: 'bool', and: [], or: [], not: [{ type: 'field', field: 'status', value: 'draft' }] },
-            ],
-            or: [],
-            not: [],
-          },
-        ],
-        not: [],
-      });
-    });
-
-    it('respects precedence: NOT binds tighter than OR', () => {
-      const { ast, errors } = parseSolrQuery('title:java OR NOT status:draft', emptyParams);
-      expect(errors).toEqual([]);
-      // title:java OR (NOT status:draft)
-      expect(ast).toEqual({
-        type: 'bool',
-        and: [],
-        or: [
-          { type: 'field', field: 'title', value: 'java' },
-          { type: 'bool', and: [], or: [], not: [{ type: 'field', field: 'status', value: 'draft' }] },
-        ],
-        not: [],
-      });
-    });
-
-    it('parentheses override natural precedence', () => {
-      const { ast, errors } = parseSolrQuery('(title:java OR author:smith) AND NOT status:draft', emptyParams);
-      expect(errors).toEqual([]);
-      // (title:java OR author:smith) AND (NOT status:draft)
-      expect(ast).toEqual({
-        type: 'bool',
-        and: [
-          {
-            type: 'group',
-            child: {
-              type: 'bool', and: [], not: [],
-              or: [
-                { type: 'field', field: 'title', value: 'java' },
-                { type: 'field', field: 'author', value: 'smith' },
-              ],
-            },
-          },
-          { type: 'bool', and: [], or: [], not: [{ type: 'field', field: 'status', value: 'draft' }] },
-        ],
-        or: [],
-        not: [],
-      });
-    });
-  });
+  // BoolNode tests moved to boolNode.parser.test.ts
 
   // ─── GroupNode ───────────────────────────────────────────────────────────
 
@@ -426,6 +272,22 @@ describe('parseSolrQuery', () => {
         child: { type: 'bare', value: 'hello world', isPhrase: true, defaultField: 'content' },
         value: 2,
       });
+    });
+
+    it('parses boost on match all *:*^2', () => {
+      const { ast, errors } = parseSolrQuery('*:*^2', emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast).toEqual({
+        type: 'boost',
+        child: { type: 'matchAll' },
+        value: 2,
+      });
+    });
+
+    it('fails to parse non-numeric boost value (^abc)', () => {
+      const { ast, errors } = parseSolrQuery('title:java^abc', emptyParams);
+      expect(ast).toBeNull();
+      expect(errors).toHaveLength(1);
     });
   });
 

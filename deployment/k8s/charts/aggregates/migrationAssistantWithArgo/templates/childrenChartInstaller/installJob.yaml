@@ -202,6 +202,9 @@ spec:
                   --set artifactRepository.s3.endpoint="s3.{{ $.Values.aws.region }}.amazonaws.com" \
             {{- end }}
           {{- end }}
+          {{- if eq $name "ack-cloudwatch-controller" }}
+                  --set aws.region="{{ $.Values.aws.region }}" \
+          {{- end }}
                   $VALUE_PARAM \
           {{- if $chart.waitForInstallation }}
                   --wait
@@ -217,6 +220,17 @@ spec:
 
               # Wait for all helm upgrades/installs to complete
               time wait
+
+      {{- if get .Values.conditionalPackageInstalls "ack-cloudwatch-controller" }}
+      {{- $region := required "Missing required value: .Values.aws.region" .Values.aws.region }}
+      {{- $account := required "Missing required value: .Values.aws.account" (toString .Values.aws.account) }}
+      {{- $stage := required "Missing required value: .Values.stageName" .Values.stageName }}
+              echo "Waiting for Dashboard CRD to be established..."
+              kubectl wait --for=condition=Established crd/dashboards.cloudwatch.services.k8s.aws --timeout=120s
+              echo "Applying CloudWatch Dashboard CRs..."
+              echo '{{ include "cloudwatch.dashboardCRs" (dict "region" $region "account" $account "stage" $stage "root" $) | b64enc }}' | base64 -d | kubectl apply -f -
+              echo "Dashboard CRs applied."
+      {{- end }}
 
               # Combine all notes and create a ConfigMap to store them
               echo "All charts installed successfully!"

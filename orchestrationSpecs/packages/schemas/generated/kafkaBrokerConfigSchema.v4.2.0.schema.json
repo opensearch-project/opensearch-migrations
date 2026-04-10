@@ -1,0 +1,1953 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "add.partitions.to.txn.retry.backoff.max.ms": {
+      "type": "integer",
+      "description": "The maximum allowed timeout for adding partitions to transactions on the server side. It only applies to the actual add partition operations, not the verification. It will not be effective if it is larger than request.timeout.ms",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 100
+    },
+    "add.partitions.to.txn.retry.backoff.ms": {
+      "type": "integer",
+      "description": "The server-side retry backoff when the server attemptsto add the partition to the transaction",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 20
+    },
+    "alter.config.policy.class.name": {
+      "type": "string",
+      "description": "The alter configs policy class that should be used for validation. The class should implement the org.apache.kafka.server.policy.AlterConfigPolicy interface. Note: This policy runs on the controller instead of the broker.",
+      "x-kafka-type": "class",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only"
+    },
+    "alter.log.dirs.replication.quota.window.num": {
+      "type": "integer",
+      "description": "The number of samples to retain in memory for alter log dirs replication quotas",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 11
+    },
+    "alter.log.dirs.replication.quota.window.size.seconds": {
+      "type": "integer",
+      "description": "The time span of each sample for alter log dirs replication quotas",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 1
+    },
+    "auto.create.topics.enable": {
+      "type": "boolean",
+      "description": "Enable auto creation of topic on the server.",
+      "x-kafka-type": "boolean",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": true
+    },
+    "auto.leader.rebalance.enable": {
+      "type": "boolean",
+      "description": "Enables auto leader balancing. A background thread checks the distribution of partition leaders at regular intervals, configurable by leader.imbalance.check.interval.seconds. If the leader is imbalanced, leader rebalance to the preferred leader for partitions is triggered.",
+      "x-kafka-type": "boolean",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": true
+    },
+    "background.threads": {
+      "type": "integer",
+      "description": "The number of threads to use for various background processing tasks",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 10
+    },
+    "client.quota.callback.class": {
+      "type": "string",
+      "description": "The fully qualified name of a class that implements the ClientQuotaCallback interface, which is used to determine quota limits applied to client requests. By default, the <user> and <client-id&gt quotas that are stored and applied. For any given request, the most specific quota that matches the user principal of the session and the client-id of the request is applied.",
+      "x-kafka-type": "class",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only"
+    },
+    "compression.gzip.level": {
+      "type": "integer",
+      "description": "The compression level to use if compression.type is set to 'gzip'.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...,9] or -1",
+      "default": -1
+    },
+    "compression.lz4.level": {
+      "type": "integer",
+      "description": "The compression level to use if compression.type is set to 'lz4'.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...,17]",
+      "default": 9
+    },
+    "compression.type": {
+      "type": "string",
+      "description": "Specify the final compression type for a given topic. This configuration accepts the standard compression codecs ('gzip', 'snappy', 'lz4', 'zstd'). It additionally accepts 'uncompressed' which is equivalent to no compression; and 'producer' which means retain the original compression codec set by the producer.",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[uncompressed, zstd, lz4, snappy, gzip, producer]",
+      "default": "producer"
+    },
+    "compression.zstd.level": {
+      "type": "integer",
+      "description": "The compression level to use if compression.type is set to 'zstd'.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[-131072,...,22]",
+      "default": 3
+    },
+    "config.providers": {
+      "type": "string",
+      "description": "Comma-separated alias names for classes implementing the ConfigProvider interface. This enables loading configuration data (such as passwords, API keys, and other credentials) from external sources. For example, see Configuration Providers .",
+      "x-kafka-type": "list",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "cluster-wide",
+      "default": "\"\""
+    },
+    "connection.failed.authentication.delay.ms": {
+      "type": "integer",
+      "description": "Connection close delay on failed authentication: this is the time (in milliseconds) by which connection close will be delayed on authentication failure. This must be configured to be less than connections.max.idle.ms to prevent connection timeout.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 100
+    },
+    "connections.max.idle.ms": {
+      "type": "integer",
+      "description": "Idle connections timeout: the server socket processor threads close the connections that idle more than this",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 600000
+    },
+    "connections.max.reauth.ms": {
+      "type": "integer",
+      "description": "When explicitly set to a positive number (the default is 0, not a positive number), a session lifetime that will not exceed the configured value will be communicated to v2.2.0 or later clients when they authenticate. The broker will disconnect any such connection that is not re-authenticated within the session lifetime and that is then subsequently used for any purpose other than re-authentication. Configuration names can optionally be prefixed with listener prefix and SASL mechanism name in lower-case. For example, listener.name.sasl_ssl.oauthbearer.connections.max.reauth.ms=3600000",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 0
+    },
+    "controlled.shutdown.enable": {
+      "type": "boolean",
+      "description": "Enable controlled shutdown of the server.",
+      "x-kafka-type": "boolean",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": true
+    },
+    "controller.quorum.election.backoff.max.ms": {
+      "type": "integer",
+      "description": "Maximum time in milliseconds before starting new elections. This is used in the binary exponential backoff mechanism that helps prevent gridlocked elections",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 1000
+    },
+    "controller.quorum.election.timeout.ms": {
+      "type": "integer",
+      "description": "Maximum time in milliseconds to wait without being able to fetch from the leader before triggering a new election",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 1000
+    },
+    "controller.quorum.fetch.timeout.ms": {
+      "type": "integer",
+      "description": "Maximum time without a successful fetch from the current leader before becoming a candidate and triggering an election for voters; Maximum time a leader can go without receiving valid fetch or fetchSnapshot request from a majority of the quorum before resigning.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 2000
+    },
+    "create.topic.policy.class.name": {
+      "type": "string",
+      "description": "The create topic policy class that should be used for validation. The class should implement the org.apache.kafka.server.policy.CreateTopicPolicy interface. Note: This policy runs on the controller instead of the broker.",
+      "x-kafka-type": "class",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only"
+    },
+    "default.replication.factor": {
+      "type": "integer",
+      "description": "The replication factor for automatically created topics, and for topics created with -1 as the replication factor",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 1
+    },
+    "delegation.token.expiry.check.interval.ms": {
+      "type": "integer",
+      "description": "Scan interval to remove expired delegation tokens.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 3600000
+    },
+    "delegation.token.expiry.time.ms": {
+      "type": "integer",
+      "description": "The token validity time in milliseconds before the token needs to be renewed. Default value 1 day.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 86400000
+    },
+    "delegation.token.max.lifetime.ms": {
+      "type": "integer",
+      "description": "The token has a maximum lifetime beyond which it cannot be renewed anymore. Default value 7 days.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 604800000
+    },
+    "delegation.token.secret.key": {
+      "type": "string",
+      "description": "Secret key to generate and verify delegation tokens. The same key must be configured across all the brokers. If using Kafka with KRaft, the key must also be set across all controllers. If the key is not set or set to empty string, brokers will disable the delegation token support.",
+      "x-kafka-type": "password",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only"
+    },
+    "delete.records.purgatory.purge.interval.requests": {
+      "type": "integer",
+      "description": "The purge interval (in number of requests) of the delete records request purgatory",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 1
+    },
+    "delete.topic.enable": {
+      "type": "boolean",
+      "description": "When set to true, topics can be deleted by the admin client. When set to false, deletion requests will be explicitly rejected by the broker.",
+      "x-kafka-type": "boolean",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": true
+    },
+    "early.start.listeners": {
+      "type": "string",
+      "description": "A comma-separated list of listener names which may be started before the authorizer has finished initialization. This is useful when the authorizer is dependent on the cluster itself for bootstrapping, as is the case for the StandardAuthorizer (which stores ACLs in the metadata log.) By default, all listeners included in controller.listener.names will also be early start listeners. A listener should not appear in this list if it accepts external traffic.",
+      "x-kafka-type": "list",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only"
+    },
+    "fetch.max.bytes": {
+      "type": "integer",
+      "description": "The maximum number of bytes we will return for a fetch request. Must be at least 1024.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1024,...]",
+      "default": 57671680
+    },
+    "fetch.purgatory.purge.interval.requests": {
+      "type": "integer",
+      "description": "The purge interval (in number of requests) of the fetch request purgatory",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 1000
+    },
+    "group.consumer.assignors": {
+      "type": "string",
+      "description": "The server side assignors as a list of either names for builtin assignors or full class names for customer assignors. The first one in the list is considered as the default assignor to be used in the case where the consumer does not specify an assignor. The supported builtin assignors are: uniform, range.",
+      "x-kafka-type": "list",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": "uniform,range"
+    },
+    "group.consumer.heartbeat.interval.ms": {
+      "type": "integer",
+      "description": "The heartbeat interval given to the members of a consumer group.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 5000
+    },
+    "group.consumer.max.heartbeat.interval.ms": {
+      "type": "integer",
+      "description": "The maximum heartbeat interval for registered consumers.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 15000
+    },
+    "group.consumer.max.session.timeout.ms": {
+      "type": "integer",
+      "description": "The maximum allowed session timeout for registered consumers.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 60000
+    },
+    "group.consumer.max.size": {
+      "type": "integer",
+      "description": "The maximum number of consumers that a single consumer group can accommodate. This value will only impact groups under the CONSUMER group protocol. To configure the max group size when using the CLASSIC group protocol use group.max.size instead.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 2147483647
+    },
+    "group.consumer.migration.policy": {
+      "type": "string",
+      "description": "The config that enables converting the non-empty classic group using the consumer embedded protocol to the non-empty consumer group using the consumer group protocol and vice versa; conversions of empty groups in both directions are always enabled regardless of this policy. bidirectional: both upgrade from classic group to consumer group and downgrade from consumer group to classic group are enabled, upgrade: only upgrade from classic group to consumer group is enabled, downgrade: only downgrade from consumer group to classic group is enabled, disabled: neither upgrade nor downgrade is enabled.",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "(case insensitive) [DISABLED, DOWNGRADE, UPGRADE, BIDIRECTIONAL]",
+      "default": "bidirectional"
+    },
+    "group.consumer.min.heartbeat.interval.ms": {
+      "type": "integer",
+      "description": "The minimum heartbeat interval for registered consumers.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 5000
+    },
+    "group.consumer.min.session.timeout.ms": {
+      "type": "integer",
+      "description": "The minimum allowed session timeout for registered consumers.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 45000
+    },
+    "group.consumer.session.timeout.ms": {
+      "type": "integer",
+      "description": "The timeout to detect client failures when using the consumer group protocol.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 45000
+    },
+    "group.coordinator.append.linger.ms": {
+      "type": "integer",
+      "description": "The duration in milliseconds that the coordinator will wait for writes to accumulate before flushing them to disk. Increasing this value improves write efficiency and batch size, but also increases the response latency for requests, as the coordinator must wait for batches to be flushed to disk before completing request processing. Transactional writes are not accumulated. Set to -1 for an adaptive linger time that minimizes latency based on the workload.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[-1,...]",
+      "default": -1
+    },
+    "group.coordinator.rebalance.protocols": {
+      "type": "string",
+      "description": "The list of enabled rebalance protocols.",
+      "x-kafka-type": "list",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[consumer, classic, share, streams]",
+      "default": "classic,consumer,streams"
+    },
+    "group.coordinator.threads": {
+      "type": "integer",
+      "description": "The number of threads used by the group coordinator.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 4
+    },
+    "group.initial.rebalance.delay.ms": {
+      "type": "integer",
+      "description": "The amount of time the group coordinator will wait for more consumers to join a new group before performing the first rebalance. A longer delay means potentially fewer rebalances, but increases the time until processing begins.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 3000
+    },
+    "group.max.session.timeout.ms": {
+      "type": "integer",
+      "description": "The maximum allowed session timeout for registered consumers. Longer timeouts give consumers more time to process messages in between heartbeats at the cost of a longer time to detect failures.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 1800000
+    },
+    "group.max.size": {
+      "type": "integer",
+      "description": "The maximum number of consumers that a single consumer group can accommodate.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 2147483647
+    },
+    "group.min.session.timeout.ms": {
+      "type": "integer",
+      "description": "The minimum allowed session timeout for registered consumers. Shorter timeouts result in quicker failure detection at the cost of more frequent consumer heartbeating, which can overwhelm broker resources.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 6000
+    },
+    "group.share.assignors": {
+      "type": "string",
+      "description": "The server-side assignors as a list of either names for built-in assignors or full class names for custom assignors. The list must contain only a single entry which is used by all groups. The supported built-in assignors are: simple.",
+      "x-kafka-type": "list",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": "simple"
+    },
+    "group.share.delivery.count.limit": {
+      "type": "integer",
+      "description": "The maximum number of delivery attempts for a record delivered to a share group.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[2,...,10]",
+      "default": 5
+    },
+    "group.share.heartbeat.interval.ms": {
+      "type": "integer",
+      "description": "The heartbeat interval given to the members of a share group.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 5000
+    },
+    "group.share.max.heartbeat.interval.ms": {
+      "type": "integer",
+      "description": "The maximum heartbeat interval for share group members.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 15000
+    },
+    "group.share.max.record.lock.duration.ms": {
+      "type": "integer",
+      "description": "The record acquisition lock maximum duration in milliseconds for share groups.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[30000,...,3600000]",
+      "default": 60000
+    },
+    "group.share.max.session.timeout.ms": {
+      "type": "integer",
+      "description": "The maximum allowed session timeout for share group members.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 60000
+    },
+    "group.share.max.share.sessions": {
+      "type": "integer",
+      "description": "The maximum number of share sessions per broker.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 2000
+    },
+    "group.share.max.size": {
+      "type": "integer",
+      "description": "The maximum number of members that a single share group can accommodate.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...,1000]",
+      "default": 200
+    },
+    "group.share.min.heartbeat.interval.ms": {
+      "type": "integer",
+      "description": "The minimum heartbeat interval for share group members.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 5000
+    },
+    "group.share.min.record.lock.duration.ms": {
+      "type": "integer",
+      "description": "The record acquisition lock minimum duration in milliseconds for share groups.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1000,...,30000]",
+      "default": 15000
+    },
+    "group.share.min.session.timeout.ms": {
+      "type": "integer",
+      "description": "The minimum allowed session timeout for share group members.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 45000
+    },
+    "group.share.partition.max.record.locks": {
+      "type": "integer",
+      "description": "Share-group record lock limit per share-partition.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[100,...,10000]",
+      "default": 2000
+    },
+    "group.share.record.lock.duration.ms": {
+      "type": "integer",
+      "description": "The record acquisition lock duration in milliseconds for share groups.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1000,...,3600000]",
+      "default": 30000
+    },
+    "group.share.session.timeout.ms": {
+      "type": "integer",
+      "description": "The timeout to detect client failures when using the share group protocol.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 45000
+    },
+    "group.streams.heartbeat.interval.ms": {
+      "type": "integer",
+      "description": "The heartbeat interval given to the members.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 5000
+    },
+    "group.streams.initial.rebalance.delay.ms": {
+      "type": "integer",
+      "description": "The amount of time the group coordinator will wait for more streams clients to join a new group before performing the first rebalance. A longer delay means potentially fewer rebalances.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 3000
+    },
+    "group.streams.max.heartbeat.interval.ms": {
+      "type": "integer",
+      "description": "The maximum allowed value for the group-level configuration of streams.heartbeat.interval.ms",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 15000
+    },
+    "group.streams.max.session.timeout.ms": {
+      "type": "integer",
+      "description": "The maximum allowed value for the group-level configuration of streams.session.timeout.ms",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 60000
+    },
+    "group.streams.max.size": {
+      "type": "integer",
+      "description": "The maximum number of streams clients that a single streams group can accommodate.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 2147483647
+    },
+    "group.streams.max.standby.replicas": {
+      "type": "integer",
+      "description": "The maximum allowed value for the group-level configuration of streams.num.standby.replicas",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 2
+    },
+    "group.streams.min.heartbeat.interval.ms": {
+      "type": "integer",
+      "description": "The minimum allowed value for the group-level configuration of streams.heartbeat.interval.ms",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 5000
+    },
+    "group.streams.min.session.timeout.ms": {
+      "type": "integer",
+      "description": "The minimum allowed value for the group-level configuration of streams.session.timeout.ms",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 45000
+    },
+    "group.streams.num.standby.replicas": {
+      "type": "integer",
+      "description": "The number of standby replicas for each task.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 0
+    },
+    "group.streams.session.timeout.ms": {
+      "type": "integer",
+      "description": "The timeout to detect client failures when using the streams group protocol.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 45000
+    },
+    "initial.broker.registration.timeout.ms": {
+      "type": "integer",
+      "description": "When initially registering with the controller quorum, the number of milliseconds to wait before declaring failure and exiting the broker process.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 60000
+    },
+    "kafka.metrics.polling.interval.secs": {
+      "type": "integer",
+      "description": "The metrics polling interval (in seconds) which can be used in kafka.metrics.reporters implementations.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 10
+    },
+    "kafka.metrics.reporters": {
+      "type": "string",
+      "description": "A list of classes to use as Yammer metrics custom reporters. The reporters should implement kafka.metrics.KafkaMetricsReporter trait. If a client wants to expose JMX operations on a custom reporter, the custom reporter needs to additionally implement an MBean trait that extends kafka.metrics.KafkaMetricsReporterMBean trait so that the registered MBean is compliant with the standard MBean convention.",
+      "x-kafka-type": "list",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "default": "\"\""
+    },
+    "leader.imbalance.check.interval.seconds": {
+      "type": "integer",
+      "description": "The frequency with which the partition rebalance check is triggered by the controller",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 300
+    },
+    "log.cleaner.backoff.ms": {
+      "type": "integer",
+      "description": "The amount of time to sleep when there are no logs to clean",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 15000
+    },
+    "log.cleaner.dedupe.buffer.size": {
+      "type": "integer",
+      "description": "The total memory used for log deduplication across all cleaner threads",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "default": 134217728
+    },
+    "log.cleaner.delete.retention.ms": {
+      "type": "integer",
+      "description": "The amount of time to retain tombstone message markers for log compacted topics. This setting also gives a bound on the time in which a consumer must complete a read if they begin from offset 0 to ensure that they get a valid snapshot of the final stage (otherwise tombstones messages may be collected before a consumer completes their scan).",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 86400000
+    },
+    "log.cleaner.enable": {
+      "type": "boolean",
+      "description": "This configuration has been deprecated and will be removed in Kafka 5.0. Users should not set it to false to prepare for its future removal. Enable the log cleaner process to run on the server. Should be enabled if using any topics with a cleanup.policy=compact including the internal offsets topic. If disabled those topics will not be compacted and continually grow in size.",
+      "x-kafka-type": "boolean",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": true
+    },
+    "log.cleaner.io.buffer.load.factor": {
+      "type": "number",
+      "description": "Log cleaner dedupe buffer load factor. The percentage full the dedupe buffer can become. A higher value will allow more log to be cleaned at once but will lead to more hash collisions",
+      "x-kafka-type": "double",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "default": 0.9
+    },
+    "log.cleaner.io.buffer.size": {
+      "type": "integer",
+      "description": "The total memory used for log cleaner I/O buffers across all cleaner threads",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 524288
+    },
+    "log.cleaner.io.max.bytes.per.second": {
+      "type": "number",
+      "description": "The log cleaner will be throttled so that the sum of its read and write i/o will be less than this value on average",
+      "x-kafka-type": "double",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "default": 1.7976931348623157e+308
+    },
+    "log.cleaner.max.compaction.lag.ms": {
+      "type": "integer",
+      "description": "The maximum time a message will remain ineligible for compaction in the log. Only applicable for logs that are being compacted.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 9223372036854776000
+    },
+    "log.cleaner.min.cleanable.ratio": {
+      "type": "number",
+      "description": "The minimum ratio of dirty log to total log for a log to eligible for cleaning. If the log.cleaner.max.compaction.lag.ms or the log.cleaner.min.compaction.lag.ms configurations are also specified, then the log compactor considers the log eligible for compaction as soon as either: (i) the dirty ratio threshold has been met and the log has had dirty (uncompacted) records for at least the log.cleaner.min.compaction.lag.ms duration, or (ii) if the log has had dirty (uncompacted) records for at most the log.cleaner.max.compaction.lag.ms period.",
+      "x-kafka-type": "double",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...,1]",
+      "default": 0.5
+    },
+    "log.cleaner.min.compaction.lag.ms": {
+      "type": "integer",
+      "description": "The minimum time a message will remain uncompacted in the log. Only applicable for logs that are being compacted.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 0
+    },
+    "log.cleaner.threads": {
+      "type": "integer",
+      "description": "The number of background threads to use for log cleaning",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 1
+    },
+    "log.cleanup.policy": {
+      "type": "string",
+      "description": "This config designates the retention policy to use on log segments. The \"delete\" policy (which is the default) will discard old segments when their retention time or size limit has been reached. The \"compact\" policy will enable log compaction , which retains the latest value for each key. It is also possible to specify both policies in a comma-separated list (e.g. \"delete,compact\"). In this case, old segments will be discarded per the retention time and size configuration, while retained segments will be compacted. An empty list means infinite retention - no cleanup policies will be applied and log segments will be retained indefinitely. Note that with remote storage enabled, local retention limits (log.local.retention.ms and log.local.retention.bytes) are still applied to local segments.",
+      "x-kafka-type": "list",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[compact, delete]",
+      "default": "delete"
+    },
+    "log.dir.failure.timeout.ms": {
+      "type": "integer",
+      "description": "If the broker is unable to successfully communicate to the controller that some log directory has failed for longer than this time, the broker will fail and shut down.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 30000
+    },
+    "log.flush.interval.messages": {
+      "type": "integer",
+      "description": "The number of messages accumulated on a log partition before messages are flushed to disk.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 9223372036854776000
+    },
+    "log.flush.interval.ms": {
+      "type": "integer",
+      "description": "The maximum time in ms that a message in any topic is kept in memory before flushed to disk. If not set, the value in log.flush.scheduler.interval.ms is used",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide"
+    },
+    "log.flush.offset.checkpoint.interval.ms": {
+      "type": "integer",
+      "description": "The frequency with which we update the persistent record of the last flush which acts as the log recovery point.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 60000
+    },
+    "log.flush.scheduler.interval.ms": {
+      "type": "integer",
+      "description": "The frequency in ms that the log flusher checks whether any log needs to be flushed to disk",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 9223372036854776000
+    },
+    "log.flush.start.offset.checkpoint.interval.ms": {
+      "type": "integer",
+      "description": "The frequency with which we update the persistent record of log start offset",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 60000
+    },
+    "log.index.interval.bytes": {
+      "type": "integer",
+      "description": "The interval with which we add an entry to the offset index.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 4096
+    },
+    "log.index.size.max.bytes": {
+      "type": "integer",
+      "description": "The maximum size in bytes of the offset index",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[4,...]",
+      "default": 10485760
+    },
+    "log.local.retention.bytes": {
+      "type": "integer",
+      "description": "The maximum size of local log segments that can grow for a partition before it gets eligible for deletion. Default value is -2, it represents log.retention.bytes value to be used. The effective value should always be less than or equal to log.retention.bytes value.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[-2,...]",
+      "default": -2
+    },
+    "log.local.retention.ms": {
+      "type": "integer",
+      "description": "The number of milliseconds to keep the local log segments before it gets eligible for deletion. Default value is -2, it represents log.retention.ms value is to be used. The effective value should always be less than or equal to log.retention.ms value.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[-2,...]",
+      "default": -2
+    },
+    "log.message.timestamp.after.max.ms": {
+      "type": "integer",
+      "description": "This configuration sets the allowable timestamp difference between the message timestamp and the broker's timestamp. The message timestamp can be later than or equal to the broker's timestamp, with the maximum allowable difference determined by the value set in this configuration. If log.message.timestamp.type=CreateTime, the message will be rejected if the difference in timestamps exceeds this specified threshold. This configuration is ignored if log.message.timestamp.type=LogAppendTime.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 3600000
+    },
+    "log.message.timestamp.before.max.ms": {
+      "type": "integer",
+      "description": "This configuration sets the allowable timestamp difference between the broker's timestamp and the message timestamp. The message timestamp can be earlier than or equal to the broker's timestamp, with the maximum allowable difference determined by the value set in this configuration. If log.message.timestamp.type=CreateTime, the message will be rejected if the difference in timestamps exceeds this specified threshold. This configuration is ignored if log.message.timestamp.type=LogAppendTime.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 9223372036854776000
+    },
+    "log.message.timestamp.type": {
+      "type": "string",
+      "description": "Define whether the timestamp in the message is message create time or log append time. The value should be either CreateTime or LogAppendTime .",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[CreateTime, LogAppendTime]",
+      "default": "CreateTime"
+    },
+    "log.preallocate": {
+      "type": "boolean",
+      "description": "Should pre allocate file when create new segment? If you are using Kafka on Windows, you probably need to set it to true.",
+      "x-kafka-type": "boolean",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "default": false
+    },
+    "log.retention.bytes": {
+      "type": "integer",
+      "description": "The maximum size of the log before deleting it",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "default": -1
+    },
+    "log.retention.check.interval.ms": {
+      "type": "integer",
+      "description": "The frequency in milliseconds that the log cleaner checks whether any log is eligible for deletion",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 300000
+    },
+    "log.retention.hours": {
+      "type": "integer",
+      "description": "The number of hours to keep a log file before deleting it (in hours), tertiary to log.retention.ms property",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 168
+    },
+    "log.retention.minutes": {
+      "type": "integer",
+      "description": "The number of minutes to keep a log file before deleting it (in minutes), secondary to log.retention.ms property. If not set, the value in log.retention.hours is used",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only"
+    },
+    "log.retention.ms": {
+      "type": "integer",
+      "description": "The number of milliseconds to keep a log file before deleting it (in milliseconds), If not set, the value in log.retention.minutes is used. If set to -1, no time limit is applied.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide"
+    },
+    "log.roll.hours": {
+      "type": "integer",
+      "description": "The maximum time before a new log segment is rolled out (in hours), secondary to log.roll.ms property",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 168
+    },
+    "log.roll.jitter.hours": {
+      "type": "integer",
+      "description": "The maximum jitter to subtract from logRollTimeMillis (in hours), secondary to log.roll.jitter.ms property",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 0
+    },
+    "log.roll.jitter.ms": {
+      "type": "integer",
+      "description": "The maximum jitter to subtract from logRollTimeMillis (in milliseconds). If not set, the value in log.roll.jitter.hours is used",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide"
+    },
+    "log.roll.ms": {
+      "type": "integer",
+      "description": "The maximum time before a new log segment is rolled out (in milliseconds). If not set, the value in log.roll.hours is used",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide"
+    },
+    "log.segment.bytes": {
+      "type": "integer",
+      "description": "The maximum size of a single log file",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1048576,...]",
+      "default": 1073741824
+    },
+    "log.segment.delete.delay.ms": {
+      "type": "integer",
+      "description": "The amount of time to wait before deleting a file from the filesystem. If the value is 0 and there is no file to delete, the system will wait 1 millisecond. Low value will cause busy waiting",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 60000
+    },
+    "max.connection.creation.rate": {
+      "type": "integer",
+      "description": "The maximum connection creation rate we allow in the broker at any time. Listener-level limits may also be configured by prefixing the config name with the listener prefix, for example, listener.name.internal.max.connection.creation.rate .Broker-wide connection rate limit should be configured based on broker capacity while listener limits should be configured based on application requirements. New connections will be throttled if either the listener or the broker limit is reached, with the exception of inter-broker listener. Connections on the inter-broker listener will be throttled only when the listener-level rate limit is reached.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 2147483647
+    },
+    "max.connections": {
+      "type": "integer",
+      "description": "The maximum number of connections we allow in the broker at any time. This limit is applied in addition to any per-ip limits configured using max.connections.per.ip. Listener-level limits may also be configured by prefixing the config name with the listener prefix, for example, listener.name.internal.max.connections.per.ip . Broker-wide limit should be configured based on broker capacity while listener limits should be configured based on application requirements. New connections are blocked if either the listener or broker limit is reached. Connections on the inter-broker listener are permitted even if broker-wide limit is reached. The least recently used connection on another listener will be closed in this case.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 2147483647
+    },
+    "max.connections.per.ip": {
+      "type": "integer",
+      "description": "The maximum number of connections we allow from each ip address. This can be set to 0 if there are overrides configured using max.connections.per.ip.overrides property. New connections from the ip address are dropped if the limit is reached.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 2147483647
+    },
+    "max.connections.per.ip.overrides": {
+      "type": "string",
+      "description": "A comma-separated list of per-ip or hostname overrides to the default maximum number of connections. An example value is \"hostName:100,127.0.0.1:200\"",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "default": "\"\""
+    },
+    "max.incremental.fetch.session.cache.slots": {
+      "type": "integer",
+      "description": "The maximum number of total incremental fetch sessions that we will maintain. FetchSessionCache is sharded into 8 shards and the limit is equally divided among all shards. Sessions are allocated to each shard in round-robin. Only entries within a shard are considered eligible for eviction.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 1000
+    },
+    "max.request.partition.size.limit": {
+      "type": "integer",
+      "description": "The maximum number of partitions can be served in one request.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 2000
+    },
+    "message.max.bytes": {
+      "type": "integer",
+      "description": "The largest record batch size allowed by Kafka (after compression if compression is enabled).This can be set per topic with the topic level max.message.bytes config.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 1048588
+    },
+    "metadata.log.dir": {
+      "type": "string",
+      "description": "This configuration determines where we put the metadata log. If it is not set, the metadata log is placed in the first log directory from log.dirs.",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only"
+    },
+    "metadata.log.max.record.bytes.between.snapshots": {
+      "type": "integer",
+      "description": "This is the maximum number of bytes in the log between the latest snapshot and the high-watermark needed before generating a new snapshot. The default value is 20971520. To generate snapshots based on the time elapsed, see the metadata.log.max.snapshot.interval.ms configuration. The Kafka node will generate a snapshot when either the maximum time interval is reached or the maximum bytes limit is reached.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 20971520
+    },
+    "metadata.log.max.snapshot.interval.ms": {
+      "type": "integer",
+      "description": "This is the maximum number of milliseconds to wait to generate a snapshot if there are committed records in the log that are not included in the latest snapshot. A value of zero disables time based snapshot generation. The default value is 3600000. To generate snapshots based on the number of metadata bytes, see the metadata.log.max.record.bytes.between.snapshots configuration. The Kafka node will generate a snapshot when either the maximum time interval is reached or the maximum bytes limit is reached.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 3600000
+    },
+    "metadata.log.segment.bytes": {
+      "type": "integer",
+      "description": "The maximum size of a single metadata log file.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[8388608,...]",
+      "default": 1073741824
+    },
+    "metadata.log.segment.ms": {
+      "type": "integer",
+      "description": "The maximum time before a new metadata log file is rolled out (in milliseconds).",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 604800000
+    },
+    "metadata.max.idle.interval.ms": {
+      "type": "integer",
+      "description": "This configuration controls how often the active controller should write no-op records to the metadata partition. If the value is 0, no-op records are not appended to the metadata partition. The default value is 500",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 500
+    },
+    "metadata.max.retention.bytes": {
+      "type": "integer",
+      "description": "The maximum combined size of the metadata log and snapshots before deleting old snapshots and log files. Since at least one snapshot must exist before any logs can be deleted, this is a soft limit.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 104857600
+    },
+    "metadata.max.retention.ms": {
+      "type": "integer",
+      "description": "The number of milliseconds to keep a metadata log file or snapshot before deleting it. Since at least one snapshot must exist before any logs can be deleted, this is a soft limit.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 604800000
+    },
+    "metric.reporters": {
+      "type": "string",
+      "description": "A list of classes to use as metrics reporters. Implementing the org.apache.kafka.common.metrics.MetricsReporter interface allows plugging in classes that will be notified of new metric creation. When custom reporters are set and org.apache.kafka.common.metrics.JmxReporter is needed, it has to be explicitly added to the list.",
+      "x-kafka-type": "list",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "cluster-wide",
+      "default": "org.apache.kafka.common.metrics.JmxReporter"
+    },
+    "metrics.num.samples": {
+      "type": "integer",
+      "description": "The number of samples maintained to compute metrics.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 2
+    },
+    "metrics.recording.level": {
+      "type": "string",
+      "description": "The highest recording level for metrics. It has three levels for recording metrics - info, debug, and trace. INFO level records only essential metrics necessary for monitoring system performance and health. It collects vital data without gathering too much detail, making it suitable for production environments where minimal overhead is desired. DEBUG level records most metrics, providing more detailed information about the system's operation. It's useful for development and testing environments where you need deeper insights to debug and fine-tune the application. TRACE level records all possible metrics, capturing every detail about the system's performance and operation. It's best for controlled environments where in-depth analysis is required, though it can introduce significant overhead.",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "default": "INFO"
+    },
+    "metrics.sample.window.ms": {
+      "type": "integer",
+      "description": "The window of time a metrics sample is computed over.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 30000
+    },
+    "min.insync.replicas": {
+      "type": "integer",
+      "description": "Specifies the minimum number of in-sync replicas (including the leader) required for a write to succeed when a producer sets acks to \"all\" (or \"-1\"). In the acks=all case, every in-sync replica must acknowledge a write for it to be considered successful. E.g., if a topic has replication.factor of 3 and the ISR set includes all three replicas, then all three replicas must acknowledge an acks=all write for it to succeed, even if min.insync.replicas happens to be less than 3. If acks=all and the current ISR set contains fewer than min.insync.replicas members, then the producer will raise an exception (either NotEnoughReplicas or NotEnoughReplicasAfterAppend ). Regardless of the acks setting, the messages will not be visible to the consumers until they are replicated to all in-sync replicas and the min.insync.replicas condition is met. When used together, min.insync.replicas and acks allow you to enforce greater durability guarantees. A typical scenario would be to create a topic with a replication factor of 3, set min.insync.replicas to 2, and produce with acks of \"all\". This ensures that a majority of replicas must persist a write before it's considered successful by the producer and it's visible to consumers. Note that when the Eligible Leader Replicas feature is enabled, the semantics of this config changes. Please refer to the ELR section for more info.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 1
+    },
+    "num.io.threads": {
+      "type": "integer",
+      "description": "The number of threads that the server uses for processing requests, which may include disk I/O",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 8
+    },
+    "num.network.threads": {
+      "type": "integer",
+      "description": "The number of threads that the server uses for receiving requests from the network and sending responses to the network. Noted: each listener (except for controller listener) creates its own thread pool.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 3
+    },
+    "num.partitions": {
+      "type": "integer",
+      "description": "The default number of log partitions per topic",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 1
+    },
+    "num.recovery.threads.per.data.dir": {
+      "type": "integer",
+      "description": "The number of threads per data directory to be used for log recovery at startup and flushing at shutdown",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 2
+    },
+    "num.replica.alter.log.dirs.threads": {
+      "type": "integer",
+      "description": "The number of threads that can move replicas between log directories, which may include disk I/O. The default value is equal to the number of directories specified in the log.dir or log.dirs configuration property.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only"
+    },
+    "num.replica.fetchers": {
+      "type": "integer",
+      "description": "Number of fetcher threads used to replicate records from each source broker. The total number of fetchers on each broker is bound by num.replica.fetchers multiplied by the number of brokers in the cluster.Increasing this value can increase the degree of I/O parallelism in the follower and leader broker at the cost of higher CPU and memory utilization.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 1
+    },
+    "offset.metadata.max.bytes": {
+      "type": "integer",
+      "description": "The maximum size for a metadata entry associated with an offset commit.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 4096
+    },
+    "offsets.commit.timeout.ms": {
+      "type": "integer",
+      "description": "Offset commit will be delayed until all replicas for the offsets topic receive the commit or this timeout is reached. This is similar to the producer request timeout. This is applied to all the writes made by the coordinator.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 5000
+    },
+    "offsets.load.buffer.size": {
+      "type": "integer",
+      "description": "Batch size for reading from the offsets segments when loading group metadata into the cache (soft-limit, overridden if records are too large).",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 5242880
+    },
+    "offsets.retention.check.interval.ms": {
+      "type": "integer",
+      "description": "Frequency at which to check for stale offsets",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 600000
+    },
+    "offsets.retention.minutes": {
+      "type": "integer",
+      "description": "For subscribed consumers, committed offset of a specific partition will be expired and discarded when 1) this retention period has elapsed after the consumer group loses all its consumers (i.e. becomes empty); 2) this retention period has elapsed since the last time an offset is committed for the partition and the group is no longer subscribed to the corresponding topic. For standalone consumers (using manual assignment), offsets will be expired after this retention period has elapsed since the time of last commit. Note that when a group is deleted via the delete-group request, its committed offsets will also be deleted without extra retention period; also when a topic is deleted via the delete-topic request, upon propagated metadata update any group's committed offsets for that topic will also be deleted without extra retention period.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 10080
+    },
+    "offsets.topic.compression.codec": {
+      "type": "integer",
+      "description": "Compression codec for the offsets topic - compression may be used to achieve \"atomic\" commits.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 0
+    },
+    "offsets.topic.num.partitions": {
+      "type": "integer",
+      "description": "The number of partitions for the offset commit topic (should not change after deployment).",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 50
+    },
+    "offsets.topic.replication.factor": {
+      "type": "integer",
+      "description": "The replication factor for the offsets topic (set higher to ensure availability). Internal topic creation will fail until the cluster size meets this replication factor requirement.",
+      "x-kafka-type": "short",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 3
+    },
+    "offsets.topic.segment.bytes": {
+      "type": "integer",
+      "description": "The offsets topic segment bytes should be kept relatively small in order to facilitate faster log compaction and cache loads.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 104857600
+    },
+    "principal.builder.class": {
+      "type": "string",
+      "description": "The fully qualified name of a class that implements the KafkaPrincipalBuilder interface, which is used to build the KafkaPrincipal object used during authorization. If no principal builder is defined, the default behavior depends on the security protocol in use. For SSL authentication, the principal will be derived using the rules defined by ssl.principal.mapping.rules applied on the distinguished name from the client certificate if one is provided; otherwise, if client authentication is not required, the principal name will be ANONYMOUS. For SASL authentication, the principal will be derived using the rules defined by sasl.kerberos.principal.to.local.rules if GSSAPI is in use, and the SASL authentication ID for other mechanisms. For PLAINTEXT, the principal will be ANONYMOUS. Note that custom implementations of KafkaPrincipalBuilder is required to implement KafkaPrincipalSerde interface, otherwise brokers will not be able to forward requests to the controller.",
+      "x-kafka-type": "class",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "per-broker",
+      "default": "org.apache.kafka.common.security.authenticator.DefaultKafkaPrincipalBuilder"
+    },
+    "producer.id.expiration.ms": {
+      "type": "integer",
+      "description": "The time in ms that a topic partition leader will wait before expiring producer IDs. Producer IDs will not expire while a transaction associated to them is still ongoing. Note that producer IDs may expire sooner if the last write from the producer ID is deleted due to the topic's retention settings. Setting this value the same or higher than delivery.timeout.ms can help prevent expiration during retries and protect against message duplication, but the default should be reasonable for most use cases.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 86400000
+    },
+    "producer.purgatory.purge.interval.requests": {
+      "type": "integer",
+      "description": "The purge interval (in number of requests) of the producer request purgatory",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 1000
+    },
+    "queued.max.request.bytes": {
+      "type": "integer",
+      "description": "The number of queued bytes allowed before no more requests are read",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": -1
+    },
+    "queued.max.requests": {
+      "type": "integer",
+      "description": "The number of queued requests allowed for data-plane, before blocking the network threads",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 500
+    },
+    "quota.window.num": {
+      "type": "integer",
+      "description": "The number of samples to retain in memory for client quotas",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 11
+    },
+    "quota.window.size.seconds": {
+      "type": "integer",
+      "description": "The time span of each sample for client quotas",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 1
+    },
+    "remote.fetch.max.wait.ms": {
+      "type": "integer",
+      "description": "The maximum amount of time the server will wait before answering the fetch request containing remote fetch partitions. It's important to be aware that the request will only be responded after all remote partitions have been successfully fetched, have failed, or this timeout is exceeded.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 500
+    },
+    "remote.list.offsets.request.timeout.ms": {
+      "type": "integer",
+      "description": "The maximum amount of time the server will wait for the remote list offsets request to complete.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 30000
+    },
+    "remote.log.index.file.cache.total.size.bytes": {
+      "type": "integer",
+      "description": "The total size of the space allocated to store index files fetched from remote storage in the local storage.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 1073741824
+    },
+    "remote.log.manager.copier.thread.pool.size": {
+      "type": "integer",
+      "description": "Size of the thread pool used in scheduling tasks to copy segments.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 10
+    },
+    "remote.log.manager.copy.max.bytes.per.second": {
+      "type": "integer",
+      "description": "The maximum number of bytes that can be copied from local storage to remote storage per second. This is a global limit for all the partitions that are being copied from local storage to remote storage. The default value is Long.MAX_VALUE, which means there is no limit on the number of bytes that can be copied per second.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 9223372036854776000
+    },
+    "remote.log.manager.copy.quota.window.num": {
+      "type": "integer",
+      "description": "The number of samples to retain in memory for remote copy quota management. The default value is 11, which means there are 10 whole windows + 1 current window.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 11
+    },
+    "remote.log.manager.copy.quota.window.size.seconds": {
+      "type": "integer",
+      "description": "The time span of each sample for remote copy quota management. The default value is 1 second.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 1
+    },
+    "remote.log.manager.expiration.thread.pool.size": {
+      "type": "integer",
+      "description": "Size of the thread pool used in scheduling tasks to clean up the expired remote log segments.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 10
+    },
+    "remote.log.manager.fetch.max.bytes.per.second": {
+      "type": "integer",
+      "description": "The maximum number of bytes that can be fetched from remote storage to local storage per second. This is a global limit for all the partitions that are being fetched from remote storage to local storage. The default value is Long.MAX_VALUE, which means there is no limit on the number of bytes that can be fetched per second.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 9223372036854776000
+    },
+    "remote.log.manager.fetch.quota.window.num": {
+      "type": "integer",
+      "description": "The number of samples to retain in memory for remote fetch quota management. The default value is 11, which means there are 10 whole windows + 1 current window.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 11
+    },
+    "remote.log.manager.fetch.quota.window.size.seconds": {
+      "type": "integer",
+      "description": "The time span of each sample for remote fetch quota management. The default value is 1 second.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 1
+    },
+    "remote.log.manager.follower.thread.pool.size": {
+      "type": "integer",
+      "description": "Size of the thread pool used in scheduling follower tasks to read the highest-uploaded remote-offset for follower partitions.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 2
+    },
+    "remote.log.manager.task.interval.ms": {
+      "type": "integer",
+      "description": "Interval at which remote log manager runs the scheduled tasks like copy segments, and clean up remote log segments.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 30000
+    },
+    "remote.log.manager.thread.pool.size": {
+      "type": "integer",
+      "description": "Size of the thread pool used in scheduling follower tasks to read the highest-uploaded remote-offset for follower partitions. This config is deprecated since 4.2, please use remote.log.manager.follower.thread.pool.size instead.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 2
+    },
+    "remote.log.metadata.custom.metadata.max.bytes": {
+      "type": "integer",
+      "description": "The maximum size of custom metadata in bytes that the broker should accept from a remote storage plugin. If custom metadata exceeds this limit, the updated segment metadata will not be stored, the copied data will be attempted to delete, and the remote copying task for this topic-partition will stop with an error.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 128
+    },
+    "remote.log.metadata.manager.class.name": {
+      "type": "string",
+      "description": "Fully qualified class name of RemoteLogMetadataManager implementation.",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "non-empty string",
+      "default": "org.apache.kafka.server.log.remote.metadata.storage.TopicBasedRemoteLogMetadataManager"
+    },
+    "remote.log.metadata.manager.class.path": {
+      "type": "string",
+      "description": "Class path of the RemoteLogMetadataManager implementation. If specified, the RemoteLogMetadataManager implementation and its dependent libraries will be loaded by a dedicated classloader which searches this class path before the Kafka broker class path. The syntax of this parameter is same as the standard Java class path string.",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only"
+    },
+    "remote.log.metadata.manager.impl.prefix": {
+      "type": "string",
+      "description": "Prefix used for properties to be passed to RemoteLogMetadataManager implementation. For example this value can be rlmm.config. .",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "non-empty string",
+      "default": "rlmm.config."
+    },
+    "remote.log.metadata.manager.listener.name": {
+      "type": "string",
+      "description": "Listener name of the local broker to which it should get connected if needed by RemoteLogMetadataManager implementation.",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "non-empty string"
+    },
+    "remote.log.reader.max.pending.tasks": {
+      "type": "integer",
+      "description": "Maximum remote log reader thread pool task queue size. If the task queue is full, fetch requests are served with an error.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 100
+    },
+    "remote.log.reader.threads": {
+      "type": "integer",
+      "description": "Size of the thread pool that is allocated for handling remote log reads.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "cluster-wide",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 10
+    },
+    "remote.log.storage.manager.class.name": {
+      "type": "string",
+      "description": "Fully qualified class name of RemoteStorageManager implementation.",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "non-empty string"
+    },
+    "remote.log.storage.manager.class.path": {
+      "type": "string",
+      "description": "Class path of the RemoteStorageManager implementation. If specified, the RemoteStorageManager implementation and its dependent libraries will be loaded by a dedicated classloader which searches this class path before the Kafka broker class path. The syntax of this parameter is same as the standard Java class path string.",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only"
+    },
+    "remote.log.storage.manager.impl.prefix": {
+      "type": "string",
+      "description": "Prefix used for properties to be passed to RemoteStorageManager implementation. For example this value can be rsm.config. .",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "non-empty string",
+      "default": "rsm.config."
+    },
+    "remote.log.storage.system.enable": {
+      "type": "boolean",
+      "description": "Whether to enable tiered storage functionality in a broker or not. When it is true broker starts all the services required for the tiered storage functionality.",
+      "x-kafka-type": "boolean",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": false
+    },
+    "replica.fetch.backoff.ms": {
+      "type": "integer",
+      "description": "The amount of time to sleep when fetch partition error occurs.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 1000
+    },
+    "replica.fetch.max.bytes": {
+      "type": "integer",
+      "description": "The number of bytes of messages to attempt to fetch for each partition. This is not an absolute maximum, if the first record batch in the first non-empty partition of the fetch is larger than this value, the record batch will still be returned to ensure that progress can be made. The maximum record batch size accepted by the broker is defined via message.max.bytes (broker config) or max.message.bytes (topic config).",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 1048576
+    },
+    "replica.fetch.min.bytes": {
+      "type": "integer",
+      "description": "Minimum bytes expected for each fetch response. If not enough bytes, wait up to replica.fetch.wait.max.ms (broker config). Even if the total data available in the broker exceeds replica.fetch.min.bytes, the actual returned size may still be less than this value due to per-partition limits replica.fetch.max.bytes and max returned limits replica.fetch.response.max.bytes",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 1
+    },
+    "replica.fetch.response.max.bytes": {
+      "type": "integer",
+      "description": "Maximum bytes expected for the entire fetch response. Records are fetched in batches, and if the first record batch in the first non-empty partition of the fetch is larger than this value, the record batch will still be returned to ensure that progress can be made. As such, this is not an absolute maximum. The maximum record batch size accepted by the broker is defined via message.max.bytes (broker config) or max.message.bytes (topic config).",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 10485760
+    },
+    "replica.fetch.wait.max.ms": {
+      "type": "integer",
+      "description": "The maximum wait time for each fetcher request issued by follower replicas. This value should always be less than the replica.lag.time.max.ms at all times to prevent frequent shrinking of ISR for low throughput topics",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 500
+    },
+    "replica.high.watermark.checkpoint.interval.ms": {
+      "type": "integer",
+      "description": "The frequency with which the high watermark is saved out to disk",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 5000
+    },
+    "replica.lag.time.max.ms": {
+      "type": "integer",
+      "description": "If a follower hasn't sent any fetch requests or hasn't consumed up to the leader's log end offset for at least this time, the leader will remove the follower from ISR",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 30000
+    },
+    "replica.selector.class": {
+      "type": "string",
+      "description": "The fully qualified class name that implements ReplicaSelector. This is used by the broker to find the preferred read replica. By default, we use an implementation that returns the leader.",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only"
+    },
+    "replica.socket.receive.buffer.bytes": {
+      "type": "integer",
+      "description": "The socket receive buffer for network requests to the leader for replicating data",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 65536
+    },
+    "replica.socket.timeout.ms": {
+      "type": "integer",
+      "description": "The socket timeout for network requests. Its value should be at least replica.fetch.wait.max.ms",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 30000
+    },
+    "replication.quota.window.num": {
+      "type": "integer",
+      "description": "The number of samples to retain in memory for replication quotas",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 11
+    },
+    "replication.quota.window.size.seconds": {
+      "type": "integer",
+      "description": "The time span of each sample for replication quotas",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 1
+    },
+    "request.timeout.ms": {
+      "type": "integer",
+      "description": "The configuration controls the maximum amount of time the client will wait for the response of a request. If the response is not received before the timeout elapses the client will resend the request if necessary or fail the request if retries are exhausted.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 30000
+    },
+    "share.coordinator.append.linger.ms": {
+      "type": "integer",
+      "description": "The duration in milliseconds that the share coordinator will wait for writes to accumulate before flushing them to disk. Set to -1 for an adaptive linger time that minimizes latency based on the workload.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[-1,...]",
+      "default": -1
+    },
+    "share.coordinator.load.buffer.size": {
+      "type": "integer",
+      "description": "Batch size for reading from the share-group state topic when loading state information into the cache (soft-limit, overridden if records are too large).",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 5242880
+    },
+    "share.coordinator.snapshot.update.records.per.snapshot": {
+      "type": "integer",
+      "description": "The number of update records the share coordinator writes between snapshot records.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[0,...]",
+      "default": 500
+    },
+    "share.coordinator.state.topic.compression.codec": {
+      "type": "integer",
+      "description": "Compression codec for the share-group state topic.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 0
+    },
+    "share.coordinator.state.topic.min.isr": {
+      "type": "integer",
+      "description": "Overridden min.insync.replicas for the share-group state topic.",
+      "x-kafka-type": "short",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 2
+    },
+    "share.coordinator.state.topic.num.partitions": {
+      "type": "integer",
+      "description": "The number of partitions for the share-group state topic (should not change after deployment).",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 50
+    },
+    "share.coordinator.state.topic.replication.factor": {
+      "type": "integer",
+      "description": "Replication factor for the share-group state topic. Topic creation will fail until the cluster size meets this replication factor requirement.",
+      "x-kafka-type": "short",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 3
+    },
+    "share.coordinator.state.topic.segment.bytes": {
+      "type": "integer",
+      "description": "The log segment size for the share-group state topic.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 104857600
+    },
+    "share.coordinator.threads": {
+      "type": "integer",
+      "description": "The number of threads used by the share coordinator.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 1
+    },
+    "share.coordinator.write.timeout.ms": {
+      "type": "integer",
+      "description": "The duration in milliseconds that the share coordinator will wait for all replicas of the share-group state topic to receive a write.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 5000
+    },
+    "share.fetch.purgatory.purge.interval.requests": {
+      "type": "integer",
+      "description": "The purge interval (in number of requests) of the share fetch request purgatory",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 1000
+    },
+    "socket.connection.setup.timeout.max.ms": {
+      "type": "integer",
+      "description": "The maximum amount of time the client will wait for the socket connection to be established. The connection setup timeout will increase exponentially for each consecutive connection failure up to this maximum. To avoid connection storms, a randomization factor of 0.2 will be applied to the timeout resulting in a random range between 20% below and 20% above the computed value.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 30000
+    },
+    "socket.connection.setup.timeout.ms": {
+      "type": "integer",
+      "description": "The amount of time the client will wait for the socket connection to be established. If the connection is not built before the timeout elapses, clients will close the socket channel. This value is the initial backoff value and will increase exponentially for each consecutive connection failure, up to the socket.connection.setup.timeout.max.ms value.",
+      "x-kafka-type": "long",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "default": 10000
+    },
+    "socket.listen.backlog.size": {
+      "type": "integer",
+      "description": "The maximum number of pending connections on the socket. In Linux, you may also need to configure somaxconn and tcp_max_syn_backlog kernel parameters accordingly to make the configuration takes effect.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 50
+    },
+    "socket.receive.buffer.bytes": {
+      "type": "integer",
+      "description": "The SO_RCVBUF buffer of the socket server sockets. If the value is -1, the OS default will be used.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 102400
+    },
+    "socket.request.max.bytes": {
+      "type": "integer",
+      "description": "The maximum number of bytes in a socket request",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 104857600
+    },
+    "socket.send.buffer.bytes": {
+      "type": "integer",
+      "description": "The SO_SNDBUF buffer of the socket server sockets. If the value is -1, the OS default will be used.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "default": 102400
+    },
+    "ssl.cipher.suites": {
+      "type": "string",
+      "description": "A list of cipher suites. This is a named combination of authentication, encryption, MAC and key exchange algorithm used to negotiate the security settings for a network connection using TLS or SSL network protocol. By default all the available cipher suites are supported.",
+      "x-kafka-type": "list",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "per-broker",
+      "default": "\"\""
+    },
+    "ssl.enabled.protocols": {
+      "type": "string",
+      "description": "The list of protocols enabled for SSL connections. The default is 'TLSv1.2,TLSv1.3'. This means that clients and servers will prefer TLSv1.3 if both support it and fallback to TLSv1.2 otherwise (assuming both support at least TLSv1.2). This default should be fine for most use cases. If this configuration is set to an empty list, Kafka will use the protocols enabled by default in the underlying SSLEngine, which may include additional protocols depending on the JVM version. Also see the config documentation for ssl.protocol to understand how it can impact the TLS version negotiation behavior.",
+      "x-kafka-type": "list",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "per-broker",
+      "default": "TLSv1.2,TLSv1.3"
+    },
+    "ssl.protocol": {
+      "type": "string",
+      "description": "The SSL protocol used to generate the SSLContext. The default is 'TLSv1.3', which should be fine for most use cases. A typical alternative to the default is 'TLSv1.2'. Allowed values for this config are dependent on the JVM. Clients using the defaults for this config and 'ssl.enabled.protocols' will downgrade to 'TLSv1.2' if the server does not support 'TLSv1.3'. If this config is set to 'TLSv1.2', however, clients will not use 'TLSv1.3' even if it is one of the values in ssl.enabled.protocols and the server only supports 'TLSv1.3'.",
+      "x-kafka-type": "string",
+      "x-kafka-importance": "medium",
+      "x-kafka-update-mode": "per-broker",
+      "default": "TLSv1.3"
+    },
+    "telemetry.max.bytes": {
+      "type": "integer",
+      "description": "The maximum size (after compression if compression is used) of telemetry metrics pushed from a client to the broker. The default value is 1048576 (1 MB).",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 1048576
+    },
+    "transaction.abort.timed.out.transaction.cleanup.interval.ms": {
+      "type": "integer",
+      "description": "The interval at which to rollback transactions that have timed out",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 10000
+    },
+    "transaction.max.timeout.ms": {
+      "type": "integer",
+      "description": "The maximum allowed timeout for transactions. If a client’s requested transaction time exceed this, then the broker will return an error in InitProducerIdRequest. This prevents a client from too large of a timeout, which can stall consumers reading from topics included in the transaction.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 900000
+    },
+    "transaction.partition.verification.enable": {
+      "type": "boolean",
+      "description": "Enable verification that checks that the partition has been added to the transaction before writing transactional records to the partition",
+      "x-kafka-type": "boolean",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "cluster-wide",
+      "default": true
+    },
+    "transaction.remove.expired.transaction.cleanup.interval.ms": {
+      "type": "integer",
+      "description": "The interval at which to remove transactions that have expired due to transactional.id.expiration.ms passing",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 3600000
+    },
+    "transaction.state.log.load.buffer.size": {
+      "type": "integer",
+      "description": "Batch size for reading from the transaction log segments when loading producer ids and transactions into the cache (soft-limit, overridden if records are too large).",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 5242880
+    },
+    "transaction.state.log.min.isr": {
+      "type": "integer",
+      "description": "The minimum number of replicas that must acknowledge a write to transaction topic in order to be considered successful.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 2
+    },
+    "transaction.state.log.num.partitions": {
+      "type": "integer",
+      "description": "The number of partitions for the transaction topic (should not change after deployment).",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 50
+    },
+    "transaction.state.log.replication.factor": {
+      "type": "integer",
+      "description": "The replication factor for the transaction topic (set higher to ensure availability). Internal topic creation will fail until the cluster size meets this replication factor requirement.",
+      "x-kafka-type": "short",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 3
+    },
+    "transaction.state.log.segment.bytes": {
+      "type": "integer",
+      "description": "The transaction topic segment bytes should be kept relatively small in order to facilitate faster log compaction and cache loads",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 104857600
+    },
+    "transaction.two.phase.commit.enable": {
+      "type": "boolean",
+      "description": "Allow participation in Two-Phase Commit (2PC) transactions with an external transaction coordinator",
+      "x-kafka-type": "boolean",
+      "x-kafka-importance": "low",
+      "x-kafka-update-mode": "read-only",
+      "default": false
+    },
+    "transactional.id.expiration.ms": {
+      "type": "integer",
+      "description": "The time in ms that the transaction coordinator will wait without receiving any transaction status updates for the current transaction before expiring its transactional id. Transactional IDs will not expire while a the transaction is still ongoing.",
+      "x-kafka-type": "int",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "read-only",
+      "x-kafka-valid-values": "[1,...]",
+      "default": 604800000
+    },
+    "unclean.leader.election.enable": {
+      "type": "boolean",
+      "description": "Indicates whether to enable replicas not in the ISR set to be elected as leader as a last resort, even though doing so may result in data loss Note: In KRaft mode, when enabling this config dynamically, it needs to wait for the unclean leader election thread to trigger election periodically (default is 5 minutes). Please run kafka-leader-election.sh with unclean option to trigger the unclean leader election immediately if needed.",
+      "x-kafka-type": "boolean",
+      "x-kafka-importance": "high",
+      "x-kafka-update-mode": "cluster-wide",
+      "default": false
+    }
+  },
+  "description": "Kafka 4.2.0 broker configuration keys derived from a live Kafka 4.2.0 broker plus the official Kafka broker-config reference, filtered by Strimzi's documented operator-managed restrictions."
+}
