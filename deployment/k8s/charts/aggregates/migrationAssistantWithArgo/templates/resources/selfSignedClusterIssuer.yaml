@@ -18,6 +18,7 @@ spec:
       containers:
       - name: create-ca
         image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+        imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
         command: ["/bin/sh", "-c"]
         args:
         - |

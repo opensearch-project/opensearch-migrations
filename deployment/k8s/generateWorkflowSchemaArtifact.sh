@@ -35,7 +35,7 @@ cat > "${TEMP_VALUES_FILE}" <<EOF
 conditionalPackageInstalls:
   kyverno: false
   argo-workflows: true
-  cert-manager: true
+  cert-manager: false
   fluent-bit: false
   kube-prometheus-stack: false
   strimzi-kafka-operator: true
