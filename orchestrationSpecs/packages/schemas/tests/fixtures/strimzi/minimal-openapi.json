@@ -1,0 +1,277 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Minimal Strimzi Fixture",
+    "version": "1.0.0"
+  },
+  "components": {
+    "schemas": {
+      "io.strimzi.api.kafka.model.Kafka": {
+        "type": "object",
+        "properties": {
+          "spec": {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.KafkaSpec"
+          }
+        }
+      },
+      "io.strimzi.api.kafka.model.nodepool.KafkaNodePool": {
+        "type": "object",
+        "properties": {
+          "spec": {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.nodepool.KafkaNodePoolSpec"
+          }
+        }
+      },
+      "io.strimzi.api.kafka.model.topic.KafkaTopic": {
+        "type": "object",
+        "properties": {
+          "spec": {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.topic.KafkaTopicSpec"
+          }
+        }
+      },
+      "io.strimzi.api.kafka.model.KafkaSpec": {
+        "type": "object",
+        "properties": {
+          "kafka": {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.KafkaClusterSpec"
+          },
+          "entityOperator": {
+            "type": "object",
+            "properties": {
+              "topicOperator": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "userOperator": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "io.strimzi.api.kafka.model.KafkaClusterSpec": {
+        "type": "object",
+        "properties": {
+          "readinessProbe": {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.Probe"
+          },
+          "livenessProbe": {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.Probe"
+          },
+          "config": {
+            "type": "object",
+            "properties": {
+              "auto.create.topics.enable": {
+                "type": "boolean"
+              },
+              "offsets.topic.replication.factor": {
+                "type": "integer"
+              },
+              "transaction.state.log.replication.factor": {
+                "type": "integer"
+              },
+              "transaction.state.log.min.isr": {
+                "type": "integer"
+              },
+              "default.replication.factor": {
+                "type": "integer"
+              },
+              "min.insync.replicas": {
+                "type": "integer"
+              },
+              "log.message.format.version": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "listeners": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/io.strimzi.api.kafka.model.GenericKafkaListener"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "io.strimzi.api.kafka.model.Probe": {
+        "type": "object",
+        "properties": {
+          "initialDelaySeconds": {
+            "type": "integer"
+          },
+          "periodSeconds": {
+            "type": "integer"
+          },
+          "timeoutSeconds": {
+            "type": "integer"
+          },
+          "failureThreshold": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "io.strimzi.api.kafka.model.GenericKafkaListener": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "internal",
+              "loadbalancer"
+            ]
+          },
+          "tls": {
+            "type": "boolean"
+          },
+          "authentication": {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.KafkaListenerAuthentication"
+          }
+        },
+        "required": [
+          "name",
+          "port",
+          "type",
+          "tls"
+        ],
+        "additionalProperties": false
+      },
+      "io.strimzi.api.kafka.model.KafkaListenerAuthentication": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "scram-sha-512",
+              "tls"
+            ]
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "io.strimzi.api.kafka.model.nodepool.KafkaNodePoolSpec": {
+        "type": "object",
+        "properties": {
+          "replicas": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "broker",
+                "controller"
+              ]
+            }
+          },
+          "storage": {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.storage.Storage"
+          }
+        },
+        "additionalProperties": false
+      },
+      "io.strimzi.api.kafka.model.storage.Storage": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.storage.JbodStorage"
+          },
+          {
+            "$ref": "#/components/schemas/io.strimzi.api.kafka.model.storage.PersistentClaimStorage"
+          }
+        ]
+      },
+      "io.strimzi.api.kafka.model.storage.JbodStorage": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "jbod"
+          },
+          "volumes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/io.strimzi.api.kafka.model.storage.PersistentClaimStorage"
+            }
+          }
+        },
+        "required": [
+          "type",
+          "volumes"
+        ],
+        "additionalProperties": false
+      },
+      "io.strimzi.api.kafka.model.storage.PersistentClaimStorage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "type": {
+            "type": "string",
+            "const": "persistent-claim"
+          },
+          "size": {
+            "type": "string"
+          },
+          "deleteClaim": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "type",
+          "size"
+        ],
+        "additionalProperties": false
+      },
+      "io.strimzi.api.kafka.model.topic.KafkaTopicSpec": {
+        "type": "object",
+        "properties": {
+          "partitions": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "replicas": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "config": {
+            "type": "object",
+            "properties": {
+              "cleanup.policy": {
+                "type": "string",
+                "enum": [
+                  "delete",
+                  "compact"
+                ]
+              },
+              "retention.ms": {
+                "type": "integer"
+              },
+              "segment.bytes": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

@@ -42,6 +42,7 @@ import { boolRule } from './rules/boolRule';
 import { fieldRule } from './rules/fieldRule';
 import { matchAllRule } from './rules/matchAllRule';
 import { phraseRule } from './rules/phraseRule';
+import { boostRule } from './rules/boostRule';
 import { rangeRule } from './rules/rangeRule';
 
 /**
@@ -63,6 +64,7 @@ const rules: Record<string, TransformRuleFn> = {
   matchAll: matchAllRule,
   phrase: phraseRule,
   range: rangeRule,
+  boost: boostRule,
 };
 
 /**
