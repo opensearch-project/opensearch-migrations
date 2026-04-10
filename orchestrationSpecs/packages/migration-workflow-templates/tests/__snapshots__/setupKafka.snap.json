@@ -14,10 +14,6 @@
           "value": "s3-snapshot-config"
         },
         {
-          "name": "s3TupleConfigMap",
-          "value": "migrations-default-s3-tuple-config"
-        },
-        {
           "name": "imageConfigMapName",
           "value": "migration-image-config"
         },
@@ -36,12 +32,12 @@
               "name": "clusterName"
             },
             {
-              "name": "clusterConfig"
+              "name": "nodePoolSpec"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec:\n  replicas: {{=sprig.dig('replicas', 1, fromJSON(inputs.parameters.clusterConfig))}}\n  roles:\n    - controller\n    - broker\n  storage:\n    type: persistent-claim\n    size: 1Gi\n    deleteClaim: true\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{inputs.parameters.nodePoolSpec}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -59,19 +55,19 @@
         }
       },
       {
-        "name": "deploykafkaclusterkraft",
+        "name": "deploykafkaclusterkraftnoauth",
         "inputs": {
           "parameters": [
             {
               "name": "clusterName"
             },
             {
-              "name": "version"
+              "name": "kafkaSpec"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka:\n    version: \"{{inputs.parameters.version}}\"\n    metadataVersion: 4.0-IV3\n    readinessProbe:\n      initialDelaySeconds: 1\n      periodSeconds: 2\n      timeoutSeconds: 2\n      failureThreshold: 1\n    livenessProbe:\n      initialDelaySeconds: 1\n      periodSeconds: 2\n      timeoutSeconds: 2\n      failureThreshold: 2\n    listeners:\n      - name: plain\n        port: 9092\n        type: internal\n        tls: false\n      - name: tls\n        port: 9093\n        type: internal\n        tls: true\n    config:\n      auto.create.topics.enable: false\n      offsets.topic.replication.factor: 1\n      transaction.state.log.replication.factor: 1\n      transaction.state.log.min.isr: 1\n      default.replication.factor: 1\n      min.insync.replicas: 1\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{inputs.parameters.kafkaSpec}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.listeners"
@@ -97,6 +93,44 @@
         }
       },
       {
+        "name": "deploykafkaclusterkraftscram",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "kafkaSpec"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{inputs.parameters.kafkaSpec}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
+          "action": "apply",
+          "setOwnerReference": false,
+          "successCondition": "status.listeners"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "brokers",
+              "valueFrom": {
+                "jsonPath": "{.status.listeners[?(@.name=='tls')].bootstrapServers}"
+              }
+            }
+          ]
+        }
+      },
+      {
         "name": "deploykafkacluster",
         "inputs": {
           "parameters": [
@@ -114,7 +148,8 @@
         "steps": [
           [
             {
-              "template": "deploykafkanodepool",
+              "template": "deploykafkaclusterkraftnoauth",
+              "when": "{{=!(sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -122,17 +157,18 @@
                     "value": "{{inputs.parameters.clusterName}}"
                   },
                   {
-                    "name": "clusterConfig",
-                    "value": "{{inputs.parameters.clusterConfig}}"
+                    "name": "kafkaSpec",
+                    "value": "{{=toJSON(sprig.merge(sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"listeners\", [sprig.dict(\"name\", 'plain', \"port\", 9092, \"type\", 'internal', \"tls\", false), sprig.dict(\"name\", 'tls', \"port\", 9093, \"type\", 'internal', \"tls\", true)]), sprig.dig('clusterSpecOverrides', 'kafka', sprig.dict(), fromJSON(inputs.parameters.clusterConfig))))}}"
                   }
                 ]
               },
-              "name": "deployPool"
+              "name": "deployNoAuthCluster"
             }
           ],
           [
             {
-              "template": "deploykafkaclusterkraft",
+              "template": "deploykafkaclusterkraftscram",
+              "when": "{{=sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -140,12 +176,12 @@
                     "value": "{{inputs.parameters.clusterName}}"
                   },
                   {
-                    "name": "version",
-                    "value": "{{inputs.parameters.version}}"
+                    "name": "kafkaSpec",
+                    "value": "{{=toJSON(sprig.merge(sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"listeners\", [sprig.dict(\"name\", 'tls', \"port\", 9093, \"type\", 'internal', \"tls\", true, \"authentication\", sprig.dict(\"type\", 'scram-sha-512'))]), sprig.dig('clusterSpecOverrides', 'kafka', sprig.dict(), fromJSON(inputs.parameters.clusterConfig))))}}"
                   }
                 ]
               },
-              "name": "deployCluster"
+              "name": "deployScramCluster"
             }
           ]
         ],
@@ -154,7 +190,7 @@
             {
               "name": "bootstrapServers",
               "valueFrom": {
-                "expression": "steps.deployCluster.outputs.parameters.brokers"
+                "expression": "((sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512') ? (steps.deployScramCluster.outputs.parameters.brokers) : (steps.deployNoAuthCluster.outputs.parameters.brokers))"
               }
             }
           ]
@@ -171,12 +207,18 @@
               "name": "topicName"
             },
             {
-              "name": "clusterConfig"
+              "name": "partitions"
+            },
+            {
+              "name": "replicas"
+            },
+            {
+              "name": "topicConfig"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec:\n  partitions: {{=sprig.dig('partitions', 1, fromJSON(inputs.parameters.clusterConfig))}}\n  replicas: {{=sprig.dig('topicReplicas', 1, fromJSON(inputs.parameters.clusterConfig))}}\n  config:\n    retention.ms: 604800000\n    segment.bytes: 1073741824\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec:\n  partitions: {{inputs.parameters.partitions}}\n  replicas: {{inputs.parameters.replicas}}\n  config: {{inputs.parameters.topicConfig}}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.topicName"
@@ -199,6 +241,37 @@
               }
             }
           ]
+        }
+      },
+      {
+        "name": "createkafkauser",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "userSpec"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaUser\nmetadata:\n  name: \"{{=inputs.parameters.clusterName+'-migration-app'}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{inputs.parameters.userSpec}}\n",
+          "action": "apply",
+          "setOwnerReference": false,
+          "successCondition": "status.conditions"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
         }
       },
       {
@@ -242,8 +315,8 @@
                     "value": "{{inputs.parameters.clusterName}}"
                   },
                   {
-                    "name": "clusterConfig",
-                    "value": "{{inputs.parameters.clusterConfig}}"
+                    "name": "nodePoolSpec",
+                    "value": "{{=toJSON(sprig.dig('nodePoolSpecOverrides', sprig.dict(), fromJSON(inputs.parameters.clusterConfig)))}}"
                   }
                 ]
               },
@@ -307,6 +380,9 @@
               "name": "version"
             },
             {
+              "name": "clusterConfig"
+            },
+            {
               "name": "retryGroupName_view",
               "value": "Apply"
             }
@@ -315,7 +391,7 @@
         "steps": [
           [
             {
-              "template": "deploykafkaclusterkraft",
+              "template": "deploykafkacluster",
               "arguments": {
                 "parameters": [
                   {
@@ -325,6 +401,10 @@
                   {
                     "name": "version",
                     "value": "{{inputs.parameters.version}}"
+                  },
+                  {
+                    "name": "clusterConfig",
+                    "value": "{{inputs.parameters.clusterConfig}}"
                   }
                 ]
               },
@@ -364,6 +444,10 @@
                     "value": "{{inputs.parameters.version}}"
                   },
                   {
+                    "name": "clusterConfig",
+                    "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
                     "name": "retryGroupName_view",
                     "value": "{{inputs.parameters.retryGroupName_view}}"
                   }
@@ -378,7 +462,7 @@
             {
               "name": "brokers",
               "valueFrom": {
-                "expression": "steps.tryApply.outputs.parameters.brokers"
+                "expression": "steps.tryApply.outputs.parameters.bootstrapServers"
               }
             }
           ]
@@ -395,7 +479,13 @@
               "name": "topicName"
             },
             {
-              "name": "clusterConfig"
+              "name": "partitions"
+            },
+            {
+              "name": "replicas"
+            },
+            {
+              "name": "topicConfig"
             },
             {
               "name": "retryGroupName_view",
@@ -418,8 +508,16 @@
                     "value": "{{inputs.parameters.topicName}}"
                   },
                   {
-                    "name": "clusterConfig",
-                    "value": "{{inputs.parameters.clusterConfig}}"
+                    "name": "partitions",
+                    "value": "{{inputs.parameters.partitions}}"
+                  },
+                  {
+                    "name": "replicas",
+                    "value": "{{inputs.parameters.replicas}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{inputs.parameters.topicConfig}}"
                   }
                 ]
               },
@@ -459,8 +557,16 @@
                     "value": "{{inputs.parameters.topicName}}"
                   },
                   {
-                    "name": "clusterConfig",
-                    "value": "{{inputs.parameters.clusterConfig}}"
+                    "name": "partitions",
+                    "value": "{{inputs.parameters.partitions}}"
+                  },
+                  {
+                    "name": "replicas",
+                    "value": "{{inputs.parameters.replicas}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{inputs.parameters.topicConfig}}"
                   },
                   {
                     "name": "retryGroupName_view",
@@ -481,6 +587,87 @@
               }
             }
           ]
+        }
+      },
+      {
+        "name": "createkafkauserwithretry",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "clusterConfig"
+            },
+            {
+              "name": "retryGroupName_view",
+              "value": "Apply"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "createkafkauser",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "userSpec",
+                    "value": "{{=toJSON(sprig.dict(\"authentication\", sprig.dict(\"type\", sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)))))}}"
+                  }
+                ]
+              },
+              "name": "tryApply",
+              "continueOn": {
+                "failed": true
+              }
+            }
+          ],
+          [
+            {
+              "template": "suspendforretry",
+              "when": "{{=steps.tryApply.status == 'Failed'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "KafkaUser"
+                  }
+                ]
+              },
+              "name": "waitForFix"
+            }
+          ],
+          [
+            {
+              "template": "createkafkauserwithretry",
+              "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "clusterConfig",
+                    "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{inputs.parameters.retryGroupName_view}}"
+                  }
+                ]
+              },
+              "name": "retryLoop"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
         }
       },
       {
@@ -535,12 +722,39 @@
                     "value": "{{inputs.parameters.version}}"
                   },
                   {
+                    "name": "clusterConfig",
+                    "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
                     "name": "retryGroupName_view",
                     "value": "{{='KafkaCluster: '+inputs.parameters.clusterName}}"
                   }
                 ]
               },
               "name": "deployCluster"
+            }
+          ],
+          [
+            {
+              "template": "createkafkauserwithretry",
+              "when": "{{=sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "clusterConfig",
+                    "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='KafkaUser: '+inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "createKafkaUser"
             }
           ]
         ],

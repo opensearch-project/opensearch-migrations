@@ -4,14 +4,12 @@ import {
     expr,
     makeDirectTypeProxy,
     makeStringTypeProxy,
-    Volume,
+    Volume
 } from "@opensearch-migrations/argo-workflow-builders";
 
 export type ContainerVolumePair = {
     readonly container: Container,
-    readonly volumes: Volume[],
-    readonly sidecars: Container[],
-    readonly initContainers: Container[]
+    readonly volumes: Volume[]
 };
 
 export function setupTestCredsForContainer(
@@ -47,26 +45,13 @@ export function setupTestCredsForContainer(
                     readOnly: true
                 }
             ]
-        },
-        sidecars: def.sidecars,
-        initContainers: def.initContainers.map(ic => {
-            const {volumeMounts: icMounts, ...restOfIc} = ic as any;
-            return {
-                ...restOfIc,
-                volumeMounts: [
-                    ...(icMounts ?? []),
-                    {
-                        name: TEST_CREDS_VOLUME_NAME,
-                        mountPath: "/config/credentials",
-                        readOnly: true
-                    }
-                ]
-            };
-        })
+        }
     } as const;
 }
 
 const DEFAULT_LOGGING_CONFIGURATION_CONFIGMAP_NAME = "default-log4j-config";
+const LOG4J_CONFIG_MOUNT_PATH = "/config/logConfiguration";
+const LOG4J_CONFIG_FILE_PATH = `${LOG4J_CONFIG_MOUNT_PATH}/configuration`;
 
 /**
  * The log4j2 library interprets an empty file not as a missing configuration, but a no-logging configuration.
@@ -128,7 +113,7 @@ export function setupLog4jConfigForContainer(
                                 existingJavaOpts,
                                 expr.ternary(
                                     customLoggingEnabled,
-                                    expr.literal("-Dlog4j2.configurationFile=/config/logConfiguration"),
+                                    expr.literal(`-Dlog4j2.configurationFile=${LOG4J_CONFIG_FILE_PATH}`),
                                     expr.literal("")),
                             )
                         )
@@ -138,12 +123,10 @@ export function setupLog4jConfigForContainer(
                 ...(volumeMounts === undefined ? [] : volumeMounts),
                 {
                     name: LOG4J_CONFIG_VOLUME_NAME,
-                    mountPath: "/config/logConfiguration",
+                    mountPath: LOG4J_CONFIG_MOUNT_PATH,
                     readOnly: true
                 }
             ]
-        },
-        sidecars: def.sidecars,
-        initContainers: def.initContainers
+        }
     } as const;
 }

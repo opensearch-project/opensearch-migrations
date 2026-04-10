@@ -1,5 +1,6 @@
 import {
     CLUSTER_CONFIG,
+    DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     getZodKeys,
     HTTP_ENDPOINT_PATTERN,
     KAFKA_CLIENT_CONFIG,
@@ -174,10 +175,6 @@ export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_REPLAYER_OPTIO
     loggingConfigurationOverrideConfigMap: true,
     podReplicas: true,
     resources: true,
-    tupleS3Bucket: true,
-    tupleS3Region: true,
-    tupleS3Prefix: true,
-    useLocalStack: true,
 }));
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
@@ -217,6 +214,11 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
 
 export const NAMED_KAFKA_CLIENT_CONFIG =
     makeOptionalDefaultedFieldsRequired(KAFKA_CLIENT_CONFIG).extend({
+        topicSpecOverrides: z.object({
+            partitions: z.number(),
+            replicas: z.number(),
+            config: z.record(z.string(), z.any()),
+        }).default(DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES),
         label: z.string()
     });
 

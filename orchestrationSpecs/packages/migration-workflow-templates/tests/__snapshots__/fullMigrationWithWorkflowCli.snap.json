@@ -15,10 +15,6 @@
           "value": "s3-snapshot-config"
         },
         {
-          "name": "s3TupleConfigMap",
-          "value": "migrations-default-s3-tuple-config"
-        },
-        {
           "name": "imageConfigMapName",
           "value": "migration-image-config"
         },

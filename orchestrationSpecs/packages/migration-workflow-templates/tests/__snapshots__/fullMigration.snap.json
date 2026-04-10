@@ -15,10 +15,6 @@
           "value": "s3-snapshot-config"
         },
         {
-          "name": "s3TupleConfigMap",
-          "value": "migrations-default-s3-tuple-config"
-        },
-        {
           "name": "imageConfigMapName",
           "value": "migration-image-config"
         },
@@ -146,6 +142,7 @@
                 "template": "waitforkafkacluster",
                 "name": "resource-management"
               },
+              "when": "{{=sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
               "arguments": {
                 "parameters": [
                   {
@@ -163,6 +160,24 @@
                 ]
               },
               "name": "waitForKafkaCluster"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "readkafkaconnectionprofile",
+                "name": "resource-management"
+              },
+              "when": "{{=sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  }
+                ]
+              },
+              "name": "readKafkaConnectionProfile"
             }
           ],
           [
@@ -204,6 +219,18 @@
                   {
                     "name": "imageCaptureProxyPullPolicy",
                     "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "resolvedKafkaConnection",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.bootstrapServers}}"
+                  },
+                  {
+                    "name": "resolvedKafkaListenerName",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.listenerName}}"
+                  },
+                  {
+                    "name": "resolvedKafkaAuthType",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.authType}}"
                   }
                 ]
               },
@@ -284,12 +311,6 @@
             },
             {
               "name": "imageCoordinatorClusterPullPolicy"
-            },
-            {
-              "name": "imageMountpointS3Location"
-            },
-            {
-              "name": "imageMountpointS3PullPolicy"
             }
           ]
         },
@@ -427,12 +448,6 @@
             },
             {
               "name": "imageCoordinatorClusterPullPolicy"
-            },
-            {
-              "name": "imageMountpointS3Location"
-            },
-            {
-              "name": "imageMountpointS3PullPolicy"
             }
           ]
         },
@@ -494,14 +509,6 @@
                   {
                     "name": "imageCoordinatorClusterPullPolicy",
                     "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
-                  },
-                  {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}"
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}"
                   },
                   {
                     "name": "snapshotItemConfig",
@@ -589,12 +596,6 @@
             },
             {
               "name": "imageCoordinatorClusterPullPolicy"
-            },
-            {
-              "name": "imageMountpointS3Location"
-            },
-            {
-              "name": "imageMountpointS3PullPolicy"
             }
           ]
         },
@@ -785,12 +786,6 @@
             },
             {
               "name": "imageCoordinatorClusterPullPolicy"
-            },
-            {
-              "name": "imageMountpointS3Location"
-            },
-            {
-              "name": "imageMountpointS3PullPolicy"
             }
           ]
         },
@@ -892,14 +887,6 @@
                   {
                     "name": "imageCoordinatorClusterPullPolicy",
                     "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
-                  },
-                  {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}"
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}"
                   },
                   {
                     "name": "label",
@@ -1005,12 +992,6 @@
             },
             {
               "name": "imageTrafficReplayerPullPolicy"
-            },
-            {
-              "name": "imageMountpointS3Location"
-            },
-            {
-              "name": "imageMountpointS3PullPolicy"
             }
           ]
         },
@@ -1073,6 +1054,7 @@
                 "template": "waitforkafkacluster",
                 "name": "resource-management"
               },
+              "when": "{{=sprig.dig('managedByWorkflow', false, fromJSON(inputs.parameters.kafkaConfig))}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1090,6 +1072,24 @@
                 ]
               },
               "name": "waitForKafkaCluster"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "readkafkaconnectionprofile",
+                "name": "resource-management"
+              },
+              "when": "{{=sprig.dig('managedByWorkflow', false, fromJSON(inputs.parameters.kafkaConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  }
+                ]
+              },
+              "name": "readKafkaConnectionProfile"
             }
           ],
           [
@@ -1121,16 +1121,20 @@
                     "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
                   },
                   {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}"
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}"
-                  },
-                  {
                     "name": "kafkaGroupId",
                     "value": "{{='replayer-'+fromJSON(inputs.parameters.targetConfig)['label']}}"
+                  },
+                  {
+                    "name": "resolvedKafkaConnection",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.bootstrapServers}}"
+                  },
+                  {
+                    "name": "resolvedKafkaListenerName",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.listenerName}}"
+                  },
+                  {
+                    "name": "resolvedKafkaAuthType",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.authType}}"
                   },
                   {
                     "name": "name",
@@ -1244,24 +1248,6 @@
                 "configMapKeyRef": {
                   "name": "{{workflow.parameters.imageConfigMapName}}",
                   "key": "coordinatorClusterPullPolicy"
-                }
-              }
-            },
-            {
-              "name": "imageMountpointS3Location",
-              "valueFrom": {
-                "configMapKeyRef": {
-                  "name": "{{workflow.parameters.imageConfigMapName}}",
-                  "key": "mountpointS3Image"
-                }
-              }
-            },
-            {
-              "name": "imageMountpointS3PullPolicy",
-              "valueFrom": {
-                "configMapKeyRef": {
-                  "name": "{{workflow.parameters.imageConfigMapName}}",
-                  "key": "mountpointS3PullPolicy"
                 }
               }
             }
@@ -1406,14 +1392,6 @@
                     "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
                   },
                   {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}"
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}"
-                  },
-                  {
                     "name": "snapshotsSourceConfig",
                     "value": "{{=toJSON(sprig.dict(\"createSnapshotConfig\", fromJSON(item['createSnapshotConfig']), \"sourceConfig\", fromJSON(item['sourceConfig'])))}}"
                   },
@@ -1479,14 +1457,6 @@
                     "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
                   },
                   {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}"
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}"
-                  },
-                  {
                     "name": "resourceName",
                     "value": "{{=item['sourceLabel']+'-'+sprig.dig('label', '', fromJSON(item['targetConfig']))+'-'+item['label']}}"
                   },
@@ -1526,14 +1496,6 @@
                   {
                     "name": "imageTrafficReplayerPullPolicy",
                     "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
-                  },
-                  {
-                    "name": "imageMountpointS3Location",
-                    "value": "{{inputs.parameters.imageMountpointS3Location}}"
-                  },
-                  {
-                    "name": "imageMountpointS3PullPolicy",
-                    "value": "{{inputs.parameters.imageMountpointS3PullPolicy}}"
                   },
                   {
                     "name": "dependsOnSnapshotMigrations",
