@@ -48,6 +48,37 @@ public class CaptureProxySetupTest {
     }
 
     @Test
+    public void testBuildKafkaPropertiesWithNormalizedKafkaFlagNames() throws IOException {
+        CaptureProxy.Parameters parameters = CaptureProxy.parseArgs(
+            new String[] {
+                "--destinationUri",
+                "invalid:9200",
+                "--listenPort",
+                "80",
+                "--kafkaBrokers",
+                kafkaBrokerString,
+                "--kafkaPropertyFile",
+                "src/test/resources/simple-kafka.properties",
+                "--kafkaAuthType",
+                "msk-iam" }
+        );
+        Properties props = buildKafkaProperties(parameters.kafkaParameters);
+
+        Assertions.assertEquals(kafkaBrokerString, props.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
+        Assertions.assertEquals("SASL_SSL", props.get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
+        Assertions.assertEquals("212", props.get("reconnect.backoff.max.ms"));
+    }
+
+    @Test
+    public void testKafkaAuthFlagsRejectConflictingLegacyAndNormalizedValues() {
+        var parameters = new org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.KafkaParameters();
+        parameters.legacyEnableMSKAuth = true;
+        parameters.kafkaAuthType = "scram-sha-512";
+
+        Assertions.assertThrows(IllegalArgumentException.class, parameters::validateKafkaAuthFlags);
+    }
+
+    @Test
     public void testBuildKafkaPropertiesWithMSKAuth() throws IOException {
         CaptureProxy.Parameters parameters = CaptureProxy.parseArgs(
             new String[] {

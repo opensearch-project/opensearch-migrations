@@ -70,6 +70,24 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
 
+    .addTemplate("readKafkaConnectionProfile", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "get",
+                manifest: {
+                    apiVersion: "kafka.strimzi.io/v1",
+                    kind: "Kafka",
+                    metadata: {name: b.inputs.resourceName}
+                }
+            })
+            .addJsonPathOutput("bootstrapServers", "{.status.listeners[0].bootstrapServers}", typeToken<string>())
+            .addJsonPathOutput("listenerName", "{.status.listeners[0].name}", typeToken<string>())
+            .addJsonPathOutput("authType", "{.spec.kafka.listeners[0].authentication.type}", typeToken<string>()))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
     .addTemplate("waitForKafkaTopic", b => b
         .addRequiredInput("resourceName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
