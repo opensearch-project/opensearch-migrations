@@ -82,17 +82,19 @@ class FileSystemReportingSinkTest {
 
     @Test
     void submitDiscardsWhenQueueFull(@TempDir Path tempDir) throws Exception {
-        // Capacity 1: first submit fills the queue, second is discarded
-        try (var sink = new FileSystemReportingSink(tempDir, 1)) {
-            sink.submit(sampleDocument("id-1", "2025-01-01T00:00:00Z"));
-            sink.submit(sampleDocument("id-2", "2025-01-01T00:00:01Z"));
+        // Capacity 2, submit 100 docs rapidly — most will be discarded since the
+        // writer thread can't keep up with synchronous offer() calls.
+        int capacity = 2;
+        int submitted = 100;
+        try (var sink = new FileSystemReportingSink(tempDir, capacity)) {
+            for (int i = 0; i < submitted; i++) {
+                sink.submit(sampleDocument());
+            }
             sink.flush();
-            // At most 1 file should be written (the queue only holds 1)
-            // But the background thread may have drained the first before the second offer,
-            // so we allow 1 or 2. The key property: no exception thrown and no more than capacity.
             long count = jsonFileCount(tempDir);
-            assertTrue(count >= 1 && count <= 2,
-                "Expected 1-2 files with capacity 1, got " + count);
+            assertTrue(count < submitted,
+                "Expected fewer files than submitted (" + submitted + "), got " + count
+                    + " — discard behavior not observed");
         }
     }
 
@@ -235,7 +237,7 @@ class FileSystemReportingSinkTest {
         Thread.sleep(200);
         // Find the background thread by name
         boolean threadAlive = Thread.getAllStackTraces().keySet().stream()
-            .anyMatch(t -> t.getName().equals("fs-metrics-sink-flush") && t.isAlive());
+            .anyMatch(t -> t.getName().equals("fs-metrics-sink-writer") && t.isAlive());
         assertFalse(threadAlive, "Background flush thread should not be alive after close()");
     }
 

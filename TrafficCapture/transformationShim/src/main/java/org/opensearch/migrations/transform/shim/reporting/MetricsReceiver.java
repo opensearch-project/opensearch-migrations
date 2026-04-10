@@ -141,7 +141,7 @@ public class MetricsReceiver {
 
             ValidationDocument doc = new ValidationDocument(
                     Instant.now().toString(),
-                    UUID.randomUUID().toString(),
+                    UUID.randomUUID().toString().substring(0, 8),
                     originalRequest,
                     transformedRequest,
                     collectionName,
