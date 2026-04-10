@@ -4,6 +4,7 @@ import {
     DeepWiden,
     MissingField,
     NonSerializedPlainObject,
+    Primitive,
     PlainObject,
     Serialized
 } from "./plainObject";
@@ -144,21 +145,24 @@ export class InfixExpression<
 }
 
 type PlainRecord = Record<string, PlainObject>;
+export type NonRecordLiteral = Primitive | readonly NonRecordLiteral[];
 type ResultOfExpr<E> = E extends BaseExpression<infer U, any> ? U : never;
 type KeysOfUnion<T> = T extends any ? keyof T : never;
 type MembersWithKey<T, K extends PropertyKey> =
     T extends any ? (K extends keyof T ? T : never) : never;
 
-// Deeply exclude `undefined` from any PlainObject (arrays + records).
+// Deeply exclude `undefined` from expression object results. Optional TS fields model
+// absent JSON keys in these Argo values; downstream expression helpers should not
+// carry `undefined` as a possible serialized value.
 type DeepStripUndefined<T> =
 // keep MissingField as-is
     T extends MissingField ? MissingField :
         // Serialized payload preserved; scrub inside the payload
-        T extends Serialized<infer U> ? Serialized<DeepStripUndefined<U>> :
+        T extends Serialized<infer U> ? Serialized<DeepStripUndefined<Exclude<U, undefined>>> :
             // arrays
-            T extends readonly (infer U)[] ? readonly DeepStripUndefined<U>[] :
+            T extends readonly (infer U)[] ? readonly DeepStripUndefined<Exclude<U, undefined>>[] :
                 // objects (including records)
-                T extends object ? { [K in keyof T]: DeepStripUndefined<T[K]> } :
+                T extends object ? { [K in keyof T]-?: DeepStripUndefined<Exclude<T[K], undefined>> } :
                     // primitives / strings / numbers / booleans
                     Exclude<T, undefined>;
 
@@ -177,7 +181,7 @@ export class RecordGetExpression<
 // Helper types for dict operations
 type NormalizeValue<V> =
     V extends BaseExpression<infer U, infer C> ? BaseExpression<U, C> :
-        V extends PlainObject ? SimpleExpression<DeepWiden<V>> :
+        V extends NonRecordLiteral ? SimpleExpression<DeepWiden<V>> :
             never;
 
 type NormalizeRecord<R extends Record<string, unknown>> = {
@@ -476,7 +480,7 @@ export class FunctionExpression<
 // Helper types for toArray
 type NormalizeOne<E> =
     E extends BaseExpression<infer U, infer C> ? BaseExpression<U, C>
-        : E extends PlainObject ? SimpleExpression<DeepWiden<E>>
+        : E extends NonRecordLiteral ? SimpleExpression<DeepWiden<E>>
             : never;
 type NormalizeTuple<ES extends readonly unknown[]> = {
     [K in keyof ES]: NormalizeOne<ES[K]>;
@@ -505,7 +509,7 @@ function _segmentsToPath(segs: readonly unknown[]): string {
 
 class ExprBuilder {
     // Core functions
-    literal<T extends PlainObject>(v: T): SimpleExpression<DeepWiden<T>> {
+    literal<T extends NonRecordLiteral>(v: T): SimpleExpression<DeepWiden<T>> {
         return new LiteralExpression<DeepWiden<T>>(v as DeepWiden<T>);
     }
 
@@ -602,7 +606,7 @@ class ExprBuilder {
         CL extends ExpressionType = ExprC<L>,
         CR extends ExpressionType = ExprC<R>,
     >(l: L, r: R) {
-        return new InfixExpression("&&", l, r);
+        return new InfixExpression<boolean, CL, CR>("&&", l, r, typeToken<boolean>());
     }
 
     or<
@@ -611,7 +615,7 @@ class ExprBuilder {
         CL extends ExpressionType = ExprC<L>,
         CR extends ExpressionType = ExprC<R>,
     >(l: L, r: R) {
-        return new InfixExpression("||", l, r);
+        return new InfixExpression<boolean, CL, CR>("||", l, r, typeToken<boolean>());
     }
 
     // String functions
@@ -682,7 +686,7 @@ class ExprBuilder {
         ComplexityOfNormalized<ES>
     > {
         const normalized = items.map((it) =>
-            isExpression(it) ? it : this.literal(it as PlainObject)
+            isExpression(it) ? it : new LiteralExpression(it as NonRecordLiteral)
         ) as NormalizeTuple<ES>;
 
         type N = Extract<typeof normalized, readonly BaseExpression<any, any>[]>;
@@ -759,12 +763,13 @@ class ExprBuilder {
     dig<
         T extends Record<string, PlainObject>,
         D extends Record<string, any> = UnwrapSerialize<NonMissing<T>>,
-        const S extends DictKeySegmentsCore<D> = DictKeySegmentsCore<D>
+        const S extends DictKeySegmentsCore<D> = DictKeySegmentsCore<D>,
+        DefaultT extends PlainObject = DigValue<T, S>
     >(
         sourceDict: AllowLiteralOrExpression<T, any>,
         segs: S,
-        defaultValue: AllowLiteralOrExpression<DigValue<T, S>>
-    ): BaseExpression<DigValue<T, S>, "complicatedExpression"> {
+        defaultValue: AllowLiteralOrExpression<DefaultT>
+    ): BaseExpression<DigValue<T, S> | DeepWiden<DefaultT>, "complicatedExpression"> {
         const source = toExpression(sourceDict);
 
         const keyExprs = (segs as readonly string[]).map(seg =>
@@ -778,7 +783,7 @@ class ExprBuilder {
         ];
 
         return new FunctionExpression<
-            DigValue<T, S>, any, "complicatedExpression", "complicatedExpression"
+            DigValue<T, S> | DeepWiden<DefaultT>, any, "complicatedExpression", "complicatedExpression"
         >("sprig.dig", argsComp);
     }
 
@@ -833,7 +838,7 @@ class ExprBuilder {
     >(
         recordExpr: NoAny<E>,
         ...keys: Keys
-    ): BaseExpression<Omit<NonMissing<T>, Keys[number]>, "complicatedExpression"> {
+    ): BaseExpression<Extract<DeepStripUndefined<Omit<NonMissing<T>, Keys[number]>>, PlainObject>, "complicatedExpression"> {
         const keyExprs = keys.map(k =>
             widenComplexity(this.literal(k))
         ) as readonly BaseExpression<string, "complicatedExpression">[];
@@ -844,7 +849,7 @@ class ExprBuilder {
         ];
 
         return new FunctionExpression<
-            Omit<NonMissing<T>, Keys[number]>,
+            Extract<DeepStripUndefined<Omit<NonMissing<T>, Keys[number]>>, PlainObject>,
             any,
             "complicatedExpression",
             "complicatedExpression"
@@ -888,7 +893,7 @@ class ExprBuilder {
         return fn<Serialized<T>,CIn,"complicatedExpression">("toJSON", toExpression(data)) as any;
     }
 
-    makeDict<R extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
+    makeDict<R extends Record<string, BaseExpression<PlainObject, any> | NonRecordLiteral>>(
         entries: R
     ): BaseExpression<
         { [K in keyof R]: ResultOf<NormalizeValue<R[K]>> },
@@ -896,7 +901,7 @@ class ExprBuilder {
     > {
         const normalized = Object.fromEntries(
             Object.entries(entries).map(([k, v]) => {
-                const e = isExpression(v) ? v : this.literal(v);
+                const e = isExpression(v) ? v : new LiteralExpression(v as NonRecordLiteral);
                 return [k, e];
             })
         ) as NormalizeRecord<R>;

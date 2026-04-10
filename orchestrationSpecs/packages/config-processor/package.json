@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@opensearch-migrations/schemas": "*",
+    "ajv": "^8.17.1",
     "ci": "^2.3.0",
     "yaml": "^2.8.3",
     "zod": "^4"

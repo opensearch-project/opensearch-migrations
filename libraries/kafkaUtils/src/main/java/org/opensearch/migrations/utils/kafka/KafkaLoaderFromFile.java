@@ -45,8 +45,8 @@ public class KafkaLoaderFromFile {
         JCommander jCommander = new JCommander(p);
         try {
             jCommander.parse(args);
-            if (p.kafkaParameters.kafkaConnection == null) {
-                throw new ParameterException("Missing required parameter: --kafkaConnection");
+            if (p.kafkaParameters.kafkaBrokers == null) {
+                throw new ParameterException("Missing required parameter: --kafkaBrokers");
             }
             if (!p.stdin && p.inputFile == null) {
                 throw new ParameterException("Must specify either --inputFile or --stdin");
@@ -67,10 +67,10 @@ public class KafkaLoaderFromFile {
     public static void main(String[] args) throws Exception {
         var params = parseArgs(args);
         var kafkaLoader = new KafkaLoader(
-                params.kafkaParameters.kafkaPropertiesFile,
-                params.kafkaParameters.kafkaConnection,
+                params.kafkaParameters.kafkaPropertyFile,
+                params.kafkaParameters.kafkaBrokers,
                 params.kafkaParameters.kafkaClientId,
-                params.kafkaParameters.mskAuthEnabled
+                Boolean.TRUE.equals(params.kafkaParameters.legacyEnableMSKAuth)
         );
         if (params.stdin) {
             kafkaLoader.loadRecordsToKafkaFromReader(
