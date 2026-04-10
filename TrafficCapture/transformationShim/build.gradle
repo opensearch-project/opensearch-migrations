@@ -6,6 +6,10 @@ plugins {
 
 dependencies {
     implementation project(':coreUtilities')
+    implementation project(':RfsHttp')
+    implementation project(':RFS')
+    implementation project(':RfsCommon')
+    implementation libs.reactor.core
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformer')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
@@ -25,6 +29,10 @@ dependencies {
 
     testImplementation libs.junit.jupiter.api
     testImplementation testFixtures(project(':coreUtilities'))
+    testImplementation testFixtures(project(':RFS'))
+    testImplementation libs.testcontainers
+    testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.testcontainers.opensearch
     testRuntimeOnly libs.junit.jupiter.engine
 }
 

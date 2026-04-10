@@ -23,6 +23,10 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JavascriptTransformer;
 import org.opensearch.migrations.transform.shim.netty.BasicAuthSigningHandler;
 import org.opensearch.migrations.transform.shim.netty.SigV4SigningHandler;
+import org.opensearch.migrations.transform.shim.reporting.MetricsReceiver;
+import org.opensearch.migrations.transform.shim.reporting.OpenSearchMetricsSink;
+import org.opensearch.migrations.transform.shim.reporting.ReportingConfig;
+import org.opensearch.migrations.transform.shim.reporting.SolrMetricsExtractor;
 import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
 import org.opensearch.migrations.transform.shim.validation.DocCountValidator;
 import org.opensearch.migrations.transform.shim.validation.DocIdValidator;
@@ -124,6 +128,10 @@ public class ShimMain {
             description = "Watch transform JS files for changes and hot-reload them.")
         public boolean watchTransforms;
 
+        @Parameter(names = {"--reporting-config"},
+            description = "Path to JSON configuration file for the validation reporting framework.")
+        public String reportingConfig;
+
         @Parameter(names = {"--help", "-h"}, help = true, description = "Show usage.")
         public boolean help;
     }
@@ -154,10 +162,15 @@ public class ShimMain {
         var rootContext = new RootShimProxyContext(otelSdk,
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 
+        // Initialize metrics reporting if configured
+        var reporting = initReporting(params.reportingConfig);
+        MetricsReceiver metricsReceiver = reporting[0] != null ? (MetricsReceiver) reporting[0] : null;
+        OpenSearchMetricsSink metricsSink = reporting[1] != null ? (OpenSearchMetricsSink) reporting[1] : null;
+
         var proxy = new ShimProxy(
             params.listenPort, targets, params.primary, activeTargets, validators,
             null, params.insecureBackend, Duration.ofMillis(params.timeoutMs), params.maxContentLength,
-            rootContext);
+            rootContext, metricsReceiver);
 
         TransformFileWatcher watcher = null;
         if (params.watchTransforms && !watchedTransforms.isEmpty()) {
@@ -168,13 +181,17 @@ public class ShimMain {
         }
 
         final TransformFileWatcher watcherRef = watcher;
+        final OpenSearchMetricsSink sinkRef = metricsSink;
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
                 log.info("Shutdown signal received, stopping proxy...");
+                if (sinkRef != null) sinkRef.close();
                 if (watcherRef != null) watcherRef.close();
                 proxy.stop();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             } catch (Exception e) {
-                if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+                log.error("Error during shutdown", e);
             }
         }));
 
@@ -184,6 +201,32 @@ public class ShimMain {
         }
         log.info("Shim running on port {}", params.listenPort);
         proxy.waitForClose();
+    }
+
+    /** Initialize metrics reporting from config file. Returns [MetricsReceiver, OpenSearchMetricsSink] or [null, null]. */
+    static Object[] initReporting(String configPath) {
+        if (configPath == null) return new Object[]{null, null};
+        try {
+            ReportingConfig reportingConfig = ReportingConfig.parse(Path.of(configPath));
+            if (reportingConfig.isEnabled() && reportingConfig.hasSink()) {
+                var connectionContext = reportingConfig.toConnectionContext();
+                var metricsSink = new OpenSearchMetricsSink(
+                    connectionContext,
+                    reportingConfig.getIndexPrefix(),
+                    reportingConfig.getBulkSize(),
+                    reportingConfig.getFlushIntervalMs()
+                );
+                var metricsReceiver = new MetricsReceiver(metricsSink, new SolrMetricsExtractor(),
+                    reportingConfig.isIncludeRequestBody());
+                metricsSink.createIndexTemplate();
+                log.info("Validation reporting enabled, sink: {} index prefix: {}",
+                    reportingConfig.getUri(), reportingConfig.getIndexPrefix());
+                return new Object[]{metricsReceiver, metricsSink};
+            }
+        } catch (Exception e) {
+            log.error("Failed to initialize metrics reporting, continuing without it: {}", e.getMessage());
+        }
+        return new Object[]{null, null};
     }
 
     static Map<String, Target> parseTargets(Parameters params,

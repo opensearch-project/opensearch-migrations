@@ -1,6 +1,15 @@
 # Solr Migration Developer Sandbox
-# Standalone compose: Solr 9.x + OpenSearch 3.3 + Translation Shim.
+# Standalone compose: Solr 9.x + OpenSearch 3.3 + Translation Shim + Reporting.
 # Uses non-default ports to avoid conflicts with the existing demo-validation compose.
+#
+# Ports:
+#   :18983 — Solr
+#   :19200 — OpenSearch (destination)
+#   :19201 — OpenSearch (reporting / metrics)
+#   :15601 — OpenSearch Dashboards (reporting visualization)
+#   :18080 — Shim (single-target, OpenSearch only)
+#   :18083 — Shim (dual-target, Solr primary)
+#   :18084 — Shim (dual-target, OpenSearch primary, with reporting)
 #
 # Usage:
 #   docker compose up -d        # Start all services
@@ -22,7 +31,7 @@ services:
       start_period: 15s
 
   opensearch:
-    image: opensearchproject/opensearch:3.3.0
+    image: opensearchproject/opensearch:3.5.0
     environment:
       - discovery.type=single-node
       - DISABLE_SECURITY_PLUGIN=true
@@ -34,6 +43,34 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
+
+  opensearch-reporting:
+    image: opensearchproject/opensearch:3.5.0
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Admin_1234!
+      - OPENSEARCH_JAVA_OPTS=-Xms256m -Xmx1g
+      - cluster.name=reporting
+      - node.name=reporting-node
+    ports:
+      - "19201:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:3.5.0
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch-reporting:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - "15601:5601"
+    depends_on:
+      opensearch-reporting:
+        condition: service_healthy
 
   transform-builder:
     image: node:20-slim
@@ -121,7 +158,7 @@ services:
       - http://otel-lgtm:4317
 
   # Dual-target shim (OpenSearch primary): sends to both, returns OpenSearch
-  # response, validates against Solr. Port 18084.
+  # response, validates against Solr. Port 18084. Reporting enabled.
   translation-shim-dual-os:
     image: localhost:5001/migrations/transformation_shim
     entrypoint: ["java", "-cp", "/app/resources:/app/classes:/app/libs/*",
@@ -130,10 +167,13 @@ services:
       - "18084:8080"
     volumes:
       - transform-dist:/transforms:ro
+      - ./reporting-config.json:/config/reporting-config.json:ro
     depends_on:
       solr:
         condition: service_healthy
       opensearch:
+        condition: service_healthy
+      opensearch-reporting:
         condition: service_healthy
       transform-builder:
         condition: service_completed_successfully
@@ -158,6 +198,8 @@ services:
       - "5000"
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
+      - --reporting-config
+      - /config/reporting-config.json
 
 volumes:
   transform-dist:
