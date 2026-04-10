@@ -26,7 +26,7 @@ The migration workflow currently operates in an "always create" mode using `kube
 
 ## Architecture Overview: The Argo Retry Model
 
-The workflow does **not** automatically inject approval annotations on the first pass. When a gated change is attempted, the system relies on a "Catch, Suspend, Auto-Patch, and Retry" loop orchestrated entirely within Argo.
+hen a gated change is attempted on a specific resource, the workflow relies on a "Catch, Suspend, Auto-Patch, and Retry" loop orchestrated entirely within Argo Workflows.
 
 ```mermaid
 flowchart TB
@@ -51,7 +51,7 @@ flowchart TB
     end
 ```
 
-**Key Concept: The API Rejection is Absolute.** If a VAP rejects a change, the entire `kubectl apply` request is aborted. The existing object in `etcd`, including its state and status, remains 100% unchanged.
+**Key Concept: The API Rejection is Absolute.** If a VAP rejects a change, the `kubectl apply` request for that resource is aborted. The existing resource, including its state and status, remains 100% unchanged.
 
 ---
 
@@ -59,7 +59,7 @@ flowchart TB
 
 Changes to resources fall into three categories.
 
-1. **Impossible:** Cannot be done — must delete & recreate the resource. This branch of the workflow cannot be advanced.
+1. **Impossible:** Cannot be done — the user must explicitly delete & recreate the resource. This branch of the workflow cannot be advanced without .
 2. **Gated:** Requires explicit approval annotation (injected via the Workflow) to proceed.
 3. **Safe:** Low-risk, allowed dynamically without approval. Safe fields require no VAP expressions — they are included in the classification tables for coverage tracking only.
 
