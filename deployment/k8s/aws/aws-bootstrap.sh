@@ -65,6 +65,7 @@ ma_images_source=""
 skip_setting_k8s_context=false
 skip_test_images=false
 image_tag="latest"
+kubectl_context=""
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -101,6 +102,7 @@ while [[ $# -gt 0 ]]; do
     --use-public-images) push_images_to_ecr=false; shift 1 ;;
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
+    --kubectl-context) kubectl_context="$2"; shift 2 ;;
     --skip-test-images) skip_test_images=true; shift 1 ;;
     --image-tag) image_tag="$2"; shift 2 ;;
     --tls-mode) tls_mode="$2"; shift 2 ;;
@@ -158,6 +160,8 @@ while [[ $# -gt 0 ]]; do
       echo "                                            is left unchanged. Use this on hosts that manage multiple K8s"
       echo "                                            deployments. You will need to pass --context=<context-name>"
       echo "                                            to every kubectl/helm command, or set the context yourself."
+      echo "  --kubectl-context <name>                  Custom alias for the kubectl context (default: EKS cluster name)."
+      echo "                                            Useful for CI systems that need a predictable context name."
       echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
       echo "  --image-tag <tag>                         Override the image tag (default: git short SHA)"
       echo ""
@@ -527,7 +531,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
     # intact — they affect template content (AppRegistry names, S3 paths) and
     # the CDK has safe defaults when they're unset.
     STACK_NAME_SUFFIX="" \
-      "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified
+      "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified -x test
     if [[ "$deploy_create_vpc" == "true" ]]; then
       cfn_template_file="$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
     else
@@ -697,8 +701,8 @@ else
 fi
 echo ""
 
-aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --alias "${MIGRATIONS_EKS_CLUSTER_NAME}"
-KUBE_CONTEXT="${MIGRATIONS_EKS_CLUSTER_NAME}"
+KUBE_CONTEXT="${kubectl_context:-${MIGRATIONS_EKS_CLUSTER_NAME}}"
+aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --alias "${KUBE_CONTEXT}"
 export KUBE_CONTEXT
 
 if [[ "$skip_setting_k8s_context" == "true" ]]; then
