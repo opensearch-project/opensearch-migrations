@@ -22,10 +22,11 @@ public class PemSslConfigurationTest {
     public void testPemSslEngineLoadsSuccessfully() throws Exception {
         var ssc = createSelfSignedCert();
         Supplier<SSLEngine> supplier = CaptureProxy.loadSslEngineFromPem(
-            ssc.certificate().getAbsolutePath(),
-            ssc.privateKey().getAbsolutePath(),
-            null
-        );
+                    ssc.certificate().getAbsolutePath(),
+                    ssc.privateKey().getAbsolutePath(),
+                    null,
+                    false
+                );
         Assertions.assertNotNull(supplier);
         SSLEngine engine = supplier.get();
         Assertions.assertNotNull(engine);
@@ -37,10 +38,11 @@ public class PemSslConfigurationTest {
         var ssc = createSelfSignedCert();
         // Use the same cert as the trust cert for testing
         Supplier<SSLEngine> supplier = CaptureProxy.loadSslEngineFromPem(
-            ssc.certificate().getAbsolutePath(),
-            ssc.privateKey().getAbsolutePath(),
-            ssc.certificate().getAbsolutePath()
-        );
+                    ssc.certificate().getAbsolutePath(),
+                    ssc.privateKey().getAbsolutePath(),
+                    ssc.certificate().getAbsolutePath(),
+                    false
+                );
         Assertions.assertNotNull(supplier);
         SSLEngine engine = supplier.get();
         Assertions.assertNotNull(engine);
@@ -51,10 +53,11 @@ public class PemSslConfigurationTest {
     public void testPemSslEngineWithEmptyTrustCertIsIgnored() throws Exception {
         var ssc = createSelfSignedCert();
         Supplier<SSLEngine> supplier = CaptureProxy.loadSslEngineFromPem(
-            ssc.certificate().getAbsolutePath(),
-            ssc.privateKey().getAbsolutePath(),
-            ""
-        );
+                    ssc.certificate().getAbsolutePath(),
+                    ssc.privateKey().getAbsolutePath(),
+                    "",
+                    false
+                );
         Assertions.assertNotNull(supplier);
         SSLEngine engine = supplier.get();
         Assertions.assertNotNull(engine);
@@ -107,10 +110,11 @@ public class PemSslConfigurationTest {
     public void testPemSslEngineProducesMultipleEngines() throws Exception {
         var ssc = createSelfSignedCert();
         Supplier<SSLEngine> supplier = CaptureProxy.loadSslEngineFromPem(
-            ssc.certificate().getAbsolutePath(),
-            ssc.privateKey().getAbsolutePath(),
-            null
-        );
+                    ssc.certificate().getAbsolutePath(),
+                    ssc.privateKey().getAbsolutePath(),
+                    null,
+                    false
+                );
         SSLEngine engine1 = supplier.get();
         SSLEngine engine2 = supplier.get();
         Assertions.assertNotNull(engine1);

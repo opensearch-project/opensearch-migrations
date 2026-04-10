@@ -89,6 +89,12 @@ public class CaptureProxy {
             description = "Path to PEM trusted CA certificate file for mutual TLS. Optional, used with --sslCertChainFile.")
         public String sslTrustCertFilePath;
         @Parameter(required = false,
+            names = { "--requireClientAuth" },
+            arity = 0,
+            description = "Require clients to present a valid TLS certificate (mutual TLS) when connecting to the proxy. "
+                + "Must be used with --sslTrustCertFile to specify the trusted CA for client certificates.")
+        public boolean requireClientAuth;
+        @Parameter(required = false,
             names = { "--maxTrafficBufferSize" },
             arity = 1,
             description = "The maximum number of bytes that will be written to a single TrafficStream object.")
@@ -297,11 +303,17 @@ public class CaptureProxy {
      * This is the preferred path for K8s deployments where cert-manager provides PEM-encoded secrets.
      */
     protected static Supplier<SSLEngine> loadSslEngineFromPem(
-        String certChainPath, String keyPath, String trustCertPath
+        String certChainPath, String keyPath, String trustCertPath, boolean requireClientAuth
     ) throws SSLException {
         var builder = SslContextBuilder.forServer(new File(certChainPath), new File(keyPath));
         if (trustCertPath != null && !trustCertPath.isEmpty()) {
             builder.trustManager(new File(trustCertPath));
+            if (requireClientAuth) {
+                builder.clientAuth(io.netty.handler.ssl.ClientAuth.REQUIRE);
+            }
+        } else if (requireClientAuth) {
+            throw new ParameterException(
+                "--sslTrustCertFile is required when --requireClientAuth is specified.");
         }
         var sslContext = builder.build();
         return () -> sslContext.newEngine(ByteBufAllocator.DEFAULT);
@@ -331,7 +343,8 @@ public class CaptureProxy {
                 throw new ParameterException("--sslKeyFile is required when --sslCertChainFile is specified.");
             }
             log.info("Loading TLS from PEM files: cert={}, key={}", params.sslCertChainFilePath, params.sslKeyFilePath);
-            return loadSslEngineFromPem(params.sslCertChainFilePath, params.sslKeyFilePath, params.sslTrustCertFilePath);
+            return loadSslEngineFromPem(params.sslCertChainFilePath, params.sslKeyFilePath,
+                params.sslTrustCertFilePath, params.requireClientAuth);
         }
 
         return null;
