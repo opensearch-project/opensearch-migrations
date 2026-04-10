@@ -164,7 +164,7 @@ class K8sService:
                     print(resp, end="", flush=True)
                     next_byte += len(resp.encode("utf-8"))
             except Exception as e:
-                logger.debug(f"Log tail failed (may be transient): {e}")
+                logger.info(f"Log tail failed (may be transient): {e}")
 
             # Check if the command has finished
             try:
