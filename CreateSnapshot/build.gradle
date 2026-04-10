@@ -6,6 +6,7 @@ plugins {
 dependencies {
     implementation project(':coreUtilities')
     implementation project(":RFS")
+    implementation project(":SolrReader")
 
     implementation libs.jcommander
     implementation libs.slf4j.api

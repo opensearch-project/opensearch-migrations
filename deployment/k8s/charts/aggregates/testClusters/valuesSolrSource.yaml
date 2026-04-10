@@ -1,0 +1,66 @@
+# Values for deploying a Solr source cluster via the Solr Operator.
+# Disables the default Elasticsearch source and enables Solr instead.
+#
+# Usage:
+#   helm install test-clusters . -f valuesSolrSource.yaml
+#
+# For EKS with real S3 (Pod Identity):
+#   helm install test-clusters . -f valuesSolrSource.yaml -f valuesSolrSourceEks.yaml
+#
+# Override the Solr version:
+#   helm install test-clusters . -f valuesSolrSource.yaml --set solrSource.image.tag=8.11.4
+
+conditionalPackageInstalls:
+  source: false
+  solrSource: true
+
+solrSourceLocalstackCredentials: true
+
+solrSource:
+  image:
+    tag: "9.7.0"
+  solrOptions:
+    javaMemory: "-Xms512m -Xmx512m"
+    solrModules:
+      - s3-repository
+
+  # The operator's solrModules field doesn't always set SOLR_MODULES env var,
+  # so we set it explicitly along with disabling the security manager
+  # (required for AWS credential file access).
+  podOptions:
+    envVars:
+      - name: SOLR_MODULES
+        value: s3-repository
+      - name: SOLR_SECURITY_MANAGER_ENABLED
+        value: "false"
+    # Solr startup can be slow; relax probes to avoid restart loops
+    startupProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      failureThreshold: 30
+      timeoutSeconds: 5
+    livenessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      failureThreshold: 5
+      timeoutSeconds: 5
+    readinessProbe:
+      periodSeconds: 10
+      failureThreshold: 5
+      timeoutSeconds: 5
+
+  backupRepositories:
+    - name: localstack-s3
+      s3:
+        region: us-east-1
+        bucket: solr-backups
+        # For cross-namespace localstack, override with:
+        #   --set 'solrSource.backupRepositories[0].s3.endpoint=http://localstack.<namespace>:4566'
+        endpoint: "http://localstack:4566"
+        credentials:
+          accessKeyIdSecret:
+            name: solr-s3-credentials
+            key: access-key-id
+          secretAccessKeySecret:
+            name: solr-s3-credentials
+            key: secret-access-key

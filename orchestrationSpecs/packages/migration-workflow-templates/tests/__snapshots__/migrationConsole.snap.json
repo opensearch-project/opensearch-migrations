@@ -63,7 +63,7 @@
             {
               "name": "configContents",
               "valueFrom": {
-                "expression": "toJSON(sprig.merge(sprig.merge(sprig.merge(((0 == len(inputs.parameters.kafkaInfo)) ? ({}) : (sprig.dict(\"kafka\", fromJSON(inputs.parameters.kafkaInfo)))), ((0 == len(inputs.parameters.sourceConfig)) ? ({}) : (sprig.dict(\"source_cluster\", fromJSON(inputs.parameters.sourceConfig))))), sprig.merge(((0 == len(inputs.parameters.targetConfig)) ? ({}) : (sprig.dict(\"target_cluster\", fromJSON(inputs.parameters.targetConfig)))), ((0 == len(inputs.parameters.snapshotConfig)) ? ({}) : (sprig.dict(\"snapshot\", fromJSON(inputs.parameters.snapshotConfig)))))), ((0 == len(inputs.parameters.backfillSession)) ? ({}) : (sprig.dict(\"backfill\", sprig.dict(\"reindex_from_snapshot\", sprig.dict(\"k8s\", sprig.dict(\"namespace\", \"{{workflow.namespace}}\", \"deployment_name\", fromJSON(inputs.parameters.backfillSession)['deploymentName']), \"backfill_session_name\", fromJSON(inputs.parameters.backfillSession)['sessionName'])))))))"
+                "expression": "toJSON(sprig.merge(sprig.merge(sprig.merge(((0 == len(inputs.parameters.kafkaInfo)) ? (sprig.dict()) : (sprig.dict(\"kafka\", fromJSON(inputs.parameters.kafkaInfo)))), ((0 == len(inputs.parameters.sourceConfig)) ? (sprig.dict()) : (sprig.dict(\"source_cluster\", fromJSON(inputs.parameters.sourceConfig))))), sprig.merge(((0 == len(inputs.parameters.targetConfig)) ? (sprig.dict()) : (sprig.dict(\"target_cluster\", fromJSON(inputs.parameters.targetConfig)))), ((0 == len(inputs.parameters.snapshotConfig)) ? (sprig.dict()) : (sprig.dict(\"snapshot\", fromJSON(inputs.parameters.snapshotConfig)))))), ((0 == len(inputs.parameters.backfillSession)) ? (sprig.dict()) : (sprig.dict(\"backfill\", sprig.dict(\"reindex_from_snapshot\", sprig.dict(\"k8s\", sprig.dict(\"namespace\", \"{{workflow.namespace}}\", \"deployment_name\", fromJSON(inputs.parameters.backfillSession)['deploymentName']), \"backfill_session_name\", fromJSON(inputs.parameters.backfillSession)['sessionName'])))))))"
               }
             }
           ]
@@ -167,7 +167,7 @@
             }
           },
           "args": [
-            "\nset -e -x\n\n# Save pod name to output path\necho $HOSTNAME > /tmp/podname\n\necho File contents...\n \nbase64 -d > /config/migration_services.yaml_ << EOF\n{{=toBase64(inputs.parameters.configContents)}}\nEOF\n\ncat /config/migration_services.yaml_ |\njq -f workflowConfigToServicesConfig.jq > /config/migration_services.yaml\n\n. /etc/profile.d/venv.sh\nsource /.venv/bin/activate\n\necho file dump\necho ---\nexport MIGRATION_USE_SERVICES_YAML_CONFIG=true\ncat /config/migration_services.yaml\necho ---\n\n{{inputs.parameters.command}}\n"
+            "\nset -e -x\n\n# Save pod name to output path\necho $HOSTNAME > /tmp/podname\n\necho File contents...\n \nbase64 -d > /config/migration_services.yaml_ << EOF\n{{=toBase64(inputs.parameters.configContents)}}\nEOF\n\ncat /config/migration_services.yaml_ |\njq -f workflowConfigToServicesConfig.jq > /config/migration_services.yaml\n\necho file dump\necho ---\nexport MIGRATION_USE_SERVICES_YAML_CONFIG=true\ncat /config/migration_services.yaml\necho ---\n\n{{inputs.parameters.command}}\n"
           ]
         },
         "metadata": {
@@ -177,20 +177,26 @@
             "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
             "migrations.opensearch.org/from-snapshot-migration": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}",
             "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}"
+          },
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
           }
         },
         "outputs": {
           "parameters": [
             {
-              "name": "statusOutput",
-              "valueFrom": {
-                "path": "/tmp/status-output.txt"
-              }
-            },
-            {
               "name": "overriddenPhase",
               "valueFrom": {
                 "path": "/tmp/phase-output.txt"
+              }
+            }
+          ],
+          "artifacts": [
+            {
+              "name": "statusOutput",
+              "path": "/tmp/status-output.txt",
+              "archive": {
+                "none": {}
               }
             }
           ]

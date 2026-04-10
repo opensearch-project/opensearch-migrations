@@ -4,7 +4,7 @@
 #
 # Version-locked list of ALL container images and helm charts required by the
 # Migration Assistant. Includes production AND development/optional charts.
-# Used by mirror-to-ecr.sh and generate-private-ecr-values.sh.
+# Used by mirrorToEcr.sh and generatePrivateEcrValues.sh.
 #
 # Discovered via: helm template on each chart + runtime image analysis.
 # Update this file when chart versions change.
@@ -14,7 +14,7 @@
 CHARTS="
 cert-manager|1.17.2|https://charts.jetstack.io
 strimzi-kafka-operator|0.50.0|https://strimzi.io/charts/
-argo-workflows|0.47.1|https://argoproj.github.io/argo-helm
+argo-workflows|1.0.5|https://argoproj.github.io/argo-helm
 fluent-bit|0.49.0|https://fluent.github.io/helm-charts
 kube-prometheus-stack|72.0.0|https://prometheus-community.github.io/helm-charts
 etcd-operator|0.4.2|oci://ghcr.io/aenix-io/charts
@@ -22,7 +22,10 @@ opentelemetry-operator|0.86.4|https://open-telemetry.github.io/opentelemetry-hel
 localstack|0.6.23|https://localstack.github.io/helm-charts
 grafana|8.15.0|https://grafana.github.io/helm-charts
 jaeger|3.2.0|https://jaegertracing.github.io/helm-charts
-kyverno|3.5.2|https://kyverno.github.io/kyverno/
+kyverno|3.7.1|https://kyverno.github.io/kyverno/
+aws-privateca-issuer|v1.4.0|https://cert-manager.github.io/aws-privateca-issuer
+acmpca-chart|1.2.2|oci://public.ecr.aws/aws-controllers-k8s
+cloudwatch-chart|1.4.2|oci://public.ecr.aws/aws-controllers-k8s
 "
 
 # ALL container images required for deployment.
@@ -34,10 +37,13 @@ quay.io/jetstack/cert-manager-cainjector:v1.17.2
 quay.io/jetstack/cert-manager-startupapicheck:v1.17.2
 
 # --- aws-privateca-issuer ---
-public.ecr.aws/cert-manager/aws-privateca-issuer:v1.4.0
+public.ecr.aws/k1n1h4h4/cert-manager-aws-privateca-issuer:v1.4.0
 
 # --- ack-acmpca-controller ---
-public.ecr.aws/aws-controllers-k8s/acmpca-controller:1.0.16
+public.ecr.aws/aws-controllers-k8s/acmpca-controller:1.2.2
+
+# --- ack-cloudwatch-controller ---
+public.ecr.aws/aws-controllers-k8s/cloudwatch-controller:1.4.2
 
 # --- strimzi (operator + runtime images) ---
 quay.io/strimzi/operator:0.50.0
@@ -49,9 +55,11 @@ quay.io/strimzi/maven-builder:0.50.0
 quay.io/strimzi/buildah:0.50.0
 
 # --- argo-workflows ---
-quay.io/argoproj/workflow-controller:v3.7.9
-quay.io/argoproj/argocli:v3.7.9
-quay.io/argoproj/argoexec:v3.7.9
+# Keep in sync with values.yaml charts.argo-workflows and
+# orchestrationSpecs/packages/argo-workflow-builders/tests/integ/infra/argoCluster.ts
+quay.io/argoproj/workflow-controller:v4.0.3
+quay.io/argoproj/argocli:v4.0.3
+quay.io/argoproj/argoexec:v4.0.3
 
 # --- fluent-bit ---
 cr.fluentbit.io/fluent/fluent-bit:4.0.1
@@ -87,14 +95,17 @@ mirror.gcr.io/jaegertracing/jaeger-cassandra-schema:1.53.0
 mirror.gcr.io/library/cassandra:3.11.6
 
 # --- kyverno ---
-reg.kyverno.io/kyverno/kyverno:v1.15.2
-reg.kyverno.io/kyverno/kyvernopre:v1.15.2
-reg.kyverno.io/kyverno/background-controller:v1.15.2
-reg.kyverno.io/kyverno/cleanup-controller:v1.15.2
-reg.kyverno.io/kyverno/reports-controller:v1.15.2
-reg.kyverno.io/kyverno/kyverno-cli:v1.15.2
-registry.k8s.io/kubectl:v1.32.7
-mirror.gcr.io/library/busybox:1.35
+reg.kyverno.io/kyverno/kyverno:v1.17.1
+reg.kyverno.io/kyverno/kyvernopre:v1.17.1
+reg.kyverno.io/kyverno/background-controller:v1.17.1
+reg.kyverno.io/kyverno/cleanup-controller:v1.17.1
+reg.kyverno.io/kyverno/reports-controller:v1.17.1
+reg.kyverno.io/kyverno/kyverno-cli:v1.17.1
+ghcr.io/kyverno/readiness-checker:v0.1.0
+registry.k8s.io/kubectl:v1.34.3
+
+# --- argo-workflows CRD upgrade job ---
+registry.k8s.io/kubectl:v1.35.3
 
 # --- localstack ---
 mirror.gcr.io/localstack/localstack:4.3.0

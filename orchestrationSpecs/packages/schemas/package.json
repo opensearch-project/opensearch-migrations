@@ -14,6 +14,7 @@
     "build": "echo 'schemas: no build step needed (exports .ts directly)'",
     "type-check": "tsc --noEmit",
     "build-unified-schema": "node --import tsx src/buildUnifiedSchema.ts",
+    "rebuild-kafka-broker-config-schema": "node --import tsx src/generateKafkaBrokerConfigSchema.ts",
     "schema": "tsx src/showUserSchema.ts",
     "argo-schema": "tsx src/showArgoSchema.ts",
     "make-sample": "tsx src/makeSample.ts",
@@ -28,6 +29,7 @@
   },
   "devDependencies": {
     "@types/jest": "*",
-    "expect-type": "*"
+    "expect-type": "*",
+    "testcontainers": "^11.12.0"
   }
 }

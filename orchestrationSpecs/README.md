@@ -52,6 +52,11 @@ full-migration workflow, run
 
 `npm run schema`
 
+For the end-to-end validation and transformation flow, including how the
+console entrypoint, `MigrationConfigTransformer`, unified schema loading, and
+Kafka/Strimzi validation fit together, see
+[ConfigValidationFile.md](./ConfigValidationFlow.md).
+
 The migration config is validated against a single unified JSON Schema.  That
 schema starts with the orchestration config shape from
 `packages/schemas/src/userSchemas.ts`, then splices in selected Strimzi schema
@@ -288,7 +293,7 @@ npm run make-templates -- --outputDirectory ${PWD}/k8sResources && \
 for file in k8sResources/*.yaml; do kc delete -f "$file" --ignore-not-found=true; done && \
 kubectl create -f k8sResources && \
 kubectl delete workflow migration-workflow ; \
-./packages/config-processor/bundled/createMigrationWorkflowFromUserConfiguration.sh ./packages/config-processor/scripts/samples/proxyWithoutTls.wf.yaml
+./packages/config-processor/bundled/createMigrationWorkflowFromUserConfiguration.sh ./packages/config-processor/scripts/samples/fullMigrationWithTraffic.wf.yaml
 ```
 
 I'll add something to handle `kc create -f createMigration.yaml` once I wire up

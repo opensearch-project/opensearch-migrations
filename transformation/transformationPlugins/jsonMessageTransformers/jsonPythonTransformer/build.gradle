@@ -1,0 +1,21 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+    id 'org.graalvm.python' version '25.0.2'
+}
+
+graalPy {
+    packages = []
+}
+
+dependencies {
+    api project(':transformation:transformationPlugins:jsonMessageTransformers:jsonGraalTransformerBase')
+
+    implementation libs.slf4j.api
+    implementation libs.polyglot.python.community
+    implementation libs.python.embedding
+
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testRuntimeOnly libs.junit.jupiter.engine
+}

@@ -10,7 +10,7 @@ import {
     UniqueNameConstraintAtDeclaration,
     UniqueNameConstraintOutsideDeclaration
 } from "./scopeConstraints";
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
+import {InputParametersRecord, OutputArtifactsRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {PlainObject} from "./plainObject";
 import {AllowLiteralOrExpression, BaseExpression, isExpression, toExpression} from "./expression";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
@@ -117,7 +117,8 @@ export abstract class TemplateBodyBuilder<
         protected readonly bodyScope: BodyScope,
         public readonly outputsScope: OutputParamsScope,
         protected readonly synchronization: SynchronizationConfig | undefined,
-        protected readonly rebind: TemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext>
+        protected readonly rebind: TemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext>,
+        public readonly outputArtifacts: OutputArtifactsRecord = {}
     ) {}
 
     addOutputs<NewOutputScope extends OutputParametersRecord>(
@@ -222,6 +223,7 @@ export abstract class TemplateBodyBuilder<
         return {
             inputs: this.inputsScope,
             outputs: this.outputsScope,
+            outputArtifacts: this.outputArtifacts,
             body: this.getBody(),
             synchronization: this.synchronization
         };
@@ -261,13 +263,14 @@ export abstract class RetryableTemplateBodyBuilder<
         outputsScope: OutputParamsScope,
         protected readonly retryParameters: RetryParameters,
         synchronization: SynchronizationConfig | undefined,
-        protected readonly retryableRebind: RetryableTemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext>
+        protected readonly retryableRebind: RetryableTemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext>,
+        outputArtifacts: OutputArtifactsRecord = {}
     ) {
         const baseRebind: TemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext> = (
             ctx, inputs, body, outputs, sync
         ) => retryableRebind(ctx, inputs, body, outputs, this.retryParameters, sync) as any;
         
-        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, synchronization, baseRebind);
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, synchronization, baseRebind, outputArtifacts);
     }
 
     public addRetryParameters(retryParameters: GenericScope) {
@@ -296,6 +299,7 @@ export abstract class RetryableTemplateBodyBuilder<
         return {
             inputs: this.inputsScope,
             outputs: this.outputsScope,
+            outputArtifacts: this.outputArtifacts,
             retryStrategy: this.retryParameters,
             body: this.getBody(),
             synchronization: this.synchronization

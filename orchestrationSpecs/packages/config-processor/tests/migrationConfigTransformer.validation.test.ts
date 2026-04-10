@@ -1,4 +1,5 @@
-import { MigrationConfigTransformer } from '../src/migrationConfigTransformer';
+import { MigrationConfigTransformer, normalizeUserConfig } from '../src/migrationConfigTransformer';
+import { OVERALL_MIGRATION_CONFIG } from '@opensearch-migrations/schemas';
 
 describe('MigrationConfigTransformer validation', () => {
     let transformer: MigrationConfigTransformer;
@@ -30,8 +31,7 @@ describe('MigrationConfigTransformer validation', () => {
                     "snapshots": {
                         "snap1": {
                             "config": {
-                                "createSnapshotConfig": {},
-                                "requiredForCompleteMigration": true
+                                "createSnapshotConfig": {}
                             },
                             "repoName": "default"
                         }
@@ -150,6 +150,20 @@ describe('MigrationConfigTransformer validation', () => {
         }).not.toThrow();
     });
 
+    it('should normalize workflow-managed Kafka auth and drop empty kafkaTopic placeholders before AJV validation', () => {
+        const parsed = OVERALL_MIGRATION_CONFIG.parse(baseConfig);
+        const normalized = normalizeUserConfig(parsed);
+
+        expect(normalized.kafkaClusterConfiguration.default).toMatchObject({
+            autoCreate: {
+                auth: {
+                    type: "scram-sha-512"
+                }
+            }
+        });
+        expect(normalized.traffic?.proxies?.proxy1).not.toHaveProperty("kafkaTopic");
+    });
+
     it('should derive managed Kafka auth profile for auto-created SCRAM clusters', async () => {
         const configWithScramKafka = {
             ...baseConfig,
@@ -181,7 +195,7 @@ describe('MigrationConfigTransformer validation', () => {
         expect(result.kafkaClusters?.[0]).toMatchObject({
             name: "default",
             config: {
-                auth: {type: "none"},
+                auth: {type: "scram-sha-512"},
                 nodePoolSpecOverrides: {
                     replicas: 1,
                     roles: ["controller", "broker"],
@@ -235,6 +249,34 @@ describe('MigrationConfigTransformer validation', () => {
         expect(() => {
             transformer.validateInput(configWithInvalidExistingScramKafka);
         }).toThrow(/existing/);
+    });
+
+    it('should report an unknown Kafka broker key without union noise', () => {
+        const configWithBogusKafkaKey = {
+            ...baseConfig,
+            kafkaClusterConfiguration: {
+                default: {
+                    autoCreate: {
+                        clusterSpecOverrides: {
+                            kafka: {
+                                config: {
+                                    "auto.create.topics.enable": false,
+                                    "bogus.inner.key": true,
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        expect(() => {
+            transformer.validateInput(configWithBogusKafkaKey);
+        }).toThrow(/Kafka broker config 'bogus\.inner\.key' is not part of the pinned Kafka 4\.2\.0 broker config catalog/);
+
+        expect(() => {
+            transformer.validateInput(configWithBogusKafkaKey);
+        }).not.toThrow(/must have required property 'existing'|must match a schema in anyOf/);
     });
 
     it('should attach a derived proxy route onto the transformed source config', async () => {

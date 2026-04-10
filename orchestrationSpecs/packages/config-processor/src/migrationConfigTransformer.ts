@@ -5,7 +5,7 @@ import {
     OVERALL_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
-    ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, CAPTURE_CONFIG,
+    ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
     GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
@@ -16,6 +16,9 @@ import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG>;
+export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration"> & {
+    kafkaClusterConfiguration: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>;
+};
 
 /** Kafka version deployed by auto-created clusters. Not user-configurable. */
 const KAFKA_VERSION = "4.0.0";
@@ -92,17 +95,6 @@ export function setNamesInUserConfig(userConfig: InputConfig): InputConfig {
     };
 }
 
-function buildUnifiedValidationInput(rawData: unknown, parsedData: InputConfig): unknown {
-    if (typeof rawData !== "object" || rawData === null || Array.isArray(rawData)) {
-        return parsedData;
-    }
-    return {
-        ...rawData,
-        kafkaClusterConfiguration: parsedData.kafkaClusterConfiguration,
-        snapshotMigrationConfigs: parsedData.snapshotMigrationConfigs,
-    };
-}
-
 function makeProxyServiceEndpoint(proxyName: string, listenPort: number, hasTls: boolean): string {
     return `${hasTls ? "https" : "http"}://${proxyName}:${listenPort}`;
 }
@@ -173,6 +165,84 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
     }
 }
 
+const DEFAULT_AUTO_CREATE_CONFIG: z.infer<typeof KAFKA_CLUSTER_CONFIG> = { autoCreate: {} };
+const DEFAULT_WORKFLOW_MANAGED_KAFKA_AUTH = {type: "scram-sha-512" as const};
+
+function resolveWorkflowManagedKafkaAuth(
+    cluster: z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>}
+) {
+    return cluster.autoCreate.auth ?? DEFAULT_WORKFLOW_MANAGED_KAFKA_AUTH;
+}
+
+function normalizeKafkaClusterConfig(
+    cluster: z.infer<typeof KAFKA_CLUSTER_CONFIG>
+): z.infer<typeof KAFKA_CLUSTER_CONFIG> {
+    // Keep the cluster in the user-config schema family while resolving
+    // workflow-managed defaults into an explicit canonical form.
+    if ("existing" in cluster) {
+        return cluster;
+    }
+
+    return {
+        autoCreate: {
+            ...cluster.autoCreate,
+            auth: resolveWorkflowManagedKafkaAuth(
+                cluster as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>}
+            ),
+        }
+    };
+}
+
+function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["traffic"] {
+    // Drop user-schema sentinel placeholders that are equivalent to omission so
+    // AJV validates the canonical user config rather than Zod's empty-string defaults.
+    if (!traffic) {
+        return traffic;
+    }
+
+    const normalizedProxies: NonNullable<InputConfig["traffic"]>["proxies"] = {};
+    for (const [key, proxy] of Object.entries(traffic.proxies ?? {})) {
+        normalizedProxies[key] = proxy.kafkaTopic === ""
+            ? (({kafkaTopic, ...rest}) => rest)(proxy)
+            : proxy;
+    }
+
+    return {
+        ...traffic,
+        proxies: normalizedProxies,
+    };
+}
+
+export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConfig {
+    const namedConfig = setNamesInUserConfig(userConfig);
+    return {
+        ...namedConfig,
+        traffic: normalizeTrafficConfig(namedConfig.traffic),
+        kafkaClusterConfiguration: Object.fromEntries(
+            Object.entries(namedConfig.kafkaClusterConfiguration ?? {}).map(([key, cluster]) => [
+                key,
+                normalizeKafkaClusterConfig(cluster)
+            ])
+        ),
+    };
+}
+
+/** Resolve kafkaClusterConfiguration, auto-injecting autoCreate entries only when no explicit kafka config was provided. */
+function resolveKafkaClusters(userConfig: { kafkaClusterConfiguration?: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>, traffic?: { proxies?: Record<string, { kafka?: string }> } }) {
+    const explicit = userConfig.kafkaClusterConfiguration ?? {};
+    if (Object.keys(explicit).length > 0) {
+        return explicit;
+    }
+    const clusters: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>> = {};
+    for (const proxy of Object.values(userConfig.traffic?.proxies || {})) {
+        const key = proxy.kafka ?? "default";
+        if (!(key in clusters)) {
+            clusters[key] = DEFAULT_AUTO_CREATE_CONFIG;
+        }
+    }
+    return clusters;
+}
+
 /** Build a NAMED_KAFKA_CLIENT_CONFIG from a kafka cluster reference and topic. */
 function buildKafkaClientConfig(
     kafkaClusterKey: string,
@@ -199,7 +269,7 @@ function buildKafkaClientConfig(
             label: kafkaClusterKey
         };
     }
-    const auth = cluster.autoCreate.auth ?? {type: "none" as const};
+    const auth = resolveWorkflowManagedKafkaAuth(cluster as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>});
     const listenerName = auth.type === "scram-sha-512" ? "tls" : "plain";
     const listenerPort = auth.type === "scram-sha-512" ? 9093 : 9092;
     // autoCreate — Strimzi creates a deterministic bootstrap service for the selected internal listener.
@@ -230,25 +300,28 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         super(OVERALL_MIGRATION_CONFIG, ARGO_MIGRATION_CONFIG);
     }
 
-    validateInput(data: unknown): InputConfig {
-        // First pass: normal schema validation (including refinements)
-        const obj = setNamesInUserConfig(super.validateInput(data));
+    validateInput(data: unknown): NormalizedUserConfig {
+        // First pass: zod schema validation (including refinements)
+        const parsed = super.validateInput(data);
+        const normalized = normalizeUserConfig(parsed);
 
-        // Second pass: unified schema validation for embedded Strimzi passthrough sections
-        validateInputAgainstUnifiedSchema(buildUnifiedValidationInput(data, obj));
+        // Second pass: unified schema validation against the normalized user config.
+        // This stays in the user-config schema family and avoids mixing raw input
+        // with selectively patched normalized subtrees.
+        validateInputAgainstUnifiedSchema(normalized);
 
-        // Second pass: check for extra keys
+        // Third pass: check for extra keys
         validateNoExtraKeys(data, OVERALL_MIGRATION_CONFIG);
         
-        return obj;
+        return normalized;
     }
 
-    async transform(input: InputConfig): Promise<OutputConfig> {
+    async transform(input: NormalizedUserConfig): Promise<OutputConfig> {
         const processedInput = await this.preprocessInput(input);
-        return this.transformSync(processedInput);
+        return await this.transformSync(processedInput);
     }
 
-    private async preprocessInput(input: InputConfig): Promise<InputConfig> {
+    private async preprocessInput(input: NormalizedUserConfig): Promise<NormalizedUserConfig> {
         const processedSourceClusters = {...input.sourceClusters};
 
         for (const [name, cluster] of Object.entries(input.sourceClusters)) {
@@ -266,11 +339,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         return { ...input, sourceClusters: processedSourceClusters };
     }
 
-    private transformSync(userConfig: InputConfig): OutputConfig {
+    private async transformSync(userConfig: NormalizedUserConfig): Promise<OutputConfig> {
         const kafkaClusters = this.buildKafkaClusters(userConfig);
         const proxies = this.buildProxies(userConfig);
         const snapshots = this.buildSnapshots(userConfig);
-        const snapshotMigrations = this.buildSnapshotMigrations(userConfig);
+        const snapshotMigrations = await this.buildSnapshotMigrations(userConfig);
         const trafficReplays = this.buildTrafficReplays(userConfig);
 
         const output = {
@@ -290,8 +363,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Collect auto-created kafka clusters with their aggregated topics from proxies. */
-    private buildKafkaClusters(userConfig: InputConfig) {
-        const kafkaClusters = userConfig.kafkaClusterConfiguration ?? {};
+    private buildKafkaClusters(userConfig: NormalizedUserConfig) {
+        const kafkaClusters = resolveKafkaClusters(userConfig);
         // Aggregate topics per kafka cluster from proxies
         const topicsByCluster = new Map<string, Set<string>>();
         for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
@@ -305,14 +378,17 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             .map(([name, config]) => ({
                 name,
                 version: KAFKA_VERSION,
-                config: (config as any).autoCreate,
+                config: {
+                    ...(config as any).autoCreate,
+                    auth: resolveWorkflowManagedKafkaAuth(config as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>}),
+                },
                 topics: [...(topicsByCluster.get(name) ?? [])]
             }));
     }
 
     /** Denormalize each proxy with source endpoint and kafka client config. */
-    private buildProxies(userConfig: InputConfig) {
-        const kafkaClusters = userConfig.kafkaClusterConfiguration ?? {};
+    private buildProxies(userConfig: NormalizedUserConfig) {
+        const kafkaClusters = resolveKafkaClusters(userConfig);
         return Object.entries(userConfig.traffic?.proxies || {}).map(([proxyName, proxy]) => {
             const sourceCluster = userConfig.sourceClusters[proxy.source];
             if (!sourceCluster) {
@@ -329,7 +405,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         });
     }
 
-    private getSourceAttachedProxy(userConfig: InputConfig, sourceName: string) {
+    private getSourceAttachedProxy(userConfig: NormalizedUserConfig, sourceName: string) {
         const matchingProxies = Object.entries(userConfig.traffic?.proxies || {})
             .filter(([_, proxy]) => proxy.source === sourceName);
 
@@ -354,7 +430,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Build snapshot creation configs grouped by source cluster. */
-    private buildSnapshots(userConfig: InputConfig) {
+    private buildSnapshots(userConfig: NormalizedUserConfig) {
         // Build a map of source → proxy names for dependsOnProxySetups
         const proxyNamesBySource = new Map<string, string[]>();
         for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
@@ -393,7 +469,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
 
             if (createConfigs.length > 0) {
-                const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
+                const { snapshotInfo: _si, ...restOfSource } = sourceCluster;
                 const proxy = this.getSourceAttachedProxy(userConfig, sourceName);
                 results.push({
                     createSnapshotConfig: createConfigs,
@@ -409,12 +485,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Build snapshot migration configs from snapshotMigrationConfigs + perSnapshotConfig. */
-    private buildSnapshotMigrations(userConfig: InputConfig) {
+    private async buildSnapshotMigrations(userConfig: NormalizedUserConfig) {
         const results: any[] = [];
 
         for (const mc of userConfig.snapshotMigrationConfigs) {
             const { fromSource, toTarget, perSnapshotConfig } = mc;
-            if (!perSnapshotConfig) continue;
 
             const sourceCluster = userConfig.sourceClusters[fromSource];
             const targetCluster = userConfig.targetClusters[toTarget];
@@ -422,10 +497,27 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Migration references unknown target cluster '${toTarget}'`);
             }
 
-            const { enabled: _e2, ...restOfTarget } = targetCluster;
-            const { snapshotInfo: _si, enabled: _e1, ...restOfSource } = sourceCluster;
+            // When perSnapshotConfig is not provided, auto-generate it from snapshotInfo.snapshots
+            // so the workflow creates/waits for snapshots the same way for both ES and Solr sources.
+            const effectivePerSnapshotConfig = perSnapshotConfig ?? (
+                sourceCluster.snapshotInfo?.snapshots
+                    ? Object.fromEntries(
+                        Object.keys(sourceCluster.snapshotInfo.snapshots).map(snapName => [
+                            snapName,
+                            [USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG.parse({
+                                metadataMigrationConfig: {},
+                                documentBackfillConfig: {},
+                            })]
+                        ])
+                    )
+                    : undefined
+            );
 
-            for (const [snapshotName, migrations] of Object.entries(perSnapshotConfig)) {
+            if (!effectivePerSnapshotConfig) continue;
+
+            const { snapshotInfo: _si, ...restOfSource } = sourceCluster;
+
+            for (const [snapshotName, migrations] of Object.entries(effectivePerSnapshotConfig)) {
                 const snapshotDef = sourceCluster.snapshotInfo?.snapshots[snapshotName];
                 if (!snapshotDef) {
                     throw new Error(`Migration references snapshot '${snapshotName}' not defined in source '${fromSource}'`);
@@ -445,7 +537,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     migrations: autoLabelMigrations(migrations),
                     sourceVersion: sourceCluster.version || "",
                     sourceLabel: fromSource,
-                    targetConfig: { ...restOfTarget, label: toTarget },
+                    targetConfig: { ...targetCluster, label: toTarget },
                     snapshotConfig: {
                         label: snapshotName,
                         ...(repoConfig ? {
@@ -462,8 +554,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Build traffic replay configs by resolving proxy → kafka chain. */
-    private buildTrafficReplays(userConfig: InputConfig) {
-        const kafkaClusters = userConfig.kafkaClusterConfiguration ?? {};
+    private buildTrafficReplays(userConfig: NormalizedUserConfig) {
+        const kafkaClusters = resolveKafkaClusters(userConfig);
         const proxies = userConfig.traffic?.proxies;
 
         return Object.entries(userConfig.traffic?.replayers || {}).map(([_name, replayer]) => {
@@ -478,14 +570,13 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
 
             const topic = proxy.kafkaTopic || replayer.fromProxy;
-            const { enabled: _e3, ...restOfTarget } = targetCluster;
             const replayerConfig = ARGO_REPLAYER_OPTIONS.parse(replayer.replayerConfig ?? {});
 
             return {
                 fromProxy: replayer.fromProxy,
                 kafkaClusterName: proxy.kafka ?? "default",
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
-                toTarget: { ...restOfTarget, label: replayer.toTarget },
+                toTarget: { ...targetCluster, label: replayer.toTarget },
                 replayerConfig,
                 ...(replayer.dependsOnSnapshotMigrations ? { dependsOnSnapshotMigrations: replayer.dependsOnSnapshotMigrations } : {}),
             };

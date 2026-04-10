@@ -49,7 +49,8 @@ export async function startCluster(): Promise<void> {
   
   // Download Argo manifest on the host and copy into the container
   // (K3s BusyBox wget doesn't support HTTPS)
-  const argoVersion = "v4.0.0";
+  // Keep in sync with values.yaml charts.argo-workflows and privateEcrManifest.sh
+  const argoVersion = "v4.0.3";
   const manifestUrl = `https://github.com/argoproj/argo-workflows/releases/download/${argoVersion}/quick-start-minimal.yaml`;
   const { execSync } = await import("child_process");
   const tempFile = "/tmp/argo-install-manifest.yaml";

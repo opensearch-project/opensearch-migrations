@@ -31,6 +31,7 @@ record TestCaseDefinition(
     String method,
     String requestBody,
     String requestPath,
+    List<RequestStep> requestSequence,
     List<AssertionRule> assertionRules,
     Map<String, Object> solrSchema,
     Map<String, Object> opensearchMapping,
@@ -39,5 +40,9 @@ record TestCaseDefinition(
 ) {
     /** A per-path assertion rule controlling how diffs are handled. */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record AssertionRule(String path, String rule, String expected, String reason) {}
+    record AssertionRule(String path, String rule, String expected, Integer skip, String reason) {}
+
+    /** A step in a multi-request test sequence (e.g. cursor pagination page 2, 3, ...). */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record RequestStep(String requestPath, List<AssertionRule> assertionRules) {}
 }

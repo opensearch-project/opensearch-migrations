@@ -1,8 +1,6 @@
 import {
-    AllowLiteralOrExpression,
     BaseExpression,
     expr,
-    INLINE,
     INTERNAL,
     makeDirectTypeProxy,
     makeStringTypeProxy,
@@ -11,7 +9,7 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
-import {KAFKA_CLUSTER_CREATION_CONFIG, NAMED_KAFKA_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
+import {KAFKA_CLUSTER_CREATION_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
@@ -22,28 +20,45 @@ function getKafkaAuthType(config: BaseExpression<Serialized<KafkaConfig>>) {
     return expr.dig(expr.deserializeRecord(config), ["auth", "type"], "none");
 }
 
+function makePlainListener() {
+    return expr.makeDict({
+        name: "plain",
+        port: 9092,
+        type: "internal",
+        tls: false
+    });
+}
+
+function makeTlsListener() {
+    return expr.makeDict({
+        name: "tls",
+        port: 9093,
+        type: "internal",
+        tls: true
+    });
+}
+
+function makeScramListener() {
+    return expr.makeDict({
+        name: "tls",
+        port: 9093,
+        type: "internal",
+        tls: true,
+        authentication: expr.makeDict({type: "scram-sha-512"})
+    });
+}
+
 function makeManagedKafkaListeners(authType: BaseExpression<string>) {
     return expr.ternary(
         expr.equals(authType, expr.literal("scram-sha-512")),
-        expr.literal([
-            {
-                name: "tls",
-                port: 9093,
-                type: "internal",
-                tls: true,
-                authentication: {type: "scram-sha-512"}
-            }
-        ]),
-        expr.literal([
-            {name: "plain", port: 9092, type: "internal", tls: false},
-            {name: "tls", port: 9093, type: "internal", tls: true}
-        ])
+        expr.toArray(makeScramListener()),
+        expr.toArray(makePlainListener(), makeTlsListener())
     );
 }
 
 function makeManagedKafkaUserManifest(args: {
     clusterName: BaseExpression<string>,
-    clusterConfig: BaseExpression<Serialized<KafkaConfig>>,
+    userSpec: BaseExpression<Serialized<Record<string, any>>>,
     workflowUid: BaseExpression<string>,
 }): Record<string, any> {
     return {
@@ -56,20 +71,15 @@ function makeManagedKafkaUserManifest(args: {
                 "workflows.argoproj.io/run-uid": makeStringTypeProxy(args.workflowUid)
             }
         },
-        spec: makeDirectTypeProxy(expr.makeDict({
-            authentication: expr.makeDict({
-                type: expr.dig(expr.deserializeRecord(args.clusterConfig), ["auth", "type"], "none")
-            })
-        }))
+        spec: makeDirectTypeProxy(args.userSpec as any) as any
     };
 }
 
 function makeDeployKafkaNodePool(args: {
     clusterName: BaseExpression<string>,
-    clusterConfig: BaseExpression<Serialized<KafkaConfig>>,
+    nodePoolSpec: BaseExpression<Serialized<Record<string, any>>>,
     workflowUid: BaseExpression<string>,
 }): Record<string, any> {
-    const config = expr.deserializeRecord(args.clusterConfig);
     return {
         apiVersion: "kafka.strimzi.io/v1",
         kind: "KafkaNodePool",
@@ -80,19 +90,57 @@ function makeDeployKafkaNodePool(args: {
                 "workflows.argoproj.io/run-uid": makeStringTypeProxy(args.workflowUid)
             }
         },
-        spec: makeDirectTypeProxy(expr.dig(config, ["nodePoolSpecOverrides"], expr.literal({})))
+        spec: makeDirectTypeProxy(args.nodePoolSpec as any) as any
     };
 }
 
-function makeDeployKafkaClusterKraftNoAuthManifest(args: {
-    clusterName: BaseExpression<string>,
+function makeManagedKafkaSpecNoAuth(args: {
     version: BaseExpression<string>,
     clusterConfig: BaseExpression<Serialized<KafkaConfig>>,
+}) {
+    const config = expr.deserializeRecord(args.clusterConfig);
+    const kafkaSpecOverrides = expr.dig(config, ["clusterSpecOverrides", "kafka"], expr.makeDict({}));
+
+    return expr.mergeDicts(
+        expr.makeDict({
+            version: args.version,
+            metadataVersion: "4.0-IV3",
+            listeners: expr.toArray(makePlainListener(), makeTlsListener())
+        }),
+        kafkaSpecOverrides
+    );
+}
+
+function makeManagedKafkaSpecScram(args: {
+    version: BaseExpression<string>,
+    clusterConfig: BaseExpression<Serialized<KafkaConfig>>,
+}) {
+    const config = expr.deserializeRecord(args.clusterConfig);
+    const kafkaSpecOverrides = expr.dig(config, ["clusterSpecOverrides", "kafka"], expr.makeDict({}));
+
+    return expr.mergeDicts(
+        expr.makeDict({
+            version: args.version,
+            metadataVersion: "4.0-IV3",
+            listeners: expr.toArray(makeScramListener())
+        }),
+        kafkaSpecOverrides
+    );
+}
+
+function makeManagedKafkaUserSpec(clusterConfig: BaseExpression<Serialized<KafkaConfig>>) {
+    return expr.makeDict({
+        authentication: expr.makeDict({
+            type: expr.dig(expr.deserializeRecord(clusterConfig), ["auth", "type"], "none")
+        })
+    });
+}
+
+function makeDeployKafkaClusterKraftManifest(args: {
+    clusterName: BaseExpression<string>,
+    kafkaSpec: BaseExpression<Serialized<Record<string, any>>>,
     workflowUid: BaseExpression<string>,
 }): Record<string, any> {
-    const config = expr.deserializeRecord(args.clusterConfig);
-    const kafkaSpecOverrides = expr.dig(config, ["clusterSpecOverrides", "kafka"], expr.literal({}));
-
     return {
         apiVersion: "kafka.strimzi.io/v1",
         kind: "Kafka",
@@ -107,55 +155,7 @@ function makeDeployKafkaClusterKraftNoAuthManifest(args: {
             }
         },
         spec: {
-            kafka: makeDirectTypeProxy(expr.mergeDicts(
-                expr.makeDict({
-                    version: args.version,
-                    metadataVersion: "4.0-IV3",
-                    listeners: expr.literal([
-                        {name: "plain", port: 9092, type: "internal", tls: false},
-                        {name: "tls", port: 9093, type: "internal", tls: true}
-                    ])
-                }),
-                kafkaSpecOverrides
-            )),
-            entityOperator: {topicOperator: {}, userOperator: {}}
-        }
-    };
-}
-
-function makeDeployKafkaClusterKraftScramManifest(args: {
-    clusterName: BaseExpression<string>,
-    version: BaseExpression<string>,
-    clusterConfig: BaseExpression<Serialized<KafkaConfig>>,
-    workflowUid: BaseExpression<string>,
-}): Record<string, any> {
-    const config = expr.deserializeRecord(args.clusterConfig);
-    const kafkaSpecOverrides = expr.dig(config, ["clusterSpecOverrides", "kafka"], expr.literal({}));
-
-    return {
-        apiVersion: "kafka.strimzi.io/v1",
-        kind: "Kafka",
-        metadata: {
-            name: args.clusterName,
-            labels: {
-                "workflows.argoproj.io/run-uid": makeStringTypeProxy(args.workflowUid)
-            },
-            annotations: {
-                "strimzi.io/node-pools": "enabled",
-                "strimzi.io/kraft": "enabled"
-            }
-        },
-        spec: {
-            kafka: makeDirectTypeProxy(expr.mergeDicts(
-                expr.makeDict({
-                    version: args.version,
-                    metadataVersion: "4.0-IV3",
-                    listeners: expr.literal([
-                        {name: "tls", port: 9093, type: "internal", tls: true, authentication: {type: "scram-sha-512"}}
-                    ])
-                }),
-                kafkaSpecOverrides
-            )),
+            kafka: makeDirectTypeProxy(args.kafkaSpec as any) as any,
             entityOperator: {topicOperator: {}, userOperator: {}}
         }
     };
@@ -169,9 +169,9 @@ function makeKafkaTopicManifest(args: {
     clusterName: BaseExpression<string>,
     topicName: BaseExpression<string>,
     workflowUid: BaseExpression<string>,
-    partitions: BaseExpression<number>,
-    replicas: BaseExpression<number>,
-    topicConfig: BaseExpression<Record<string, any>>,
+    partitions: BaseExpression<Serialized<number>>,
+    replicas: BaseExpression<Serialized<number>>,
+    topicConfig: BaseExpression<Serialized<Record<string, any>>>,
 }): Record<string, any> {
     return {
         apiVersion: "kafka.strimzi.io/v1",
@@ -186,7 +186,7 @@ function makeKafkaTopicManifest(args: {
         spec: {
             partitions: makeDirectTypeProxy(args.partitions),
             replicas: makeDirectTypeProxy(args.replicas),
-            config: makeDirectTypeProxy(args.topicConfig),
+            config: makeDirectTypeProxy(args.topicConfig as any) as any,
         }
     };
 }
@@ -205,7 +205,7 @@ export const SetupKafka = WorkflowBuilder.create({
 
     .addTemplate("deployKafkaNodePool", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addRequiredInput("nodePoolSpec", typeToken<Serialized<Record<string, any>>>())
         .addRequiredInput("workflowUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
@@ -213,7 +213,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 setOwnerReference: false,
                 manifest: makeDeployKafkaNodePool({
                     clusterName: b.inputs.clusterName,
-                    clusterConfig: b.inputs.clusterConfig,
+                    nodePoolSpec: b.inputs.nodePoolSpec,
                     workflowUid: b.inputs.workflowUid,
                 })
             }))
@@ -223,18 +223,16 @@ export const SetupKafka = WorkflowBuilder.create({
 
     .addTemplate("deployKafkaClusterKraftNoAuth", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("version", typeToken<string>())
-        .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addRequiredInput("kafkaSpec", typeToken<Serialized<Record<string, any>>>())
         .addRequiredInput("workflowUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
                 successCondition: "status.listeners",
-                manifest: makeDeployKafkaClusterKraftNoAuthManifest({
+                manifest: makeDeployKafkaClusterKraftManifest({
                     clusterName: b.inputs.clusterName,
-                    version: b.inputs.version,
-                    clusterConfig: b.inputs.clusterConfig,
+                    kafkaSpec: b.inputs.kafkaSpec,
                     workflowUid: b.inputs.workflowUid,
                 })
             }))
@@ -246,18 +244,16 @@ export const SetupKafka = WorkflowBuilder.create({
 
     .addTemplate("deployKafkaClusterKraftScram", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("version", typeToken<string>())
-        .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addRequiredInput("kafkaSpec", typeToken<Serialized<Record<string, any>>>())
         .addRequiredInput("workflowUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
                 successCondition: "status.listeners",
-                manifest: makeDeployKafkaClusterKraftScramManifest({
+                manifest: makeDeployKafkaClusterKraftManifest({
                     clusterName: b.inputs.clusterName,
-                    version: b.inputs.version,
-                    clusterConfig: b.inputs.clusterConfig,
+                    kafkaSpec: b.inputs.kafkaSpec,
                     workflowUid: b.inputs.workflowUid,
                 })
             }))
@@ -277,8 +273,10 @@ export const SetupKafka = WorkflowBuilder.create({
             .addStep("deployNoAuthCluster", INTERNAL, "deployKafkaClusterKraftNoAuth", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
-                    version: b.inputs.version,
-                    clusterConfig: b.inputs.clusterConfig,
+                    kafkaSpec: expr.recordToString(makeManagedKafkaSpecNoAuth({
+                        version: b.inputs.version,
+                        clusterConfig: b.inputs.clusterConfig,
+                    })),
                     workflowUid: b.inputs.workflowUid,
                 }),
                 {when: c => ({templateExp: expr.not(shouldCreateManagedKafkaUser(b.inputs.clusterConfig))})}
@@ -286,8 +284,10 @@ export const SetupKafka = WorkflowBuilder.create({
             .addStep("deployScramCluster", INTERNAL, "deployKafkaClusterKraftScram", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
-                    version: b.inputs.version,
-                    clusterConfig: b.inputs.clusterConfig,
+                    kafkaSpec: expr.recordToString(makeManagedKafkaSpecScram({
+                        version: b.inputs.version,
+                        clusterConfig: b.inputs.clusterConfig,
+                    })),
                     workflowUid: b.inputs.workflowUid,
                 }),
                 {when: c => ({templateExp: shouldCreateManagedKafkaUser(b.inputs.clusterConfig)})}
@@ -318,9 +318,9 @@ export const SetupKafka = WorkflowBuilder.create({
                     clusterName: b.inputs.clusterName,
                     topicName: b.inputs.topicName,
                     workflowUid: b.inputs.workflowUid,
-                    partitions: expr.deserializeRecord(b.inputs.partitions),
-                    replicas: expr.deserializeRecord(b.inputs.replicas),
-                    topicConfig: expr.deserializeRecord(b.inputs.topicConfig),
+                    partitions: b.inputs.partitions,
+                    replicas: b.inputs.replicas,
+                    topicConfig: b.inputs.topicConfig,
                 })
             }))
         .addJsonPathOutput("topicName", "{.status.topicName}", typeToken<string>())
@@ -329,7 +329,7 @@ export const SetupKafka = WorkflowBuilder.create({
 
     .addTemplate("createKafkaUser", t => t
         .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addRequiredInput("userSpec", typeToken<Serialized<Record<string, any>>>())
         .addRequiredInput("workflowUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
@@ -338,7 +338,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 successCondition: "status.conditions",
                 manifest: makeManagedKafkaUserManifest({
                     clusterName: b.inputs.clusterName,
-                    clusterConfig: b.inputs.clusterConfig,
+                    userSpec: b.inputs.userSpec,
                     workflowUid: b.inputs.workflowUid,
                 })
             }))
@@ -372,7 +372,11 @@ export const SetupKafka = WorkflowBuilder.create({
             .addStep("tryApply", INTERNAL, "deployKafkaNodePool", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
-                    clusterConfig: b.inputs.clusterConfig,
+                    nodePoolSpec: expr.recordToString(expr.dig(
+                        expr.deserializeRecord(b.inputs.clusterConfig),
+                        ["nodePoolSpecOverrides"],
+                        expr.makeDict({})
+                    )),
                     workflowUid: expr.getWorkflowValue("uid"),
                 }),
                 {continueOn: {failed: true}}
@@ -503,7 +507,7 @@ export const SetupKafka = WorkflowBuilder.create({
             .addStep("tryApply", INTERNAL, "createKafkaUser", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
-                    clusterConfig: b.inputs.clusterConfig,
+                    userSpec: expr.recordToString(makeManagedKafkaUserSpec(b.inputs.clusterConfig)),
                     workflowUid: expr.getWorkflowValue("uid"),
                 }),
                 {continueOn: {failed: true}}

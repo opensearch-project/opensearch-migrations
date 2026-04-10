@@ -131,13 +131,22 @@ export interface SolrSchema {
 /** HTTP methods supported by the test framework. */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'HEAD';
 
+/** A step in a multi-request test sequence. */
+export interface RequestStep {
+  /** Request path — supports {{nextCursorMark}} placeholder from previous response. */
+  requestPath: string;
+  /** Per-path assertion rules for this step. Defaults to parent test's rules. */
+  assertionRules?: AssertionRule[];
+}
+
 /** Assertion rule types for controlling how diffs are handled per JSON path. */
 export type AssertionRuleType =
   | 'ignore' // Skip this path entirely
   | 'loose-order' // Compare arrays as sets (ignore ordering)
   | 'loose-type' // Allow numeric type coercion (1 == 1.0)
   | 'expect-diff' // Known difference — test passes, diff logged as info
-  | 'regex'; // Match actual value against a regex pattern
+  | 'regex' // Match actual value against a regex pattern
+  | 'sublist'; // Array rule: extract a sublist from actual (via skip/take) before comparing
 
 /**
  * A per-path assertion rule that controls how differences are handled.
@@ -152,6 +161,8 @@ export interface AssertionRule {
   rule: AssertionRuleType;
   /** For 'regex' rule: the pattern to match against the actual value. */
   expected?: string;
+  /** For 'sublist' rule: number of leading elements to skip in actual before comparing. Defaults to 0. */
+  skip?: number;
   /** Documentation: WHY this rule exists. Shows up in diff reports. */
   reason?: string;
 }
@@ -171,6 +182,12 @@ export interface TestCase {
   /** Request body (for POST/PUT/DELETE). JSON-serializable. */
   requestBody?: string;
   requestPath: string;
+  /**
+   * Optional sequence of follow-up requests for multi-step tests (e.g. cursor pagination).
+   * Each step's requestPath can use {{nextCursorMark}} which is replaced with the value
+   * from the previous response's nextCursorMark field.
+   */
+  requestSequence?: RequestStep[];
   /** Per-path assertion rules controlling how diffs are handled. */
   assertionRules?: AssertionRule[];
   /**

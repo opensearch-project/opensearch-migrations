@@ -55,12 +55,17 @@
           "resources": {
             "limits": {
               "cpu": "50m",
-              "memory": "32Mi"
+              "memory": "64Mi"
             },
             "requests": {
               "cpu": "50m",
               "memory": "32Mi"
             }
+          }
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
           }
         },
         "activeDeadlineSeconds": "31536000",
@@ -87,6 +92,15 @@
           "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
           "action": "get",
           "successCondition": "status.listeners"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
         },
         "outputs": {
           "parameters": []
@@ -233,12 +247,17 @@
           "resources": {
             "limits": {
               "cpu": "50m",
-              "memory": "32Mi"
+              "memory": "64Mi"
             },
             "requests": {
               "cpu": "50m",
               "memory": "32Mi"
             }
+          }
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
           }
         },
         "activeDeadlineSeconds": "31536000",
@@ -266,6 +285,15 @@
           "action": "get",
           "successCondition": "status.phase == Ready"
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -290,6 +318,15 @@
           "action": "get",
           "successCondition": "status.phase == Ready"
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -313,6 +350,15 @@
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
           "action": "get",
           "successCondition": "status.phase == Ready"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
         },
         "outputs": {
           "parameters": []

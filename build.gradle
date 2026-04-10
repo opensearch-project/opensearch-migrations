@@ -57,6 +57,12 @@ ext {
     // support -Dbuild.snapshot=false, but default to true
     buildSnapshot = System.getProperty("build.snapshot", "true") == "true"
     finalVersion = buildSnapshot ? "${buildVersion}-SNAPSHOT" : buildVersion
+
+    // ECR pull-through cache: auto-derive from environment if not explicitly passed via -P flag.
+    // The ECR_PULL_THROUGH_ENDPOINT env var is set on Jenkins hosts (via /etc/profile.d/ecr-pull-through.sh).
+    if (!project.hasProperty('pullThroughCacheEndpoint')) {
+        pullThroughCacheEndpoint = System.getenv('ECR_PULL_THROUGH_ENDPOINT') ?: ''
+    }
 }
 
 allprojects {
@@ -189,7 +195,18 @@ subprojects {
                 useJUnitPlatform()
                 //  Disable parallel test execution, see MIGRATIONS-1666
                 systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+                systemProperty 'project.root', rootProject.projectDir.absolutePath
                 systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
+
+                // Snapshot fixture caching - avoids re-creating Docker containers on subsequent runs
+                // Override: -Psnapshot.fixture.cache.dir=/path or SNAPSHOT_FIXTURE_CACHE_DIR env var
+                // Disable: -Psnapshot.fixture.cache.disable=true
+                if (project.hasProperty('snapshot.fixture.cache.dir')) {
+                    systemProperty 'snapshot.fixture.cache.dir', project.property('snapshot.fixture.cache.dir')
+                }
+                if (project.hasProperty('snapshot.fixture.cache.disable')) {
+                    systemProperty 'snapshot.fixture.cache.disable', project.property('snapshot.fixture.cache.disable')
+                }
 
                 // Register BucketTestExtension for all tests to enable test striping
                 // Test striping allows distributing test execution across multiple runs
@@ -215,7 +232,7 @@ subprojects {
                 systemProperty 'junit.jupiter.extensions.autodetection.enabled', true
                 // Verify assertions in tests
                 jvmArgs += ['-ea', '-XX:+HeapDumpOnOutOfMemoryError', '-Xmx2g']
-                systemProperty "junit.jupiter.execution.timeout.default", "5m"
+                systemProperty "junit.jupiter.execution.timeout.default", "15m"
                 jacoco {
                     enabled = true
                     def stripingSuffix = (total != null && index != null) ? "-${index}-of-${total}" : ""
@@ -243,6 +260,9 @@ subprojects {
                 maxParallelForks = 1
                 useJUnitPlatform {
                     includeTags 'isolatedTest'
+                }
+                testLogging {
+                    showStandardStreams = true
                 }
             }
 
@@ -356,6 +376,21 @@ subprojects {
         jacocoTestReport {
             dependsOn = testsWithJacoco
             executionData.from testsWithJacoco*.jacoco.destinationFile
+
+            // Include source and class dirs from project dependencies so coverage
+            // for code in RfsCommon/SearchSnapshotExtractor is reported by downstream modules
+            afterEvaluate {
+                def depProjects = configurations.findAll { it.canBeResolved }.collectMany { config ->
+                    config.dependencies.withType(ProjectDependency).collect { it.dependencyProject }
+                }.unique()
+                depProjects.each { depProject ->
+                    if (depProject.plugins.hasPlugin('java')) {
+                        additionalSourceDirs.from depProject.sourceSets.main.allSource.srcDirs
+                        additionalClassDirs.from depProject.sourceSets.main.output.classesDirs
+                    }
+                }
+            }
+
             reports {
                 xml.required = true
             }

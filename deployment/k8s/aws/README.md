@@ -36,7 +36,8 @@ By default, all artifacts come from the latest published release.
 The script:
 - Downloads CloudFormation templates from the Solutions S3 bucket
 - Downloads Helm chart and dashboards from the GitHub release
-- Uses container images from `public.ecr.aws/opensearchproject`
+- Mirrors container images from public registries to private ECR
+  (use `--use-public-images` to opt out and pull directly from public registries)
 
 
 ### Prerequisites
@@ -100,16 +101,14 @@ for additional deployment guidance.
 
 ## Isolated / Air-Gapped Networks
 
-For subnets without internet access, the bootstrap script can mirror all required
-container images and helm charts to your private ECR registry, and create the VPC
-endpoints needed for EKS to pull from ECR. Add `--push-all-images-to-private-ecr`
-and `--create-vpc-endpoints` (unless you're managing those endpoints elsewhere) 
+Since the bootstrap script mirrors all images to private ECR by default, isolated
+subnets work out of the box. You just need VPC endpoints for EKS to pull from ECR.
+Add `--create-vpc-endpoints` (unless you're managing those endpoints elsewhere)
 and the script handles the rest.
 
 ```bash
 ./deployment/k8s/aws/aws-bootstrap.sh \
   --deploy-import-vpc-cfn \
-  --push-all-images-to-private-ecr \
   --create-vpc-endpoints \
   --stack-name MA-Prod \
   --stage prod \

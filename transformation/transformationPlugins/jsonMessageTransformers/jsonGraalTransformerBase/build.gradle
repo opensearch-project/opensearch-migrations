@@ -1,0 +1,13 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    api project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+
+    implementation libs.slf4j.api
+    implementation libs.jackson.core
+    implementation libs.jackson.databind
+    api libs.polyglot
+}

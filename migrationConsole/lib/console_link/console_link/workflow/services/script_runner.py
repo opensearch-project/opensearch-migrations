@@ -288,7 +288,13 @@ class ScriptRunner:
         try:
             result_str = self.run_config_processor_node_script(
                 command, temp_file_path)
-            return json.loads(result_str)
+            try:
+                return json.loads(result_str)
+            except json.JSONDecodeError:
+                # Handle case where config processor outputs multiple JSON objects
+                decoder = json.JSONDecoder()
+                obj, _ = decoder.raw_decode(result_str)
+                return obj
         finally:
             try:
                 os.unlink(temp_file_path)

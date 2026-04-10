@@ -49,6 +49,7 @@ public class ShimTestFixture implements AutoCloseable {
 
     private final GenericContainer<?> solr;
     private final OpensearchContainer<?> opensearch;
+    private final boolean ownsOpenSearch;
     private final IJsonTransformer requestTransform;
     private final IJsonTransformer responseTransform;
     private ShimProxy proxy;
@@ -61,6 +62,17 @@ public class ShimTestFixture implements AutoCloseable {
                            IJsonTransformer requestTransform, IJsonTransformer responseTransform) {
         this.solr = createSolrContainer(solrImage);
         this.opensearch = createOpenSearchContainer(opensearchImage);
+        this.ownsOpenSearch = true;
+        this.requestTransform = requestTransform;
+        this.responseTransform = responseTransform;
+    }
+
+    /** Constructor that reuses an existing OpenSearch container. */
+    public ShimTestFixture(String solrImage, OpensearchContainer<?> sharedOpenSearch,
+                           IJsonTransformer requestTransform, IJsonTransformer responseTransform) {
+        this.solr = createSolrContainer(solrImage);
+        this.opensearch = sharedOpenSearch;
+        this.ownsOpenSearch = false;
         this.requestTransform = requestTransform;
         this.responseTransform = responseTransform;
     }
@@ -73,7 +85,9 @@ public class ShimTestFixture implements AutoCloseable {
     /** Start containers and proxy, installing the given Solr plugins first. */
     public void start(List<String> plugins) throws Exception {
         solr.start();
-        opensearch.start();
+        if (ownsOpenSearch) {
+            opensearch.start();
+        }
 
         if (plugins != null) {
             for (var plugin : plugins) {
@@ -201,7 +215,9 @@ public class ShimTestFixture implements AutoCloseable {
     public void close() throws Exception {
         if (proxy != null) proxy.stop();
         solr.stop();
-        opensearch.stop();
+        if (ownsOpenSearch) {
+            opensearch.stop();
+        }
     }
 
     @SuppressWarnings("resource")
@@ -218,7 +234,7 @@ public class ShimTestFixture implements AutoCloseable {
     }
 
     @SuppressWarnings("resource")
-    private static OpensearchContainer<?> createOpenSearchContainer(String image) {
+    static OpensearchContainer<?> createOpenSearchContainer(String image) {
         var imageName = DockerImageName.parse(image);
         if (!image.startsWith("opensearchproject/opensearch")) {
             imageName = imageName.asCompatibleSubstituteFor("opensearchproject/opensearch");

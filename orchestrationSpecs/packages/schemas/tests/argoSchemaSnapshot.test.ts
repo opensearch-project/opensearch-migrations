@@ -1,7 +1,7 @@
 import path from "node:path";
 import {
     ARGO_MIGRATION_CONFIG,
-    buildUnifiedSchema,
+  buildUnifiedSchema,
     zodSchemaToJsonSchema
 } from "../src";
 import {z} from "zod";

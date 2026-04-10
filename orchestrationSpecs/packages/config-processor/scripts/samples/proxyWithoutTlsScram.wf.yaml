@@ -1,5 +1,8 @@
 # Capture proxy without frontside TLS using an auto-created Strimzi Kafka cluster
-# with SCRAM auth enabled for the migration applications.
+# with SCRAM auth enabled explicitly for the migration applications.
+# This variant is functionally similar to proxyWithoutTls.wf.yaml today, but it
+# states the auth choice directly instead of relying on the workflow-managed
+# Kafka default policy.
 kafkaClusterConfiguration:
   default:
     autoCreate:

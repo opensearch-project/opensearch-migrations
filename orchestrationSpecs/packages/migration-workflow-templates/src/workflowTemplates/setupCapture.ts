@@ -87,7 +87,7 @@ function makeProxyParamsDict(
         expr.omit(expr.get(config, "proxyConfig"), ...ARGO_PROXY_WORKFLOW_OPTION_KEYS),
         expr.mergeDicts(
             expr.ternary(expr.dig(config, ["proxyConfig", "noCapture"], false),
-                expr.literal({}),
+                expr.makeDict({}),
                 expr.makeDict({
                     kafkaConnection: effectiveKafkaConnection
                 })
@@ -107,7 +107,7 @@ function makeProxyParamsDict(
                     expr.makeDict({
                         kafkaPropertyFile: expr.literal(KAFKA_AUTH_CONFIG_FILE_PATH),
                     }),
-                    expr.literal({})
+                    expr.makeDict({})
                 )
             )
         )
@@ -168,7 +168,7 @@ function makeProxyConfigManifest(
             noCapture: makeDirectTypeProxy(expr.dig(proxyOpts, ["noCapture"], false)),
             numThreads: makeDirectTypeProxy(expr.dig(proxyOpts, ["numThreads"], 1)),
             sslConfigFile: makeStringTypeProxy(expr.dig(proxyOpts, ["sslConfigFile"], expr.literal(""))),
-            tls: makeDirectTypeProxy(expr.dig(proxyOpts, ["tls"], expr.literal({})) as any),
+            tls: makeDirectTypeProxy(expr.dig(proxyOpts, ["tls"], expr.makeDict({})) as any),
             enableMSKAuth: makeDirectTypeProxy(expr.dig(proxyOpts, ["enableMSKAuth"], false)),
             suppressCaptureForHeaderMatch: makeDirectTypeProxy(
                 expr.dig(proxyOpts, ["suppressCaptureForHeaderMatch"], expr.literal([])) as any
@@ -309,7 +309,7 @@ function makeCertificateManifest(args: {
                 kind: args.issuerKind,
                 group: args.issuerGroup,
             },
-            dnsNames: makeDirectTypeProxy(args.dnsNames as any),
+            dnsNames: makeDirectTypeProxy(args.dnsNames),
             duration: args.duration,
             renewBefore: args.renewBefore,
         }
@@ -541,33 +541,34 @@ export const SetupCapture = WorkflowBuilder.create({
 
         .addSteps(b => {
             const config = expr.deserializeRecord(b.inputs.proxyConfig);
-            const proxyOpts = expr.get(config, "proxyConfig") as any;
-            const tlsBlock = expr.get(proxyOpts, "tls") as any;
-            // Use dig so generated `when` expressions stay null-safe and avoid bracket-heavy
-            // nested indexing that Argo fails to parse here.
-            const tlsMode = expr.dig(proxyOpts, ["tls", "mode"], expr.literal("")) as any;
-            const hasCertManagerTls = expr.equals(tlsMode, "certManager") as any;
-            const hasExistingSecretTls = expr.equals(tlsMode, "existingSecret") as any;
-            const hasTls = expr.or(hasCertManagerTls, hasExistingSecretTls) as unknown as BaseExpression<boolean, "complicatedExpression">;
+            const proxyOpts = expr.get(config, "proxyConfig");
+            // Use dig for ALL tls field accesses so expressions are null-safe.
+            // Argo evaluates step parameter expressions BEFORE checking `when` conditions,
+            // so expr.get() on a nil tls block crashes even when the step is guarded.
+            const tlsMode = expr.dig(proxyOpts, ["tls", "mode"], expr.literal(""));
+            const hasCertManagerTls = expr.equals(tlsMode, "certManager");
+            const hasExistingSecretTls = expr.equals(tlsMode, "existingSecret");
+            const hasTls = expr.or(hasCertManagerTls, hasExistingSecretTls);
             // Secret name: for certManager mode, use <proxyName>-tls; for existingSecret, extract from config
             const certManagerSecretName = expr.concat(b.inputs.proxyName, expr.literal("-tls"));
-            const existingSecretName = expr.get(tlsBlock, "secretName") as any;
+            const existingSecretName = expr.dig(proxyOpts, ["tls", "secretName"], expr.literal(""));
             const tlsSecretName = expr.ternary(hasCertManagerTls, certManagerSecretName,
-                expr.ternary(hasExistingSecretTls, existingSecretName, expr.literal(""))) as any;
+                expr.ternary(hasExistingSecretTls, existingSecretName, expr.literal("")));
             const kafkaConfig = expr.get(config, "kafkaConfig");
             const effectiveKafkaAuthType = expr.ternary(
                 expr.not(expr.equals(b.inputs.resolvedKafkaAuthType, expr.literal(""))),
                 b.inputs.resolvedKafkaAuthType,
                 expr.getLoose(kafkaConfig, "authType")
             );
-            const topicSpecOverrides = expr.cast(expr.get(kafkaConfig as any, "topicSpecOverrides")).to<{
-                partitions: number;
-                replicas: number;
-                config: Record<string, any>;
-            }>();
+            const topicSpecOverrides = expr.get(kafkaConfig, "topicSpecOverrides");
             const kafkaAuthConfigMapName = expr.concat(b.inputs.proxyName, expr.literal("-kafka-auth"));
             // Issuer fields for cert provisioning
-            const issuerRef = expr.get(tlsBlock, "issuerRef") as any;
+            const issuerName = expr.dig(proxyOpts, ["tls", "issuerRef", "name"], expr.literal(""));
+            const issuerKind = expr.dig(proxyOpts, ["tls", "issuerRef", "kind"], expr.literal("ClusterIssuer"));
+            const issuerGroup = expr.dig(proxyOpts, ["tls", "issuerRef", "group"], expr.literal("cert-manager.io"));
+            const tlsDnsNames = expr.dig(proxyOpts, ["tls", "dnsNames"], expr.literal([]));
+            const tlsDuration = expr.dig(proxyOpts, ["tls", "duration"], expr.literal("2160h"));
+            const tlsRenewBefore = expr.dig(proxyOpts, ["tls", "renewBefore"], expr.literal("360h"));
 
             return b
                 .addStep("createKafkaTopic", SetupKafka, "createKafkaTopicWithRetry", c =>
@@ -598,12 +599,12 @@ export const SetupCapture = WorkflowBuilder.create({
                             c.register({
                                 certName: certManagerSecretName,
                                 secretName: certManagerSecretName,
-                                issuerName: expr.get(issuerRef, "name") as any,
-                                issuerKind: expr.get(issuerRef, "kind") as any,
-                                issuerGroup: expr.get(issuerRef, "group") as any,
-                                dnsNames: expr.recordToString(expr.get(tlsBlock, "dnsNames") as any),
-                                duration: expr.get(tlsBlock, "duration") as any,
-                                renewBefore: expr.get(tlsBlock, "renewBefore") as any,
+                                issuerName,
+                                issuerKind,
+                                issuerGroup,
+                                dnsNames: expr.recordToString(tlsDnsNames),
+                                duration: tlsDuration,
+                                renewBefore: tlsRenewBefore,
                             }),
                         {when: {templateExp: hasCertManagerTls}}
                     )
@@ -625,14 +626,14 @@ export const SetupCapture = WorkflowBuilder.create({
                                 kafkaAuthType: effectiveKafkaAuthType,
                                 kafkaSecretName: expr.getLoose(kafkaConfig, "secretName"),
                                 kafkaCaSecretName: expr.getLoose(kafkaConfig, "caSecretName"),
-                                resources: expr.serialize(expr.get(proxyOpts, "resources") as any),
+                                resources: expr.serialize(expr.get(proxyOpts, "resources")),
                                 jsonConfig: expr.asString(expr.serialize(
                                     makeProxyParamsDict(
                                         b.inputs.proxyConfig,
                                         b.inputs.resolvedKafkaConnection,
                                         b.inputs.resolvedKafkaListenerName,
                                         b.inputs.resolvedKafkaAuthType
-                                    ) as any
+                                    )
                                 )),
                             }),
                         {when: {templateExp: expr.not(hasTls)}}
@@ -647,7 +648,7 @@ export const SetupCapture = WorkflowBuilder.create({
                                 kafkaAuthType: effectiveKafkaAuthType,
                                 kafkaSecretName: expr.getLoose(kafkaConfig, "secretName"),
                                 kafkaCaSecretName: expr.getLoose(kafkaConfig, "caSecretName"),
-                                resources: expr.serialize(expr.get(proxyOpts, "resources") as any),
+                                resources: expr.serialize(expr.get(proxyOpts, "resources")),
                                 tlsSecretName: tlsSecretName,
                                 jsonConfig: expr.asString(expr.serialize(
                                     expr.mergeDicts(
@@ -656,12 +657,12 @@ export const SetupCapture = WorkflowBuilder.create({
                                             b.inputs.resolvedKafkaConnection,
                                             b.inputs.resolvedKafkaListenerName,
                                             b.inputs.resolvedKafkaAuthType
-                                        ) as any,
+                                        ),
                                         expr.makeDict({
                                             sslCertChainFile: expr.literal("/etc/proxy-tls/tls.crt"),
                                             sslKeyFile: expr.literal("/etc/proxy-tls/tls.key"),
                                         })
-                                    ) as any
+                                    )
                                 )),
                             }),
                         {when: {templateExp: hasTls}}

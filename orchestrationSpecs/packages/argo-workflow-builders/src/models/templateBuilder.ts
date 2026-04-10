@@ -41,7 +41,7 @@ import {
     WaitForExistingResourceBuilder,
     WaitForExistingResourceDefinition, WaitForNewResourceBuilder, WaitForNewResourceDefinition
 } from "./waitForResourceBuilder";
-import {AllowLiteralOrExpression, expr, isExpression} from "./expression";
+import {AllowLiteralOrExpression, expr, isExpression, LiteralExpression, NonRecordLiteral} from "./expression";
 import {typeToken, TypeToken} from "./sharedTypes";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
 import { Container } from "@opensearch-migrations/k8s-types";
@@ -120,10 +120,10 @@ export class TemplateBuilder<
             workflowParameters: WorkflowInputsToExpressions<ParentWorkflowScope>,
             inputParameters: InputParamsToExpressions<InputParamsScope>,
             rawParameters: { workflow: ParentWorkflowScope; currentTemplate: InputParamsScope }
-        }) => T;
-        const e = fn(this.inputs) as T;
+        }) => AllowLiteralOrExpression<T>;
+        const e = fn(this.inputs);
         return this.extendWithParam(name as string,
-            defineParam({expression: isExpression(e) ? e : expr.literal(e), description})) as any;
+            defineParam({expression: isExpression(e) ? e : new LiteralExpression(e as Extract<T, NonRecordLiteral>), description})) as any;
     }
 
     addOptionalOrConfigMap<T extends PlainObject, Name extends string>(
@@ -314,7 +314,7 @@ export class TemplateBuilder<
         ) => WaitForExistingResourceBuilder<ParentWorkflowScope, InputParamsScope, FinalBody, FinalOut>>
     ): WaitForExistingResourceBuilder<ParentWorkflowScope, InputParamsScope, FinalBody, FinalOut> {
         const fn = builderFn as any;
-        return fn(new WaitForExistingResourceBuilder(this.parentWorkflowScope, this.inputScope, {}, {}, undefined));
+        return fn(new WaitForExistingResourceBuilder(this.parentWorkflowScope, this.inputScope, {}, {}, {}, undefined));
     }
 
     getTemplateSignatureScope(): InputParamsScope {

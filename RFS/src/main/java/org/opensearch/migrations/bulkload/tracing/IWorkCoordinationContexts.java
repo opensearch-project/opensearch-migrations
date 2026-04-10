@@ -92,6 +92,6 @@ public interface IWorkCoordinationContexts {
     interface IScopedWorkContext<C extends IBaseAcquireWorkContext> extends IScopedInstrumentationAttributes {
         C createOpeningContext();
 
-        ICompleteWorkItemContext createCloseContet();
+        ICompleteWorkItemContext createCloseContext();
     }
 }

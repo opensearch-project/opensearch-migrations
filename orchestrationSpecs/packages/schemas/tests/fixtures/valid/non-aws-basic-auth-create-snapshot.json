@@ -1,0 +1,29 @@
+{
+  "sourceClusters": {
+    "source": {
+      "version": "ES 7.10.2",
+      "endpoint": "https://my-cluster.example.com:9200",
+      "authConfig": { "basic": { "secretName": "source-creds" } },
+      "snapshotInfo": {
+        "snapshots": {
+          "snap1": {
+            "repoName": "",
+            "config": { "createSnapshotConfig": {} }
+          }
+        }
+      }
+    }
+  },
+  "targetClusters": {
+    "target": { "endpoint": "http://target:9200" }
+  },
+  "snapshotMigrationConfigs": [
+    {
+      "fromSource": "source",
+      "toTarget": "target",
+      "perSnapshotConfig": {
+        "snap1": [{ "metadataMigrationConfig": {} }]
+      }
+    }
+  ]
+}

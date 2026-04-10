@@ -73,9 +73,6 @@ EOF
 cat /config/migration_services.yaml_ |
 jq -f workflowConfigToServicesConfig.jq > /config/migration_services.yaml
 
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
-
 echo file dump
 echo ---
 export MIGRATION_USE_SERVICES_YAML_CONFIG=true
@@ -89,7 +86,7 @@ function makeOptionalDict<
     T extends PlainObject,
     SCHEMA extends PlainObject
 >(label: string, v: BaseExpression<T>, tt: TypeToken<SCHEMA>) {
-    return expr.ternary(expr.isEmpty(v), expr.literal({}),
+    return expr.ternary(expr.isEmpty(v), expr.makeDict({}),
         expr.makeDict({[label]: expr.stringToRecord(tt, expr.asString(v))}));
 }
 
@@ -117,7 +114,7 @@ export const MigrationConsole = WorkflowBuilder.create({
                             makeOptionalDict("snapshot", expr.asString(c.inputs.snapshotConfig), typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
                         )
                     ),
-                    expr.ternary(expr.isEmpty(c.inputs.backfillSession), expr.literal({}), expr.makeDict({
+                    expr.ternary(expr.isEmpty(c.inputs.backfillSession), expr.makeDict({}), expr.makeDict({
                         "backfill": expr.makeDict({
                             "reindex_from_snapshot": expr.makeDict({
                                 "k8s": expr.makeDict({
@@ -168,7 +165,7 @@ export const MigrationConsole = WorkflowBuilder.create({
                 }
             }))
         )
-        .addPathOutput("statusOutput", "/tmp/status-output.txt", typeToken<string>())
+        .addArtifactOutput("statusOutput", "/tmp/status-output.txt")
         .addPathOutput("overriddenPhase", "/tmp/phase-output.txt", typeToken<string>())
     )
 

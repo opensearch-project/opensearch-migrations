@@ -12,6 +12,6 @@ class CommandResult(Generic[T]):
     output: CompletedProcess | None = None
 
     def display(self) -> str:
-        if self.value:
+        if self.value is not None:
             return str(self.value)
         return ""

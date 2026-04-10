@@ -120,7 +120,7 @@ export class WaitForNewResourceBuilder<
             (typeof waitOpts.maxDurationSeconds === "number" ? waitOpts.maxDurationSeconds : DEFAULT_WAIT_DURATION);
         const maxDurationSeconds = waitOpts.maxDurationSeconds ?? maxKubeWaitDuration;
         const resources = waitOpts.kubectlPodResources ?? {
-            limits: { cpu: "50m", memory: "32Mi" },
+            limits: { cpu: "50m", memory: "64Mi" },
             requests: { cpu: "50m", memory: "32Mi" }
         };
 
@@ -157,7 +157,7 @@ export class WaitForExistingResourceBuilder<
     InputParamsScope extends InputParametersRecord,
     BodyScope extends GenericScope,
     OutputParamsScope extends OutputParametersRecord
-> extends TemplateBodyBuilder<
+> extends RetryableTemplateBodyBuilder<
     ParentWorkflowScope,
     InputParamsScope,
     BodyScope,
@@ -170,16 +170,17 @@ export class WaitForExistingResourceBuilder<
         inputsScope: InputParamsScope,
         bodyScope: BodyScope,
         outputsScope: OutputParamsScope,
+        retryParameters: RetryParameters,
         synchronization: SynchronizationConfig | undefined
     ) {
-        const templateRebind: TemplateRebinder<
+        const templateRebind: RetryableTemplateRebinder<
             ParentWorkflowScope,
             InputParamsScope,
             GenericScope
-        > = (ctx, inputs, body, outputs, sync) =>
-            new WaitForExistingResourceBuilder(ctx, inputs, body as any, outputs as any, sync) as any;
+        > = (ctx, inputs, body, outputs, retry, sync) =>
+            new WaitForExistingResourceBuilder(ctx, inputs, body as any, outputs as any, retry, sync) as any;
 
-        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, synchronization, templateRebind);
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
     }
 
     setDefinition(
@@ -195,6 +196,23 @@ export class WaitForExistingResourceBuilder<
             this.inputsScope,
             def,
             this.outputsScope,
+            this.retryParameters,
+            this.synchronization
+        );
+    }
+
+    addRetryParameters(retryParameters: GenericScope): WaitForExistingResourceBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        BodyScope,
+        OutputParamsScope
+    > {
+        return new WaitForExistingResourceBuilder(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            this.bodyScope,
+            this.outputsScope,
+            retryParameters,
             this.synchronization
         );
     }

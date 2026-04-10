@@ -24,7 +24,7 @@ ENV PIPENV_CUSTOM_VENV_NAME=.venv
 ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
 
-RUN python3.11 -m pip install pipenv
+RUN python3.11 -m pip install pipenv==2026.5.0
 WORKDIR /
 RUN python3.11 -m venv .venv
 
