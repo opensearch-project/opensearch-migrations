@@ -77,10 +77,13 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   # Limits on the TOTAL aggregate size of the pool.
-  # The Migration Console is intended only to be a very small control-plane
+  # The Migration Console is intended only to be a very small control-plane.
+  # Memory limit is set to 8Gi to allow scheduling on instances with up to
+  # 8 GiB RAM (e.g. t3.large). Daemonsets (fluent-bit, otel-collector) are
+  # excluded from this node via nodeAffinity to keep overhead minimal.
   limits:
     cpu: 4000m
-    memory: 4Gi
+    memory: 8Gi
   disruption:
     consolidationPolicy: WhenEmpty
     consolidateAfter: 5m  # No reason to wait long if the console exits
@@ -196,11 +199,11 @@ spec:
           resources:
             requests:
               cpu: 1500m
-              memory: 2.5Gi
+              memory: 2Gi
             limits:
               cpu: 1500m
               memory:
-                2.5Gi
+                2Gi
           env:
             - name: MIGRATIONS_CLI_CONSOLE_DISABLE_LEGACY_COMMANDS
               value: "true"
