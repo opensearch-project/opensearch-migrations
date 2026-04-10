@@ -115,7 +115,12 @@ export const ResourceManagement = WorkflowBuilder.create({
                     kind: "CapturedTraffic",
                     name: b.inputs.resourceName
                 },
-                conditions: {successCondition: "status.phase == Ready"}
+                conditions: {
+                    successCondition: expr.concat(
+                        expr.literal("status.lastRunUid == "),
+                        expr.getWorkflowValue("uid")
+                    )
+                }
             })
             .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
         )
@@ -132,7 +137,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     kind: "DataSnapshot",
                     name: b.inputs.resourceName
                 },
-                conditions: {successCondition: "status.phase == Ready"}
+                conditions: {successCondition: "status.phase == Completed"}
             })
             .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
         )
@@ -149,7 +154,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     kind: "SnapshotMigration",
                     name: b.inputs.resourceName
                 },
-                conditions: {successCondition: "status.phase == Ready"}
+                conditions: {successCondition: "status.phase == Completed"}
             })
             .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
         )
@@ -186,7 +191,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     apiVersion: CRD_API_VERSION,
                     kind: "DataSnapshot",
                     metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Ready", snapshotName: b.inputs.snapshotName}
+                    status: {phase: "Completed", snapshotName: b.inputs.snapshotName}
                 }
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -203,7 +208,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     apiVersion: CRD_API_VERSION,
                     kind: "SnapshotMigration",
                     metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Ready"}
+                    status: {phase: "Completed"}
                 }
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -228,6 +233,22 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     // ── Generic phase patch template ────────────────────────────────────
 
+    .addTemplate("readResourcePhase", t => t
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "get",
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: makeStringTypeProxy(b.inputs.resourceKind),
+                    metadata: { name: b.inputs.resourceName }
+                }
+            })
+            .addJsonPathOutput("phase", "{.status.phase}", typeToken<string>()))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
     .addTemplate("patchResourcePhase", t => t
         .addRequiredInput("resourceKind", typeToken<string>())
         .addRequiredInput("resourceName", typeToken<string>())
@@ -241,6 +262,28 @@ export const ResourceManagement = WorkflowBuilder.create({
                     kind: makeStringTypeProxy(b.inputs.resourceKind),
                     metadata: { name: b.inputs.resourceName },
                     status: { phase: makeStringTypeProxy(b.inputs.phase) }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    // ── Workflow UID stamp (marks resource as processed by this run) ────
+
+    .addTemplate("stampWorkflowUid", t => t
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: makeStringTypeProxy(b.inputs.resourceKind),
+                    metadata: { name: b.inputs.resourceName },
+                    status: {
+                        lastRunUid: makeStringTypeProxy(expr.getWorkflowValue("uid"))
+                    }
                 }
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)

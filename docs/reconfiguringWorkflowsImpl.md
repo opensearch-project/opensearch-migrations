@@ -8,18 +8,18 @@
 
 | File | Action | Status | Description |
 |------|--------|--------|-------------|
-| `.../validatingAdmissionPolicies.yaml` | **MODIFY** | ✅ Kafka done; Proxy + Snapshot TODO | Migrate Kafka VAPs to UID, add Proxy VAP, DataSnapshot VAP (all-impossible), SnapshotMigration VAP (impossible+gated), Lock-on-Complete |
-| `.../migrationCrds.yaml` | **MODIFY** | TODO | Merge `migrationOptionsCrds.yaml` bodies into this file |
-| `.../migrationOptionsCrds.yaml` | **DELETE** | TODO | Bodies merged into `migrationCrds.yaml` |
-| `.../workflowRbac.yaml` | **MODIFY** | ⚠️ Partial | VAP ClusterRole done; add RBAC for merged CRD types |
-| `.../test-vap-kafka.yaml` | **MODIFY** | TODO | Update Helm test to use UID annotation pattern |
+| `.../validatingAdmissionPolicies.yaml` | **MODIFY** | ✅ Done | Kafka VAPs use UID pattern; CapturedTraffic, DataSnapshot, SnapshotMigration, Lock-on-Complete VAPs added |
+| `.../migrationCrds.yaml` | **MODIFY** | ✅ Done | Unified CRDs: CapturedTraffic (proxy config + lifecycle), DataSnapshot (snapshot config + lifecycle), SnapshotMigration (RFS + metadata config + lifecycle). No separate config CRDs. |
+| `.../migrationOptionsCrds.yaml` | **DELETE** | ✅ Done | Superseded by unified CRDs in `migrationCrds.yaml` |
+| `.../workflowRbac.yaml` | **MODIFY** | ✅ Done | RBAC for unified CRD types |
+| `.../test-vap-kafka.yaml` | **MODIFY** | ✅ Done | Uses UID annotation pattern |
 | `expression.ts` | — | ✅ Already has `getWorkflowValue("uid")` | Emits `{{workflow.uid}}` — no new helper needed |
-| `taskBuilder.ts` | — | ✅ DONE | `continueOn` support in TaskOpts |
-| `setupKafka.ts` | **MODIFY** | ⚠️ Retry done; needs auto-patch + UID label | Insert auto-patch step, add `run-uid` label to manifests |
-| `setupCapture.ts` | **MODIFY** | TODO | Two-phase commit: apply ProxyConfig CRD → deploy → mark Ready, with UID retry loop |
-| `fullMigration.ts` | **MODIFY** | TODO | Wire phase transitions into `setupSingleProxy` |
-| `resourceManagement.ts` | **MODIFY** | TODO | Add generic phase patch templates |
-| `migrationInitializer.ts` | — | ✅ DONE | Creates placeholder CRDs (`spec: {}`, `status.phase: Initialized`) |
+| `taskBuilder.ts` | — | ✅ Done | `continueOn` support in TaskOpts |
+| `setupKafka.ts` | **MODIFY** | ✅ Done | Auto-patch steps + UID labels on all Kafka manifests |
+| `setupCapture.ts` | **MODIFY** | ✅ Done | Applies CapturedTraffic CRD with retry loop, lifecycle phase transitions |
+| `fullMigration.ts` | **MODIFY** | ✅ Done | Uses `setupProxyWithLifecycle` |
+| `resourceManagement.ts` | **MODIFY** | ✅ Done | Generic `patchResourcePhase` + `patchApprovalAnnotation` templates |
+| `migrationInitializer.ts` | — | ✅ Done | Creates placeholder CRDs (`spec: {}`, `status.phase: Initialized`) |
 
 ---
 
@@ -27,30 +27,33 @@
 
 These changes have dependencies. Implement in this order:
 
-1. **CRD merge + RBAC** — No code depends on this, but it must land before the workflow can apply ProxyConfig resources.
-2. **`resourceManagement.ts`** — Add phase patch templates. Other files depend on these.
-3. **`validatingAdmissionPolicies.yaml`** — Migrate Kafka VAPs to UID, add Proxy VAP, DataSnapshot VAP, SnapshotMigration VAP, Lock-on-Complete. Can be done in parallel with step 2.
-4. **`setupKafka.ts`** — Add auto-patch step and `run-uid` label to manifests. Depends on step 3 (UID VAPs).
-5. **`setupCapture.ts`** — Two-phase commit for proxy. Depends on steps 1, 2, 3.
-6. **`fullMigration.ts`** — Wire phase transitions. Depends on step 5.
-7. **`test-vap-kafka.yaml`** — Update Helm test. Depends on step 4.
+1. **CRD + RBAC** ✅ — Unified CRDs in `migrationCrds.yaml` (CapturedTraffic, DataSnapshot, SnapshotMigration). No separate config CRDs.
+2. **`resourceManagement.ts`** ✅ — Generic phase patch + approval annotation templates.
+3. **`validatingAdmissionPolicies.yaml`** ✅ — All VAPs use UID pattern. CapturedTraffic, DataSnapshot, SnapshotMigration, Lock-on-Complete policies added.
+4. **`setupKafka.ts`** ✅ — Auto-patch steps + UID labels on all Kafka manifests.
+5. **`setupCapture.ts`** ✅ — Applies CapturedTraffic CRD directly (no separate ProxyConfig). Lifecycle phase transitions.
+6. **`fullMigration.ts`** ✅ — Uses `setupProxyWithLifecycle`.
+7. **`test-vap-kafka.yaml`** ✅ — Uses UID annotation pattern.
 
 ---
 
-## 1. CRD Merge
+## 1. CRD Design (Unified)
 
-Merge the bodies from `migrationOptionsCrds.yaml` (ProxyConfig, ReplayerConfig, SnapshotConfig, RfsConfig) into `migrationCrds.yaml` alongside the existing CapturedTraffic, DataSnapshot, SnapshotMigration definitions. Then delete `migrationOptionsCrds.yaml`.
+Each migration component uses a single CRD that holds both configuration (`.spec`) and lifecycle state (`.status.phase`). There are no separate "config" and "resource" CRDs — this follows the standard Kubernetes pattern.
 
-After the merge, update the RBAC in `workflowRbac.yaml` — add the new resource types to the `workflow-deployer-role`:
+The three resource types in `migrationCrds.yaml`:
+
+* **`CapturedTraffic`** — proxy config fields directly in `.spec` (listenPort, noCapture, enableMSKAuth, tls, podReplicas, etc.)
+* **`DataSnapshot`** — snapshot config fields directly in `.spec` (snapshotPrefix, indexAllowlist, maxSnapshotRateMbPerNode, etc.)
+* **`SnapshotMigration`** — nested config under `.spec.documentBackfillConfig` (RFS fields) and `.spec.metadataMigrationConfig`
+
+RBAC in `workflowRbac.yaml` covers these three types plus their `/status` subresources:
 
 ```yaml
-# Add to the existing migrations.opensearch.org rule
 - apiGroups: ["migrations.opensearch.org"]
   resources: [
     "capturedtraffics", "datasnapshots", "snapshotmigrations",
-    "capturedtraffics/status", "datasnapshots/status", "snapshotmigrations/status",
-    "proxyconfigs", "replayerconfigs", "snapshotconfigs", "rfsconfigs",
-    "proxyconfigs/status", "replayerconfigs/status", "snapshotconfigs/status", "rfsconfigs/status"
+    "capturedtraffics/status", "datasnapshots/status", "snapshotmigrations/status"
   ]
   verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 ```
@@ -125,16 +128,16 @@ Impossible checks (storage.type, roles, partition decrease, cluster assignment) 
 
 Update all `messageExpression` strings from `"Major Change Blocked [...]"` to `"Gated Change [...]"`.
 
-### 3b. Add Proxy VAP
+### 3b. CapturedTraffic VAP
 
-New policy for `proxyconfigs` in the `migrations.opensearch.org` API group:
+Policy for `capturedtraffics` in the `migrations.opensearch.org` API group:
 
 ```yaml
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: {{ .Release.Namespace }}-proxyconfig-policy
+  name: {{ .Release.Namespace }}-capturedtraffic-policy
 spec:
   failurePolicy: Fail
   matchConstraints:
@@ -142,7 +145,7 @@ spec:
     - apiGroups: ["migrations.opensearch.org"]
       apiVersions: ["v1alpha1"]
       operations: ["UPDATE"]
-      resources: ["proxyconfigs"]
+      resources: ["capturedtraffics"]
   validations:
     # Impossible: listenPort
     - expression: |
@@ -179,14 +182,14 @@ spec:
          'workflows.argoproj.io/run-uid' in object.metadata.labels &&
          object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
            object.metadata.labels['workflows.argoproj.io/run-uid'])
-      message: "Gated changes detected on ProxyConfig. Workflow approval is required."
+      message: "Gated changes detected on CapturedTraffic. Workflow approval is required."
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: {{ .Release.Namespace }}-proxyconfig-binding
+  name: {{ .Release.Namespace }}-capturedtraffic-binding
 spec:
-  policyName: {{ .Release.Namespace }}-proxyconfig-policy
+  policyName: {{ .Release.Namespace }}-capturedtraffic-policy
   validationActions: [Deny]
   matchResources:
     namespaceSelector:
@@ -466,16 +469,15 @@ Apply the same pattern to `deployKafkaClusterKraftWithRetry` and `createKafkaTop
 
 ## 5. Proxy Two-Phase Commit (`setupCapture.ts`)
 
-### 5a. Add ProxyConfig CRD manifest builder
+### 5a. Add CapturedTraffic CRD manifest builder
 
 The manifest must map each spec field individually, following the same pattern as `makeDeployKafkaNodePool`, `makeProxyDeploymentManifest`, etc. A bulk `spec: makeDirectTypeProxy(...)` won't work — the builder needs each field explicitly for proper expression/literal handling.
 
 ```typescript
-// TODO: Build out field-by-field from DENORMALIZED_PROXY_CONFIG,
+// Build out field-by-field from DENORMALIZED_PROXY_CONFIG,
 // extracting each field via expr.get()/expr.dig() from the deserialized config.
-// Follow the pattern in makeProxyDeploymentManifest / makeDeployKafkaNodePool.
 //
-// function makeProxyConfigManifest(args: {
+// function makeCapturedTrafficManifest(args: {
 //     proxyName: BaseExpression<string>,
 //     proxyConfig: BaseExpression<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>,
 // }) {
@@ -483,7 +485,7 @@ The manifest must map each spec field individually, following the same pattern a
 //     const proxyOpts = expr.get(config, "proxyConfig");
 //     return {
 //         apiVersion: "migrations.opensearch.org/v1alpha1",
-//         kind: "ProxyConfig",
+//         kind: "CapturedTraffic",
 //         metadata: {
 //             name: args.proxyName,
 //             labels: {
@@ -503,9 +505,9 @@ The manifest must map each spec field individually, following the same pattern a
 // }
 ```
 
-### 5b. Add apply + retry template for ProxyConfig
+### 5b. Add apply + retry template for CapturedTraffic
 
-Follow the same pattern as Kafka. The `applyProxyConfig` leaf template does the apply; `applyProxyConfigWithRetry` wraps it with the suspend → auto-patch → retry loop.
+Follow the same pattern as Kafka. The `applyCapturedTraffic` leaf template does the apply; `applyCapturedTrafficWithRetry` wraps it with the suspend → auto-patch → retry loop.
 
 ### 5c. Update `setupProxy` orchestration
 

@@ -1481,6 +1481,10 @@
                     "value": "{{inputs.parameters.imageTrafficReplayerPullPolicy}}"
                   },
                   {
+                    "name": "name",
+                    "value": "{{=jsonpath(toJSON(item), '$.name')}}"
+                  },
+                  {
                     "name": "dependsOnSnapshotMigrations",
                     "value": "{{=jsonpath(toJSON(item), '$.dependsOnSnapshotMigrations')}}"
                   },

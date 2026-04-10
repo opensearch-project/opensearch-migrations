@@ -171,6 +171,17 @@ export class MigrationInitializer {
             });
         }
 
+        // TrafficReplay resources from trafficReplays
+        for (const replay of workflows.trafficReplays ?? []) {
+            items.push({
+                apiVersion: CRD_API_VERSION,
+                kind: 'TrafficReplay',
+                metadata: { name: replay.name },
+                spec: {},
+                status: { phase: 'Initialized' }
+            });
+        }
+
         return {
             apiVersion: 'v1',
             kind: 'List',

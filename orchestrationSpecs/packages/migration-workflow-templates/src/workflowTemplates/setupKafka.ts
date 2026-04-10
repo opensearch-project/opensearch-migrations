@@ -544,12 +544,19 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
 
         .addSteps(b => b
+            .addStep("checkExisting", ResourceManagement, "readKafkaConnectionProfile", c =>
+                c.register({
+                    resourceName: b.inputs.clusterName,
+                }),
+                {continueOn: {failed: true}}
+            )
             .addStep("deployPool", INTERNAL, "deployKafkaNodePoolWithRetry", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
                     clusterConfig: b.inputs.clusterConfig,
                     retryGroupName_view: expr.concat(expr.literal("KafkaNodePool: "), b.inputs.clusterName),
-                })
+                }),
+                {when: c => ({templateExp: expr.not(expr.equals(c.checkExisting.status, "Succeeded"))})}
             )
             .addStep("deployCluster", INTERNAL, "deployKafkaClusterKraftWithRetry", c =>
                 c.register({
@@ -557,7 +564,8 @@ export const SetupKafka = WorkflowBuilder.create({
                     version: b.inputs.version,
                     clusterConfig: b.inputs.clusterConfig,
                     retryGroupName_view: expr.concat(expr.literal("KafkaCluster: "), b.inputs.clusterName),
-                })
+                }),
+                {when: c => ({templateExp: expr.not(expr.equals(c.checkExisting.status, "Succeeded"))})}
             )
             .addStep("createKafkaUser", INTERNAL, "createKafkaUserWithRetry", c =>
                 c.register({
@@ -565,10 +573,17 @@ export const SetupKafka = WorkflowBuilder.create({
                     clusterConfig: b.inputs.clusterConfig,
                     retryGroupName_view: expr.concat(expr.literal("KafkaUser: "), b.inputs.clusterName),
                 }),
-                {when: c => ({templateExp: shouldCreateManagedKafkaUser(b.inputs.clusterConfig)})}
+                {when: c => ({templateExp: expr.and(
+                    expr.not(expr.equals(c.checkExisting.status, "Succeeded")),
+                    shouldCreateManagedKafkaUser(b.inputs.clusterConfig)
+                )})}
             )
         )
-        .addExpressionOutput("bootstrapServers", c => c.steps.deployCluster.outputs.brokers)
+        .addExpressionOutput("bootstrapServers", c => expr.ternary(
+            expr.equals(c.steps.checkExisting.status, "Succeeded"),
+            c.steps.checkExisting.outputs.bootstrapServers,
+            c.steps.deployCluster.outputs.brokers
+        ))
     )
 
 

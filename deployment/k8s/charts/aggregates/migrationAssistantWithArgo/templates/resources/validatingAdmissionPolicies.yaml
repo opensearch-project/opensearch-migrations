@@ -186,13 +186,13 @@ spec:
         values: ["{{ .Release.Namespace }}"]
 
 # ─────────────────────────────────────────────────────────────
-# ProxyConfig Policy - impossible + gated fields
+# CapturedTraffic Policy - impossible + gated proxy config fields
 # ─────────────────────────────────────────────────────────────
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: {{ .Release.Namespace }}-proxyconfig-policy
+  name: {{ .Release.Namespace }}-capturedtraffic-policy
 spec:
   failurePolicy: Fail
   matchConstraints:
@@ -200,7 +200,7 @@ spec:
     - apiGroups: ["migrations.opensearch.org"]
       apiVersions: ["v1alpha1"]
       operations: ["UPDATE"]
-      resources: ["proxyconfigs"]
+      resources: ["capturedtraffics"]
   validations:
     # Impossible: listenPort
     - expression: |
@@ -212,7 +212,7 @@ spec:
         !has(oldObject.spec.internetFacing) || !has(object.spec.internetFacing) ||
         object.spec.internetFacing == oldObject.spec.internetFacing
       message: "Impossible: internetFacing cannot be changed. Delete and recreate the proxy."
-    # Gated: noCapture, enableMSKAuth, tls, suppressCapture* fields
+    # Gated: noCapture, enableMSKAuth, tls, kafkaClusterName, kafkaTopicName, suppressCapture* fields
     - expression: |
         (
           (!has(object.spec.noCapture) || !has(oldObject.spec.noCapture) ||
@@ -221,6 +221,10 @@ spec:
            object.spec.enableMSKAuth == oldObject.spec.enableMSKAuth) &&
           (!has(object.spec.tls) || !has(oldObject.spec.tls) ||
            object.spec.tls == oldObject.spec.tls) &&
+          (!has(object.spec.kafkaClusterName) || !has(oldObject.spec.kafkaClusterName) ||
+           object.spec.kafkaClusterName == oldObject.spec.kafkaClusterName) &&
+          (!has(object.spec.kafkaTopicName) || !has(oldObject.spec.kafkaTopicName) ||
+           object.spec.kafkaTopicName == oldObject.spec.kafkaTopicName) &&
           (!has(object.spec.suppressCaptureForHeaderMatch) || !has(oldObject.spec.suppressCaptureForHeaderMatch) ||
            object.spec.suppressCaptureForHeaderMatch == oldObject.spec.suppressCaptureForHeaderMatch) &&
           (!has(object.spec.suppressCaptureForMethod) || !has(oldObject.spec.suppressCaptureForMethod) ||
@@ -236,15 +240,15 @@ spec:
          'workflows.argoproj.io/run-uid' in object.metadata.labels &&
          object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
            object.metadata.labels['workflows.argoproj.io/run-uid'])
-      message: "Gated changes detected on ProxyConfig. Approve via the Argo Workflow UI to proceed."
+      message: "Gated changes detected on CapturedTraffic. Approve via the Argo Workflow UI to proceed."
 
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: {{ .Release.Namespace }}-proxyconfig-binding
+  name: {{ .Release.Namespace }}-capturedtraffic-binding
 spec:
-  policyName: {{ .Release.Namespace }}-proxyconfig-policy
+  policyName: {{ .Release.Namespace }}-capturedtraffic-policy
   validationActions: [Deny]
   matchResources:
     namespaceSelector:
@@ -253,6 +257,76 @@ spec:
         operator: In
         values: ["{{ .Release.Namespace }}"]
 
+
+# ─────────────────────────────────────────────────────────────
+# TrafficReplay Policy - impossible + gated replayer fields
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-trafficreplay-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["trafficreplays"]
+  validations:
+    # Impossible: kafkaTrafficEnableMSKAuth
+    - expression: |
+        !has(oldObject.spec.kafkaTrafficEnableMSKAuth) || !has(object.spec.kafkaTrafficEnableMSKAuth) ||
+        object.spec.kafkaTrafficEnableMSKAuth == oldObject.spec.kafkaTrafficEnableMSKAuth
+      message: "Impossible: kafkaTrafficEnableMSKAuth cannot be changed. Delete and recreate the replayer."
+    # Impossible: kafkaTrafficPropertyFile
+    - expression: |
+        !has(oldObject.spec.kafkaTrafficPropertyFile) || !has(object.spec.kafkaTrafficPropertyFile) ||
+        object.spec.kafkaTrafficPropertyFile == oldObject.spec.kafkaTrafficPropertyFile
+      message: "Impossible: kafkaTrafficPropertyFile cannot be changed. Delete and recreate the replayer."
+    # Gated: auth, transformer, and tuple transformer fields
+    - expression: |
+        (
+          (!has(object.spec.authHeaderValue) || !has(oldObject.spec.authHeaderValue) ||
+           object.spec.authHeaderValue == oldObject.spec.authHeaderValue) &&
+          (!has(object.spec.removeAuthHeader) || !has(oldObject.spec.removeAuthHeader) ||
+           object.spec.removeAuthHeader == oldObject.spec.removeAuthHeader) &&
+          (!has(object.spec.transformerConfig) || !has(oldObject.spec.transformerConfig) ||
+           object.spec.transformerConfig == oldObject.spec.transformerConfig) &&
+          (!has(object.spec.transformerConfigEncoded) || !has(oldObject.spec.transformerConfigEncoded) ||
+           object.spec.transformerConfigEncoded == oldObject.spec.transformerConfigEncoded) &&
+          (!has(object.spec.transformerConfigFile) || !has(oldObject.spec.transformerConfigFile) ||
+           object.spec.transformerConfigFile == oldObject.spec.transformerConfigFile) &&
+          (!has(object.spec.tupleTransformerConfig) || !has(oldObject.spec.tupleTransformerConfig) ||
+           object.spec.tupleTransformerConfig == oldObject.spec.tupleTransformerConfig) &&
+          (!has(object.spec.tupleTransformerConfigBase64) || !has(oldObject.spec.tupleTransformerConfigBase64) ||
+           object.spec.tupleTransformerConfigBase64 == oldObject.spec.tupleTransformerConfigBase64) &&
+          (!has(object.spec.tupleTransformerConfigFile) || !has(oldObject.spec.tupleTransformerConfigFile) ||
+           object.spec.tupleTransformerConfigFile == oldObject.spec.tupleTransformerConfigFile)
+        ) ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
+      message: "Gated changes detected on TrafficReplay. Approve via the Argo Workflow UI to proceed."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-trafficreplay-binding
+spec:
+  policyName: {{ .Release.Namespace }}-trafficreplay-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
 # ─────────────────────────────────────────────────────────────
 # DataSnapshot Policy - all fields impossible after initial apply
 # ─────────────────────────────────────────────────────────────

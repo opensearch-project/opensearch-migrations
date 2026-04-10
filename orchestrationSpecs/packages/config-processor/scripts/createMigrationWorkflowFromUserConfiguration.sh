@@ -35,8 +35,8 @@ echo "Applying Kubernetes resources..."
 # Apply CRD resources
 if [ -f "$TEMP_DIR/crdResources.yaml" ]; then
     echo "Applying CRD resources..."
-    kubectl delete -f "$TEMP_DIR/crdResources.yaml" --ignore-not-found
-    kubectl apply -f "$TEMP_DIR/crdResources.yaml"
+    kubectl create -f "$TEMP_DIR/crdResources.yaml" 2>/dev/null || \
+    echo "CRD resources already exist, skipping."
 fi
 
 # Apply approval config maps

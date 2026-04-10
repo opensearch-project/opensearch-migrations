@@ -246,6 +246,7 @@ export const DENORMALIZED_CREATE_SNAPSHOTS_CONFIG = z.object({
 });
 
 export const DENORMALIZED_REPLAY_CONFIG = z.object({
+    name: z.string(),
     dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER),
     fromProxy: z.string(),
     kafkaClusterName: z.string(),

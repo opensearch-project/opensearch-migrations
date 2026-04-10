@@ -13,7 +13,15 @@ The migration workflow currently operates in an "always create" mode using `kube
 **Implementation Targets:**
 
 * Phase 1 (Completed): Kafka cluster (`Kafka`), `KafkaNodePool`, and `KafkaTopic` from Strimzi.
-* Phase 2 (Current): `CaptureProxy` (long-lived) and `DataSnapshot` / `SnapshotMigration` (finite/terminal).
+* Phase 2 (Current): `CapturedTraffic` (long-lived) and `DataSnapshot` / `SnapshotMigration` (finite/terminal).
+
+### CRD Design
+
+Each migration component is represented by a single CRD that holds both the desired configuration (`.spec`) and the lifecycle state (`.status.phase`). This follows the standard Kubernetes pattern — there are no separate "config" and "resource" CRDs. The three resource types are:
+
+* **`CapturedTraffic`** — capture proxy configuration and lifecycle (long-lived, transitions to `Ready`)
+* **`DataSnapshot`** — snapshot operation parameters and lifecycle (terminal, transitions to `Completed`)
+* **`SnapshotMigration`** — metadata migration + document backfill (RFS) config and lifecycle (terminal, transitions to `Completed`)
 
 ### Goals
 
@@ -65,13 +73,15 @@ Changes to resources fall into three categories.
 
 For terminal resources in `Completed` state, the [Lock-on-Complete](#the-lock-on-complete-pattern-terminal-resources-only) pattern overrides all categories — every spec change becomes Impossible.
 
-### CaptureProxy (`migrations.opensearch.org/ProxyConfig`)
+### CaptureProxy (`migrations.opensearch.org/CapturedTraffic`)
 
 | Field | Category   | Rationale | Restart Required? |
 | --- |------------| --- | --- |
 | `spec.listenPort` | Impossible | Changing breaks all client connections | N/A |
 | `spec.noCapture` | **Gated**  | Fundamentally changes proxy behavior | Yes (rolling) |
 | `spec.enableMSKAuth` | **Gated**  | Auth mode change is destructive | Yes (rolling) |
+| `spec.kafkaClusterName` | **Gated** | Changes which Kafka cluster receives captured traffic | Yes (rolling) |
+| `spec.kafkaTopicName` | **Gated** | Changes which topic receives captured traffic | Yes (rolling) |
 | `spec.tls.mode` | **Gated**  | TLS mode switch requires cert/secret changes | Yes (rolling) |
 | `spec.podReplicas` | Safe       | Scaling is safe, Deployment handles rolling | No |
 | `spec.resources` | Safe       | Resource limits/requests | Yes (rolling) |
@@ -91,6 +101,34 @@ For terminal resources in `Completed` state, the [Lock-on-Complete](#the-lock-on
 | `spec.suppressMethodAndPath` | **Gated**  | Traffic filtering changes | Yes (rolling) |
 
 *(Note: Kafka and KafkaNodePool resources follow similar matrices established in Phase 1).*
+
+### TrafficReplay (`migrations.opensearch.org/TrafficReplay`)
+
+| Field | Category | Rationale | Restart Required? |
+| --- | --- | --- | --- |
+| `spec.kafkaTrafficEnableMSKAuth` | Impossible | Kafka auth mode — changing breaks the consumer connection | N/A |
+| `spec.kafkaTrafficPropertyFile` | Impossible | Kafka connection properties — fundamental to consumer setup | N/A |
+| `spec.authHeaderValue` | **Gated** | Changes auth sent to target cluster | Yes (rolling) |
+| `spec.removeAuthHeader` | **Gated** | Toggles auth header stripping | Yes (rolling) |
+| `spec.transformerConfig` | **Gated** | Changes traffic transformation — could corrupt replay | Yes (rolling) |
+| `spec.transformerConfigEncoded` | **Gated** | Same as above, different encoding | Yes (rolling) |
+| `spec.transformerConfigFile` | **Gated** | Same as above, file reference | Yes (rolling) |
+| `spec.tupleTransformerConfig` | **Gated** | Tuple-level transformation | Yes (rolling) |
+| `spec.tupleTransformerConfigBase64` | **Gated** | Same | Yes (rolling) |
+| `spec.tupleTransformerConfigFile` | **Gated** | Same | Yes (rolling) |
+| `spec.podReplicas` | Safe | Scaling is safe, Deployment handles rolling | No |
+| `spec.resources` | Safe | Resource limits/requests | Yes (rolling) |
+| `spec.jvmArgs` | Safe | JVM tuning | Yes (rolling) |
+| `spec.loggingConfigurationOverrideConfigMap` | Safe | Logging config swap | Yes (rolling) |
+| `spec.otelCollectorEndpoint` | Safe | Observability config | Yes (rolling) |
+| `spec.speedupFactor` | Safe | Replay rate tuning | Yes (rolling) |
+| `spec.lookaheadTimeSeconds` | Safe | Buffer tuning | Yes (rolling) |
+| `spec.maxConcurrentRequests` | Safe | Performance tuning | Yes (rolling) |
+| `spec.numClientThreads` | Safe | Performance tuning | Yes (rolling) |
+| `spec.observedPacketConnectionTimeout` | Safe | Timeout tuning | Yes (rolling) |
+| `spec.quiescentPeriodMs` | Safe | Timing tuning | Yes (rolling) |
+| `spec.targetServerResponseTimeoutSeconds` | Safe | Timeout tuning | Yes (rolling) |
+| `spec.userAgent` | Safe | Cosmetic | Yes (rolling) |
 
 ### DataSnapshot (`migrations.opensearch.org/DataSnapshot`)
 
@@ -255,6 +293,134 @@ failureCondition: status.phase == Error
 
 ---
 
-## Implementation Plan
+## Adding a New Managed Resource
 
-See [reconfiguringWorkflowsImpl.md](./reconfiguringWorkflowsImpl.md) for the concrete implementation reference — file-by-file changes, code patterns, and migration steps for existing Kafka VAPs.
+When adding a new migration component (e.g., a traffic replayer), follow this checklist. Each step has a concrete file and pattern to follow.
+
+### 1. Define the CRD
+
+Add to `migrationCrds.yaml`. Each resource is a single CRD with configuration in `.spec` and lifecycle in `.status.phase`. Choose the lifecycle type:
+
+* **Long-lived** (proxy, replayer): phases `[Initialized, Running, Ready, Error]`
+* **Terminal** (snapshot, migration job): phases `[Initialized, Running, Completed, Error]`
+
+Include a typed schema for every spec field — don't use `x-kubernetes-preserve-unknown-fields` on the spec root. This enables CEL field-level comparisons in VAPs.
+
+### 2. Add RBAC
+
+Add the resource and its `/status` subresource to the `workflow-deployer-role` in `workflowRbac.yaml`:
+
+```yaml
+resources: ["trafficreplays", "trafficreplays/status"]
+```
+
+### 3. Classify fields
+
+For every spec field, decide:
+
+| Category | Meaning | VAP action |
+|----------|---------|------------|
+| **Impossible** | Cannot change without delete/recreate (e.g., listen port, index allowlist) | Hard block, no escape hatch |
+| **Gated** | Risky but allowed with explicit approval (e.g., auth mode, TLS config) | Block unless UID annotation matches |
+| **Safe** | Low-risk, always allowed (e.g., replica count, logging config) | No VAP expression needed |
+
+For terminal resources, Lock-on-Complete overrides everything once `status.phase == Completed`.
+
+### 4. Write the VAP
+
+Add a `ValidatingAdmissionPolicy` + `ValidatingAdmissionPolicyBinding` to `validatingAdmissionPolicies.yaml`.
+
+Pattern for Impossible fields:
+```yaml
+- expression: |
+    !has(oldObject.spec.fieldName) || !has(object.spec.fieldName) ||
+    object.spec.fieldName == oldObject.spec.fieldName
+  message: "Impossible: fieldName cannot be changed. Delete and recreate."
+```
+
+Pattern for Gated fields (all share a single UID check):
+```yaml
+- expression: |
+    (field1 unchanged && field2 unchanged && ...)
+    ||
+    (has(object.metadata.annotations) &&
+     'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+     has(object.metadata.labels) &&
+     'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+     object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+       object.metadata.labels['workflows.argoproj.io/run-uid'])
+  message: "Gated changes detected. Approve via the Argo Workflow UI."
+```
+
+Use `has()` on every field to handle CRD upgrades where the field didn't previously exist.
+
+For terminal resources, also add them to the `lock-on-complete-policy` resource list.
+
+### 5. Add initializer placeholder
+
+In `migrationInitializer.ts`, create the resource with `spec: {}` and `status: { phase: "Initialized" }` during the initialization step. This lets downstream `waitFor` steps find the resource before the workflow populates it.
+
+### 6. Build the manifest builder function
+
+In the appropriate workflow template file (e.g., `setupReplay.ts`), create a function that maps config fields to the CRD spec field-by-field:
+
+```typescript
+function makeTrafficReplayManifest(config, name) {
+    return {
+        apiVersion: "migrations.opensearch.org/v1alpha1",
+        kind: "TrafficReplay",
+        metadata: {
+            name: name,
+            labels: {
+                "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
+            }
+        },
+        spec: {
+            // Each field individually via expr.get()/expr.dig()
+        }
+    };
+}
+```
+
+The `run-uid` label is required for the Workflow UID Approval Pattern.
+
+### 7. Add apply + retry templates
+
+Three templates, layered:
+
+1. **Leaf apply** — `action: "apply"` with the manifest. Includes `K8S_RESOURCE_RETRY_STRATEGY`.
+2. **Retry wrapper** — catches VAP rejections with `continueOn: {failed: true}`, suspends for user review, auto-patches the UID approval annotation via `patchApprovalAnnotation`, then recursively retries via `addStepToSelf`.
+3. **Lifecycle wrapper** — calls the retry template, then transitions phases:
+   * `patchResourcePhase("Running")` after the CRD spec is accepted
+   * Deploy the actual infrastructure
+   * `patchResourcePhase("Ready")` on success, `patchResourcePhase("Error")` on failure
+
+Use `continueOn: {failed: true}` on the deploy step so the workflow can still mark `Error` on failure (Fail Forward / Poison Resource principle).
+
+### 8. Wire into the parent workflow
+
+Call the lifecycle template from `fullMigration.ts` (or the appropriate orchestration template). The parent workflow should not manage phases — that's encapsulated in the lifecycle template.
+
+### 9. Add a Helm test
+
+Create a test pod in `templates/tests/` modeled on `test-vap-kafka.yaml`. The test should:
+
+1. Create the resource
+2. Apply a spec (should succeed on `Initialized`)
+3. Try an Impossible field change (should fail)
+4. Try a Gated field change without approval (should fail)
+5. Add matching UID label + annotation, retry the Gated change (should succeed)
+6. Try with mismatched UIDs (should fail)
+7. For terminal resources: patch to `Completed`, try any spec change (should fail via Lock-on-Complete)
+
+### File summary
+
+| File | What to add |
+|------|-------------|
+| `migrationCrds.yaml` | CRD with typed schema + status phases |
+| `workflowRbac.yaml` | Resource + `/status` in deployer role |
+| `validatingAdmissionPolicies.yaml` | Policy + binding (Impossible, Gated, optionally Lock-on-Complete) |
+| `migrationInitializer.ts` | Placeholder creation |
+| `setup<Component>.ts` | Manifest builder + apply/retry/lifecycle templates |
+| `fullMigration.ts` | Call the lifecycle template |
+| `templates/tests/test-vap-<component>.yaml` | Helm test for VAP rules |

@@ -1164,6 +1164,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             "items": {
               "type": "object",
               "properties": {
+                "name": {
+                  "type": "string"
+                },
                 "dependsOnSnapshotMigrations": {
                   "type": "array",
                   "items": {
@@ -1527,6 +1530,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 }
               },
               "required": [
+                "name",
                 "dependsOnSnapshotMigrations",
                 "fromProxy",
                 "kafkaClusterName",

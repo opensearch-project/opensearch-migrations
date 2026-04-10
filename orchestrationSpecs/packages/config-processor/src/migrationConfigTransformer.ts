@@ -558,7 +558,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const kafkaClusters = resolveKafkaClusters(userConfig);
         const proxies = userConfig.traffic?.proxies;
 
-        return Object.entries(userConfig.traffic?.replayers || {}).map(([_name, replayer]) => {
+        return Object.entries(userConfig.traffic?.replayers || {}).map(([name, replayer]) => {
             const proxy = proxies?.[replayer.fromProxy];
             if (!proxy) {
                 throw new Error(`Replayer references unknown proxy '${replayer.fromProxy}'`);
@@ -573,6 +573,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const replayerConfig = ARGO_REPLAYER_OPTIONS.parse(replayer.replayerConfig ?? {});
 
             return {
+                name: [replayer.fromProxy, replayer.toTarget, name].join('-'),
                 fromProxy: replayer.fromProxy,
                 kafkaClusterName: proxy.kafka ?? "default",
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
