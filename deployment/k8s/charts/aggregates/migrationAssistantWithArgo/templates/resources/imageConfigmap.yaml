@@ -17,5 +17,3 @@ data:
   migrationConsolePullPolicy: "{{ .Values.images.migrationConsole.pullPolicy }}"
   coordinatorClusterImage: "{{ .Values.images.coordinatorCluster.repository }}:{{ .Values.images.coordinatorCluster.tag }}"
   coordinatorClusterPullPolicy: "{{ .Values.images.coordinatorCluster.pullPolicy }}"
-  mountpointS3Image: "{{ .Values.images.mountpointS3.repository }}:{{ .Values.images.mountpointS3.tag }}"
-  mountpointS3PullPolicy: "{{ .Values.images.mountpointS3.pullPolicy }}"

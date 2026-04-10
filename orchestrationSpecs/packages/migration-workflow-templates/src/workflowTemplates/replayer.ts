@@ -15,14 +15,12 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
-import {setupLog4jConfigForContainer, setupS3MountpointVolumeForContainer, setupTestCredsForContainer} from "./commonUtils/containerFragments";
+import {setupLog4jConfigForContainer, setupTestCredsForContainer} from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
-
-const S3_TUPLE_MOUNT_PATH = "/mnt/s3/tuples";
 
 function makeReplayerTargetParamDict(
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>
@@ -58,6 +56,8 @@ function makeReplayerParamsDict(
     kafkaConfig: BaseExpression<Serialized<z.infer<typeof KAFKA_CLIENT_CONFIG>>>,
     kafkaGroupId: BaseExpression<string>,
     tupleS3Bucket: BaseExpression<string>,
+    tupleS3Region: BaseExpression<string>,
+    tupleS3Prefix: BaseExpression<string>,
 ) {
     const base = expr.mergeDicts(
         expr.mergeDicts(
@@ -70,13 +70,17 @@ function makeReplayerParamsDict(
             kafkaTrafficGroupId: kafkaGroupId,
         })
     );
-    // When S3 bucket is configured, override tupleOutputDir to the mount path
+    // When S3 bucket is configured, pass S3 params directly to the replayer
     return expr.mergeDicts(
         base,
         expr.ternary(
             expr.isEmpty(tupleS3Bucket),
             expr.makeDict({}),
-            expr.makeDict({ tupleOutputDir: expr.literal(S3_TUPLE_MOUNT_PATH), enableSyncTuples: expr.literal(true) })
+            expr.makeDict({
+                tupleS3Bucket: tupleS3Bucket,
+                tupleS3Region: tupleS3Region,
+                tupleS3Prefix: tupleS3Prefix,
+            })
         )
     );
 }
@@ -103,7 +107,6 @@ function getReplayerDeploymentManifest
     tupleS3Region: BaseExpression<string>,
     tupleS3Prefix: BaseExpression<string>,
     useLocalStack: BaseExpression<boolean>,
-    mountpointS3Image: BaseExpression<string>,
 }): Deployment {
     const baseContainerDefinition = {
         name: "replayer",
@@ -121,15 +124,7 @@ function getReplayerDeploymentManifest
     const withLog4j = setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
         {container: baseContainerDefinition, volumes: [], sidecars: [], initContainers: []},
         args.jvmArgs);
-    const withS3 = setupS3MountpointVolumeForContainer(
-        args.tupleS3Bucket,
-        args.tupleS3Region,
-        args.tupleS3Prefix,
-        S3_TUPLE_MOUNT_PATH,
-        args.useLocalStack,
-        args.mountpointS3Image,
-        withLog4j);
-    const finalContainerDefinition = setupTestCredsForContainer(args.useLocalStack, withS3);
+    const finalContainerDefinition = setupTestCredsForContainer(args.useLocalStack, withLog4j);
     return {
         apiVersion: "apps/v1",
         kind: "Deployment",
@@ -208,7 +203,7 @@ export const Replayer = WorkflowBuilder.create({
         .addRequiredInput("tupleS3Bucket", typeToken<string>())
         .addRequiredInput("tupleS3Region", typeToken<string>())
         .addRequiredInput("tupleS3Prefix", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer", "MountpointS3"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
 
         .addResourceTask(b => b
@@ -231,7 +226,6 @@ export const Replayer = WorkflowBuilder.create({
                     tupleS3Region: b.inputs.tupleS3Region,
                     tupleS3Prefix: b.inputs.tupleS3Prefix,
                     useLocalStack: expr.deserializeRecord(b.inputs.useLocalStack),
-                    mountpointS3Image: b.inputs.imageMountpointS3Location,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -247,7 +241,7 @@ export const Replayer = WorkflowBuilder.create({
         // ConfigMap defaults for S3 tuple config — used when user doesn't override
         .addInputsFromRecord(defaultTupleS3Config(t.inputs.workflowParameters.s3TupleConfigMap))
 
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer", "MountpointS3"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
 
         .addSteps(b => {
             // Resolve effective values: user override wins, else ConfigMap default
@@ -279,7 +273,9 @@ export const Replayer = WorkflowBuilder.create({
                             b.inputs.replayerOptions,
                             b.inputs.kafkaConfig,
                             b.inputs.kafkaGroupId,
-                            effectiveBucket
+                            effectiveBucket,
+                            effectiveRegion,
+                            effectivePrefix
                         ) as any
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.replayerOptions, "resources"))

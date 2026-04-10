@@ -281,11 +281,13 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
             "By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). " +
             "Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."),
     tupleS3Bucket: z.string().default("").optional()
-        .describe("S3 bucket name for tuple output via Mountpoint S3. When set, a mount-s3 sidecar mounts the bucket at the tupleOutputDir path. Leave empty to write tuples to local storage only."),
+        .describe("S3 bucket name for tuple output. When set, the replayer writes tuples directly to S3 via the AWS CRT client. Leave empty to disable tuple output."),
     tupleS3Region: z.string().default("").optional()
         .describe("AWS region for the tuple S3 bucket. Required when tupleS3Bucket is set."),
     tupleS3Prefix: z.string().default("tuples/").optional()
         .describe("S3 key prefix within the tuple bucket. Defaults to 'tuples/'."),
+    tupleS3Endpoint: z.string().default("").optional()
+        .describe("Custom S3 endpoint URL for LocalStack, MinIO, or non-standard S3-compatible services. Leave empty for standard AWS S3."),
     useLocalStack: z.boolean().default(false).optional()
         .describe("Use LocalStack S3 endpoint instead of real AWS S3. Only for local testing."),
 }).describe("Kubernetes deployment-level options for the traffic replayer.");
@@ -324,12 +326,10 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
         .describe("Base64-encoded tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX),
     tupleTransformerConfigFile: z.string().optional()
         .describe("Path to a JSON file containing tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
-    tupleOutputDir: z.string().default("./tuples").optional()
-        .describe("Directory for compressed tuple output files when enableSyncTuples is true (local path or Mountpoint S3 mount)."),
     tupleMaxLagSeconds: z.number().default(60).optional()
-        .describe("Maximum seconds before rotating/committing a tuple file (used with enableSyncTuples)."),
+        .describe("Maximum seconds before rotating/uploading a tuple file to S3."),
     tupleMaxFileSizeMb: z.number().default(256).optional()
-        .describe("Maximum uncompressed size in MB before rotating a tuple file (used with enableSyncTuples)."),
+        .describe("Maximum uncompressed size in MB before rotating a tuple file to S3."),
     userAgent: z.string().optional()
         .describe("String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."),
 }).describe("Process-level configuration options for the traffic replayer application. These control how captured traffic is read from Kafka and replayed to the target cluster.");

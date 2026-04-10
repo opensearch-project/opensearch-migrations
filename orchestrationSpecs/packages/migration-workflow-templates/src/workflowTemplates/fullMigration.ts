@@ -383,7 +383,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addOptionalInput("sortOrder_view", c => 999)
         .addRequiredInput("dependsOnSnapshotMigrations", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_FILTER>[]>())
 
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "TrafficReplayer", "MountpointS3"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "TrafficReplayer"]))
 
         .addSteps(b => b
             .addStep("waitForSnapshotMigrationDeps", ResourceManagement, "waitForSnapshotMigration", c => {

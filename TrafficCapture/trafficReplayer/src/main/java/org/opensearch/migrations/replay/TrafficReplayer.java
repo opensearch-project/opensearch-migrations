@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay;
 import java.lang.ref.WeakReference;
 import java.net.URI;
 import java.nio.charset.Charset;
-import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -18,6 +17,7 @@ import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
+import org.opensearch.migrations.replay.sink.S3TupleSink;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
@@ -47,6 +47,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
 
 @Slf4j
 public class TrafficReplayer {
@@ -190,14 +192,6 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = { "--enable-sync-tuples", "--enableSyncTuples" },
-            arity = 0,
-            description = "Enable per-thread tuple writing to gzip files (GzipJsonLinesSink). "
-                + "When not set, tuples are written via the legacy Log4J2 async appender path.")
-        boolean enableSyncTuples;
-
-        @Parameter(
-            required = false,
             names = { "--user-agent", "--userAgent" },
             arity = 1,
             description = "For HTTP requests to the target cluster, append this string (after \"; \") to"
@@ -302,10 +296,31 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = { "--tuple-output-dir", "--tupleOutputDir" },
+            names = { "--tuple-s3-bucket", "--tupleS3Bucket" },
             arity = 1,
-            description = "Directory for compressed tuple output files (local path or Mountpoint S3 mount)")
-        String tupleOutputDir = "./tuples";
+            description = "S3 bucket for tuple output. When set, tuples are written directly to S3 via the CRT client.")
+        String tupleS3Bucket;
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-s3-region", "--tupleS3Region" },
+            arity = 1,
+            description = "AWS region for the tuple S3 bucket. Required when --tuple-s3-bucket is set.")
+        String tupleS3Region;
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-s3-prefix", "--tupleS3Prefix" },
+            arity = 1,
+            description = "S3 key prefix for tuple objects. Defaults to 'tuples/'.")
+        String tupleS3Prefix = "tuples/";
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-s3-endpoint", "--tupleS3Endpoint" },
+            arity = 1,
+            description = "Custom S3 endpoint URL (for LocalStack, MinIO, or non-standard S3-compatible services).")
+        String tupleS3Endpoint;
 
         @Parameter(
             required = false,
@@ -320,6 +335,14 @@ public class TrafficReplayer {
             arity = 1,
             description = "Maximum uncompressed size in MB before rotating a tuple file")
         int tupleMaxFileSizeMb = 256;
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-max-per-file", "--tupleMaxPerFile" },
+            arity = 1,
+            description = "Maximum number of tuples per S3 object. Set to 1 for one-tuple-per-file mode. "
+                + "0 (default) means no count limit — rotation is controlled by size and age thresholds only.")
+        int tupleMaxPerFile = 0;
 
     }
 
@@ -603,35 +626,42 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            if (params.enableSyncTuples) {
-                log.info("Sync tuple writing enabled — using per-thread GzipJsonLinesSink");
-                var tupleOutputDir = resolveTupleOutputDir(params.tupleOutputDir);
-                var tupleWriter = new ThreadLocalTupleWriter(
-                    tupleOutputDir,
-                    params.tupleMaxFileSizeMb * 1024L * 1024L,
-                    Duration.ofSeconds(params.tupleMaxLagSeconds)
-                );
-                tr.setupRunAndWaitForReplayWithShutdownChecks(
-                    Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                    serverTimeout,
-                    blockingTrafficSource,
-                    timeShifter,
-                    tupleWriter,
-                    Duration.ofMillis(params.quiescentPeriodMs)
-                );
-            } else {
-                var resultsToLogsConsumer = new ResultsToLogsConsumer(null, null,
-                        () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig));
-                var tupleWriter = new TupleParserChainConsumer(resultsToLogsConsumer);
-                tr.setupRunAndWaitForReplayWithShutdownChecks(
-                    Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                    serverTimeout,
-                    blockingTrafficSource,
-                    timeShifter,
-                    tupleWriter,
-                    Duration.ofMillis(params.quiescentPeriodMs)
+            ThreadLocalTupleWriter tupleWriter = null;
+            if (params.tupleS3Bucket != null && !params.tupleS3Bucket.isEmpty()) {
+                log.info("S3 tuple writing enabled — bucket={}, region={}, prefix={}",
+                    params.tupleS3Bucket, params.tupleS3Region, params.tupleS3Prefix);
+                var s3ClientBuilder = S3AsyncClient.crtBuilder()
+                    .region(Region.of(params.tupleS3Region))
+                    .credentialsProvider(DefaultCredentialsProvider.builder().build())
+                    .targetThroughputInGbps(2.0)
+                    .minimumPartSizeInBytes(8L * 1024 * 1024);
+                if (params.tupleS3Endpoint != null && !params.tupleS3Endpoint.isEmpty()) {
+                    s3ClientBuilder.endpointOverride(URI.create(params.tupleS3Endpoint));
+                    s3ClientBuilder.forcePathStyle(true);
+                }
+                var s3Client = s3ClientBuilder.build();
+                var replayerId = ProcessHelpers.getNodeInstanceName();
+                tupleWriter = new ThreadLocalTupleWriter(
+                    sinkIndex -> new S3TupleSink(
+                        s3Client,
+                        params.tupleS3Bucket,
+                        params.tupleS3Prefix,
+                        replayerId,
+                        sinkIndex,
+                        params.tupleMaxFileSizeMb * 1024L * 1024L,
+                        Duration.ofSeconds(params.tupleMaxLagSeconds),
+                        params.tupleMaxPerFile
+                    )
                 );
             }
+            tr.setupRunAndWaitForReplayWithShutdownChecks(
+                Duration.ofSeconds(params.observedPacketConnectionTimeout),
+                serverTimeout,
+                blockingTrafficSource,
+                timeShifter,
+                tupleWriter,
+                Duration.ofMillis(params.quiescentPeriodMs)
+            );
             log.info("Done processing TrafficStreams");
         } finally {
             scheduledExecutorService.shutdown();
@@ -644,21 +674,6 @@ public class TrafficReplayer {
                 activeContextLogger.atLevel(acmLevel).setMessage("[end of run]]").log();
             }
         }
-    }
-
-    /**
-     * When running with a Mountpoint S3 sidecar, each pod's FUSE mount lives at
-     * {@code <hostPath>/.pods/<POD_NAME>/s3}. Append that suffix so the replayer
-     * writes through the FUSE mount instead of to the bare hostPath root.
-     */
-    static Path resolveTupleOutputDir(String tupleOutputDir) {
-        var podName = System.getenv("POD_NAME");
-        var base = Path.of(tupleOutputDir);
-        if (podName != null && !podName.isEmpty()) {
-            base = base.resolve(".pods").resolve(podName).resolve("s3");
-            log.info("Resolved tupleOutputDir with POD_NAME: {}", base);
-        }
-        return base;
     }
 
     private static void setupShutdownHookForReplayer(TrafficReplayerTopLevel tr) {
