@@ -149,21 +149,20 @@ class K8sService:
         Returns the exit code of the background command.
         """
         start_time = time.time()
-        next_line = 1
+        next_byte = 0
         while True:
             if timeout > 0 and (time.time() - start_time) > timeout:
                 raise TimeoutError(f"Background command did not complete within {timeout}s")
             time.sleep(poll_interval)
 
-            # Print new log lines since last poll
+            # Print new log bytes since last poll (no filtering/rewrapping for Jenkins parity)
             try:
                 resp = self.exec_migration_console_cmd(
-                    command_list=["tail", "-n", f"+{next_line}", log_file],
+                    command_list=["tail", "-c", f"+{next_byte + 1}", log_file],
                     unbuffered=False)
-                if resp and resp.strip():
-                    new_lines = resp.strip()
-                    print(new_lines)
-                    next_line += new_lines.count("\n") + 1
+                if resp:
+                    print(resp, end="", flush=True)
+                    next_byte += len(resp.encode("utf-8"))
             except Exception as e:
                 logger.debug(f"Log tail failed (may be transient): {e}")
 
@@ -176,10 +175,10 @@ class K8sService:
                     # Print any remaining log output
                     try:
                         resp = self.exec_migration_console_cmd(
-                            command_list=["tail", "-n", f"+{next_line}", log_file],
+                            command_list=["tail", "-c", f"+{next_byte + 1}", log_file],
                             unbuffered=False)
-                        if resp and resp.strip():
-                            print(resp)
+                        if resp:
+                            print(resp, end="", flush=True)
                     except Exception:
                         pass
                     logger.info(f"Background command completed with exit code: {exit_code}")
