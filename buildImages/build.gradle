@@ -72,7 +72,7 @@ jibProjects.values().each { cfg ->
 def buildKitProjects = [
         [
                 serviceName: "migrationCompanion",
-                contextDir: "MigrationCompanion",
+                contextDir: "MigrationCompanion/build/dockerContext",
                 imageName:  "migration_companion",
                 imageTag:   "latest",
                 buildArgs: [
@@ -80,7 +80,7 @@ def buildKitProjects = [
                         RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
                 ],
                 requiredDependencies: [
-                        ":MigrationCompanion:syncVersionFile_migrationCompanion"
+                        ":MigrationCompanion:syncDockerBuildContext"
                 ]
         ],
         [

@@ -36,7 +36,7 @@ WORKDIR /app
 
 COPY --from=go-builder /build/opensearch-pricing-calculator .
 COPY --from=go-builder /build/priceCache.json .
-COPY build/version/VERSION .
+COPY VERSION .
 
 # Python skill (pip install for programmatic use)
 COPY skills/solr-opensearch-migration-advisor /app/skills/solr-opensearch-migration-advisor

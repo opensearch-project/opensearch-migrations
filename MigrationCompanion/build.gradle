@@ -1,5 +1,3 @@
-import org.opensearch.migrations.common.CommonUtils
-
 plugins {
     id 'base'
 }
@@ -11,7 +9,34 @@ def os = System.getProperty('os.name').toLowerCase().contains('mac') ? 'darwin' 
 def arch = System.getProperty('os.arch').contains('aarch64') ? 'arm64' : 'amd64'
 def goRoot = new File(gradle.gradleUserHomeDir, "go/${goVersion}/${os}-${arch}")
 
-CommonUtils.syncVersionFileToDockerStaging(project, "migrationCompanion", "build/version")
+def commonExcludes = [
+        "**/__pycache__/**",
+        "**/.pytest_cache/**",
+        "**/.venv/**",
+        "**/node_modules/**",
+        "**/*.pyc",
+]
+
+tasks.register('syncDockerBuildContext', Sync) {
+    into layout.buildDirectory.dir("dockerContext")
+
+    from(project.file("Dockerfile"))
+    from(rootProject.layout.projectDirectory.file("VERSION"))
+
+    from(project.file("opensearch-pricing-calculator")) {
+        into "opensearch-pricing-calculator"
+        exclude commonExcludes
+        exclude "*_test.go"
+        exclude "docker-compose.yml"
+    }
+    from(project.file("skills/solr-opensearch-migration-advisor")) {
+        into "skills/solr-opensearch-migration-advisor"
+        exclude commonExcludes
+        exclude "tests/**"
+        exclude ".gitignore"
+        exclude ".env.example"
+    }
+}
 
 tasks.register('setupGo') {
     description = 'Download Go toolchain from go.dev (cached in ~/.gradle/go/)'
