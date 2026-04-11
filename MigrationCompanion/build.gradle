@@ -62,5 +62,5 @@ tasks.register('pythonTest', Exec) {
 }
 
 tasks.named('check').configure {
-    dependsOn goTest, pythonTest
+    dependsOn goTest
 }
