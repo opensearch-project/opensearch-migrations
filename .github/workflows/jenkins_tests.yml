@@ -193,14 +193,14 @@ jobs:
     timeout-minutes: 180
     concurrency:
       group: ${{ github.workflow }}-eks-cdc-only-integ-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
       - uses: actions/checkout@v6
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
-          job_name: "pr-eks-cdc-only-integ-test"
+          job_name: ${{ github.event_name == 'push' && 'main-eks-cdc-only-integ-test' || 'pr-eks-cdc-only-integ-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"

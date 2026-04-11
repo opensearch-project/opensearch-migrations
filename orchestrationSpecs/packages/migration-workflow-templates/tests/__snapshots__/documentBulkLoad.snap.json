@@ -41,7 +41,7 @@
           ]
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -295,7 +295,7 @@
           "setOwnerReference": true
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",

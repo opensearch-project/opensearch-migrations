@@ -1,4 +1,13 @@
 # conftest.py
+#
+# Test ID naming convention:
+#   0001-0009  Basic tests (single doc backfill, coordinator cluster)
+#   0004-0005  Multi-type index tests (union, split)
+#   0006       Benchmark backfill (OpenSearch Benchmark)
+#   0010-0019  Snapshot-only tests (BYOS / externally managed snapshots)
+#   0021-0029  AOSS collection tests (search, time-series, vector)
+#   0030-0039  CDC tests (capture proxy + replayer + live traffic)
+#
 import json
 import os
 from pathlib import Path
@@ -13,6 +22,7 @@ from .test_cases.basic_tests import *
 from .test_cases.multi_type_tests import *
 from .test_cases.backfill_tests import *
 from .test_cases.snapshot_only_tests import *
+from .test_cases.cdc_tests import *
 from .test_cases.aoss_collection_tests import *
 
 logger = logging.getLogger(__name__)

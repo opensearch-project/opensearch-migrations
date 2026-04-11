@@ -220,6 +220,11 @@ class MATestBase:
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
             self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=timeout_seconds)
 
+    def post_migration_actions(self):
+        """Hook for actions after migration completes but before verification.
+        CDC tests override this to send traffic through the capture proxy."""
+        pass
+
     def display_final_cluster_state(self):
         source_response = cat_indices(cluster=self.source_cluster, refresh=True).decode("utf-8")
         target_response = cat_indices(cluster=self.target_cluster, refresh=True).decode("utf-8")

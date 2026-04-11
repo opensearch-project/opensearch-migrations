@@ -417,6 +417,12 @@ export const FullMigration = WorkflowBuilder.create({
                         resourceName: expr.concat(
                             expr.asString(expr.get(c.item, "source")),
                             expr.literal("-"),
+                            expr.dig(
+                                expr.deserializeRecord(b.inputs.targetConfig),
+                                ["label"],
+                                ""
+                            ),
+                            expr.literal("-"),
                             expr.asString(expr.get(c.item, "snapshot"))
                         )
                     });

@@ -46,7 +46,7 @@
           "setOwnerReference": false
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -108,7 +108,7 @@
           "successCondition": "status.readyReplicas > 0"
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -169,7 +169,7 @@
           "successCondition": "status.readyReplicas > 0"
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -196,7 +196,7 @@
           "setOwnerReference": false
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -244,7 +244,7 @@
           "setOwnerReference": false
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",

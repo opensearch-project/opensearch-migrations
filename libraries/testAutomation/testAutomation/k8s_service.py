@@ -486,6 +486,17 @@ class K8sService:
             ignore_errors=True
         )
 
+    def cleanup_strimzi_crs(self) -> None:
+        """Delete Strimzi CRs while the operator is still running to process finalizers."""
+        for cr_type in ["kafkatopics.kafka.strimzi.io",
+                        "kafkanodepools.kafka.strimzi.io",
+                        "kafkas.kafka.strimzi.io"]:
+            self.run_command(
+                self._kubectl_base() + ["delete", cr_type, "--all",
+                                        "-n", self.namespace, "--timeout=60s"],
+                ignore_errors=True
+            )
+
     def get_helm_installations(self) -> List[str]:
         target_namespace = self.namespace
         # Use helm list with short output format to get just the release names

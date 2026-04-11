@@ -1016,7 +1016,7 @@
                   },
                   {
                     "name": "resourceName",
-                    "value": "{{=item['source']+'-'+item['snapshot']}}"
+                    "value": "{{=item['source']+'-'+sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))+'-'+item['snapshot']}}"
                   }
                 ]
               },

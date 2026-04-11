@@ -94,7 +94,7 @@
           "successCondition": "status.listeners"
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -185,7 +185,7 @@
           "action": "get"
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -286,7 +286,7 @@
           "successCondition": "status.phase == Ready"
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -319,7 +319,7 @@
           "successCondition": "status.phase == Ready"
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -352,7 +352,7 @@
           "successCondition": "status.phase == Ready"
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -383,7 +383,7 @@
           ]
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -417,7 +417,7 @@
           ]
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -448,7 +448,7 @@
           ]
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -474,7 +474,7 @@
           "action": "get"
         },
         "retryStrategy": {
-          "limit": "6",
+          "limit": "60",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
