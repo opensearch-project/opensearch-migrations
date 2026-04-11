@@ -71,6 +71,12 @@ jibProjects.values().each { cfg ->
 
 def buildKitProjects = [
         [
+                serviceName: "opensearchPricingCalculator",
+                contextDir: "MigrationCompanion/opensearch-pricing-calculator",
+                imageName:  "opensearch_pricing_calculator",
+                imageTag:   "latest",
+        ],
+        [
                 serviceName: "elasticsearchTestConsole",
                 contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
                 imageName:  "elasticsearch_test_console",
