@@ -16,6 +16,11 @@ spec:
   mountOptions:
     - region {{ .Values.aws.region }}
     - read-only
+    {{- if .Values.defaultBucketConfiguration.useLocalStack }}
+    - endpoint-url http://{{ .Values.defaultBucketConfiguration.endpoint }}.{{ .Release.Namespace }}.svc.cluster.local:4566
+    - force-path-style
+    - no-sign-request
+    {{- end }}
   csi:
     driver: s3.csi.aws.com
     volumeHandle: {{ .Release.Namespace }}-s3-artifacts
