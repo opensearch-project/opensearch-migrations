@@ -58,7 +58,7 @@ esac
 
 gradlew :buildImages:buildImagesToRegistry_$PLATFORM -Pbuilder="$BUILDER_NAME"
 
-kubectl config set-context --current --namespace=ma
+kubectl config set-context "${KUBE_CONTEXT}" --namespace=ma
 
 # Nice to have additions to minikube
 minikube addons enable metrics-server
@@ -71,7 +71,7 @@ helm dependency update charts/aggregates/migrationAssistantWithArgo
 
 if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
   echo "Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
-  helm upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
+  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
     --wait --timeout 10m \
     -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml \
     --set "images.captureProxy.repository=${LOCAL_REGISTRY}/migrations/capture_proxy" \
@@ -90,16 +90,16 @@ if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
     --set "images.reindexFromSnapshot.tag=latest" \
     --set "images.reindexFromSnapshot.pullPolicy=Always"
 
-  helm upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
+  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
       --wait --timeout 10m \
       --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard"
 else
   echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
-  helm upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
+  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
     --wait --timeout 10m \
     -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
 
-  helm upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
+  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
     --wait --timeout 10m
 fi
 

@@ -6,7 +6,7 @@ def call(Map config = [:]) {
     def endpointEnvVar = envVarMap[collectionType]
     def defaultStageId = config.defaultStageId ?: "aosss"
     def jobName = config.jobName ?: "eks-aoss-${collectionType.toLowerCase()}-integ-test"
-    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
     def clusterContextFilePath = "tmp/cluster-context-aoss-${currentBuild.number}.json"
 
     pipeline {
@@ -23,6 +23,10 @@ def call(Map config = [:]) {
             string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/aoss-osb-data/os1x-aoss-osb-data/', description: 'Full S3 URI to snapshot repository')
             string(name: 'SNAPSHOT_NAME', defaultValue: 'os1x-aoss-osb-data', description: 'Name of the snapshot')
             string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '33', description: 'Max retries for workflow monitoring (~1/min). 33=~30min')
+            booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source instead of using public images')
+            booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
+            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
+            string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
         }
 
         options {
@@ -51,7 +55,7 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
                     script {
-                        def pool = jobName.startsWith("main-") ? "m" : "p"
+                        def pool = jobName.startsWith("main-") ? "m" : jobName.startsWith("release-") ? "r" : "p"
                         env.maStageName = "${params.STAGE ?: defaultStageId}-${pool}${currentBuild.number}"
                         env.STACK_NAME = "MA-Serverless-${maStageName}-${params.REGION}"
                         env.eksClusterName = "migration-eks-cluster-${maStageName}-${params.REGION}"
@@ -69,6 +73,10 @@ def call(Map config = [:]) {
                             Test ID:          ${testId}
                             Source:           ${params.SOURCE_VERSION}
                             Workers:          ${params.RFS_WORKERS}
+                            Build Images:           ${params.BUILD_IMAGES}
+                            Build Chart:            ${params.BUILD_CHART_AND_DASHBOARDS}
+                            Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
+                            Version:                ${params.VERSION}
                             ================================================================
                         """
                     }
@@ -83,7 +91,10 @@ def call(Map config = [:]) {
                 }
             }
 
+            // Skip source build when using release bootstrap or when not building
+            // any artifacts from source (images/chart).
             stage('Build') {
+                when { expression { !params.USE_RELEASE_BOOTSTRAP && (params.BUILD_IMAGES || params.BUILD_CHART_AND_DASHBOARDS) } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
@@ -99,18 +110,20 @@ def call(Map config = [:]) {
                         script {
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 7200, roleSessionName: 'jenkins-session') {
+                                    def bootstrap = resolveBootstrap(
+                                        useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
+                                        buildImages: params.BUILD_IMAGES,
+                                        buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
+                                        version: params.VERSION
+                                    )
                                     sh """
-                                        ./deployment/k8s/aws/assemble-bootstrap.sh
-                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
+                                        ${bootstrap.script} \
                                           --deploy-create-vpc-cfn \
-                                          --build-cfn \
-                                          --build-images \
-                                          --build-chart-and-dashboards \
                                           --stack-name "${env.STACK_NAME}" \
                                           --stage "${maStageName}" \
                                           --region "${params.REGION}" \
                                           --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          --base-dir "\$(pwd)" \
+                                          ${bootstrap.flags} \
                                           --skip-console-exec \
                                           --skip-setting-k8s-context \
                                           2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}

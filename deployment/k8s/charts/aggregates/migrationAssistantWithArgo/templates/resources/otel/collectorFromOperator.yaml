@@ -34,6 +34,15 @@ spec:
       memory: 200Mi
   tolerations:
     - operator: Exists
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: karpenter.sh/nodepool
+                operator: NotIn
+                values:
+                  - dedicated-small-instance-migration-console-pool
   config:
     receivers:
       otlp:

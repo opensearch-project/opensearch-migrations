@@ -37,14 +37,15 @@ public class KafkaTopicDumper {
     }
 
     public void runDumpFromKafka(
-        String mode, String brokers, String topic, boolean mskAuth, String propertyFile,
+        String mode, String brokers, String topic, String authType,
+        String kafkaUserName, String kafkaPassword, String propertyFile,
         Long startOffset, Long startTime, Long endOffset, Long endTime,
         int previewBytesRead, int previewBytesWrite,
         int observedPacketConnectionTimeout, String packetTimeoutParamName,
         RootReplayerContext topContext
     ) throws Exception {
         var kafkaProps = KafkaTrafficCaptureSource.buildKafkaProperties(
-            brokers, "unused-dump-group", mskAuth, propertyFile);
+            brokers, "unused-dump-group", authType, kafkaUserName, kafkaPassword, propertyFile);
         kafkaProps.remove(ConsumerConfig.GROUP_ID_CONFIG);
 
         try (var consumer = new KafkaConsumer<String, byte[]>(kafkaProps)) {

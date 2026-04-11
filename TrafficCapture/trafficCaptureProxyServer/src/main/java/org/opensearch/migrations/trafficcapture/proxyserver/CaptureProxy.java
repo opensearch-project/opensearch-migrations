@@ -205,11 +205,13 @@ public class CaptureProxy {
         try {
             parser.parse(args);
             // Exactly one these 3 options are required. See that exactly one is set by summing up their presence
-            if (Stream.of(p.traceDirectory, p.kafkaParameters.kafkaConnection, (p.noCapture ? "" : null))
+            p.kafkaParameters.validateKafkaAuthFlags();
+            if (Stream.of(p.traceDirectory, p.kafkaParameters.kafkaBrokers, (p.noCapture ? "" : null))
                 .mapToInt(s -> s != null ? 1 : 0)
                 .sum() != 1) {
                 throw new ParameterException(
-                    "Expected exactly one of '--traceDirectory', '--kafkaConnection', or " + "'--noCapture' to be set"
+                    "Expected exactly one of '--traceDirectory', '--kafkaBrokers'/'--kafkaConnection', or "
+                        + "'--noCapture' to be set"
                 );
             }
             return p;
@@ -290,7 +292,7 @@ public class CaptureProxy {
         // Resist the urge for now though until it comes in as a request/need.
         if (params.traceDirectory != null) {
             return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
-        } else if (params.kafkaParameters.kafkaConnection != null) {
+        } else if (params.kafkaParameters.kafkaBrokers != null) {
             return new KafkaCaptureFactory(
                 rootContext,
                 nodeId,
