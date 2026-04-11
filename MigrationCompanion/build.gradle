@@ -39,16 +39,9 @@ tasks.register('goTest', Exec) {
     commandLine "${goRoot}/bin/go", 'test', './...', '-count=1'
 }
 
-tasks.register('syncPythonVersion', Copy) {
-    description = 'Copy root VERSION file into solr-migration-advisor for pyproject.toml'
-    from rootProject.file('VERSION')
-    into pyDir
-}
-
 tasks.register('pythonSetup', Exec) {
     description = 'Install solr-migration-advisor Python dependencies'
     group = 'verification'
-    dependsOn syncPythonVersion
     workingDir pyDir
     commandLine 'pip', 'install', '-e', '.[dev]'
 }
