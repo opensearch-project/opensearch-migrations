@@ -1,4 +1,5 @@
 FROM golang:1.24-alpine AS builder
+ARG TARGETARCH
 
 WORKDIR /build
 
@@ -12,8 +13,8 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build static binary with version info
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+# Build static binary for the target platform
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -a -installsuffix cgo -o opensearch-pricing-calculator .
 
 # --- Runtime stage ---
