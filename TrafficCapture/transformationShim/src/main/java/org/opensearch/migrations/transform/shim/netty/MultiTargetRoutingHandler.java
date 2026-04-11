@@ -211,7 +211,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
         for (String name : activeTargets) {
             Target target = targets.get(name);
-            Map<String, Object> targetRequestMap = (target.requestTransform() != null || hasCursorMark)
+            Map<String, Object> targetRequestMap = (dualMode || target.requestTransform() != null)
                 ? deepCopyMap(requestMap) : requestMap;
             targetRequestMap.put("_targetName", name);
             targetRequestMap.put("_mode", dualMode ? "dual" : "single");
