@@ -81,9 +81,11 @@ RUN dnf install -y  \
         dnf clean all
 
 # Install mount-s3 for direct S3 bucket mounting (requires SYS_ADMIN capability at runtime)
-RUN ARCH=$(uname -m) && \
+RUN MOUNT_S3_VERSION="1.22.2" && \
+    ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi && \
     curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
-        "https://s3.amazonaws.com/mountpoint-s3-release/latest/${ARCH}/mount-s3.rpm" \
+        "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNT_S3_VERSION}/${ARCH}/mount-s3-${MOUNT_S3_VERSION}-${ARCH}.rpm" \
         -o /tmp/mount-s3.rpm && \
     dnf install -y /tmp/mount-s3.rpm && \
     rm -f /tmp/mount-s3.rpm
