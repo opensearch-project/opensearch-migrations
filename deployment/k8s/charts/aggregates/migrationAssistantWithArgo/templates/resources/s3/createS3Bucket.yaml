@@ -4,7 +4,7 @@ kind: Job
 metadata:
   name: create-s3-bucket-{{ .Release.Name }}
   annotations:
-    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "1"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
@@ -31,13 +31,21 @@ spec:
               value: "test"
             {{- end }}
             - name: AWS_REGION
-              value: {{ .Values.aws.region | quote }}
-            {{- if .Values.defaultBucketConfiguration.useLocalStack }}
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: AWS_REGION
             - name: S3_ENDPOINT_URL
-              value: {{ printf "http://%s.%s.svc.cluster.local:4566" .Values.defaultBucketConfiguration.endpoint .Release.Namespace | quote }}
-            {{- end }}
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: ENDPOINT_HTTP
+                  optional: true
             - name: BUCKET_NAME
-              value: {{ printf "migrations-default-%s-%s-%s" (toString .Values.aws.account) .Values.stageName .Values.aws.region | quote }}
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: BUCKET_NAME
           command:
             - /bin/sh
             - -c

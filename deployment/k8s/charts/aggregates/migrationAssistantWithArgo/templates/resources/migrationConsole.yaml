@@ -115,7 +115,6 @@ spec:
 ---
 {{- end }}
 {{ $sharedLogsVolumeEnabled := .Values.logs.sharedLogsVolume.enabled }}
-{{ $s3ArtifactsMountEnabled := index .Values.conditionalPackageInstalls "aws-mountpoint-s3-csi-driver" }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -212,6 +211,31 @@ spec:
               value: "/root/schema/workflowMigration.schema.json"
             - name: MIGRATION_SAMPLE_CONFIG_PATH
               value: "/root/schema/sample.yaml"
+            {{- if .Values.defaultBucketConfiguration.create }}
+            - name: S3_ARTIFACTS_BUCKET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: BUCKET_NAME
+            - name: S3_ARTIFACTS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: AWS_REGION
+            - name: S3_ARTIFACTS_ENDPOINT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: ENDPOINT_HTTP
+                  optional: true
+            {{- end }}
+          {{- if .Values.defaultBucketConfiguration.create }}
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - SYS_ADMIN
+          {{- end }}
           command:
             - "/bin/sh"
             - "-c"
@@ -224,11 +248,6 @@ spec:
             - name: shared-logs
               mountPath: /shared-logs-output
     {{- end }}
-    {{- if $s3ArtifactsMountEnabled }}
-            - name: s3-artifacts
-              mountPath: /s3/artifacts
-              readOnly: true
-    {{- end }}
       volumes:
         - name: workflow-schema
           emptyDir: {}
@@ -236,9 +255,4 @@ spec:
         - name: shared-logs
           persistentVolumeClaim:
             claimName: {{ .Values.logs.sharedLogsVolume.name }}
-    {{- end }}
-    {{- if $s3ArtifactsMountEnabled }}
-        - name: s3-artifacts
-          persistentVolumeClaim:
-            claimName: s3-artifacts-pvc
     {{- end }}

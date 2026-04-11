@@ -6,7 +6,6 @@ conditionalPackageInstalls:
   fluent-bit: true
   kube-prometheus-stack: true   # needed for metric gathering; will be needed for auto-scaling
   strimzi-kafka-operator: true  # Required by capture and replay
-  aws-mountpoint-s3-csi-driver: true   # S3 CSI driver for mounting artifacts bucket on migration console
 
   # TLS certificate infrastructure for capture proxy
   ack-acmpca-controller: false  # opt-in: manages AWS PCA as K8s resources via ACK
@@ -299,31 +298,6 @@ charts:
   strimzi-kafka-operator:
     version: 0.50.0
     repository: "https://strimzi.io/charts/"
-
-  aws-mountpoint-s3-csi-driver:
-    version: "2.5.0"
-    repository: "https://awslabs.github.io/mountpoint-s3-csi-driver"
-    namespace: kube-system
-    waitForInstallation: true
-    values:
-      storageType: ephemeral # strimzi is stateless
-      storageSize: 5Gi
-      resources:
-        requests: { cpu: 250m, memory: 384Mi }
-        limits:   { cpu: 1000m, memory: 512Mi }
-
-      # Increase probe thresholds to prevent unnecessary restarts during high API load.
-      readinessProbe:
-        initialDelaySeconds: 15
-        periodSeconds: 10
-        timeoutSeconds: 5
-        failureThreshold: 3
-      livenessProbe:
-        initialDelaySeconds: 15
-        periodSeconds: 15
-        timeoutSeconds: 5
-        failureThreshold: 3
-
 
   argo-workflows:
     version: "1.0.5"
