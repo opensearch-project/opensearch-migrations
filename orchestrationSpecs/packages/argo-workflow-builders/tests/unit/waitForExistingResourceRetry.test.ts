@@ -1,4 +1,5 @@
 import { renderWorkflowTemplate, typeToken, WorkflowBuilder } from '../../src';
+import { expr } from '../../src';
 
 describe('WaitForExistingResource retry support', () => {
     it('renders retryStrategy when addRetryParameters is called', () => {
@@ -56,5 +57,42 @@ describe('WaitForExistingResource retry support', () => {
 
         expect(template).toBeDefined();
         expect(template.retryStrategy).toBeUndefined();
+    });
+
+    it('renders successCondition and failureCondition expressions for existing-resource waits', () => {
+        const wf = WorkflowBuilder.create({ k8sResourceName: 'test-wait-expression-conditions' })
+            .addTemplate('waitWithExpressionConditions', t => t
+                .addRequiredInput('resourceName', typeToken<string>())
+                .addRequiredInput('expectedState', typeToken<string>())
+                .addWaitForExistingResource(b => b
+                    .setDefinition({
+                        resource: {
+                            apiVersion: "v1",
+                            kind: "ConfigMap",
+                            name: b.inputs.resourceName
+                        },
+                        conditions: {
+                            successCondition: expr.concat(
+                                expr.literal("data.state == "),
+                                b.inputs.expectedState
+                            ),
+                            failureCondition: expr.concat(
+                                expr.literal("data.state == failed-"),
+                                b.inputs.expectedState
+                            )
+                        }
+                    })
+                )
+            )
+            .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const template = rendered.spec.templates.find((t: any) => t.name === 'waitwithexpressionconditions');
+
+        expect(template).toBeDefined();
+        expect(template.resource.successCondition).toContain('{{=');
+        expect(template.resource.successCondition).toContain('inputs.parameters.expectedState');
+        expect(template.resource.failureCondition).toContain('{{=');
+        expect(template.resource.failureCondition).toContain('inputs.parameters.expectedState');
     });
 });
