@@ -207,6 +207,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("patchDataSnapshotReady", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("snapshotName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "patch",
@@ -215,7 +216,11 @@ export const ResourceManagement = WorkflowBuilder.create({
                     apiVersion: CRD_API_VERSION,
                     kind: "DataSnapshot",
                     metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Completed", snapshotName: b.inputs.snapshotName}
+                    status: {
+                        phase: "Completed",
+                        snapshotName: b.inputs.snapshotName,
+                        configChecksum: makeStringTypeProxy(b.inputs.configChecksum)
+                    }
                 }
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -224,6 +229,7 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     .addTemplate("patchSnapshotMigrationReady", t => t
         .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "patch",
@@ -232,7 +238,10 @@ export const ResourceManagement = WorkflowBuilder.create({
                     apiVersion: CRD_API_VERSION,
                     kind: "SnapshotMigration",
                     metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Completed"}
+                    status: {
+                        phase: "Completed",
+                        configChecksum: makeStringTypeProxy(b.inputs.configChecksum)
+                    }
                 }
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -269,7 +278,8 @@ export const ResourceManagement = WorkflowBuilder.create({
                     metadata: { name: b.inputs.resourceName }
                 }
             })
-            .addJsonPathOutput("phase", "{.status.phase}", typeToken<string>()))
+            .addJsonPathOutput("phase", "{.status.phase}", typeToken<string>())
+            .addJsonPathOutput("configChecksum", "{.status.configChecksum}", typeToken<string>()))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 

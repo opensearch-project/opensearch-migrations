@@ -94,7 +94,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               "required": [
                 "name",
                 "version",
-                "topics"
+                "topics",
+                "configChecksum"
               ]
             },
             "minItems": 1
@@ -190,7 +191,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   },
                   "required": [
                     "kafkaConnection",
-                    "label"
+                    "label",
+                    "configChecksum"
                   ]
                 },
                 "sourceEndpoint": {
@@ -461,7 +463,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "name",
                 "kafkaConfig",
                 "sourceEndpoint",
-                "proxyConfig"
+                "proxyConfig",
+                "configChecksum"
               ]
             },
             "default": []
@@ -585,7 +588,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "repo",
                       "semaphoreConfigMapName",
                       "semaphoreKey",
-                      "dependsOnProxySetups"
+                      "dependsOnProxySetups",
+                      "configChecksum"
                     ]
                   },
                   "minItems": 1
@@ -1180,11 +1184,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               "required": [
                 "label",
                 "snapshotNameResolution",
+                "snapshotConfigChecksum",
                 "migrations",
                 "sourceVersion",
                 "sourceLabel",
                 "targetConfig",
-                "snapshotConfig"
+                "snapshotConfig",
+                "configChecksum"
               ]
             },
             "default": []
@@ -1211,15 +1217,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "description": "Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots."
                       },
                       "configChecksum": {
-                        "type": "string",
-                        "description": "Auto-populated config checksum for the referenced snapshot migration."
+                        "type": "string"
                       }
                     },
                     "required": [
                       "source",
-                      "snapshot"
-                    ],
-                    "description": "Reference to a specific snapshot from a specific source cluster, used to express dependencies."
+                      "snapshot",
+                      "configChecksum"
+                    ]
                   }
                 },
                 "fromProxy": {
@@ -1314,7 +1319,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   },
                   "required": [
                     "kafkaConnection",
-                    "label"
+                    "label",
+                    "configChecksum"
                   ]
                 },
                 "replayerConfig": {
@@ -1576,10 +1582,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "name",
                 "dependsOnSnapshotMigrations",
                 "fromProxy",
+                "fromProxyConfigChecksum",
                 "kafkaClusterName",
                 "kafkaConfig",
                 "replayerConfig",
-                "toTarget"
+                "toTarget",
+                "configChecksum"
               ]
             },
             "default": []
@@ -2743,10 +2751,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "snapshot": {
                       "type": "string",
                       "description": "Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots."
-                    },
-                    "configChecksum": {
-                      "type": "string",
-                      "description": "Auto-populated config checksum for the referenced snapshot migration."
                     }
                   },
                   "required": [

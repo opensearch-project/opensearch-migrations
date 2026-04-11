@@ -427,11 +427,14 @@
             },
             {
               "name": "snapshotName"
+            },
+            {
+              "name": "configChecksum"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Completed\n  snapshotName: \"{{inputs.parameters.snapshotName}}\"\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Completed\n  snapshotName: \"{{inputs.parameters.snapshotName}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
@@ -458,11 +461,14 @@
           "parameters": [
             {
               "name": "resourceName"
+            },
+            {
+              "name": "configChecksum"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Completed\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Completed\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
@@ -547,6 +553,12 @@
               "name": "phase",
               "valueFrom": {
                 "jsonPath": "{.status.phase}"
+              }
+            },
+            {
+              "name": "configChecksum",
+              "valueFrom": {
+                "jsonPath": "{.status.configChecksum}"
               }
             }
           ]

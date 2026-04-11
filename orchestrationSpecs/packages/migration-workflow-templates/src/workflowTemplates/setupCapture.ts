@@ -712,7 +712,10 @@ export const SetupCapture = WorkflowBuilder.create({
                 })
             , {
                 when: c => ({templateExp: expr.and(
-                    expr.not(expr.equals(c.checkPhase.outputs.phase, "Ready")),
+                    expr.not(expr.and(
+                        expr.equals(c.checkPhase.outputs.phase, "Ready"),
+                        expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
+                    )),
                     expr.dig(
                         expr.deserializeRecord(b.inputs.proxyConfig),
                         ["kafkaConfig", "managedByWorkflow"],
@@ -727,7 +730,10 @@ export const SetupCapture = WorkflowBuilder.create({
                 })
             , {
                 when: c => ({templateExp: expr.and(
-                    expr.not(expr.equals(c.checkPhase.outputs.phase, "Ready")),
+                    expr.not(expr.and(
+                        expr.equals(c.checkPhase.outputs.phase, "Ready"),
+                        expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
+                    )),
                     expr.dig(
                         expr.deserializeRecord(b.inputs.proxyConfig),
                         ["kafkaConfig", "managedByWorkflow"],
@@ -743,7 +749,10 @@ export const SetupCapture = WorkflowBuilder.create({
                     kafkaTopicName: b.inputs.kafkaTopicName,
                     retryGroupName_view: expr.concat(expr.literal("CapturedTraffic: "), b.inputs.proxyName),
                 }),
-                {when: c => ({templateExp: expr.not(expr.equals(c.checkPhase.outputs.phase, "Ready"))})}
+                {when: c => ({templateExp: expr.not(expr.and(
+                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
+                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
+                ))})}
             )
             .addStep("markRunning", ResourceManagement, "patchResourcePhase", c =>
                 c.register({
@@ -751,7 +760,10 @@ export const SetupCapture = WorkflowBuilder.create({
                     resourceName: b.inputs.proxyName,
                     phase: expr.literal("Running"),
                 }),
-                {when: c => ({templateExp: expr.not(expr.equals(c.checkPhase.outputs.phase, "Ready"))})}
+                {when: c => ({templateExp: expr.not(expr.and(
+                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
+                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
+                ))})}
             )
             .addStep("setupProxy", INTERNAL, "setupProxy", c =>
                 c.register({
@@ -768,7 +780,10 @@ export const SetupCapture = WorkflowBuilder.create({
                 }),
                 {
                     when: c => ({templateExp: expr.and(
-                        expr.not(expr.equals(c.checkPhase.outputs.phase, "Ready")),
+                        expr.not(expr.and(
+                            expr.equals(c.checkPhase.outputs.phase, "Ready"),
+                            expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
+                        )),
                         expr.dig(
                             expr.deserializeRecord(b.inputs.proxyConfig),
                             ["kafkaConfig", "managedByWorkflow"],
@@ -790,7 +805,10 @@ export const SetupCapture = WorkflowBuilder.create({
                 }),
                 {
                     when: c => ({templateExp: expr.and(
-                        expr.not(expr.equals(c.checkPhase.outputs.phase, "Ready")),
+                        expr.not(expr.and(
+                            expr.equals(c.checkPhase.outputs.phase, "Ready"),
+                            expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
+                        )),
                         expr.not(expr.dig(
                             expr.deserializeRecord(b.inputs.proxyConfig),
                             ["kafkaConfig", "managedByWorkflow"],
