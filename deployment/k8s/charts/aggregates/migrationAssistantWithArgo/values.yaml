@@ -6,7 +6,7 @@ conditionalPackageInstalls:
   fluent-bit: true
   kube-prometheus-stack: true   # needed for metric gathering; will be needed for auto-scaling
   strimzi-kafka-operator: true  # Required by capture and replay
-  aws-mountpoint-s3-csi-driver: false  # S3 CSI driver for mounting S3 buckets as volumes (EKS only)
+  aws-mountpoint-s3-csi-driver: true   # S3 CSI driver for mounting artifacts bucket on migration console
 
   # TLS certificate infrastructure for capture proxy
   ack-acmpca-controller: false  # opt-in: manages AWS PCA as K8s resources via ACK

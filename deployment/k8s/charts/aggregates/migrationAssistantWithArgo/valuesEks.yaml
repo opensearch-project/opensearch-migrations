@@ -4,7 +4,6 @@ conditionalPackageInstalls:
   aws-privateca-issuer: true     # pre-install on EKS; lightweight, idle without a PCA ARN
   ack-acmpca-controller: false   # opt-in only — creates real AWS PCA with cost implications
   ack-cloudwatch-controller: true
-  aws-mountpoint-s3-csi-driver: true  # S3 CSI driver for mounting artifacts bucket on migration console
 
 aws:
   configureAwsEksResources: true
