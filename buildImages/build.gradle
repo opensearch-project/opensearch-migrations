@@ -75,6 +75,10 @@ def buildKitProjects = [
                 contextDir: "MigrationCompanion",
                 imageName:  "migration_companion",
                 imageTag:   "latest",
+                buildArgs: [
+                        BUILDER_IMAGE: ptc.rewrite("docker.io/library/golang:1.24-alpine"),
+                        RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
+                ],
                 requiredDependencies: [
                         ":MigrationCompanion:syncVersionFile_migrationCompanion"
                 ]

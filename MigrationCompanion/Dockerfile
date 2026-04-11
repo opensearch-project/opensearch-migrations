@@ -1,5 +1,9 @@
+# Global ARGs (must be before first FROM to be usable in FROM lines)
+ARG BUILDER_IMAGE=docker.io/library/golang:1.24-alpine
+ARG RUNTIME_IMAGE=docker.io/library/amazonlinux:2023
+
 # --- Stage 1: Build Go binary ---
-FROM golang:1.24-alpine AS go-builder
+FROM ${BUILDER_IMAGE} AS go-builder
 ARG TARGETARCH
 
 WORKDIR /build
@@ -13,13 +17,17 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -a -installsuffix cgo -o opensearch-pricing-calculator .
 
 # --- Stage 2: Runtime ---
-FROM alpine:3.21
+FROM ${RUNTIME_IMAGE}
 
-RUN apk add --no-cache ca-certificates py3-pip python3 && \
-    update-ca-certificates && rm -rf /var/cache/apk/*
+RUN dnf install -y --setopt=install_weak_deps=False \
+      ca-certificates \
+      python3.11 \
+      python3.11-pip \
+      shadow-utils \
+    && dnf clean all && rm -rf /var/cache/dnf
 
 # Create non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 
 WORKDIR /app
 
@@ -32,7 +40,7 @@ COPY build/version/VERSION .
 
 # Python skill
 COPY skills/solr-opensearch-migration-advisor /app/skills/solr-opensearch-migration-advisor
-RUN pip install --no-cache-dir --break-system-packages \
+RUN python3.11 -m pip install --no-cache-dir \
     /app/skills/solr-opensearch-migration-advisor
 
 RUN mkdir -p /app/logs && chown -R appuser:appgroup /app
