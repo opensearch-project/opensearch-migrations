@@ -21,34 +21,53 @@ FROM ${RUNTIME_IMAGE}
 
 RUN dnf install -y --setopt=install_weak_deps=False \
       ca-certificates \
+      curl \
+      jq \
       python3.11 \
       python3.11-pip \
       shadow-utils \
     && dnf clean all && rm -rf /var/cache/dnf
 
-# Create non-root user
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+# Create non-root user for Claude agent
+RUN useradd -m -s /bin/bash user
 
+# --- Pricing Calculator ---
 WORKDIR /app
 
-# Go binary and its data
 COPY --from=go-builder /build/opensearch-pricing-calculator .
 COPY --from=go-builder /build/priceCache.json .
-
-# Version file (staged by Gradle syncVersionFile task)
 COPY build/version/VERSION .
 
-# Python skill
+# Python skill (pip install for programmatic use)
 COPY skills/solr-opensearch-migration-advisor /app/skills/solr-opensearch-migration-advisor
 RUN python3.11 -m pip install --no-cache-dir \
     /app/skills/solr-opensearch-migration-advisor
 
-RUN mkdir -p /app/logs && chown -R appuser:appgroup /app
+RUN mkdir -p /app/logs && chown -R user:user /app
 
-USER appuser
+# --- Claude Agent ---
+RUN mkdir -p /home/user/claude/.claude/skills/solr-opensearch-migration-advisor \
+    && mkdir -p /home/user/claude/processing/.claude/skills
+
+COPY skills/solr-opensearch-migration-advisor/entrypoint.sh /home/user/entrypoint.sh
+COPY skills/solr-opensearch-migration-advisor/SKILL.md /home/user/claude/.claude/skills/solr-opensearch-migration-advisor/SKILL.md
+COPY skills/solr-opensearch-migration-advisor/references /home/user/claude/references
+COPY skills/solr-opensearch-migration-advisor/scripts /home/user/claude/scripts
+COPY skills/solr-opensearch-migration-advisor/steering /home/user/claude/steering
+
+RUN chmod +x /home/user/entrypoint.sh \
+    && chown -R user:user /home/user/claude
+
+USER user
+WORKDIR /home/user
+
+# Install Claude CLI
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/home/user/.local/bin:${PATH}"
+RUN claude --version
 
 # Main API port + MCP server port
 EXPOSE 5050
 EXPOSE 8081
 
-ENTRYPOINT ["/app/opensearch-pricing-calculator"]
+CMD ["tail", "-f", "/dev/null"]
