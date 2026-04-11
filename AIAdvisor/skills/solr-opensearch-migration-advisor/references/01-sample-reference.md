@@ -1,1 +1,0 @@
-This is a sample reference document to be replaced.
