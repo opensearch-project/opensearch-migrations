@@ -14,6 +14,7 @@ tasks.register('goTest', Exec) {
     group = 'verification'
     workingDir goDir
     commandLine 'go', 'test', './...', '-count=1'
+    onlyIf { ['which', 'go'].execute().waitFor() == 0 }
 }
 
 tasks.register('pythonSetup', Exec) {

@@ -15,7 +15,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
 # --- Stage 2: Runtime ---
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates python3 py3-pip && \
+RUN apk add --no-cache ca-certificates py3-pip python3 && \
     update-ca-certificates && rm -rf /var/cache/apk/*
 
 # Create non-root user
