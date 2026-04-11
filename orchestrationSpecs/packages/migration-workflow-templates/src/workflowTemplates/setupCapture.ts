@@ -689,6 +689,8 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("kafkaTopicName", typeToken<string>())
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("checksumForSnapshot", typeToken<string>())
+        .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "CaptureProxy"]))
@@ -824,6 +826,8 @@ export const SetupCapture = WorkflowBuilder.create({
                     resourceName: b.inputs.proxyName,
                     phase: expr.literal("Ready"),
                     configChecksum: b.inputs.configChecksum,
+                    checksumForSnapshot: b.inputs.checksumForSnapshot,
+                    checksumForReplayer: b.inputs.checksumForReplayer,
                 }),
                 {when: c => ({templateExp: expr.or(
                     expr.equals(c.setupProxy.status, "Succeeded"),

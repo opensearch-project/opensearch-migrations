@@ -219,6 +219,14 @@
                   {
                     "name": "configChecksum",
                     "value": "{{=sprig.dig('configChecksum', '', fromJSON(inputs.parameters.proxyConfig))}}"
+                  },
+                  {
+                    "name": "checksumForSnapshot",
+                    "value": "{{=sprig.dig('checksumForSnapshot', '', fromJSON(inputs.parameters.proxyConfig))}}"
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{=sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.proxyConfig))}}"
                   }
                 ]
               },
@@ -338,6 +346,10 @@
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "checksumField",
+                    "value": "checksumForSnapshot"
                   }
                 ]
               },
@@ -854,6 +866,10 @@
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "checksumField",
+                    "value": "checksumForSnapshotMigration"
                   }
                 ]
               },
@@ -990,6 +1006,10 @@
                   {
                     "name": "configChecksum",
                     "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{=sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
                   }
                 ]
               },
@@ -1101,6 +1121,10 @@
                   {
                     "name": "resourceName",
                     "value": "{{=item['source']+'-'+item['snapshot']}}"
+                  },
+                  {
+                    "name": "checksumField",
+                    "value": "checksumForReplayer"
                   }
                 ]
               },
@@ -1131,6 +1155,10 @@
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.fromProxy}}"
+                  },
+                  {
+                    "name": "checksumField",
+                    "value": "checksumForReplayer"
                   }
                 ]
               },
@@ -1436,7 +1464,7 @@
                   },
                   {
                     "name": "proxyConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item)))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item)))}}"
                   },
                   {
                     "name": "kafkaClusterName",
@@ -1594,7 +1622,7 @@
                   },
                   {
                     "name": "snapshotMigrationConfig",
-                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotNameResolution\", fromJSON(item['snapshotNameResolution']), \"snapshotConfigChecksum\", item['snapshotConfigChecksum'], \"migrations\", fromJSON(item['migrations']), \"sourceVersion\", item['sourceVersion'], \"sourceLabel\", item['sourceLabel'], \"targetConfig\", fromJSON(item['targetConfig']), \"snapshotConfig\", fromJSON(item['snapshotConfig']), \"sourceEndpoint\", sprig.dig('sourceEndpoint', '', item), \"configChecksum\", item['configChecksum']))}}"
+                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotNameResolution\", fromJSON(item['snapshotNameResolution']), \"snapshotConfigChecksum\", item['snapshotConfigChecksum'], \"migrations\", fromJSON(item['migrations']), \"sourceVersion\", item['sourceVersion'], \"sourceLabel\", item['sourceLabel'], \"targetConfig\", fromJSON(item['targetConfig']), \"snapshotConfig\", fromJSON(item['snapshotConfig']), \"sourceEndpoint\", sprig.dig('sourceEndpoint', '', item), \"configChecksum\", item['configChecksum'], \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item)))}}"
                   },
                   {
                     "name": "configChecksum",

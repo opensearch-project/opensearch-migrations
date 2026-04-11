@@ -142,6 +142,8 @@ export const FullMigration = WorkflowBuilder.create({
                     kafkaTopicName: b.inputs.kafkaTopicName,
                     proxyName: b.inputs.proxyName,
                     configChecksum: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["configChecksum"], ""),
+                    checksumForSnapshot: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForSnapshot"], ""),
+                    checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForReplayer"], ""),
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
                 })
@@ -176,6 +178,7 @@ export const FullMigration = WorkflowBuilder.create({
                         ...selectInputsForRegister(b, c),
                         resourceName: expr.get(c.item, "name"),
                         configChecksum: expr.get(c.item, "configChecksum"),
+                        checksumField: expr.literal("checksumForSnapshot"),
                     }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "dependsOnProxySetups")),
@@ -335,6 +338,7 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.getLoose(snapshotNameRes, "dataSnapshotResourceName"),
                         expr.literal("")),
                     configChecksum: expr.dig(config, ["snapshotConfigChecksum"], expr.literal("")),
+                    checksumField: expr.literal("checksumForSnapshotMigration"),
                 });
             }, {
                     when: c => ({templateExp: expr.and(
@@ -415,6 +419,10 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     resourceName: b.inputs.resourceName,
                     configChecksum: b.inputs.configChecksum,
+                    checksumForReplayer: expr.dig(
+                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                        ["checksumForReplayer"], ""
+                    ),
                 }),
                 {when: c => ({templateExp: expr.not(expr.and(
                     expr.equals(c.checkPhase.outputs.phase, "Completed"),
@@ -458,6 +466,7 @@ export const FullMigration = WorkflowBuilder.create({
                             expr.asString(expr.get(c.item, "snapshot"))
                         ),
                         configChecksum: expr.dig(c.item, ["configChecksum"], expr.literal("")),
+                        checksumField: expr.literal("checksumForReplayer"),
                     });
                 }, {
                     loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.dependsOnSnapshotMigrations)),
@@ -475,6 +484,7 @@ export const FullMigration = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.fromProxy,
                     configChecksum: b.inputs.fromProxyConfigChecksum,
+                    checksumField: expr.literal("checksumForReplayer"),
                 }),
                 {when: c => ({templateExp: expr.not(expr.and(
                     expr.equals(c.checkPhase.outputs.phase, "Ready"),
@@ -603,6 +613,8 @@ export const FullMigration = WorkflowBuilder.create({
                         sourceAllowInsecure: expr.get(c.item, "sourceAllowInsecure"),
                         proxyConfig: expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
                         configChecksum: expr.dig(c.item, ["configChecksum"], ""),
+                        checksumForSnapshot: expr.dig(c.item, ["checksumForSnapshot"], ""),
+                        checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
                     })),
                     // proxyConfig:      expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>(),
                     kafkaClusterName: expr.dig(
@@ -684,7 +696,8 @@ export const FullMigration = WorkflowBuilder.create({
                         targetConfig: expr.deserializeRecord(expr.get(c.item, "targetConfig")),
                         snapshotConfig: expr.deserializeRecord(expr.get(c.item, "snapshotConfig")),
                         sourceEndpoint: expr.dig(c.item, ["sourceEndpoint"], ""),
-                        configChecksum: expr.get(c.item, "configChecksum")
+                        configChecksum: expr.get(c.item, "configChecksum"),
+                        checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
                     })),
 //                    snapshotMigrationConfig: expr.cast(c.item).to<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>()
                     configChecksum: expr.dig(c.item, ["configChecksum"], ""),

@@ -90,6 +90,10 @@ spec:
                   type: integer
                 configChecksum:
                   type: string
+                checksumForSnapshot:
+                  type: string
+                checksumForReplayer:
+                  type: string
               x-kubernetes-preserve-unknown-fields: true
 ---
 # DataSnapshot: represents a source cluster snapshot operation.
@@ -141,6 +145,8 @@ spec:
                 lastAppliedGeneration:
                   type: integer
                 configChecksum:
+                  type: string
+                checksumForSnapshotMigration:
                   type: string
               x-kubernetes-preserve-unknown-fields: true
 ---
@@ -217,6 +223,8 @@ spec:
                 lastAppliedGeneration:
                   type: integer
                 configChecksum:
+                  type: string
+                checksumForReplayer:
                   type: string
               x-kubernetes-preserve-unknown-fields: true
 ---

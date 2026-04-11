@@ -763,6 +763,12 @@
               "name": "configChecksum"
             },
             {
+              "name": "checksumForSnapshot"
+            },
+            {
+              "name": "checksumForReplayer"
+            },
+            {
               "name": "listenPort"
             },
             {
@@ -1037,6 +1043,14 @@
                   {
                     "name": "configChecksum",
                     "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "checksumForSnapshot",
+                    "value": "{{inputs.parameters.checksumForSnapshot}}"
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{inputs.parameters.checksumForReplayer}}"
                   }
                 ]
               },

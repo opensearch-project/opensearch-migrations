@@ -116,6 +116,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("waitForCapturedTraffic", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("checksumField", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addWaitForExistingResource(b => b
             .setDefinition({
@@ -126,7 +127,9 @@ export const ResourceManagement = WorkflowBuilder.create({
                 },
                 conditions: {
                     successCondition: expr.concat(
-                        expr.literal("status.phase == Ready, status.configChecksum == "),
+                        expr.literal("status.phase == Ready, status."),
+                        b.inputs.checksumField,
+                        expr.literal(" == "),
                         b.inputs.configChecksum
                     ),
                     failureCondition: "status.phase == Error"
@@ -140,6 +143,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("waitForDataSnapshot", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("checksumField", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addWaitForExistingResource(b => b
             .setDefinition({
@@ -150,7 +154,9 @@ export const ResourceManagement = WorkflowBuilder.create({
                 },
                 conditions: {
                     successCondition: expr.concat(
-                        expr.literal("status.phase == Completed, status.configChecksum == "),
+                        expr.literal("status.phase == Completed, status."),
+                        b.inputs.checksumField,
+                        expr.literal(" == "),
                         b.inputs.configChecksum
                     ),
                     failureCondition: "status.phase == Error"
@@ -164,6 +170,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("waitForSnapshotMigration", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("checksumField", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addWaitForExistingResource(b => b
             .setDefinition({
@@ -174,7 +181,9 @@ export const ResourceManagement = WorkflowBuilder.create({
                 },
                 conditions: {
                     successCondition: expr.concat(
-                        expr.literal("status.phase == Completed, status.configChecksum == "),
+                        expr.literal("status.phase == Completed, status."),
+                        b.inputs.checksumField,
+                        expr.literal(" == "),
                         b.inputs.configChecksum
                     ),
                     failureCondition: "status.phase == Error"
@@ -219,7 +228,8 @@ export const ResourceManagement = WorkflowBuilder.create({
                     status: {
                         phase: "Completed",
                         snapshotName: b.inputs.snapshotName,
-                        configChecksum: makeStringTypeProxy(b.inputs.configChecksum)
+                        configChecksum: makeStringTypeProxy(b.inputs.configChecksum),
+                        checksumForSnapshotMigration: makeStringTypeProxy(b.inputs.configChecksum),
                     }
                 }
             }))
@@ -230,6 +240,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("patchSnapshotMigrationReady", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "patch",
@@ -240,7 +251,8 @@ export const ResourceManagement = WorkflowBuilder.create({
                     metadata: {name: b.inputs.resourceName},
                     status: {
                         phase: "Completed",
-                        configChecksum: makeStringTypeProxy(b.inputs.configChecksum)
+                        configChecksum: makeStringTypeProxy(b.inputs.configChecksum),
+                        checksumForReplayer: makeStringTypeProxy(b.inputs.checksumForReplayer),
                     }
                 }
             }))
@@ -288,6 +300,9 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("phase", typeToken<string>())
         .addOptionalInput("configChecksum", c => "")
+        .addOptionalInput("checksumForSnapshot", c => "")
+        .addOptionalInput("checksumForReplayer", c => "")
+        .addOptionalInput("checksumForSnapshotMigration", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "patch",
@@ -298,7 +313,10 @@ export const ResourceManagement = WorkflowBuilder.create({
                     metadata: { name: b.inputs.resourceName },
                     status: {
                         phase: makeStringTypeProxy(b.inputs.phase),
-                        configChecksum: makeStringTypeProxy(b.inputs.configChecksum)
+                        configChecksum: makeStringTypeProxy(b.inputs.configChecksum),
+                        checksumForSnapshot: makeStringTypeProxy(b.inputs.checksumForSnapshot),
+                        checksumForReplayer: makeStringTypeProxy(b.inputs.checksumForReplayer),
+                        checksumForSnapshotMigration: makeStringTypeProxy(b.inputs.checksumForSnapshotMigration),
                     }
                 }
             }))

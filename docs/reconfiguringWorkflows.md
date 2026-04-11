@@ -73,62 +73,136 @@ Changes to resources fall into three categories.
 
 For terminal resources in `Completed` state, the [Lock-on-Complete](#the-lock-on-complete-pattern-terminal-resources-only) pattern overrides all categories — every spec change becomes Impossible.
 
+### Checksum Materiality — Schema-Driven Per-Dependency Checksums
+
+Each field classification table includes columns showing whether a field is **material to the checksum** for each downstream dependency. A field is material if changing it would alter the behavior or correctness of the downstream consumer — meaning the downstream should block and re-evaluate when this field changes.
+
+Fields that are purely operational (replica counts, resource limits, logging, observability endpoints) are not material — downstream consumers don't care if the proxy scaled from 2 to 4 replicas.
+
+The dependency graph for checksum propagation:
+
+```
+Kafka ──→ Proxy (CapturedTraffic) ──→ DataSnapshot ──→ SnapshotMigration ──→ TrafficReplay
+  │                    │                                        │
+  │                    └────────────────────────────────────────→│
+  └─────────────────────────────────────────────────────────────→│
+```
+
+Each arrow represents a "waits for" relationship. Downstream waiters check a **per-dependency checksum** on the upstream resource — not a single monolithic hash.
+
+#### Schema annotations as the source of truth
+
+Checksum materiality and change restriction categories are encoded directly on the Zod schema using `.meta()`:
+
+```typescript
+listenPort: z.number()
+    .describe("TCP port the capture proxy listens on...")
+    .meta({
+        checksumFor: ['snapshot', 'replayer'],
+        changeRestriction: 'impossible'
+    })
+
+podReplicas: z.number().default(1).optional()
+    .describe("Number of proxy pod replicas...")
+    .meta({
+        // no checksumFor — purely operational
+        changeRestriction: 'safe'
+    })
+```
+
+The `checksumFor` array names the downstream dependencies whose checksum includes this field. The `changeRestriction` classifies the field for VAP generation (`'impossible'`, `'gated'`, or `'safe'`/omitted).
+
+These annotations drive:
+1. **Config transformer** — computes per-dependency checksums by selecting only fields tagged for each dependency
+2. **Doc generation** — populates the checksum columns in the field classification tables
+3. **VAP generation** — (future) generates CEL expressions from the restriction categories
+
+#### Per-dependency checksums in CRD status
+
+Each CRD carries its self-checksum plus named downstream checksums as flat fields in `.status`:
+
+```yaml
+status:
+  phase: Ready
+  configChecksum: "abc123"           # self — all spec fields, used for lifecycle skip
+  checksumForSnapshot: "def456"      # subset of fields that affect snapshots
+  checksumForReplayer: "def456"      # subset of fields that affect the replayer
+```
+
+Downstream waiters check the checksum relevant to them:
+
+```yaml
+# Snapshot waiter checking the proxy:
+successCondition: status.phase == Ready, status.checksumForSnapshot == <expected>
+
+# Replayer waiter checking the proxy:
+successCondition: status.phase == Ready, status.checksumForReplayer == <expected>
+```
+
+This means a change to `podReplicas` (not in any `checksumFor`) changes the self-checksum (triggering a re-deploy of the proxy) but does **not** change the downstream checksums — so the snapshot and replayer waiters are unaffected and don't re-run.
+
 ### CaptureProxy (`migrations.opensearch.org/CapturedTraffic`)
 
-| Field | Category   | Rationale | Restart Required? |
-| --- |------------| --- | --- |
-| `spec.listenPort` | Impossible | Changing breaks all client connections | N/A |
-| `spec.noCapture` | **Gated**  | Fundamentally changes proxy behavior | Yes (rolling) |
-| `spec.enableMSKAuth` | **Gated**  | Auth mode change is destructive | Yes (rolling) |
-| `spec.kafkaClusterName` | **Gated** | Changes which Kafka cluster receives captured traffic | Yes (rolling) |
-| `spec.kafkaTopicName` | **Gated** | Changes which topic receives captured traffic | Yes (rolling) |
-| `spec.tls.mode` | **Gated**  | TLS mode switch requires cert/secret changes | Yes (rolling) |
-| `spec.podReplicas` | Safe       | Scaling is safe, Deployment handles rolling | No |
-| `spec.resources` | Safe       | Resource limits/requests | Yes (rolling) |
-| `spec.internetFacing` | Impossible | Changes load balancer scheme; recreate Service | N/A |
-| `spec.loggingConfigurationOverrideConfigMap` | Safe       | Logging config swap | Yes (rolling) |
-| `spec.otelCollectorEndpoint` | Safe       | Observability config | Yes (rolling) |
-| `spec.setHeader` | Gated      | Header injection tweaks | Yes (rolling) |
-| `spec.destinationConnectionPoolSize` | Safe       | Connection tuning | Yes (rolling) |
-| `spec.destinationConnectionPoolTimeout` | Safe       | Connection tuning | Yes (rolling) |
-| `spec.kafkaClientId` | Safe       | Client identity change | Yes (rolling) |
-| `spec.maxTrafficBufferSize` | Gated       | Performance tuning | Yes (rolling) |
-| `spec.numThreads` | Safe       | Performance tuning | Yes (rolling) |
-| `spec.sslConfigFile` | Safe       | Legacy SSL config path | Yes (rolling) |
-| `spec.suppressCaptureForHeaderMatch` | **Gated**  | Traffic filtering changes | Yes (rolling) |
-| `spec.suppressCaptureForMethod` | **Gated**  | Traffic filtering changes | Yes (rolling) |
-| `spec.suppressCaptureForUriPath` | **Gated**  | Traffic filtering changes | Yes (rolling) |
-| `spec.suppressMethodAndPath` | **Gated**  | Traffic filtering changes | Yes (rolling) |
+Downstream dependencies that consume the proxy's checksum:
+- **Snapshot** — waits for the proxy to be Ready before creating a snapshot of the source cluster
+- **Replayer** — replays the captured traffic; sensitive to anything that changes what traffic is captured or how it's encoded
+
+| Field | Category   | Rationale | Restart Required? | In Checksum For: Snapshot | In Checksum For: Replayer |
+| --- |------------| --- | --- | --- | --- |
+| `spec.listenPort` | Impossible | Changing breaks all client connections | N/A | ✅ | ✅ |
+| `spec.noCapture` | **Gated**  | Fundamentally changes proxy behavior | Yes (rolling) | ✅ | ✅ |
+| `spec.enableMSKAuth` | **Gated**  | Auth mode change is destructive | Yes (rolling) | ❌ | ❌ |
+| `spec.kafkaClusterName` | **Gated** | Changes which Kafka cluster receives captured traffic | Yes (rolling) | ❌ | ❌ |
+| `spec.kafkaTopicName` | **Gated** | Changes which topic receives captured traffic | Yes (rolling) | ❌ | ❌ |
+| `spec.tls.mode` | **Gated**  | TLS mode switch requires cert/secret changes | Yes (rolling) | ❌ | ❌ |
+| `spec.podReplicas` | Safe       | Scaling is safe, Deployment handles rolling | No | ❌ | ❌ |
+| `spec.resources` | Safe       | Resource limits/requests | Yes (rolling) | ❌ | ❌ |
+| `spec.internetFacing` | Impossible | Changes load balancer scheme; recreate Service | N/A | ❌ | ❌ |
+| `spec.loggingConfigurationOverrideConfigMap` | Safe       | Logging config swap | Yes (rolling) | ❌ | ❌ |
+| `spec.otelCollectorEndpoint` | Safe       | Observability config | Yes (rolling) | ❌ | ❌ |
+| `spec.setHeader` | Gated      | Header injection tweaks | Yes (rolling) | ✅ | ✅ |
+| `spec.destinationConnectionPoolSize` | Safe       | Connection tuning | Yes (rolling) | ❌ | ❌ |
+| `spec.destinationConnectionPoolTimeout` | Safe       | Connection tuning | Yes (rolling) | ❌ | ❌ |
+| `spec.kafkaClientId` | Safe       | Client identity change | Yes (rolling) | ❌ | ❌ |
+| `spec.maxTrafficBufferSize` | Gated       | Performance tuning | Yes (rolling) | ❌ | ❌ |
+| `spec.numThreads` | Safe       | Performance tuning | Yes (rolling) | ❌ | ❌ |
+| `spec.sslConfigFile` | Safe       | Legacy SSL config path | Yes (rolling) | ❌ | ❌ |
+| `spec.suppressCaptureForHeaderMatch` | **Gated**  | Traffic filtering changes | Yes (rolling) | ✅ | ✅ |
+| `spec.suppressCaptureForMethod` | **Gated**  | Traffic filtering changes | Yes (rolling) | ✅ | ✅ |
+| `spec.suppressCaptureForUriPath` | **Gated**  | Traffic filtering changes | Yes (rolling) | ✅ | ✅ |
+| `spec.suppressMethodAndPath` | **Gated**  | Traffic filtering changes | Yes (rolling) | ✅ | ✅ |
 
 *(Note: Kafka and KafkaNodePool resources follow similar matrices established in Phase 1).*
 
 ### TrafficReplay (`migrations.opensearch.org/TrafficReplay`)
 
-| Field | Category | Rationale | Restart Required? |
-| --- | --- | --- | --- |
-| `spec.kafkaTrafficEnableMSKAuth` | Impossible | Kafka auth mode — changing breaks the consumer connection | N/A |
-| `spec.kafkaTrafficPropertyFile` | Impossible | Kafka connection properties — fundamental to consumer setup | N/A |
-| `spec.authHeaderValue` | **Gated** | Changes auth sent to target cluster | Yes (rolling) |
-| `spec.removeAuthHeader` | **Gated** | Toggles auth header stripping | Yes (rolling) |
-| `spec.transformerConfig` | **Gated** | Changes traffic transformation — could corrupt replay | Yes (rolling) |
-| `spec.transformerConfigEncoded` | **Gated** | Same as above, different encoding | Yes (rolling) |
-| `spec.transformerConfigFile` | **Gated** | Same as above, file reference | Yes (rolling) |
-| `spec.tupleTransformerConfig` | **Gated** | Tuple-level transformation | Yes (rolling) |
-| `spec.tupleTransformerConfigBase64` | **Gated** | Same | Yes (rolling) |
-| `spec.tupleTransformerConfigFile` | **Gated** | Same | Yes (rolling) |
-| `spec.podReplicas` | Safe | Scaling is safe, Deployment handles rolling | No |
-| `spec.resources` | Safe | Resource limits/requests | Yes (rolling) |
-| `spec.jvmArgs` | Safe | JVM tuning | Yes (rolling) |
-| `spec.loggingConfigurationOverrideConfigMap` | Safe | Logging config swap | Yes (rolling) |
-| `spec.otelCollectorEndpoint` | Safe | Observability config | Yes (rolling) |
-| `spec.speedupFactor` | Safe | Replay rate tuning | Yes (rolling) |
-| `spec.lookaheadTimeSeconds` | Safe | Buffer tuning | Yes (rolling) |
-| `spec.maxConcurrentRequests` | Safe | Performance tuning | Yes (rolling) |
-| `spec.numClientThreads` | Safe | Performance tuning | Yes (rolling) |
-| `spec.observedPacketConnectionTimeout` | Safe | Timeout tuning | Yes (rolling) |
-| `spec.quiescentPeriodMs` | Safe | Timing tuning | Yes (rolling) |
-| `spec.targetServerResponseTimeoutSeconds` | Safe | Timeout tuning | Yes (rolling) |
-| `spec.userAgent` | Safe | Cosmetic | Yes (rolling) |
+The replayer has no downstream dependencies — nothing waits on it. The checksum column here tracks whether a field is material to the replayer's *own* checksum (i.e., would a change require re-evaluation of the replayer's correctness, or is it purely operational).
+
+| Field | Category | Rationale | Restart Required? | In Own Checksum |
+| --- | --- | --- | --- | --- |
+| `spec.kafkaTrafficEnableMSKAuth` | Impossible | Kafka auth mode — changing breaks the consumer connection | N/A | ✅ |
+| `spec.kafkaTrafficPropertyFile` | Impossible | Kafka connection properties — fundamental to consumer setup | N/A | ✅ |
+| `spec.authHeaderValue` | **Gated** | Changes auth sent to target cluster | Yes (rolling) | ✅ |
+| `spec.removeAuthHeader` | **Gated** | Toggles auth header stripping | Yes (rolling) | ✅ |
+| `spec.transformerConfig` | **Gated** | Changes traffic transformation — could corrupt replay | Yes (rolling) | ✅ |
+| `spec.transformerConfigEncoded` | **Gated** | Same as above, different encoding | Yes (rolling) | ✅ |
+| `spec.transformerConfigFile` | **Gated** | Same as above, file reference | Yes (rolling) | ✅ |
+| `spec.tupleTransformerConfig` | **Gated** | Tuple-level transformation | Yes (rolling) | ✅ |
+| `spec.tupleTransformerConfigBase64` | **Gated** | Same | Yes (rolling) | ✅ |
+| `spec.tupleTransformerConfigFile` | **Gated** | Same | Yes (rolling) | ✅ |
+| `spec.podReplicas` | Safe | Scaling is safe, Deployment handles rolling | No | ❌ |
+| `spec.resources` | Safe | Resource limits/requests | Yes (rolling) | ❌ |
+| `spec.jvmArgs` | Safe | JVM tuning | Yes (rolling) | ❌ |
+| `spec.loggingConfigurationOverrideConfigMap` | Safe | Logging config swap | Yes (rolling) | ❌ |
+| `spec.otelCollectorEndpoint` | Safe | Observability config | Yes (rolling) | ❌ |
+| `spec.speedupFactor` | Safe | Replay rate tuning | Yes (rolling) | ❌ |
+| `spec.lookaheadTimeSeconds` | Safe | Buffer tuning | Yes (rolling) | ❌ |
+| `spec.maxConcurrentRequests` | Safe | Performance tuning | Yes (rolling) | ❌ |
+| `spec.numClientThreads` | Safe | Performance tuning | Yes (rolling) | ❌ |
+| `spec.observedPacketConnectionTimeout` | Safe | Timeout tuning | Yes (rolling) | ❌ |
+| `spec.quiescentPeriodMs` | Safe | Timing tuning | Yes (rolling) | ❌ |
+| `spec.targetServerResponseTimeoutSeconds` | Safe | Timeout tuning | Yes (rolling) | ❌ |
+| `spec.userAgent` | Safe | Cosmetic | Yes (rolling) | ❌ |
 
 ### DataSnapshot (`migrations.opensearch.org/DataSnapshot`)
 
@@ -138,9 +212,22 @@ Lock-on-Complete freezes the entire spec once done.
 All fields here are impossible to edit.  If a user wanted to change a snapshot
 in-progress, they would need to delete the existing snapshot and redrive.
 
+Downstream dependencies that consume the snapshot's checksum:
+- **SnapshotMigration** — waits for the snapshot to be Completed before running metadata migration and/or document backfill
+
+Since all spec fields are frozen on completion, every field is inherently material to the checksum. The distinction here is whether a field change would invalidate the downstream SnapshotMigration's correctness (requiring it to re-run) vs. being purely operational to the snapshot job itself.
+
+| Field | Category | In Checksum For: SnapshotMigration |
+| --- | --- | --- |
+| Snapshot config (compression, global state, allowlist, etc.) | Impossible (Lock-on-Complete) | ✅ |
+| Repo config (S3 path, region, etc.) | Impossible (Lock-on-Complete) | ✅ |
+
 ### SnapshotMigration (`migrations.opensearch.org/SnapshotMigration`)
 
 Terminal resource — transitions to `Completed`. Lock-on-Complete freezes the entire spec once done. A SnapshotMigration contains one or more sub-tasks, each optionally including metadata migration and/or document backfill (RFS).
+
+Downstream dependencies that consume the migration's checksum:
+- **Replayer** — waits for the migration to be Completed before starting replay (ensures the target cluster has the expected index mappings and backfilled data)
 
 **Metadata migration fields:**
 
@@ -151,21 +238,21 @@ in-progress, they would need to delete the existing snapshot and redrive.
 
 **Document backfill (RFS) fields:**
 
-| Field | Category   | Rationale |
-| --- |------------| --- |
-| `spec.documentBackfillConfig.indexAllowlist` | Impossible | |
-| `spec.documentBackfillConfig.podReplicas` | Safe       | |
-| `spec.documentBackfillConfig.allowLooseVersionMatching` | Impossible | |
-| `spec.documentBackfillConfig.docTransformerConfigBase64` | Impossible | |
-| `spec.documentBackfillConfig.documentsPerBulkRequest` | Safe       | |
-| `spec.documentBackfillConfig.initialLeaseDuration` | Gated      | |
-| `spec.documentBackfillConfig.maxConnections` | Gated      | |
-| `spec.documentBackfillConfig.maxShardSizeBytes` | Gated      | |
-| `spec.documentBackfillConfig.otelCollectorEndpoint` | Safe       | |
-| `spec.documentBackfillConfig.useTargetClusterForWorkCoordination` |  Safe          | |
-| `spec.documentBackfillConfig.jvmArgs` |  Safe          | |
-| `spec.documentBackfillConfig.loggingConfigurationOverrideConfigMap` |   Safe         | |
-| `spec.documentBackfillConfig.resources` |    Safe        | |
+| Field | Category   | Rationale | In Checksum For: Replayer |
+| --- |------------| --- | --- |
+| `spec.documentBackfillConfig.indexAllowlist` | Impossible | | ✅ |
+| `spec.documentBackfillConfig.podReplicas` | Safe       | | ❌ |
+| `spec.documentBackfillConfig.allowLooseVersionMatching` | Impossible | | ✅ |
+| `spec.documentBackfillConfig.docTransformerConfigBase64` | Impossible | | ✅ |
+| `spec.documentBackfillConfig.documentsPerBulkRequest` | Safe       | | ❌ |
+| `spec.documentBackfillConfig.initialLeaseDuration` | Gated      | | ❌ |
+| `spec.documentBackfillConfig.maxConnections` | Gated      | | ❌ |
+| `spec.documentBackfillConfig.maxShardSizeBytes` | Gated      | | ❌ |
+| `spec.documentBackfillConfig.otelCollectorEndpoint` | Safe       | | ❌ |
+| `spec.documentBackfillConfig.useTargetClusterForWorkCoordination` |  Safe          | | ❌ |
+| `spec.documentBackfillConfig.jvmArgs` |  Safe          | | ❌ |
+| `spec.documentBackfillConfig.loggingConfigurationOverrideConfigMap` |   Safe         | | ❌ |
+| `spec.documentBackfillConfig.resources` |    Safe        | | ❌ |
 
 ---
 
