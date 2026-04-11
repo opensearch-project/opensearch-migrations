@@ -688,34 +688,7 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            ThreadLocalTupleWriter tupleWriter = null;
-            if (params.tupleS3Bucket != null && !params.tupleS3Bucket.isEmpty()) {
-                log.info("S3 tuple writing enabled — bucket={}, region={}, prefix={}",
-                    params.tupleS3Bucket, params.tupleS3Region, params.tupleS3Prefix);
-                var s3ClientBuilder = S3AsyncClient.crtBuilder()
-                    .region(Region.of(params.tupleS3Region))
-                    .credentialsProvider(DefaultCredentialsProvider.builder().build())
-                    .targetThroughputInGbps(2.0)
-                    .minimumPartSizeInBytes(8L * 1024 * 1024);
-                if (params.tupleS3Endpoint != null && !params.tupleS3Endpoint.isEmpty()) {
-                    s3ClientBuilder.endpointOverride(URI.create(params.tupleS3Endpoint));
-                    s3ClientBuilder.forcePathStyle(true);
-                }
-                var s3Client = s3ClientBuilder.build();
-                var replayerId = ProcessHelpers.getNodeInstanceName();
-                tupleWriter = new ThreadLocalTupleWriter(
-                    sinkIndex -> new S3TupleSink(
-                        s3Client,
-                        params.tupleS3Bucket,
-                        params.tupleS3Prefix,
-                        replayerId,
-                        sinkIndex,
-                        params.tupleMaxFileSizeMb * 1024L * 1024L,
-                        Duration.ofSeconds(params.tupleMaxLagSeconds),
-                        params.tupleMaxPerFile
-                    )
-                );
-            }
+            var tupleWriter = createS3TupleWriterIfConfigured(params);
             tr.setupRunAndWaitForReplayWithShutdownChecks(
                 Duration.ofSeconds(params.observedPacketConnectionTimeout),
                 serverTimeout,
@@ -736,6 +709,37 @@ public class TrafficReplayer {
                 activeContextLogger.atLevel(acmLevel).setMessage("[end of run]]").log();
             }
         }
+    }
+
+    private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(Parameters params) {
+        if (params.tupleS3Bucket == null || params.tupleS3Bucket.isEmpty()) {
+            return null;
+        }
+        log.info("S3 tuple writing enabled — bucket={}, region={}, prefix={}",
+            params.tupleS3Bucket, params.tupleS3Region, params.tupleS3Prefix);
+        var s3ClientBuilder = S3AsyncClient.crtBuilder()
+            .region(Region.of(params.tupleS3Region))
+            .credentialsProvider(DefaultCredentialsProvider.builder().build())
+            .targetThroughputInGbps(2.0)
+            .minimumPartSizeInBytes(8L * 1024 * 1024);
+        if (params.tupleS3Endpoint != null && !params.tupleS3Endpoint.isEmpty()) {
+            s3ClientBuilder.endpointOverride(URI.create(params.tupleS3Endpoint));
+            s3ClientBuilder.forcePathStyle(true);
+        }
+        var s3Client = s3ClientBuilder.build();
+        var replayerId = ProcessHelpers.getNodeInstanceName();
+        return new ThreadLocalTupleWriter(
+            sinkIndex -> new S3TupleSink(
+                s3Client,
+                params.tupleS3Bucket,
+                params.tupleS3Prefix,
+                replayerId,
+                sinkIndex,
+                params.tupleMaxFileSizeMb * 1024L * 1024L,
+                Duration.ofSeconds(params.tupleMaxLagSeconds),
+                params.tupleMaxPerFile
+            )
+        );
     }
 
     private static void setupShutdownHookForReplayer(TrafficReplayerTopLevel tr) {
