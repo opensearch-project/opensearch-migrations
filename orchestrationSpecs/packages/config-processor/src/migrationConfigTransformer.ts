@@ -7,6 +7,9 @@ import {
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
     GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT, PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
+    FieldMeta, ChecksumDependency,
+    USER_PROXY_PROCESS_OPTIONS, USER_PROXY_WORKFLOW_OPTIONS,
+    USER_RFS_PROCESS_OPTIONS,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -349,21 +352,28 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         // Compute config checksums with dependency chaining
         const cs = MigrationConfigTransformer.configChecksum;
+        const csDep = MigrationConfigTransformer.checksumForDependency;
+        const PROXY_SCHEMA = z.object({...USER_PROXY_WORKFLOW_OPTIONS.shape, ...USER_PROXY_PROCESS_OPTIONS.shape});
+        const RFS_SCHEMA = USER_RFS_PROCESS_OPTIONS;
         const kafkaChecksums = new Map(kafkaClusters.map(k => [k.name, cs(k)]));
 
         const proxiesWithChecksums = proxies.map(p => ({
             ...p,
             kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksums.get(p.kafkaConfig.label) ?? '' },
             configChecksum: cs(p.proxyConfig, kafkaChecksums.get(p.kafkaConfig.label)),
+            checksumForSnapshot: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'snapshot', kafkaChecksums.get(p.kafkaConfig.label)),
+            checksumForReplayer: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'replayer', kafkaChecksums.get(p.kafkaConfig.label)),
         }));
         const proxyChecksums = new Map(proxiesWithChecksums.map(p => [p.name, p.configChecksum]));
+        const proxyChecksumForSnapshot = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForSnapshot]));
+        const proxyChecksumForReplayer = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForReplayer]));
 
         const snapshotsWithChecksums = snapshots.map(s => ({
             ...s,
             createSnapshotConfig: s.createSnapshotConfig.map((item: z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>) => {
                 const enrichedDeps = (item.dependsOnProxySetups ?? []).map((dep: {name: string}) => ({
                     ...dep,
-                    configChecksum: proxyChecksums.get(dep.name) ?? '',
+                    configChecksum: proxyChecksumForSnapshot.get(dep.name) ?? '',
                 }));
                 return {
                     ...item,
@@ -379,23 +389,35 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
         }
 
-        const migrationsWithChecksums = snapshotMigrations.map(m => ({
-            ...m,
-            snapshotConfigChecksum: snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '',
-            configChecksum: cs(m.migrations, m.targetConfig, snapshotChecksums.get([m.sourceLabel, m.label].join('-'))),
-        }));
+        const migrationsWithChecksums = snapshotMigrations.map(m => {
+            // Extract replayer-material fields from each migration's documentBackfillConfig
+            const replayerMaterialParts = m.migrations.map((mig: any) =>
+                mig.documentBackfillConfig
+                    ? csDep(RFS_SCHEMA, mig.documentBackfillConfig as Record<string, unknown>, 'replayer')
+                    : ''
+            );
+            return {
+                ...m,
+                snapshotConfigChecksum: snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '',
+                configChecksum: cs(m.migrations, m.targetConfig, snapshotChecksums.get([m.sourceLabel, m.label].join('-'))),
+                checksumForReplayer: cs(m.targetConfig, ...replayerMaterialParts),
+            };
+        });
         const migrationChecksums = new Map(migrationsWithChecksums.map(m =>
             [[m.sourceLabel, m.label].join('-'), m.configChecksum]
+        ));
+        const migrationChecksumForReplayer = new Map(migrationsWithChecksums.map(m =>
+            [[m.sourceLabel, m.label].join('-'), m.checksumForReplayer]
         ));
 
         const replaysWithChecksums = trafficReplays.map(r => ({
             ...r,
             kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
-            fromProxyConfigChecksum: proxyChecksums.get(r.fromProxy) ?? '',
-            configChecksum: cs(r.replayerConfig, r.toTarget, proxyChecksums.get(r.fromProxy)),
+            fromProxyConfigChecksum: proxyChecksumForReplayer.get(r.fromProxy) ?? '',
+            configChecksum: cs(r.replayerConfig, r.toTarget, proxyChecksumForReplayer.get(r.fromProxy)),
             dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).map(dep => ({
                 ...dep,
-                configChecksum: migrationChecksums.get([dep.source, dep.snapshot].join('-')) ?? '',
+                configChecksum: migrationChecksumForReplayer.get([dep.source, dep.snapshot].join('-')) ?? '',
             })),
         }));
 
@@ -651,6 +673,26 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             semaphoreConfigMapName: 'concurrency-config',
             semaphoreKey: generateSemaphoreKey(sourceVersion, sourceName, snapshotName)
         };
+    }
+
+    /**
+     * Pick only the fields from `data` whose schema annotation includes `dep` in checksumFor,
+     * then hash them (plus any extra upstream checksums).
+     */
+    static checksumForDependency(
+        schema: z.ZodObject<any>,
+        data: Record<string, unknown>,
+        dep: ChecksumDependency,
+        ...upstreamChecksums: (string | undefined)[]
+    ): string {
+        const picked: Record<string, unknown> = {};
+        for (const [key, fieldSchema] of Object.entries(schema.shape)) {
+            const meta = (fieldSchema as z.ZodType).meta() as FieldMeta | undefined;
+            if (meta?.checksumFor?.includes(dep)) {
+                picked[key] = data[key];
+            }
+        }
+        return MigrationConfigTransformer.configChecksum(picked, ...upstreamChecksums);
     }
 
     static configChecksum(...parts: unknown[]): string {

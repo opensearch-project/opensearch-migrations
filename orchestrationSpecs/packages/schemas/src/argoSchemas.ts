@@ -213,6 +213,7 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     sourceAllowInsecure: z.boolean().optional(),
     sourceAuth: z.any().optional(),
     configChecksum: z.string(),
+    checksumForReplayer: z.string(),
 });
 
 export const NAMED_KAFKA_CLIENT_CONFIG =
@@ -233,6 +234,8 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
     sourceAllowInsecure: z.boolean().default(false),
     proxyConfig: ARGO_PROXY_OPTIONS,
     configChecksum: z.string(),
+    checksumForSnapshot: z.string(),
+    checksumForReplayer: z.string(),
 });
 
 export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
