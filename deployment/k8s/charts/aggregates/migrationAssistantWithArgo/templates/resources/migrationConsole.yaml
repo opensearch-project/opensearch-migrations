@@ -86,6 +86,7 @@ spec:
 ---
 {{- end }}
 {{ $sharedLogsVolumeEnabled := .Values.logs.sharedLogsVolume.enabled }}
+{{ $s3ArtifactsMountEnabled := index .Values.conditionalPackageInstalls "aws-mountpoint-s3-csi-driver" }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -150,9 +151,19 @@ spec:
             - name: shared-logs
               mountPath: /shared-logs-output
     {{- end }}
+    {{- if $s3ArtifactsMountEnabled }}
+            - name: s3-artifacts
+              mountPath: /s3/artifacts
+              readOnly: true
+    {{- end }}
       volumes:
     {{- if $sharedLogsVolumeEnabled  }}
         - name: shared-logs
           persistentVolumeClaim:
             claimName: {{ .Values.logs.sharedLogsVolume.name }}
+    {{- end }}
+    {{- if $s3ArtifactsMountEnabled }}
+        - name: s3-artifacts
+          persistentVolumeClaim:
+            claimName: s3-artifacts-pvc
     {{- end }}
