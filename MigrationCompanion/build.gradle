@@ -1,9 +1,13 @@
+import org.opensearch.migrations.common.CommonUtils
+
 plugins {
     id 'base'
 }
 
 def goDir = file('opensearch-pricing-calculator')
 def pyDir = file('skills/solr-opensearch-migration-advisor')
+
+CommonUtils.syncVersionFileToDockerStaging(project, "migrationCompanion", "build/version")
 
 tasks.register('goTest', Exec) {
     description = 'Run Go tests for opensearch-pricing-calculator'

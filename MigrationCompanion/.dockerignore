@@ -1,0 +1,12 @@
+**/__pycache__
+**/.pytest_cache
+**/.venv
+**/node_modules
+**/*.pyc
+skills/solr-opensearch-migration-advisor/tests
+skills/solr-opensearch-migration-advisor/.gitignore
+skills/solr-opensearch-migration-advisor/.env.example
+opensearch-pricing-calculator/*_test.go
+opensearch-pricing-calculator/docker-compose.yml
+.gradle
+build

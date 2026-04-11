@@ -75,6 +75,9 @@ def buildKitProjects = [
                 contextDir: "MigrationCompanion",
                 imageName:  "migration_companion",
                 imageTag:   "latest",
+                requiredDependencies: [
+                        ":MigrationCompanion:syncVersionFile_migrationCompanion"
+                ]
         ],
         [
                 serviceName: "elasticsearchTestConsole",

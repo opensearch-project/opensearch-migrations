@@ -27,6 +27,9 @@ WORKDIR /app
 COPY --from=go-builder /build/opensearch-pricing-calculator .
 COPY --from=go-builder /build/priceCache.json .
 
+# Version file (staged by Gradle syncVersionFile task)
+COPY build/version/VERSION .
+
 # Python skill
 COPY skills/solr-opensearch-migration-advisor /app/skills/solr-opensearch-migration-advisor
 RUN pip install --no-cache-dir --break-system-packages \

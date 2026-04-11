@@ -1,8 +1,10 @@
 version: "3.8"
 
 services:
-  opensearch-pricing-calculator:
-    build: .
+  migration-companion:
+    build:
+      context: ..
+      dockerfile: Dockerfile
     ports:
       - "5050:5050"   # HTTP API
       - "8081:8081"   # MCP server
