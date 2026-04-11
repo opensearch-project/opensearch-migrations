@@ -12,7 +12,7 @@ if [[ -n "${S3_ARTIFACTS_BUCKET_NAME}" ]]; then
 
   MOUNT_ARGS=("$S3_ARTIFACTS_BUCKET_NAME" "$MOUNT_POINT" "--read-only")
   [[ -n "${S3_ARTIFACTS_REGION}" ]] && MOUNT_ARGS+=("--region" "${S3_ARTIFACTS_REGION}")
-  [[ -n "${S3_ARTIFACTS_ENDPOINT_URL}" ]] && MOUNT_ARGS+=("--endpoint-url" "${S3_ARTIFACTS_ENDPOINT_URL}" "--force-path-style")
+  [[ -n "${S3_ARTIFACTS_ENDPOINT_URL}" ]] && MOUNT_ARGS+=("--endpoint-url" "${S3_ARTIFACTS_ENDPOINT_URL}" "--force-path-style" "--no-sign-request")
 
   echo "Waiting for S3 bucket ${S3_ARTIFACTS_BUCKET_NAME}..."
   until mount-s3 "${MOUNT_ARGS[@]}" 2>/dev/null; do
