@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "solr-to-opensearch"
-version = "2.9.0"
+dynamic = ["version"]
 description = "Agent skill for migrating from Apache Solr to OpenSearch"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -31,6 +31,9 @@ eval = [
     "claude-agent-sdk==0.1.53",
     "dotenv==0.9.9",
 ]
+
+[tool.setuptools.dynamic]
+version = {file = ["../../../VERSION"]}
 
 [tool.setuptools.packages.find]
 where = ["scripts"]
