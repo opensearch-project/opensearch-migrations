@@ -10,3 +10,4 @@ opensearch-pricing-calculator/*_test.go
 opensearch-pricing-calculator/docker-compose.yml
 .gradle
 build
+!build/version/VERSION
