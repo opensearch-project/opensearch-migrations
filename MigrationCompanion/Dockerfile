@@ -19,7 +19,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
 # --- Stage 2: Runtime ---
 FROM ${RUNTIME_IMAGE}
 
-RUN dnf install -y --setopt=install_weak_deps=False \
+RUN dnf install -y --allowerasing --setopt=install_weak_deps=False \
       ca-certificates \
       curl \
       jq \
