@@ -351,7 +351,8 @@ class K8sService:
                          "--ignore-not-found", "--grace-period=0"], ignore_errors=True)
         # Delete main namespace
         self.run_command(self._kubectl_base() + ["delete", "namespace", self.namespace,
-                         "--ignore-not-found", "--grace-period=0", "--force"])
+                         "--ignore-not-found", "--grace-period=0", "--force", "--timeout=120s"],
+                         ignore_errors=True)
         # Wait for pods to fully terminate before deleting webhooks again
         # This prevents kyverno from recreating webhooks during termination
         self.wait_for_pods_terminated()

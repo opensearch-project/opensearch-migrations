@@ -15,7 +15,8 @@ static def expandVersionString(String input) {
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "cdc-only"
     def jobName = config.jobName ?: "eks-cdc-integ-test"
-    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
+    def defaultTestIds = config.defaultTestIds ?: "0030"
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
     def sourceVersion = config.sourceVersion ?: ""
     def targetVersion = config.targetVersion ?: ""
     def sourceClusterType = config.sourceClusterType ?: ""
@@ -28,6 +29,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'initial-eks-cdc-test', description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
+            string(name: 'TEST_IDS', defaultValue: "${defaultTestIds}", description: 'Comma-separated test IDs to run (e.g. 0030)')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             choice(
                     name: 'SOURCE_VERSION',
@@ -50,6 +52,10 @@ def call(Map config = [:]) {
                     description: 'Pick a target cluster type'
             )
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
+            booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source instead of using public images')
+            booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
+            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
+            string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download.')
         }
 
         options {
@@ -75,10 +81,27 @@ def call(Map config = [:]) {
         }
 
         stages {
-            stage('Checkout') {
+            stage('Checkout & Print Params') {
                 steps {
                     script { env.maStageName = "${params.STAGE}-${currentBuild.number}" }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
+                    echo """
+    ================================================================
+    EKS CDC Integration Test
+    ================================================================
+    Git:                    ${params.GIT_REPO_URL} @ ${params.GIT_BRANCH}
+    Commit:                 ${params.GIT_COMMIT ?: '(latest)'}
+    Stage:                  ${env.maStageName}
+    Region:                 ${params.REGION}
+    Test IDs:               ${params.TEST_IDS}
+    Source:                 ${params.SOURCE_VERSION}
+    Target:                 ${params.TARGET_VERSION}
+    Build Images:           ${params.BUILD_IMAGES}
+    Build Chart:            ${params.BUILD_CHART_AND_DASHBOARDS}
+    Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
+    Version:                ${params.VERSION}
+    ================================================================
+"""
                 }
             }
 
@@ -141,18 +164,22 @@ def call(Map config = [:]) {
                                         vpcId = sh(script: "aws ec2 describe-subnets --subnet-ids ${firstSubnet} --region ${params.REGION} --query 'Subnets[0].VpcId' --output text", returnStdout: true).trim()
                                         echo "Resolved VPC ID from subnet: ${vpcId}"
                                     }
+                                    def bootstrap = resolveBootstrap(
+                                        useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
+                                        buildImages: params.BUILD_IMAGES,
+                                        buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
+                                        skipTestImages: true,
+                                        version: params.VERSION
+                                    )
                                     sh """
-                                        ./deployment/k8s/aws/aws-bootstrap.sh \
+                                        ${bootstrap.script} \
                                           --deploy-import-vpc-cfn \
-                                          --build-cfn \
                                           --stack-name "Migration-Assistant-Infra-Import-VPC-eks-${env.STACK_NAME_SUFFIX}" \
                                           --vpc-id "${vpcId}" \
                                           --subnet-ids "${subnetIds}" \
                                           --stage "${maStageName}" \
                                           --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          --build-images \
-                                          --build-chart-and-dashboards \
-                                          --base-dir "\$(pwd)" \
+                                          ${bootstrap.flags} \
                                           --skip-console-exec \
                                           --skip-setting-k8s-context \
                                           --region ${params.REGION} \
@@ -285,7 +312,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='0030' --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
+                                        sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
                                     }
                                 }
                             }

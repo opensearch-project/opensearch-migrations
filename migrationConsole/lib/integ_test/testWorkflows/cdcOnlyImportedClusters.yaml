@@ -1,0 +1,136 @@
+# CDC-only test workflow: capture proxy + Kafka + replayer, no snapshot migration.
+# Builds a minimal config with traffic section only and submits via workflow CLI.
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cdc-only-imported-clusters
+spec:
+  serviceAccountName: argo-workflow-executor
+  entrypoint: main
+  parallelism: 100
+
+  arguments:
+    parameters:
+      - name: migration-image-configmap
+        value: "migration-image-config"
+      - name: monitor-retry-limit
+        value: "120"
+
+  templates:
+    - name: main
+      inputs:
+        parameters:
+          - name: source-configs
+          - name: target-config
+          - name: imageMigrationConsoleLocation
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.migration-image-configmap}}"
+                key: migrationConsoleImage
+          - name: imageMigrationConsolePullPolicy
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.migration-image-configmap}}"
+                key: migrationConsolePullPolicy
+      steps:
+        - - name: build-cdc-only-config
+            template: build-cdc-only-config
+            arguments:
+              parameters:
+                - name: source-configs
+                  value: "{{inputs.parameters.source-configs}}"
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
+                - name: imageMigrationConsoleLocation
+                  value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                - name: imageMigrationConsolePullPolicy
+                  value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+
+        - - name: run-full-migration-with-workflow-cli
+            templateRef:
+              name: full-migration-with-workflow-cli
+              template: main
+            arguments:
+              parameters:
+                - name: migrationConfigBase64
+                  value: "{{steps.build-cdc-only-config.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                - name: imageMigrationConsolePullPolicy
+                  value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                - name: keepMigrationWorkflow
+                  value: "true"
+
+    - name: build-cdc-only-config
+      inputs:
+        parameters:
+          - name: source-configs
+          - name: target-config
+          - name: imageMigrationConsoleLocation
+          - name: imageMigrationConsolePullPolicy
+      container:
+        image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+        imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+
+            SOURCE_CONFIGS='{{inputs.parameters.source-configs}}'
+            TARGET_CONFIG='{{inputs.parameters.target-config}}'
+
+            # Transform source cluster config (same field renames as fullMigrationImportedClusters)
+            SOURCE_CLUSTER=$(echo "$SOURCE_CONFIGS" | jq '
+              .[0].source
+              | .version = (.version | gsub("_"; " "))
+              | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+              | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+              | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
+              | del(.no_auth) | del(.snapshotRepo)
+            ')
+
+            TARGET_CLUSTER=$(echo "$TARGET_CONFIG" | jq '
+              del(.version)
+              | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+              | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+              | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
+              | del(.no_auth)
+            ')
+
+            CDC_CONFIG=$(jq -n \
+              --argjson source "$SOURCE_CLUSTER" \
+              --argjson target "$TARGET_CLUSTER" \
+              '{
+                "skipApprovals": true,
+                "sourceClusters": { "source1": $source },
+                "targetClusters": { "target1": $target },
+                "snapshotMigrationConfigs": [],
+                "kafkaClusterConfiguration": { "default": { "autoCreate": {} } },
+                "traffic": {
+                  "proxies": {
+                    "capture-proxy": {
+                      "source": "source1",
+                      "proxyConfig": { "listenPort": 9201, "noCapture": false }
+                    }
+                  },
+                  "replayers": {
+                    "replay1": {
+                      "fromProxy": "capture-proxy",
+                      "toTarget": "target1",
+                      "replayerConfig": {
+                        "observedPacketConnectionTimeout": 30,
+                        "speedupFactor": 20
+                      }
+                    }
+                  }
+                }
+              }')
+
+            echo "CDC-only migration config:"
+            echo "$CDC_CONFIG" | jq .
+            echo "$CDC_CONFIG" | base64 | tr -d '\n' > /tmp/migration-config-base64
+      outputs:
+        parameters:
+          - name: migrationConfigBase64
+            valueFrom:
+              path: /tmp/migration-config-base64

@@ -7,4 +7,4 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
 
 // Using JOB_NAME_OVERRIDE ensures the GenericTrigger regex stays in sync with the actual job name
 def jobNameOverride = params.JOB_NAME_OVERRIDE ?: env.JOB_BASE_NAME ?: ''
-eksCdcIntegPipeline(jobName: jobNameOverride ?: null)
+eksCdcIntegPipeline(jobName: jobNameOverride ?: null, defaultTestIds: '0030')
