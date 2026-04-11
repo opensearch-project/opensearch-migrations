@@ -47,17 +47,23 @@
             },
             {
               "name": "proxyName"
+            },
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "kafkaTopicName"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  labels:\n    workflows.argoproj.io/run-uid: \"{{workflow.uid}}\"\nspec:\n  loggingConfigurationOverrideConfigMap: \"{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  internetFacing: {{=sprig.dig('internetFacing', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  podReplicas: {{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  resources: {{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources']}}\n  otelCollectorEndpoint: \"{{=sprig.dig('otelCollectorEndpoint', 'http://otel-collector:4317', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  setHeader: {{=sprig.dig('setHeader', [], fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  destinationConnectionPoolSize: {{=sprig.dig('destinationConnectionPoolSize', 0, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  destinationConnectionPoolTimeout: \"{{=sprig.dig('destinationConnectionPoolTimeout', 'PT30S', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  kafkaClientId: \"{{=sprig.dig('kafkaClientId', 'HttpCaptureProxyProducer', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  listenPort: {{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['listenPort']}}\n  maxTrafficBufferSize: {{=sprig.dig('maxTrafficBufferSize', 1048576, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  noCapture: {{=sprig.dig('noCapture', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  numThreads: {{=sprig.dig('numThreads', 1, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  sslConfigFile: \"{{=sprig.dig('sslConfigFile', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  tls: {{=sprig.dig('tls', sprig.dict(), fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  enableMSKAuth: {{=sprig.dig('enableMSKAuth', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  suppressCaptureForHeaderMatch: {{=sprig.dig('suppressCaptureForHeaderMatch', [], fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  suppressCaptureForMethod: \"{{=sprig.dig('suppressCaptureForMethod', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  suppressCaptureForUriPath: \"{{=sprig.dig('suppressCaptureForUriPath', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  suppressMethodAndPath: \"{{=sprig.dig('suppressMethodAndPath', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  labels:\n    workflows.argoproj.io/run-uid: \"{{workflow.uid}}\"\nspec:\n  loggingConfigurationOverrideConfigMap: \"{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  internetFacing: {{=sprig.dig('internetFacing', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  podReplicas: {{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  resources: {{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources']}}\n  otelCollectorEndpoint: \"{{=sprig.dig('otelCollectorEndpoint', 'http://otel-collector:4317', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  setHeader: {{=sprig.dig('setHeader', [], fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  destinationConnectionPoolSize: {{=sprig.dig('destinationConnectionPoolSize', 0, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  destinationConnectionPoolTimeout: \"{{=sprig.dig('destinationConnectionPoolTimeout', 'PT30S', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  kafkaClientId: \"{{=sprig.dig('kafkaClientId', 'HttpCaptureProxyProducer', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  listenPort: {{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['listenPort']}}\n  maxTrafficBufferSize: {{=sprig.dig('maxTrafficBufferSize', 1048576, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  noCapture: {{=sprig.dig('noCapture', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  numThreads: {{=sprig.dig('numThreads', 1, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  sslConfigFile: \"{{=sprig.dig('sslConfigFile', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  tls: {{=sprig.dig('tls', sprig.dict(), fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  enableMSKAuth: {{=sprig.dig('enableMSKAuth', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  kafkaClusterName: \"{{inputs.parameters.kafkaClusterName}}\"\n  kafkaTopicName: \"{{inputs.parameters.kafkaTopicName}}\"\n  suppressCaptureForHeaderMatch: {{=sprig.dig('suppressCaptureForHeaderMatch', [], fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  suppressCaptureForMethod: \"{{=sprig.dig('suppressCaptureForMethod', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  suppressCaptureForUriPath: \"{{=sprig.dig('suppressCaptureForUriPath', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  suppressMethodAndPath: \"{{=sprig.dig('suppressMethodAndPath', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n",
           "action": "apply",
           "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -79,6 +85,12 @@
               "name": "proxyName"
             },
             {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "kafkaTopicName"
+            },
+            {
               "name": "retryGroupName_view",
               "value": "Apply"
             }
@@ -97,6 +109,14 @@
                   {
                     "name": "proxyName",
                     "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
                   }
                 ]
               },
@@ -162,6 +182,14 @@
                     "value": "{{inputs.parameters.proxyName}}"
                   },
                   {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
                     "name": "retryGroupName_view",
                     "value": "{{inputs.parameters.retryGroupName_view}}"
                   }
@@ -198,7 +226,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -260,7 +288,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -321,7 +349,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -348,7 +376,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -396,7 +424,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -732,22 +760,19 @@
               "name": "proxyName"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "listenPort"
             },
             {
               "name": "podReplicas"
             },
             {
-              "name": "resolvedKafkaConnection",
-              "value": ""
+              "name": "imageMigrationConsoleLocation"
             },
             {
-              "name": "resolvedKafkaListenerName",
-              "value": ""
-            },
-            {
-              "name": "resolvedKafkaAuthType",
-              "value": ""
+              "name": "imageMigrationConsolePullPolicy"
             },
             {
               "name": "imageCaptureProxyLocation"
@@ -760,7 +785,77 @@
         "steps": [
           [
             {
+              "templateRef": {
+                "template": "readresourcephase",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceKind",
+                    "value": "CapturedTraffic"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  }
+                ]
+              },
+              "name": "checkPhase"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforkafkacluster",
+                "name": "resource-management"
+              },
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready') && sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=sprig.dig('kafkaConfig', 'configChecksum', '', fromJSON(inputs.parameters.proxyConfig))}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  }
+                ]
+              },
+              "name": "waitForKafkaCluster"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "readkafkaconnectionprofile",
+                "name": "resource-management"
+              },
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready') && sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  }
+                ]
+              },
+              "name": "readKafkaConnectionProfile"
+            }
+          ],
+          [
+            {
               "template": "applycapturedtrafficwithretry",
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -770,6 +865,14 @@
                   {
                     "name": "proxyName",
                     "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
                   },
                   {
                     "name": "retryGroupName_view",
@@ -786,6 +889,7 @@
                 "template": "patchresourcephase",
                 "name": "resource-management"
               },
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -808,6 +912,7 @@
           [
             {
               "template": "setupproxy",
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -835,24 +940,24 @@
                     "value": "{{inputs.parameters.podReplicas}}"
                   },
                   {
-                    "name": "resolvedKafkaConnection",
-                    "value": "{{inputs.parameters.resolvedKafkaConnection}}"
-                  },
-                  {
-                    "name": "resolvedKafkaListenerName",
-                    "value": "{{inputs.parameters.resolvedKafkaListenerName}}"
-                  },
-                  {
-                    "name": "resolvedKafkaAuthType",
-                    "value": "{{inputs.parameters.resolvedKafkaAuthType}}"
-                  },
-                  {
                     "name": "imageCaptureProxyLocation",
                     "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
                   },
                   {
                     "name": "imageCaptureProxyPullPolicy",
                     "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "resolvedKafkaConnection",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.bootstrapServers}}"
+                  },
+                  {
+                    "name": "resolvedKafkaListenerName",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.listenerName}}"
+                  },
+                  {
+                    "name": "resolvedKafkaAuthType",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.authType}}"
                   }
                 ]
               },
@@ -882,6 +987,10 @@
                   {
                     "name": "phase",
                     "value": "Ready"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
                   }
                 ]
               },

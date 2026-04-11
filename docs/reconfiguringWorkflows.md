@@ -267,25 +267,75 @@ To prevent VAPs from breaking when a CRD is upgraded (e.g., a new optional field
 
 ---
 
-## Efficient Argo Execution
+## Efficient Argo Execution: Config Checksum Chaining
 
-To avoid blind sleeps, we rely on Argo's `resource` template getting a 
-quick-result that the resource already matched and was complete.
+### Problem
 
-1. **Phase 1: Apply / Assert**
-* Workflow executes `kubectl apply` via Argo's `resource` template.
-* If the spec matches etcd exactly, K8s treats it as a No-Op.
-* If a VAP rejects it, the recursive UI-approval loop handles it.
+Resources have cross-branch dependencies (e.g., the replayer waits for the proxy). Previously, waiters checked `status.phase == Ready`, but this has a race condition: on re-run, the phase is already `Ready` from the prior run, so downstream waiters proceed immediately — before the current workflow has verified whether the upstream config changed.
 
+### Solution: Config Checksums
 
-2. **Phase 2: Wait**
-* Use Argo's native waiters to progress the workflow instantly when the controller updates the status:
-```yaml
-# For Proxy (Long-Lived)
-successCondition: status.phase == Ready
-failureCondition: status.phase == Error
+Each resource carries a `status.configChecksum` — a SHA-256 hash of its effective configuration. Downstream waiters check the checksum instead of the phase, ensuring they only proceed when the upstream resource's config matches what the current workflow expects.
+
+**Checksum computation** happens in the config processor at generation time:
+
+1. For each resource, hash all spec fields that will be applied to the CRD
+2. For resources with upstream dependencies, fold the upstream checksums into the hash
+3. Emit the checksum alongside the denormalized config
+
+**Chaining example:**
 
 ```
+KafkaCluster checksum = sha256(kafkaClusterSpec)
+CapturedTraffic checksum = sha256(proxySpec + KafkaCluster.checksum)
+TrafficReplay checksum = sha256(replayerSpec + CapturedTraffic.checksum)
+```
+
+If the Kafka cluster config changes, its checksum changes, which cascades through the proxy and replayer checksums — even if their own spec fields didn't change.
+
+**Runtime flow:**
+
+1. Config processor computes all checksums and includes them in the workflow config
+2. The initializer creates placeholder CRDs with `status.phase: Initialized` and `status.configChecksum` already set
+3. The initializer also emits a `patchCrdStatus.sh` helper because CRD status must be patched through the `/status` subresource separately from the initial create/apply
+4. Lifecycle templates update `status.phase` and, on success, restamp `status.configChecksum`
+5. Waiters compare both lifecycle state and checksum for CRDs, and compare Strimzi readiness plus a checksum annotation for Kafka
+
+**Re-run scenarios:**
+
+| Scenario | What happens |
+|----------|-------------|
+| Nothing changed | All checksums match from prior run. Waiters resolve instantly. Lifecycle templates skip via `checkPhase`. |
+| Proxy config changed | Proxy checksum changes → replayer expected checksum changes. Replayer waiter blocks until proxy lifecycle completes and stamps new checksum. |
+| Kafka config changed | Kafka checksum changes → proxy checksum changes → replayer checksum changes. Full cascade, all waiters block until upstream completes. |
+| Only replayer config changed | Proxy/Kafka checksums unchanged, waiters resolve instantly. Only replayer lifecycle runs. |
+
+### Lifecycle Template Pattern
+
+```
+checkPhase
+  → if not already terminal/ready for this run:
+      applyCRD → markRunning → deploy → markReady/markError
+```
+
+For CRDs we own, the checksum is carried in `status.configChecksum` and is written alongside the phase transition to `Ready` / `Completed`.
+
+For Kafka, we do not own the `status` subresource, so the workflow patches `metadata.annotations["migration-configChecksum"]` after the Strimzi resource has been applied.
+
+### Waiter Pattern
+
+```yaml
+CapturedTraffic:
+successCondition: status.phase == Ready, status.configChecksum == <expected-checksum>
+
+DataSnapshot / SnapshotMigration:
+successCondition: status.phase == Completed, status.configChecksum == <expected-checksum>
+
+Kafka:
+successCondition: status.listeners, metadata.annotations.migration-configChecksum == <expected-checksum>
+```
+
+The checksum is not used alone in the CRD waiters; it is paired with the expected terminal lifecycle state so the workflow still distinguishes "not done yet" from "done with the wrong config."
 
 
 
@@ -358,7 +408,9 @@ For terminal resources, also add them to the `lock-on-complete-policy` resource 
 
 ### 5. Add initializer placeholder
 
-In `migrationInitializer.ts`, create the resource with `spec: {}` and `status: { phase: "Initialized" }` during the initialization step. This lets downstream `waitFor` steps find the resource before the workflow populates it.
+In `migrationInitializer.ts`, create the resource with `spec: {}` and `status: { phase: "Initialized", configChecksum: "<precomputed>" }` during the initialization step. This lets downstream `waitFor` steps find the resource before the workflow populates it.
+
+If the resource is a CRD with a status subresource, make sure the initializer also emits the corresponding status patch command into `patchCrdStatus.sh`.
 
 ### 6. Build the manifest builder function
 
@@ -381,6 +433,27 @@ function makeTrafficReplayManifest(config, name) {
     };
 }
 ```
+
+### 7. Thread checksum dependencies through the workflow config
+
+If the new resource depends on other resources, include their checksum(s) in the denormalized config emitted by the config processor and fold them into the new resource's checksum.
+
+Examples from the current implementation:
+
+* Proxy checksum includes the Kafka checksum
+* Snapshot checksum includes dependent proxy checksums
+* Replay checksum includes the upstream proxy checksum
+
+This is what makes re-runs block on the correct upstream resource version instead of merely on a historical `Ready` / `Completed` phase.
+
+### 8. Add checksum-aware waiters
+
+In `resourceManagement.ts`, define the waiter so it checks both:
+
+* the resource has reached the correct lifecycle state
+* the resource's checksum matches the expected checksum for this workflow run
+
+For external resources whose status we do not own, store the checksum in metadata annotations instead of status.
 
 The `run-uid` label is required for the Workflow UID Approval Pattern.
 

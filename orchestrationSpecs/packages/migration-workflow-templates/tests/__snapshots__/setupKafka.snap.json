@@ -46,7 +46,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -80,7 +80,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -121,7 +121,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -248,7 +248,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -289,7 +289,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -834,7 +834,28 @@
         "steps": [
           [
             {
+              "templateRef": {
+                "template": "readkafkaconnectionprofile",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "checkExisting",
+              "continueOn": {
+                "failed": true
+              }
+            }
+          ],
+          [
+            {
               "template": "deploykafkanodepoolwithretry",
+              "when": "{{=!(steps.checkExisting.status == 'Succeeded')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -857,6 +878,7 @@
           [
             {
               "template": "deploykafkaclusterkraftwithretry",
+              "when": "{{=!(steps.checkExisting.status == 'Succeeded')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -883,7 +905,7 @@
           [
             {
               "template": "createkafkauserwithretry",
-              "when": "{{=sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512'}}",
+              "when": "{{=!(steps.checkExisting.status == 'Succeeded') && sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -909,7 +931,7 @@
             {
               "name": "bootstrapServers",
               "valueFrom": {
-                "expression": "steps.deployCluster.outputs.parameters.brokers"
+                "expression": "((steps.checkExisting.status == 'Succeeded') ? (steps.checkExisting.outputs.parameters.bootstrapServers) : (steps.deployCluster.outputs.parameters.brokers))"
               }
             }
           ]

@@ -51,6 +51,9 @@
               "name": "version"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "groupName_view",
               "value": "Kafka Cluster"
             },
@@ -84,6 +87,35 @@
                 ]
               },
               "name": "deployCluster"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchconfigchecksumannotation",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceApiVersion",
+                    "value": "kafka.strimzi.io/v1"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "Kafka"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  }
+                ]
+              },
+              "name": "stampChecksum"
             }
           ]
         ],
@@ -139,50 +171,6 @@
           [
             {
               "templateRef": {
-                "template": "waitforkafkacluster",
-                "name": "resource-management"
-              },
-              "when": "{{=sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  },
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.kafkaClusterName}}"
-                  }
-                ]
-              },
-              "name": "waitForKafkaCluster"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "readkafkaconnectionprofile",
-                "name": "resource-management"
-              },
-              "when": "{{=sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.kafkaClusterName}}"
-                  }
-                ]
-              },
-              "name": "readKafkaConnectionProfile"
-            }
-          ],
-          [
-            {
-              "templateRef": {
                 "template": "setupproxywithlifecycle",
                 "name": "setup-capture"
               },
@@ -213,6 +201,14 @@
                     "value": "{{inputs.parameters.podReplicas}}"
                   },
                   {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
                     "name": "imageCaptureProxyLocation",
                     "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
                   },
@@ -221,16 +217,8 @@
                     "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
                   },
                   {
-                    "name": "resolvedKafkaConnection",
-                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.bootstrapServers}}"
-                  },
-                  {
-                    "name": "resolvedKafkaListenerName",
-                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.listenerName}}"
-                  },
-                  {
-                    "name": "resolvedKafkaAuthType",
-                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.authType}}"
+                    "name": "configChecksum",
+                    "value": "{{=sprig.dig('configChecksum', '', fromJSON(inputs.parameters.proxyConfig))}}"
                   }
                 ]
               },
@@ -317,7 +305,11 @@
                   },
                   {
                     "name": "resourceName",
-                    "value": "{{item}}"
+                    "value": "{{=item['name']}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=item['configChecksum']}}"
                   }
                 ]
               },
@@ -793,6 +785,10 @@
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=sprig.dig('snapshotConfigChecksum', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
                   }
                 ]
               },
@@ -948,6 +944,9 @@
               "name": "fromProxy"
             },
             {
+              "name": "fromProxyConfigChecksum"
+            },
+            {
               "name": "targetConfig"
             },
             {
@@ -1000,6 +999,10 @@
                   {
                     "name": "resourceName",
                     "value": "{{=item['source']+'-'+item['snapshot']}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=sprig.dig('configChecksum', '', item)}}"
                   }
                 ]
               },
@@ -1025,6 +1028,10 @@
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.fromProxy}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.fromProxyConfigChecksum}}"
                   }
                 ]
               },
@@ -1051,6 +1058,10 @@
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=sprig.dig('configChecksum', '', fromJSON(inputs.parameters.kafkaConfig))}}"
                   }
                 ]
               },
@@ -1257,6 +1268,10 @@
                     "value": "{{=item['version']}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{=sprig.dig('configChecksum', '', item)}}"
+                  },
+                  {
                     "name": "groupName_view",
                     "value": "{{=item['name']}}"
                   },
@@ -1291,7 +1306,7 @@
                   },
                   {
                     "name": "proxyConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig'])))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item)))}}"
                   },
                   {
                     "name": "kafkaClusterName",
@@ -1493,6 +1508,10 @@
                     "value": "{{=jsonpath(toJSON(item), '$.fromProxy')}}"
                   },
                   {
+                    "name": "fromProxyConfigChecksum",
+                    "value": "{{=jsonpath(toJSON(item), '$.fromProxyConfigChecksum')}}"
+                  },
+                  {
                     "name": "kafkaClusterName",
                     "value": "{{=jsonpath(toJSON(item), '$.kafkaClusterName')}}"
                   },
@@ -1507,6 +1526,10 @@
                   {
                     "name": "toTarget",
                     "value": "{{=jsonpath(toJSON(item), '$.toTarget')}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=jsonpath(toJSON(item), '$.configChecksum')}}"
                   },
                   {
                     "name": "targetConfig",

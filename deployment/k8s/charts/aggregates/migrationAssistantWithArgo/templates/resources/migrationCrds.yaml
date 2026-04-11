@@ -88,7 +88,7 @@ spec:
                   type: string
                 lastAppliedGeneration:
                   type: integer
-                lastRunUid:
+                configChecksum:
                   type: string
               x-kubernetes-preserve-unknown-fields: true
 ---
@@ -140,6 +140,8 @@ spec:
                   type: string
                 lastAppliedGeneration:
                   type: integer
+                configChecksum:
+                  type: string
               x-kubernetes-preserve-unknown-fields: true
 ---
 # SnapshotMigration: represents a migration from snapshot (metadata + document backfill).
@@ -214,6 +216,8 @@ spec:
                   type: string
                 lastAppliedGeneration:
                   type: integer
+                configChecksum:
+                  type: string
               x-kubernetes-preserve-unknown-fields: true
 ---
 # TrafficReplay: represents a traffic replayer and its configuration.
@@ -302,4 +306,6 @@ spec:
                   type: string
                 lastAppliedGeneration:
                   type: integer
+                configChecksum:
+                  type: string
               x-kubernetes-preserve-unknown-fields: true
