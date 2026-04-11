@@ -1,6 +1,5 @@
 import {
     CLUSTER_CONFIG,
-    DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     getZodKeys,
     HTTP_ENDPOINT_PATTERN,
     KAFKA_CLIENT_CONFIG,
@@ -214,11 +213,6 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
 
 export const NAMED_KAFKA_CLIENT_CONFIG =
     makeOptionalDefaultedFieldsRequired(KAFKA_CLIENT_CONFIG).extend({
-        topicSpecOverrides: z.object({
-            partitions: z.number(),
-            replicas: z.number(),
-            config: z.record(z.string(), z.any()),
-        }).default(DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES),
         label: z.string()
     });
 

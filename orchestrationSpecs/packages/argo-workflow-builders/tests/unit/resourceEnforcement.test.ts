@@ -11,19 +11,6 @@ const EXAMPLE_RESOURCES = {
     }
 }
 
-function exampleResourcesExpression() {
-    return expr.makeDict({
-        requests: expr.makeDict({
-            cpu: "1000m",
-            memory: "1024m"
-        }),
-        limits: expr.makeDict({
-            cpu: "1000m",
-            memory: "1024m"
-        })
-    });
-}
-
 describe('Resource Enforcement', () => {
     it('should allow container with resources and verify resources block', () => {
         const wf = WorkflowBuilder.create({
@@ -141,7 +128,7 @@ describe('Resource Enforcement', () => {
         .addTemplate('test', t => t
             .addContainer(c => c
                 .addImageInfo('nginx:latest', 'IfNotPresent')
-                .addResources(exampleResourcesExpression())
+                .addResources(expr.literal(EXAMPLE_RESOURCES))
                 .addCommand(['echo', 'hello'])
             )
         )

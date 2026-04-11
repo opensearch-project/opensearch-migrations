@@ -1,25 +1,13 @@
 import {expectTypeOf} from "expect-type";
-import {BaseExpression, expr, INTERNAL, makeParameterLoop, typeToken, WorkflowBuilder} from '../../src';
+import {BaseExpression, DeepWiden, expr, INTERNAL, makeParameterLoop, typeToken, WorkflowBuilder} from '../../src';
 
 describe("expression type contracts", () => {
     it("expr.literal() produces the correct value/complexity types", () => {
         const a = expr.literal("a");
         const five = expr.literal(5);
-        const arr = expr.literal(["a", "b"]);
 
         expectTypeOf(a).toEqualTypeOf<BaseExpression<string, "govaluate">>();
         expectTypeOf(five).toEqualTypeOf<BaseExpression<number, "govaluate">>();
-        expectTypeOf(arr).toEqualTypeOf<BaseExpression<string[], "govaluate">>();
-    });
-
-    it("expr.literal() rejects record values", () => {
-        // Use expr.makeDict(...) for Argo object dictionaries so the renderer emits
-        // sprig.dict(...) instead of naked JSON object syntax inside expressions.
-        // @ts-expect-error - record literals must use expr.makeDict(...)
-        expr.literal({foo: 2});
-
-        // @ts-expect-error - nested record literals must use expr.makeDict(...)
-        expr.literal([{foo: 2}]);
     });
 
     it("expr.equals() enforces same-scalar comparisons and returns boolean", () => {
@@ -28,7 +16,9 @@ describe("expression type contracts", () => {
         const five = expr.literal(5);// as SimpleExpression<number>;
         const ten = expr.literal(10);
 
-        const ba = expr.makeDict({});
+        let ba: BaseExpression<DeepWiden<any>, "govaluate"> = expr.literal({});
+        const foo = expr.literal({foo: 2});
+        //const foo2: IsAny<typeof ba> = true;
 
         // ok: string vs string
         expectTypeOf(expr.equals(a, b)).toEqualTypeOf<BaseExpression<boolean, "govaluate">>();
@@ -46,7 +36,7 @@ describe("expression type contracts", () => {
 
         // NOT ok: number vs object must fail to type-check
         // @ts-expect-error — non-scalar right-hand side should be rejected
-        expr.equals(five, expr.makeDict({obj: true}));
+        expr.equals(five, expr.literal({ obj: true }));
     });
 
     it("ternary() preserves branch value type and widens complexity", () => {
@@ -61,10 +51,10 @@ describe("expression type contracts", () => {
     });
 
     it("path works", () => {
-        const obj = expr.makeDict({
-            a: expr.makeDict({hello: "world"}),
-            b: expr.makeDict({good: "night"}),
-            c: expr.toArray(expr.makeDict({c2: expr.makeDict({c3: "foundIt"})}))
+        const obj = expr.literal({
+            a: {hello: "world"},
+            b: {good: "night"},
+            c: [{ c2: { c3: "foundIt" }}]
         });
 
         const v1 = expr.jsonPathStrict(expr.recordToString(obj), "c");
@@ -77,7 +67,7 @@ describe("expression type contracts", () => {
         expectTypeOf(result).toExtend<BaseExpression<{hello: string}>>();
     });
 
-    it("dig infers precise value type and unions in the default type", () => {
+    it("dig infers precise value type and enforces default type", () => {
         type PerIndices = {
             metadata?: {
                 indices: string[];
@@ -85,7 +75,9 @@ describe("expression type contracts", () => {
             };
         };
 
-        const cfg = expr.cast(expr.makeDict({})).to<PerIndices>();
+        const cfg = expr.deserializeRecord(
+            expr.recordToString(
+                expr.literal({} as PerIndices) as BaseExpression<PerIndices>));
 
         // precise type from path ["metadata","indices"] → string[]
         const indices= expr.dig(
@@ -121,14 +113,13 @@ describe("expression type contracts", () => {
         );
         expectTypeOf(t3).toExtend<BaseExpression<string[]>>();
 
-        // A default can intentionally differ from the path type. Runtime sprig.dig
-        // returns either the value at the path or the default when the path is absent.
-        const t4 = expr.dig(cfg, ["metadata", "indices"] as const, expr.literal("nope"));
-        expectTypeOf(t4).toExtend<BaseExpression<string[] | string>>();
+        // wrong default type is rejected at compile time
+        // @ts-expect-error default must be string[]
+        expr.dig(cfg, ["metadata", "indices"] as const, expr.literal("nope"));
 
         // another shape: optional nested string with default
         type Obj = { a?: { hello?: string } };
-        const o = expr.cast(expr.makeDict({})).to<Obj>();
+        const o = expr.literal({} as Obj);
         const v = expr.dig(o, ["a", "hello"] as const, "world");
         expectTypeOf(v).toExtend<BaseExpression<string>>();
 
@@ -150,7 +141,7 @@ describe("expression type contracts", () => {
                         payload: expr.serialize(c.item),
                     }), {
                         loopWith: makeParameterLoop(
-                            expr.toArray(expr.makeDict({name: "a", nested: expr.makeDict({value: "b"})}))
+                            expr.literal([{ name: "a", nested: { value: "b" } }])
                         )
                     })
                 )
@@ -160,8 +151,8 @@ describe("expression type contracts", () => {
     });
 
     it("jsonPath outputs cannot be passed to deserializeRecord", () => {
-        const src = expr.recordToString(expr.makeDict({
-            outer: expr.makeDict({inner: "x"}),
+        const src = expr.recordToString(expr.literal({
+            outer: { inner: "x" },
             raw: "{\"a\":1}"
         }));
 

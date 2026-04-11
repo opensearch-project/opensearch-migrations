@@ -22,9 +22,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "config": {
                   "type": "object",
-                  "nullable": true,
                   "properties": {
-                    "auth": {
+                    "replicas": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 1
+                    },
+                    "storage": {
                       "oneOf": [
                         {
                           "type": "object",
@@ -32,13 +36,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": {
                               "type": "string",
                               "enum": [
-                                "none"
+                                "ephemeral"
                               ]
                             }
                           },
                           "required": [
                             "type"
-                          ]
+                          ],
+                          "description": "Use ephemeral (emptyDir) storage. Data is lost when pods restart. Suitable for development and testing."
                         },
                         {
                           "type": "object",
@@ -46,40 +51,36 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": {
                               "type": "string",
                               "enum": [
-                                "scram-sha-512"
+                                "persistent-claim"
                               ]
+                            },
+                            "size": {
+                              "type": "string",
+                              "description": "Size of the PersistentVolumeClaim (e.g. '10Gi', '100Gi')."
                             }
                           },
                           "required": [
-                            "type"
-                          ]
+                            "type",
+                            "size"
+                          ],
+                          "description": "Use persistent storage backed by a PersistentVolumeClaim. Required for production workloads. Size should account for expected traffic volume and Kafka retention period. If the disk fills up, Kafka brokers will become unresponsive and require manual intervention."
                         }
                       ],
-                      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge."
+                      "default": {
+                        "type": "ephemeral"
+                      }
                     },
-                    "clusterSpecOverrides": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "nullable": true
-                      },
-                      "description": "Optional overrides merged into the generated Strimzi Kafka.spec. Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."
+                    "partitions": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 1
                     },
-                    "nodePoolSpecOverrides": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "nullable": true
-                      },
-                      "description": "Optional overrides merged into the generated Strimzi KafkaNodePool.spec. Workflow-managed fields such as cluster labels may be overwritten by the workflow."
-                    },
-                    "topicSpecOverrides": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "nullable": true
-                      },
-                      "description": "Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics."
+                    "topicReplicas": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "default": 1
                     }
-                  },
-                  "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
+                  }
                 },
                 "topics": {
                   "type": "array",
@@ -91,6 +92,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
               "required": [
                 "name",
                 "version",
+                "config",
                 "topics"
               ]
             },
@@ -119,64 +121,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": "",
                       "description": "Default Kafka topic name for this cluster. Can be overridden per-proxy via the capture config's kafkaTopic field."
-                    },
-                    "managedByWorkflow": {
-                      "type": "boolean",
-                      "default": false
-                    },
-                    "listenerName": {
-                      "type": "string",
-                      "default": ""
-                    },
-                    "authType": {
-                      "type": "string",
-                      "enum": [
-                        "none",
-                        "scram-sha-512"
-                      ],
-                      "default": "none"
-                    },
-                    "secretName": {
-                      "type": "string",
-                      "default": ""
-                    },
-                    "caSecretName": {
-                      "type": "string",
-                      "default": ""
-                    },
-                    "kafkaUserName": {
-                      "type": "string",
-                      "default": ""
-                    },
-                    "topicSpecOverrides": {
-                      "type": "object",
-                      "properties": {
-                        "partitions": {
-                          "type": "number"
-                        },
-                        "replicas": {
-                          "type": "number"
-                        },
-                        "config": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "nullable": true
-                          }
-                        }
-                      },
-                      "default": {
-                        "partitions": 1,
-                        "replicas": 1,
-                        "config": {
-                          "retention.ms": 604800000,
-                          "segment.bytes": 1073741824
-                        }
-                      },
-                      "required": [
-                        "partitions",
-                        "replicas",
-                        "config"
-                      ]
                     },
                     "label": {
                       "type": "string"
@@ -1207,64 +1151,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "default": "",
                       "description": "Default Kafka topic name for this cluster. Can be overridden per-proxy via the capture config's kafkaTopic field."
                     },
-                    "managedByWorkflow": {
-                      "type": "boolean",
-                      "default": false
-                    },
-                    "listenerName": {
-                      "type": "string",
-                      "default": ""
-                    },
-                    "authType": {
-                      "type": "string",
-                      "enum": [
-                        "none",
-                        "scram-sha-512"
-                      ],
-                      "default": "none"
-                    },
-                    "secretName": {
-                      "type": "string",
-                      "default": ""
-                    },
-                    "caSecretName": {
-                      "type": "string",
-                      "default": ""
-                    },
-                    "kafkaUserName": {
-                      "type": "string",
-                      "default": ""
-                    },
-                    "topicSpecOverrides": {
-                      "type": "object",
-                      "properties": {
-                        "partitions": {
-                          "type": "number"
-                        },
-                        "replicas": {
-                          "type": "number"
-                        },
-                        "config": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "nullable": true
-                          }
-                        }
-                      },
-                      "default": {
-                        "partitions": 1,
-                        "replicas": 1,
-                        "config": {
-                          "retention.ms": 604800000,
-                          "segment.bytes": 1073741824
-                        }
-                      },
-                      "required": [
-                        "partitions",
-                        "replicas",
-                        "config"
-                      ]
-                    },
                     "label": {
                       "type": "string"
                     }
@@ -1573,9 +1459,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "properties": {
               "autoCreate": {
                 "type": "object",
-                "nullable": true,
                 "properties": {
-                  "auth": {
+                  "replicas": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1,
+                    "description": "Number of Kafka broker replicas in the Strimzi Kafka cluster. Increase for higher availability and throughput."
+                  },
+                  "storage": {
                     "oneOf": [
                       {
                         "type": "object",
@@ -1583,13 +1474,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": {
                             "type": "string",
                             "enum": [
-                              "none"
+                              "ephemeral"
                             ]
                           }
                         },
                         "required": [
                           "type"
-                        ]
+                        ],
+                        "description": "Use ephemeral (emptyDir) storage. Data is lost when pods restart. Suitable for development and testing."
                       },
                       {
                         "type": "object",
@@ -1597,42 +1489,45 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": {
                             "type": "string",
                             "enum": [
-                              "scram-sha-512"
+                              "persistent-claim"
                             ]
+                          },
+                          "size": {
+                            "type": "string",
+                            "description": "Size of the PersistentVolumeClaim (e.g. '10Gi', '100Gi')."
                           }
                         },
                         "required": [
-                          "type"
-                        ]
+                          "type",
+                          "size"
+                        ],
+                        "description": "Use persistent storage backed by a PersistentVolumeClaim. Required for production workloads. Size should account for expected traffic volume and Kafka retention period. If the disk fills up, Kafka brokers will become unresponsive and require manual intervention."
                       }
                     ],
-                    "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge."
-                  },
-                  "clusterSpecOverrides": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "nullable": true
+                    "default": {
+                      "type": "ephemeral"
                     },
-                    "description": "Optional overrides merged into the generated Strimzi Kafka.spec. Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."
+                    "description": "Storage configuration for Kafka broker data."
                   },
-                  "nodePoolSpecOverrides": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "nullable": true
-                    },
-                    "description": "Optional overrides merged into the generated Strimzi KafkaNodePool.spec. Workflow-managed fields such as cluster labels may be overwritten by the workflow."
+                  "partitions": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1,
+                    "description": "[Expert] Number of partitions for auto-created Kafka topics. Values greater than 1 are experimental and have not been fully tested."
                   },
-                  "topicSpecOverrides": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "nullable": true
-                    },
-                    "description": "Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics."
+                  "topicReplicas": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 1,
+                    "description": "Replication factor for auto-created Kafka topics. Must not exceed the number of broker replicas. Higher values improve durability."
                   }
                 },
-                "description": "Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application."
+                "description": "Configuration for auto-creating a Strimzi Kafka cluster. Used when no existing Kafka cluster is provided."
               }
             },
+            "required": [
+              "autoCreate"
+            ],
             "description": "Auto-create a new Strimzi Kafka cluster with the specified configuration. The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."
           },
           {
@@ -1643,7 +1538,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "properties": {
                   "enableMSKAuth": {
                     "type": "boolean",
-                    "default": false
+                    "default": false,
+                    "description": "Enable SASL/IAM authentication for Amazon MSK. When true, configures the Kafka client with the required SASL properties for IAM-based authentication. Uses the pod's IAM role via EKS Pod Identity."
                   },
                   "kafkaConnection": {
                     "type": "string",
@@ -1652,61 +1548,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "kafkaTopic": {
                     "type": "string",
                     "default": "",
-                    "description": "Empty defaults to the name of the target label"
-                  },
-                  "auth": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "enum": [
-                              "none"
-                            ]
-                          }
-                        },
-                        "required": [
-                          "type"
-                        ]
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "type": "string",
-                            "enum": [
-                              "scram-sha-512"
-                            ]
-                          },
-                          "secretName": {
-                            "type": "string",
-                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
-                          },
-                          "caSecretName": {
-                            "type": "string",
-                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
-                          },
-                          "kafkaUserName": {
-                            "type": "string",
-                            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
-                          }
-                        },
-                        "required": [
-                          "type",
-                          "secretName",
-                          "caSecretName"
-                        ]
-                      }
-                    ],
-                    "default": {
-                      "type": "none"
-                    }
+                    "description": "Default Kafka topic name for this cluster. Can be overridden per-proxy via the capture config's kafkaTopic field."
                   }
                 },
                 "required": [
                   "kafkaConnection"
-                ]
+                ],
+                "description": "Connection configuration for an externally managed Kafka cluster."
               }
             },
             "required": [
