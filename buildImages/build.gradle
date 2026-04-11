@@ -71,9 +71,9 @@ jibProjects.values().each { cfg ->
 
 def buildKitProjects = [
         [
-                serviceName: "opensearchPricingCalculator",
-                contextDir: "MigrationCompanion/opensearch-pricing-calculator",
-                imageName:  "opensearch_pricing_calculator",
+                serviceName: "migrationCompanion",
+                contextDir: "MigrationCompanion",
+                imageName:  "migration_companion",
                 imageTag:   "latest",
         ],
         [

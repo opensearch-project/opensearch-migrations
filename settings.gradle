@@ -72,7 +72,7 @@ include 'TrafficCapture:SolrTransformations'
 include 'buildImages'
 include 'custom-es-images'
 include 'kiro-cli'
-include 'MigrationCompanion:opensearch-pricing-calculator'
+include 'MigrationCompanion'
 
 
 addSubProjects(':transformation', Paths.get(rootProject.projectDir.getPath(), 'transformation', 'transformationPlugins').toFile())
