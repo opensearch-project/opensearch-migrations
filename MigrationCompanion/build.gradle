@@ -7,18 +7,18 @@ plugins {
 def goDir = file('opensearch-pricing-calculator')
 def pyDir = file('skills/solr-opensearch-migration-advisor')
 def goVersion = '1.24.3'
-def goRoot = layout.buildDirectory.dir("goroot/go-${goVersion}").get().asFile
+def os = System.getProperty('os.name').toLowerCase().contains('mac') ? 'darwin' : 'linux'
+def arch = System.getProperty('os.arch').contains('aarch64') ? 'arm64' : 'amd64'
+def goRoot = new File(gradle.gradleUserHomeDir, "go/${goVersion}/${os}-${arch}")
 
 CommonUtils.syncVersionFileToDockerStaging(project, "migrationCompanion", "build/version")
 
 tasks.register('setupGo') {
-    description = 'Download Go toolchain from go.dev'
+    description = 'Download Go toolchain from go.dev (cached in ~/.gradle/go/)'
     group = 'build setup'
     outputs.dir(goRoot)
     doLast {
         if (new File(goRoot, "bin/go").exists()) return
-        def os = System.getProperty('os.name').toLowerCase().contains('mac') ? 'darwin' : 'linux'
-        def arch = System.getProperty('os.arch').contains('aarch64') ? 'arm64' : 'amd64'
         def url = "https://go.dev/dl/go${goVersion}.${os}-${arch}.tar.gz"
         def tarball = new File(temporaryDir, "go.tar.gz")
         ant.get(src: url, dest: tarball)
