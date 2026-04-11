@@ -6,15 +6,44 @@ plugins {
 
 def goDir = file('opensearch-pricing-calculator')
 def pyDir = file('skills/solr-opensearch-migration-advisor')
+def goVersion = '1.24.3'
+def goInstallDir = layout.buildDirectory.dir("go-${goVersion}").get().asFile
 
 CommonUtils.syncVersionFileToDockerStaging(project, "migrationCompanion", "build/version")
+
+tasks.register('setupGo') {
+    description = 'Download and install Go toolchain'
+    group = 'build setup'
+    def marker = new File(goInstallDir, "bin/go")
+    outputs.file(marker)
+    doLast {
+        if (!marker.exists()) {
+            def os = System.getProperty('os.name').toLowerCase().contains('mac') ? 'darwin' : 'linux'
+            def arch = System.getProperty('os.arch').contains('aarch64') ? 'arm64' : 'amd64'
+            def tarball = "go${goVersion}.${os}-${arch}.tar.gz"
+            def url = "https://go.dev/dl/${tarball}"
+            def dest = new File(temporaryDir, tarball)
+            ant.get(src: url, dest: dest)
+            ant.mkdir(dir: goInstallDir)
+            ant.exec(executable: 'tar', failonerror: true) {
+                arg(value: '-xzf')
+                arg(value: dest.absolutePath)
+                arg(value: '--strip-components=1')
+                arg(value: '-C')
+                arg(value: goInstallDir.absolutePath)
+            }
+        }
+    }
+}
 
 tasks.register('goTest', Exec) {
     description = 'Run Go tests for opensearch-pricing-calculator'
     group = 'verification'
+    dependsOn setupGo
     workingDir goDir
-    commandLine 'go', 'test', './...', '-count=1'
-    onlyIf { ['which', 'go'].execute().waitFor() == 0 }
+    environment 'GOROOT', goInstallDir.absolutePath
+    environment 'PATH', "${goInstallDir}/bin${File.pathSeparator}${System.getenv('PATH')}"
+    commandLine "${goInstallDir}/bin/go", 'test', './...', '-count=1'
 }
 
 tasks.register('pythonSetup', Exec) {
