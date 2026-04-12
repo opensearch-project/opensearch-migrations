@@ -35,7 +35,6 @@ RUN useradd -m -s /bin/bash user
 WORKDIR /app
 
 COPY --from=go-builder /build/opensearch-pricing-calculator .
-COPY --from=go-builder /build/priceCache.json .
 COPY VERSION .
 
 # Python skill (pip install for programmatic use)
