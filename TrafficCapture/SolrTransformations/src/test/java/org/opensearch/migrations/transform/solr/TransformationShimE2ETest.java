@@ -27,6 +27,7 @@ import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.TestFactory;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -125,6 +126,20 @@ class TransformationShimE2ETest {
     private void executeTestCase(
             ShimTestFixture fixture, TestCaseDefinition tc, String solrImage) throws Exception {
         seedData(fixture, tc);
+
+        // Error-path test: assert status code and error message, skip Solr comparison
+        if (tc.expectedStatusCode() != null) {
+            var resp = fixture.httpGetRaw(fixture.getProxyBaseUrl() + tc.requestPath());
+            assertEquals(tc.expectedStatusCode().intValue(), resp.statusCode(),
+                tc.name() + ": expected HTTP " + tc.expectedStatusCode() + " but got " + resp.statusCode());
+            if (tc.expectedErrorContains() != null) {
+                assertTrue(resp.body().contains(tc.expectedErrorContains()),
+                    tc.name() + ": expected error body to contain '" + tc.expectedErrorContains()
+                        + "' but got: " + resp.body());
+            }
+            log.info("PASSED (error-path): {} [{}] → HTTP {}", tc.name(), solrImage, resp.statusCode());
+            return;
+        }
 
         var proxyResponse = sendRequest(fixture, fixture.getProxyBaseUrl() + tc.requestPath(), tc);
         var proxyJson = MAPPER.readValue(proxyResponse, new TypeReference<Map<String, Object>>() {});
