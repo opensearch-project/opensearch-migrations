@@ -11,6 +11,7 @@ const mockTestCase: ExpandedTestCase = {
     changeClass: 'safe',
     mutatorId: 'proxy-noCapture-toggle',
     baselineChecksumReport: { components: {} },
+    mutatedConfig: {},
     mutatedChecksumReport: { components: {} },
     expect: {
         reran: ['proxy:capture-proxy'],

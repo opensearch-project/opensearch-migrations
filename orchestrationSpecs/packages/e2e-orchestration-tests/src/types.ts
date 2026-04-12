@@ -63,6 +63,7 @@ export type ExpandedTestCase = {
   changeClass: ChangeClass;
   mutatorId: string;
   baselineChecksumReport: ChecksumReport;
+  mutatedConfig: Record<string, unknown>;
   mutatedChecksumReport: ChecksumReport;
   expect: ExpandedExpectation;
 };
@@ -72,6 +73,17 @@ export type ExpandedExpectation = {
   unchanged: string[];
   blockedOn?: Record<string, string[]>;
 };
+
+/**
+ * Runtime expectation for a single run within a test.
+ * - allCompleted: baseline run — every component should reach Ready/Completed
+ * - allSkipped: noop run — every component checksum unchanged from prior
+ * - reran/unchanged: mutation run — specific components changed, others didn't
+ */
+export type RunExpectation =
+  | { mode: 'allCompleted' }
+  | { mode: 'allSkipped' }
+  | { mode: 'selective'; reran: string[]; unchanged: string[]; blockedOn?: Record<string, string[]> };
 
 export type ComponentObservation = {
   kind: string;

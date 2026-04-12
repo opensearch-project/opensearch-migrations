@@ -159,6 +159,7 @@ export async function expandMatrix(
                     changeClass: selector.changeClass,
                     mutatorId: mutator.id,
                     baselineChecksumReport: baseReport,
+                    mutatedConfig: mutatedConfig,
                     mutatedChecksumReport: mutatedReport,
                     expect: expectation,
                 });

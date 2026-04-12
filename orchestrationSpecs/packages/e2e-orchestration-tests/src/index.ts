@@ -4,3 +4,6 @@ export * from './derivedSubgraph';
 export * from './approvedMutators';
 export * from './matrixExpander';
 export * from './reportSchema';
+export * from './stateStore';
+export * from './assertLogic';
+export * from './buildOuterWorkflow';
