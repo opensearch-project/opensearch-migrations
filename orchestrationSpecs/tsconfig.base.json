@@ -39,6 +39,12 @@
       ],
       "@opensearch-migrations/strimzi-types": [
         "./packages/strimzi-types/src/index.ts"
+      ],
+      "@opensearch-migrations/config-processor": [
+        "./packages/config-processor/src/index.ts"
+      ],
+      "@opensearch-migrations/e2e-orchestration-tests": [
+        "./packages/e2e-orchestration-tests/src/index.ts"
       ]
     }
   }

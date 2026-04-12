@@ -1,0 +1,54 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`buildChecksumReport produces a report with all expected components 1`] = `
+{
+  "kafka:default": {
+    "configChecksum": "7c013c875fc53ba1",
+    "dependsOn": [],
+    "downstreamChecksums": {},
+    "kind": "kafkaCluster",
+    "resourceName": "default",
+  },
+  "proxy:capture-proxy": {
+    "configChecksum": "8de5a27a17450e97",
+    "dependsOn": [
+      "kafka:default",
+    ],
+    "downstreamChecksums": {
+      "replayer": "059902afba2297d7",
+      "snapshot": "059902afba2297d7",
+    },
+    "kind": "proxy",
+    "resourceName": "capture-proxy",
+  },
+  "replay:capture-proxy-target-replay1": {
+    "configChecksum": "a8090315cdc70386",
+    "dependsOn": [
+      "proxy:capture-proxy",
+    ],
+    "downstreamChecksums": {},
+    "kind": "trafficReplay",
+    "resourceName": "capture-proxy-target-replay1",
+  },
+  "snapshot:source-snap1": {
+    "configChecksum": "afbe905ae83fc0d8",
+    "dependsOn": [
+      "proxy:capture-proxy",
+    ],
+    "downstreamChecksums": {},
+    "kind": "snapshot",
+    "resourceName": "source-snap1",
+  },
+  "snapshotMigration:source-target-snap1": {
+    "configChecksum": "3902ceadb6f2f349",
+    "dependsOn": [
+      "snapshot:source-snap1",
+    ],
+    "downstreamChecksums": {
+      "replayer": "f5fe60a7bfaf842e",
+    },
+    "kind": "snapshotMigration",
+    "resourceName": "source-target-snap1",
+  },
+}
+`;

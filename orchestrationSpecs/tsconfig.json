@@ -6,6 +6,7 @@
     { "path": "./packages/schemas" },
     { "path": "./packages/argo-workflow-builders" },
     { "path": "./packages/migration-workflow-templates" },
-    { "path": "./packages/config-processor" }
+    { "path": "./packages/config-processor" },
+    { "path": "./packages/e2e-orchestration-tests" }
   ]
 }
