@@ -181,6 +181,48 @@ graph LR
 
 ---
 
+## Input Validation
+
+Validation runs before any endpoint-specific transforms, rejecting invalid requests early with clear error messages.
+
+### Declaring Supported Params
+
+Each feature module can export three optional fields that the validation system auto-discovers:
+
+```typescript
+// features/my-feature.ts
+export const params = ['myParam'];                    // exact param names
+export const paramPrefixes = ['myParam.'];            // prefix matching (e.g., hl.fl, json.facet)
+export const paramRules: ParamRule[] = [
+  { name: 'myParam', type: 'integer' },               // type validation
+  { name: 'q', type: 'rejectPattern',                 // regex rejection
+    pattern: String.raw`^\{!`,
+    reason: 'Local params ({!...}) syntax not supported' },
+];
+```
+
+Register the module in `FEATURE_MODULES` in `registry.ts` so validation discovers its params.
+
+### Validation Order
+
+1. **Unsupported param detection** — any param not declared by any feature (and not in `COMMON_PARAMS`) is rejected
+2. **Param type checks** — rules run in declaration order:
+   - `integer` — must match `/^-?\d+$/` (rejects `10abc`)
+   - `boolean` — must be `'true'` or `'false'`
+   - `json` — must parse via `JSON.parse()`
+   - `rejectPattern` — must NOT match the given regex
+
+### Available ParamRule Types
+
+| Type | Validates | Example |
+|------|-----------|---------|
+| `integer` | Strict integer string | `{ name: 'rows', type: 'integer' }` |
+| `boolean` | `'true'` or `'false'` only | `{ name: 'hl', type: 'boolean' }` |
+| `json` | Valid JSON | `{ name: 'json.facet', type: 'json' }` |
+| `rejectPattern` | Value must NOT match regex | `{ name: 'sort', type: 'rejectPattern', pattern: String.raw`\{!`, reason: '...' }` |
+
+---
+
 ## Type System
 
 The TypeScript types mirror the Java-side `JsonKeysForHttpMessage` schema:

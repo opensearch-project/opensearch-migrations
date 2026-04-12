@@ -646,4 +646,144 @@ export const testCases: TestCase[] = [
       { path: '$.highlighting[*][*][*]', rule: 'regex', expected: '.*<em>.*</em>.*', reason: 'Fragment text may differ between Solr and OpenSearch highlighters' },
     ],
   }),
+
+  // ───────────────────────────────────────────────────────────
+  // Validation tests — error-path (expectedStatusCode)
+  // ───────────────────────────────────────────────────────────
+
+  solrTest('validation-unsupported-param-fq', {
+    description: 'Unsupported param fq should return 500',
+    documents: [{ id: '1', title: 'test' }],
+    requestPath: '/solr/testcollection/select?q=*:*&fq=title:test&wt=json',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('validation-unsupported-param-facet', {
+    description: 'Unsupported legacy facet params should return 500',
+    documents: [{ id: '1', title: 'test' }],
+    requestPath: '/solr/testcollection/select?q=*:*&facet=true&facet.field=title&wt=json',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('validation-unsupported-param-defType', {
+    description: 'Unsupported defType param should return 500',
+    documents: [{ id: '1', title: 'test' }],
+    requestPath: '/solr/testcollection/select?q=test&defType=dismax&qf=title&wt=json',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('validation-invalid-rows-non-numeric', {
+    description: 'Non-numeric rows should return 500',
+    documents: [{ id: '1', title: 'test' }],
+    requestPath: '/solr/testcollection/select?q=*:*&rows=abc&wt=json',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('validation-invalid-start-non-numeric', {
+    description: 'Non-numeric start should return 500',
+    documents: [{ id: '1', title: 'test' }],
+    requestPath: '/solr/testcollection/select?q=*:*&start=xyz&wt=json',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('validation-invalid-hl-boolean', {
+    description: 'Invalid boolean value for hl should return 500',
+    documents: [{ id: '1', title: 'test' }],
+    requestPath: '/solr/testcollection/select?q=*:*&hl=yes&wt=json',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('validation-local-params-in-q', {
+    description: 'Local params syntax in q should return 500',
+    documents: [{ id: '1', title: 'test' }],
+    requestPath: '/solr/testcollection/select?q=' + encodeURIComponent('{!dismax qf=title}hello') + '&wt=json',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('validation-invalid-sort-no-direction', {
+    description: 'Sort without direction should return 500',
+    documents: [{ id: '1', title: 'test' }],
+    requestPath: '/solr/testcollection/select?q=*:*&sort=price&wt=json',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('url-plus-decoding-in-sort', {
+    description: 'Sort with + as space (e.g. sort=price+asc) should decode correctly and return sorted results',
+    documents: [
+      { id: '1', title: 'alpha', price: 30 },
+      { id: '2', title: 'beta', price: 10 },
+      { id: '3', title: 'gamma', price: 20 },
+    ],
+    requestPath: '/solr/testcollection/select?q=*:*&sort=price+asc&wt=json',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+        price: { type: 'pfloat' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        id: { type: 'keyword' },
+        title: { type: 'text' },
+        price: { type: 'float' },
+      },
+    },
+    assertionRules: SOLR_INTERNAL_RULES,
+  }),
+
+  solrTest('validation-invalid-json-facet', {
+    description: 'Malformed json.facet should return 500',
+    documents: [{ id: '1', title: 'test' }],
+    requestPath: '/solr/testcollection/select?q=*:*&json.facet=' + encodeURIComponent('{bad json}') + '&wt=json',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('validation-local-params-in-fl', {
+    description: 'Local params syntax in fl should return 500',
+    documents: [{ id: '1', title: 'test' }],
+    requestPath: '/solr/testcollection/select?q=*:*&fl=' + encodeURIComponent('id,{!func}div(price,2)') + '&wt=json',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('validation-empty-rows', {
+    description: 'Empty rows value should return 500',
+    documents: [{ id: '1', title: 'test' }],
+    requestPath: '/solr/testcollection/select?q=*:*&rows=&wt=json',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('validation-empty-start', {
+    description: 'Empty start value should return 500',
+    documents: [{ id: '1', title: 'test' }],
+    requestPath: '/solr/testcollection/select?q=*:*&start=&wt=json',
+    expectedStatusCode: 500,
+    expectedErrorContains: 'Request transform failed',
+  }),
+
+  solrTest('validation-valid-request-passes', {
+    description: 'Valid request with supported params should pass through normally',
+    documents: [{ id: '1', title: 'test document' }],
+    requestPath: '/solr/testcollection/select?q=*:*&rows=10&start=0&fl=id,title&wt=json',
+    solrSchema: {
+      fields: {
+        title: { type: 'text_general' },
+      },
+    },
+    opensearchMapping: {
+      properties: {
+        title: { type: 'text' },
+      },
+    },
+  }),
 ];

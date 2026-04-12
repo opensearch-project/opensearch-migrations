@@ -11,7 +11,13 @@
  */
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext } from '../context';
+import type { ParamRule } from './validation';
 
+/** Solr query params this feature handles. */
+export const params = ['sort'];
+export const paramRules: ParamRule[] = [
+  { name: 'sort', type: 'rejectPattern', pattern: String.raw`\{!`, reason: 'Local params ({!...}) syntax in sort is not supported' },
+];
 function parseSortClause(clause: string): Map<string, any> {
   const parts = clause.trim().split(/\s+/);
   if (parts.length < 2 || !parts[0]) {
