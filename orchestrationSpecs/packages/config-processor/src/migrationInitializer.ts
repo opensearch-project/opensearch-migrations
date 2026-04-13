@@ -2,7 +2,7 @@ import {StreamSchemaParser} from "./streamSchemaTransformer";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {
     ARGO_MIGRATION_CONFIG,
-    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN
+    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN,
 } from "@opensearch-migrations/schemas";
 import {stringify} from "yaml";
 import * as fs from "fs/promises";

@@ -60,6 +60,15 @@ spec:
               mountPath: /etc/otel/
       tolerations:
         - operator: Exists
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: NotIn
+                    values:
+                      - dedicated-small-instance-migration-console-pool
       volumes:
         - name: otel-collector-config
           configMap:

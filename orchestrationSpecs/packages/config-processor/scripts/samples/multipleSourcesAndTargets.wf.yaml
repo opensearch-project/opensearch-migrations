@@ -21,7 +21,6 @@ sourceClusters:
         snapA:
           config:
             createSnapshotConfig: {}
-            requiredForCompleteMigration: true
           repoName: "repoA"
 
   sourceB:
@@ -43,7 +42,6 @@ sourceClusters:
             createSnapshotConfig:
               indexAllowlist:
                 - "index-*"
-            requiredForCompleteMigration: true
           repoName: "repoB"
 
 targetClusters:

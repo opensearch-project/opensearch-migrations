@@ -54,6 +54,9 @@ public class TrafficReplayer {
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
     public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
+    public static final String KAFKA_AUTH_TYPE_NONE = "none";
+    public static final String KAFKA_AUTH_TYPE_MSK_IAM = "msk-iam";
+    public static final String KAFKA_AUTH_TYPE_SCRAM_SHA_512 = "scram-sha-512";
 
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
     private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
@@ -252,20 +255,20 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-brokers", "--kafkaTrafficBrokers" },
+            names = { "--kafkaBrokers", "--kafka-traffic-brokers", "--kafkaTrafficBrokers" },
             arity = 1,
             description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers " +
                 "to bootstrap with i.e. 'kafka-1:9092,kafka-2:9092'")
         String kafkaTrafficBrokers;
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-topic", "--kafkaTrafficTopic" },
+            names = { "--kafkaTopic", "--kafka-traffic-topic", "--kafkaTrafficTopic" },
             arity = 1,
             description = "Topic name used to pull messages from Kafka")
         String kafkaTrafficTopic;
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-group-id", "--kafkaTrafficGroupId" },
+            names = { "--kafkaGroupId", "--kafka-traffic-group-id", "--kafkaTrafficGroupId" },
             arity = 1,
             description = "Consumer group id that is used when pulling messages from Kafka")
         String kafkaTrafficGroupId;
@@ -273,14 +276,44 @@ public class TrafficReplayer {
             required = false,
             names = { "--kafka-traffic-enable-msk-auth", "--kafkaTrafficEnabledMskAuth" },
             arity = 0,
-            description = "Enables SASL properties required for connecting to MSK with IAM auth")
-        boolean kafkaTrafficEnableMSKAuth;
+            description = "Legacy flag that enables MSK IAM auth. Prefer --kafkaAuthType=msk-iam")
+        Boolean kafkaTrafficEnableMSKAuth;
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-property-file", "--kafkaTrafficPropertyFile" },
+            names = { "--kafkaPropertyFile", "--kafka-traffic-property-file", "--kafkaTrafficPropertyFile" },
             arity = 1,
             description = "File path for Kafka properties file to use for additional or overriden Kafka properties")
         String kafkaTrafficPropertyFile;
+        @Parameter(
+            required = false,
+            names = { "--kafkaAuthType", "--kafka-traffic-auth-type", "--kafkaTrafficAuthType" },
+            arity = 1,
+            description = "Kafka client auth mode. Supported values: none, msk-iam, scram-sha-512")
+        String kafkaTrafficAuthType;
+        @Parameter(
+            required = false,
+            names = { "--kafkaListenerName", "--kafka-traffic-listener-name", "--kafkaTrafficListenerName" },
+            arity = 1,
+            description = "Kafka listener name selected by orchestration")
+        String kafkaTrafficListenerName;
+        @Parameter(
+            required = false,
+            names = { "--kafkaSecretName", "--kafka-traffic-secret-name", "--kafkaTrafficSecretName" },
+            arity = 1,
+            description = "Kubernetes Secret containing Kafka client auth material")
+        String kafkaTrafficSecretName;
+        @Parameter(
+            required = false,
+            names = { "--kafkaUserName", "--kafka-traffic-user-name", "--kafkaTrafficUserName" },
+            arity = 1,
+            description = "Kafka user/principal name selected by orchestration")
+        String kafkaTrafficUserName;
+        @Parameter(
+            required = false,
+            names = { "--kafkaPassword", "--kafka-traffic-password", "--kafkaTrafficPassword" },
+            arity = 1,
+            description = "Kafka password for SCRAM auth. Prefer setting via TRAFFIC_REPLAYER_KAFKA_TRAFFIC_PASSWORD env var.")
+        String kafkaTrafficPassword;
 
         @Parameter(
             required = false,
@@ -289,6 +322,34 @@ public class TrafficReplayer {
             description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
+
+        void validateKafkaAuthFlags() {
+            if (kafkaTrafficAuthType != null && !kafkaTrafficAuthType.isBlank()) {
+                if (Boolean.TRUE.equals(kafkaTrafficEnableMSKAuth)
+                    && !KAFKA_AUTH_TYPE_MSK_IAM.equals(kafkaTrafficAuthType)) {
+                    throw new ParameterException(
+                        "--kafka-traffic-enable-msk-auth is only compatible with --kafkaAuthType=msk-iam"
+                    );
+                }
+                if (!KAFKA_AUTH_TYPE_NONE.equals(kafkaTrafficAuthType)
+                    && !KAFKA_AUTH_TYPE_MSK_IAM.equals(kafkaTrafficAuthType)
+                    && !KAFKA_AUTH_TYPE_SCRAM_SHA_512.equals(kafkaTrafficAuthType)) {
+                    throw new ParameterException("Unsupported --kafkaAuthType value: " + kafkaTrafficAuthType);
+                }
+            }
+        }
+
+        boolean isKafkaTrafficEnableMSKAuth() {
+            return KAFKA_AUTH_TYPE_MSK_IAM.equals(getEffectiveKafkaAuthType());
+        }
+
+        String getEffectiveKafkaAuthType() {
+            validateKafkaAuthFlags();
+            if (kafkaTrafficAuthType != null && !kafkaTrafficAuthType.isBlank()) {
+                return kafkaTrafficAuthType;
+            }
+            return Boolean.TRUE.equals(kafkaTrafficEnableMSKAuth) ? KAFKA_AUTH_TYPE_MSK_IAM : KAFKA_AUTH_TYPE_NONE;
+        }
     }
 
     @Getter
@@ -373,6 +434,7 @@ public class TrafficReplayer {
         var parser = JsonCommandLineParser.newBuilder().addObject(p).build();
         try {
             parser.parse(args);
+            p.validateKafkaAuthFlags();
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
             System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
@@ -437,7 +499,8 @@ public class TrafficReplayer {
             }
         } else if (params.kafkaTrafficBrokers != null && params.kafkaTrafficTopic != null) {
             runner.runDumpFromKafka(params.mode, params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
-                params.kafkaTrafficEnableMSKAuth, params.kafkaTrafficPropertyFile,
+                params.getEffectiveKafkaAuthType(), params.kafkaTrafficUserName, params.kafkaTrafficPassword,
+                params.kafkaTrafficPropertyFile,
                 params.startOffset, params.startTime, params.endOffset, params.endTime,
                 params.previewBytesRead, params.previewBytesWrite,
                 params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,

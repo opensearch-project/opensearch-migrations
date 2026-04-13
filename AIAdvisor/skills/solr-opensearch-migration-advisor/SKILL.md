@@ -367,10 +367,44 @@ Or simply use a new `session_id`.
 
 ## Reference Knowledge Base
 
-You have access to a verified knowledge base of technical information about Apache Solr and OpenSearch located under the `references` directory. Before answering any questions, search the provided context and cite your sources from the reference materials.
+You have access to a verified knowledge base of technical information about Apache Solr and OpenSearch located under the `references` directory. Consult these files proactively — do not wait for the user to ask. Use the table below to select the most relevant file(s) for the current topic, then cite the specific section you drew from.
 
-#[[file:references/01-sample-reference.md]]
-#[[file:steering/stakeholders.md]]
+### When to Use Each Reference File
+
+| File | Content Summary | Use When… |
+|---|---|---|
+| `references/01-schema-migration.md` | Field type mappings, `schema.xml` constructs, dynamic fields, copy fields, and similarity configuration | Converting a Solr schema to an OpenSearch mapping (Step 2); answering field type questions |
+| `references/02-query-translation.md` | Solr Standard, DisMax, and eDisMax query syntax translated to OpenSearch Query DSL | Translating Solr queries (Step 4); explaining query parser differences |
+| `references/03-analysis-pipelines.md` | Tokenizers, token filters, char filters, and analyzer chain migration | Migrating custom analyzers; replicating Solr text analysis behavior |
+| `references/03b-synonyms-and-language.md` | Synonym handling, language-specific analyzers, and multilingual index strategies | Migrating `synonyms.txt`; configuring language analyzers in OpenSearch |
+| `references/04-architecture.md` | SolrCloud vs. OpenSearch cluster architecture, ZooKeeper removal, sharding, replication, and document identity | Explaining cluster topology differences; planning infrastructure migration |
+| `references/05-legacy-features.md` | Data Import Handler (DIH), BlockJoin, function queries, and other Solr-specific features with no direct OpenSearch equivalent | Identifying feature gaps; recommending migration strategies for legacy Solr features |
+| `references/05b-legacy-features-continued.md` | Joins, Streaming Expressions, SpellCheck, MoreLikeThis, custom request handlers, and a full feature gap summary table | Same as above — continuation covering additional legacy features |
+| `references/06-feature-compatibility-matrix.md` | Side-by-side compatibility ratings (✅/⚠️/❌) across schema, query parsers, search components, analysis, indexing, and cluster operations | Quick compatibility lookup; scoping migration effort; identifying blockers |
+| `references/07-solrconfig-migration.md` | `solrconfig.xml` constructs (request handlers, caches, update settings, merge policy, similarity) mapped to OpenSearch equivalents | Migrating `solrconfig.xml`; configuring OpenSearch index and node settings |
+| `references/08-query-behavior-edge-cases.md` | Known behavioral differences between Solr query parsers and OpenSearch Query DSL: default operator, fuzzy scale, date math, scoring, highlighting, sorting, deep pagination | Debugging query result differences; validating query parity after migration |
+| `references/09-sizing-and-performance.md` | Node roles, shard sizing formulas, JVM/heap tuning, bulk indexing settings, cache configuration, hardware recommendations, and monitoring metrics | Sizing a new OpenSearch cluster; performance tuning; capacity planning (Step 3 / DevOps stakeholder) |
+| `references/10-validation-parity-checklist.md` | Seven-phase validation checklist: pre-migration baseline → schema → document counts → query parity → feature-specific → performance → operational readiness | Guiding the user through post-migration validation; generating a sign-off checklist |
+
+### Usage Guidelines
+
+- **Cite your sources.** When drawing on a reference file, name the file and section (e.g., *"per `references/06-feature-compatibility-matrix.md`, section 3 — Query Parsers"*).
+- **Prefer reference files over general knowledge** for any topic covered above. The reference files reflect decisions and conventions specific to this migration skill.
+- **Combine files when needed.** For example, a schema question may require both `01-schema-migration.md` (field types) and `03-analysis-pipelines.md` (analyzer chains).
+- **Stakeholder filtering.** For a DevOps / Platform Engineer, prioritize `04-architecture.md`, `09-sizing-and-performance.md`, and `07-solrconfig-migration.md`. For a Search Relevance Engineer, prioritize `01-schema-migration.md`, `02-query-translation.md`, `03-analysis-pipelines.md`, and `08-query-behavior-edge-cases.md`.
+
+#[[file:references/01-schema-migration.md]]
+#[[file:references/02-query-translation.md]]
+#[[file:references/03-analysis-pipelines.md]]
+#[[file:references/03b-synonyms-and-language.md]]
+#[[file:references/04-architecture.md]]
+#[[file:references/05-legacy-features.md]]
+#[[file:references/05b-legacy-features-continued.md]]
+#[[file:references/06-feature-compatibility-matrix.md]]
+#[[file:references/07-solrconfig-migration.md]]
+#[[file:references/08-query-behavior-edge-cases.md]]
+#[[file:references/09-sizing-and-performance.md]]
+#[[file:references/10-validation-parity-checklist.md]]
 
 ## Instructions
 
@@ -448,20 +482,3 @@ Or configure it in your MCP client (e.g. `.kiro/settings/mcp.json`):
   }
 }
 ```
-
-## Reference Data
-
-### Field Type Mapping Reference
-| Solr Field Type | OpenSearch Type |
-|---|---|
-| TextField | text |
-| StrField | keyword |
-| IntPointField / TrieIntField | integer |
-| LongPointField / TrieLongField | long |
-| FloatPointField / TrieFloatField | float |
-| DoublePointField / TrieDoubleField | double |
-| DatePointField / TrieDateField | date |
-| BoolField | boolean |
-| BinaryField | binary |
-| LatLonPointSpatialField | geo_point |
-| SpatialRecursivePrefixTreeFieldType | geo_shape |

@@ -38,10 +38,5 @@ export function runPipeline<Ctx extends { endpoint: SolrEndpoint }>(
 }
 
 function applyTransform<Ctx>(t: MicroTransform<Ctx>, ctx: Ctx): void {
-  try {
-    if (!t.match || t.match(ctx)) t.apply(ctx);
-  } catch (e) {
-    // Log but don't kill the pipeline — partial transform is better than no transform
-    console.error(`Transform '${t.name}' failed:`, e);
-  }
+  if (!t.match || t.match(ctx)) t.apply(ctx);
 }
