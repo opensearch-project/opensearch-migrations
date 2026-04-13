@@ -1,13 +1,15 @@
 package org.opensearch.migrations.replay.sink;
 
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntFunction;
 
 import org.opensearch.migrations.replay.ParsedHttpMessagesAsDicts;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 
+import io.netty.util.concurrent.FastThreadLocal;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -18,9 +20,18 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class ThreadLocalTupleWriter implements AutoCloseable {
-    private final ConcurrentHashMap<Long, TupleSink> sinks = new ConcurrentHashMap<>();
+    private final List<TupleSink> sinks = new CopyOnWriteArrayList<>();
     private final AtomicInteger sinkIndexCounter = new AtomicInteger();
     private final IntFunction<TupleSink> sinkFactory;
+
+    private final FastThreadLocal<TupleSink> threadLocalSink = new FastThreadLocal<>() {
+        @Override
+        protected TupleSink initialValue() {
+            TupleSink sink = sinkFactory.apply(sinkIndexCounter.getAndIncrement());
+            sinks.add(sink);
+            return sink;
+        }
+    };
 
     /**
      * @param sinkFactory creates a new sink for each thread, given a sink index
@@ -33,19 +44,14 @@ public class ThreadLocalTupleWriter implements AutoCloseable {
      * Write a tuple. Called on a Netty event loop thread.
      */
     public CompletableFuture<Void> writeTuple(SourceTargetCaptureTuple tuple, ParsedHttpMessagesAsDicts parsed) {
-        var sink = sinks.computeIfAbsent(
-            Thread.currentThread().getId(),
-            id -> sinkFactory.apply(sinkIndexCounter.getAndIncrement())
-        );
         var future = new CompletableFuture<Void>();
-        var map = parsed.toTupleMap(tuple);
-        sink.accept(map, future);
+        threadLocalSink.get().accept(parsed.toTupleMap(tuple), future);
         return future;
     }
 
     @Override
     public void close() {
-        sinks.values().forEach(sink -> {
+        sinks.forEach(sink -> {
             try {
                 sink.close();
             } catch (Exception e) {
@@ -53,5 +59,6 @@ public class ThreadLocalTupleWriter implements AutoCloseable {
             }
         });
         sinks.clear();
+        threadLocalSink.remove();
     }
 }

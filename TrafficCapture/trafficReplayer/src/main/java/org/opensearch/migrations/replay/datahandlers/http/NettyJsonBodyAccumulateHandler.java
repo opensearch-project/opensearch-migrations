@@ -112,7 +112,7 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                     } else {
                         payload.put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, parsedJsonObjects.get(0));
                     }
-                    if (!jsonAccumulator.hasPartialValues() && context != null) {
+                    if (!jsonAccumulator.hasPartialValues()) {
                         context.onJsonPayloadParseSucceeded();
                     }
                 }
@@ -132,7 +132,7 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                     if (jsonBodyByteLength == 0 &&
                         hasRequestContentTypeMatching(capturedHttpJsonMessage, v -> !v.startsWith("text/")))
                     {
-                        if (context != null) { context.onPayloadSetBinary(); }
+                        context.onPayloadSetBinary();
                         capturedHttpJsonMessage.payload()
                             .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
                                 leftoverBody.retainedDuplicate()
@@ -144,11 +144,11 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                             capturedHttpJsonMessage.payload()
                                 .put(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY,
                                     charBuffer.toString());
-                            if (context != null) { context.onTextPayloadParseSucceeded(); }
+                            context.onTextPayloadParseSucceeded();
                         } catch (CharacterCodingException e) {
-                            if (context != null) { context.onTextPayloadParseFailed(); }
+                            context.onTextPayloadParseFailed();
                             log.atDebug().setCause(e).setMessage("Payload not valid utf-8, fallback to binary").log();
-                            if (context != null) { context.onPayloadSetBinary(); }
+                            context.onPayloadSetBinary();
                             capturedHttpJsonMessage.payload()
                                 .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
                                     accumulatedBody.retainedSlice(jsonBodyByteLength,

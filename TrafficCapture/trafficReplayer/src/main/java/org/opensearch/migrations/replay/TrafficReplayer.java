@@ -357,10 +357,10 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = { "--tuple-max-lag-seconds", "--tupleMaxLagSeconds" },
+            names = { "--tuple-max-buffer-seconds", "--tupleMaxBufferSeconds" },
             arity = 1,
             description = "Maximum seconds before rotating/committing a tuple file")
-        int tupleMaxLagSeconds = 60;
+        int tupleMaxBufferSeconds = 60;
 
         @Parameter(
             required = false,
@@ -736,7 +736,7 @@ public class TrafficReplayer {
                 replayerId,
                 sinkIndex,
                 params.tupleMaxFileSizeMb * 1024L * 1024L,
-                Duration.ofSeconds(params.tupleMaxLagSeconds),
+                Duration.ofSeconds(params.tupleMaxBufferSeconds),
                 params.tupleMaxPerFile
             )
         );

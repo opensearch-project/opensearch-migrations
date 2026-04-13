@@ -19,17 +19,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Writes tuples as gzip-compressed JSON lines to files compatible with Mountpoint S3.
+ * Writes tuples as gzip-compressed JSON lines to local files.
  *
  * <p>Tuples accumulate in a gzip buffer until either the uncompressed byte threshold
- * ({@code maxFileSizeBytes}) or the time threshold ({@code maxFileAge}) is reached,
+ * ({@code rotateAfterBytes}) or the time threshold ({@code maxFileAge}) is reached,
  * at which point the file is finished, fsynced, closed, and a new file is opened.
  * This batching preserves the gzip deflate dictionary across tuples within a file,
  * achieving ~39x compression on repetitive JSON.</p>
- *
- * <p>The fsync-then-rotate semantic is required by Mountpoint S3, which has
- * write-once-then-close semantics — once fsync completes the S3 upload, further
- * writes to the same file descriptor fail.</p>
  *
  * <p>Each instance is single-threaded (one per Netty event loop). The {@code threadIndex}
  * is embedded in filenames to avoid collisions between concurrent writers.</p>
@@ -41,7 +37,7 @@ public class GzipJsonLinesSink implements TupleSink {
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final Path outputDir;
-    private final long maxFileSizeBytes;
+    private final long rotateAfterBytes;
     private final Duration maxFileAge;
     private final int threadIndex;
     private final AtomicLong sequenceCounter = new AtomicLong();
@@ -52,9 +48,9 @@ public class GzipJsonLinesSink implements TupleSink {
     private Instant fileOpenedAt;
     private final List<CompletableFuture<Void>> pendingFutures = new ArrayList<>();
 
-    public GzipJsonLinesSink(Path outputDir, long maxFileSizeBytes, Duration maxFileAge, int threadIndex) {
+    public GzipJsonLinesSink(Path outputDir, long rotateAfterBytes, Duration maxFileAge, int threadIndex) {
         this.outputDir = outputDir;
-        this.maxFileSizeBytes = maxFileSizeBytes;
+        this.rotateAfterBytes = rotateAfterBytes;
         this.maxFileAge = maxFileAge;
         this.threadIndex = threadIndex;
         try {
@@ -66,8 +62,8 @@ public class GzipJsonLinesSink implements TupleSink {
     }
 
     /** Convenience constructor for single-threaded use (thread index 0). */
-    public GzipJsonLinesSink(Path outputDir, long maxFileSizeBytes, Duration maxFileAge) {
-        this(outputDir, maxFileSizeBytes, maxFileAge, 0);
+    public GzipJsonLinesSink(Path outputDir, long rotateAfterBytes, Duration maxFileAge) {
+        this(outputDir, rotateAfterBytes, maxFileAge, 0);
     }
 
     @Override
@@ -122,7 +118,7 @@ public class GzipJsonLinesSink implements TupleSink {
     }
 
     private boolean shouldRotate() {
-        return uncompressedBytes >= maxFileSizeBytes
+        return uncompressedBytes >= rotateAfterBytes
             || Duration.between(fileOpenedAt, Instant.now()).compareTo(maxFileAge) >= 0;
     }
 

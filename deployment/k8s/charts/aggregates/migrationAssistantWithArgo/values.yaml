@@ -298,6 +298,25 @@ charts:
   strimzi-kafka-operator:
     version: 0.50.0
     repository: "https://strimzi.io/charts/"
+    values:
+      storageType: ephemeral # strimzi is stateless
+      storageSize: 5Gi
+      resources:
+        requests: { cpu: 250m, memory: 384Mi }
+        limits:   { cpu: 1000m, memory: 512Mi }
+
+      # Increase probe thresholds to prevent unnecessary restarts during high API load.
+      readinessProbe:
+        initialDelaySeconds: 15
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      livenessProbe:
+        initialDelaySeconds: 15
+        periodSeconds: 15
+        timeoutSeconds: 5
+        failureThreshold: 3
+
 
   argo-workflows:
     version: "1.0.5"

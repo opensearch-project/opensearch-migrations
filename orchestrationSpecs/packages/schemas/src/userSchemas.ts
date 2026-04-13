@@ -415,7 +415,7 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
         .describe("Base64-encoded tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX),
     tupleTransformerConfigFile: z.string().optional()
         .describe("Path to a JSON file containing tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
-    tupleMaxLagSeconds: z.number().default(60).optional()
+    tupleMaxBufferSeconds: z.number().default(60).optional()
         .describe("Maximum seconds before rotating/uploading a tuple file to S3."),
     tupleMaxFileSizeMb: z.number().default(256).optional()
         .describe("Maximum uncompressed size in MB before rotating a tuple file to S3."),
