@@ -346,28 +346,7 @@
                   }
                 ]
               },
-              "name": "createSnapshot",
-              "continueOn": {
-                "failed": true
-              }
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "patchdatasnapshotfailed",
-                "name": "resource-management"
-              },
-              "when": "{{=steps.createSnapshot.status == 'Failed'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')+'-'+jsonpath(inputs.parameters.snapshotConfig, '$.label')}}"
-                  }
-                ]
-              },
-              "name": "patchDataSnapshotFailed"
+              "name": "createSnapshot"
             }
           ],
           [
@@ -376,7 +355,6 @@
                 "template": "getconsoleconfig",
                 "name": "migration-console"
               },
-              "when": "{{=steps.createSnapshot.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
