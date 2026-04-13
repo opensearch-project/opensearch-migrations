@@ -25,6 +25,10 @@ import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.transform.shim.netty.BasicAuthSigningHandler;
 import org.opensearch.migrations.transform.shim.netty.SigV4SigningHandler;
+import org.opensearch.migrations.transform.shim.reporting.FileSystemReportingSink;
+import org.opensearch.migrations.transform.shim.reporting.MetricsReceiver;
+import org.opensearch.migrations.transform.shim.reporting.ReportingSink;
+import org.opensearch.migrations.transform.shim.reporting.SolrMetricsExtractor;
 import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
 import org.opensearch.migrations.transform.shim.validation.DocCountValidator;
 import org.opensearch.migrations.transform.shim.validation.DocIdValidator;
@@ -177,6 +181,28 @@ public class ShimMain {
 
         public RequestTransformationParams requestTransformationParams = new RequestTransformationParams();
         public ResponseTransformationParams responseTransformationParams = new ResponseTransformationParams();
+        public ReportingParams reportingParams = new ReportingParams();
+    }
+
+    /**
+     * CLI parameters for the validation reporting framework.
+     * Uses a JSON config string, consistent with {@code --transformerConfig}.
+     *
+     * <p>Example:
+     * <pre>{@code
+     * --reportingConfig '{"outputDir":"/var/shim/reports","bufferSize":2048,"includeRequestBody":true,"includeResponseBody":false}'
+     * }</pre>
+     *
+     * <p>Only {@code outputDir} is required. When {@code --reportingConfig} is omitted,
+     * reporting is disabled entirely.
+     */
+    public static class ReportingParams {
+        @Parameter(names = {"--reportingConfig", "--reporting-config"},
+            description = "Reporting config JSON object. Required key: \"outputDir\". "
+                + "Optional: \"bufferSize\" (default 1024), \"includeRequestBody\" (default false), "
+                + "\"includeResponseBody\" (default false). "
+                + "Example: '{\"outputDir\":\"/var/shim/reports\",\"bufferSize\":2048}'")
+        public String reportingConfig;
     }
 
     public static void main(String[] args) throws Exception {
@@ -185,6 +211,7 @@ public class ShimMain {
             .addObject(params)
             .addObject(params.requestTransformationParams)
             .addObject(params.responseTransformationParams)
+            .addObject(params.reportingParams)
             .build();
         jCommander.setProgramName("Shim");
         try {
@@ -209,10 +236,24 @@ public class ShimMain {
         var rootContext = new RootShimProxyContext(otelSdk,
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 
+        // Build reporting components if configured
+        ReportingSink reportingSink = null;
+        MetricsReceiver metricsReceiver = null;
+        if (params.reportingParams.reportingConfig != null) {
+            var parsed = parseReportingConfig(params.reportingParams.reportingConfig);
+            reportingSink = new FileSystemReportingSink(
+                Path.of((String) parsed.get("outputDir")),
+                parsed.containsKey("bufferSize") ? ((Number) parsed.get("bufferSize")).intValue() : 1024);
+            metricsReceiver = new MetricsReceiver(reportingSink, new SolrMetricsExtractor(),
+                Boolean.TRUE.equals(parsed.get("includeRequestBody")),
+                Boolean.TRUE.equals(parsed.get("includeResponseBody")));
+            log.info("Reporting enabled: {}", params.reportingParams.reportingConfig);
+        }
+
         var proxy = new ShimProxy(
             params.listenPort, targets, params.primary, activeTargets, validators,
             null, params.insecureBackend, Duration.ofMillis(params.timeoutMs), params.maxContentLength,
-            rootContext);
+            rootContext, metricsReceiver, reportingSink);
 
         TransformFileWatcher watcher = null;
         if (params.watchTransforms && !watchedTransforms.isEmpty()) {
@@ -315,6 +356,25 @@ public class ShimMain {
             log.warn("Could not extract bindings for watch mode: {}", e.getMessage());
         }
         return bindings;
+    }
+
+    /**
+     * Parse the {@code --reportingConfig} JSON string into a map.
+     * Validates that the required {@code outputDir} key is present.
+     */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> parseReportingConfig(String json) {
+        try {
+            var config = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(json, Map.class);
+            if (!config.containsKey("outputDir") || !(config.get("outputDir") instanceof String)) {
+                throw new ParameterException(
+                    "--reportingConfig requires \"outputDir\" key with a string value");
+            }
+            return config;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new ParameterException("Invalid --reportingConfig JSON: " + e.getMessage());
+        }
     }
 
     static Map<String, Target> parseTargets(Parameters params,

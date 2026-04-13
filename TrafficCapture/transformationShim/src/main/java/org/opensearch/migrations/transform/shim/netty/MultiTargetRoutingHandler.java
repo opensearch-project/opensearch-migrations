@@ -6,6 +6,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.transform.shim.reporting.MetricsReceiver;
 import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
 import org.opensearch.migrations.transform.shim.tracing.ShimRequestContext;
 import org.opensearch.migrations.transform.shim.tracing.TargetDispatchContext;
@@ -91,6 +93,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     private final AtomicInteger activeRequests;
     private final AtomicLong requestCounter = new AtomicLong(0);
     private final RootShimProxyContext rootContext;
+    private final MetricsReceiver metricsReceiver;
 
     /** Connection pools keyed by target name. Lazily initialized on first use. */
     private volatile AbstractChannelPoolMap<String, FixedChannelPool> poolMap;
@@ -104,7 +107,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         SslContext backendSslContext,
         int maxContentLength,
         AtomicInteger activeRequests,
-        RootShimProxyContext rootContext
+        RootShimProxyContext rootContext,
+        MetricsReceiver metricsReceiver
     ) {
         super(false);
         this.targets = targets;
@@ -116,6 +120,23 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         this.maxContentLength = maxContentLength;
         this.activeRequests = activeRequests;
         this.rootContext = rootContext;
+        this.metricsReceiver = metricsReceiver;
+    }
+
+    /** Backward-compatible constructor without MetricsReceiver. */
+    public MultiTargetRoutingHandler(
+        Map<String, Target> targets,
+        String primaryTarget,
+        Set<String> activeTargets,
+        List<ValidationRule> validators,
+        Duration secondaryTimeout,
+        SslContext backendSslContext,
+        int maxContentLength,
+        AtomicInteger activeRequests,
+        RootShimProxyContext rootContext
+    ) {
+        this(targets, primaryTarget, activeTargets, validators, secondaryTimeout,
+            backendSslContext, maxContentLength, activeRequests, rootContext, null);
     }
 
     /** Backward-compatible constructor without RootShimProxyContext. */
@@ -184,15 +205,23 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
         long requestId = requestCounter.getAndIncrement();
         var dispatchResult = dispatchAll(requestMap, requestCtx);
-        handlePrimaryCompletion(ctx, dispatchResult.futures,
+        handlePrimaryCompletion(ctx, dispatchResult,
             keepAlive, requestMap, requestId, requestCtx);
     }
 
     private static class DispatchResult {
         final Map<String, CompletableFuture<TargetResponse>> futures;
+        final Map<String, Map<String, Object>> perTargetTransformedRequests;
+        final Map<String, Map<String, Object>> perTargetTransformMetrics;
 
-        DispatchResult(Map<String, CompletableFuture<TargetResponse>> futures) {
+        DispatchResult(
+            Map<String, CompletableFuture<TargetResponse>> futures,
+            Map<String, Map<String, Object>> perTargetTransformedRequests,
+            Map<String, Map<String, Object>> perTargetTransformMetrics
+        ) {
             this.futures = futures;
+            this.perTargetTransformedRequests = perTargetTransformedRequests;
+            this.perTargetTransformMetrics = perTargetTransformMetrics;
         }
     }
 
@@ -201,6 +230,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         ShimRequestContext requestCtx
     ) {
         Map<String, CompletableFuture<TargetResponse>> futures = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> perTargetTransformedRequests = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> perTargetTransformMetrics = new LinkedHashMap<>();
         boolean dualMode = activeTargets.size() > 1;
         String uri = (String) requestMap.get("URI");
         // Check for cursorMark in both URL params and JSON request body (P1)
@@ -228,18 +259,37 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
             // Response transform needs per-target URI (with rewritten cursorMark)
             Map<String, Object> responseRequestMap = hasCursorMark ? targetRequestMap : requestMap;
             futures.put(name, dispatchToTarget(target, targetRequestMap, responseRequestMap, dispatchCtx));
+
+            collectTransformData(target, name, targetRequestMap,
+                perTargetTransformedRequests, perTargetTransformMetrics);
         }
-        return new DispatchResult(futures);
+        return new DispatchResult(futures, perTargetTransformedRequests, perTargetTransformMetrics);
+    }
+
+    /** Extract per-target transformed request and _metrics side-channel after dispatch. */
+    @SuppressWarnings("unchecked")
+    private static void collectTransformData(
+        Target target, String name, Map<String, Object> targetRequestMap,
+        Map<String, Map<String, Object>> perTargetTransformedRequests,
+        Map<String, Map<String, Object>> perTargetTransformMetrics
+    ) {
+        if (target.requestTransform() != null) {
+            Map<String, Object> metricsMap = (Map<String, Object>) targetRequestMap.remove("_metrics");
+            perTargetTransformMetrics.put(name,
+                metricsMap != null ? metricsMap : Collections.emptyMap());
+            perTargetTransformedRequests.put(name, targetRequestMap);
+        }
     }
 
     private void handlePrimaryCompletion(
         ChannelHandlerContext ctx,
-        Map<String, CompletableFuture<TargetResponse>> futures,
+        DispatchResult dispatchResult,
         boolean keepAlive,
         Map<String, Object> requestMap,
         long requestId,
         ShimRequestContext requestCtx
     ) {
+        var futures = dispatchResult.futures;
         futures.get(primaryTarget).whenComplete((primaryResp, primaryEx) ->
             ctx.channel().eventLoop().execute(() -> {
                 try {
@@ -249,6 +299,9 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                     Map<String, TargetResponse> allResponses = collectResponses(futures);
 
                     List<ValidationResult> results = runValidators(allResponses);
+
+                    collectMetrics(requestMap, dispatchResult, allResponses);
+
                     FullHttpResponse response = buildFinalResponse(primary, allResponses, results, requestMap);
                     HttpMessageUtil.writeResponse(ctx, response, keepAlive);
 
@@ -268,6 +321,27 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                 }
             })
         );
+    }
+
+    /**
+     * Invoke MetricsReceiver if configured and in dual-target mode.
+     * Exceptions are caught and logged so they never affect the client response.
+     */
+    private void collectMetrics(
+        Map<String, Object> requestMap,
+        DispatchResult dispatchResult,
+        Map<String, TargetResponse> allResponses
+    ) {
+        if (metricsReceiver != null && allResponses.size() >= 2) {
+            try {
+                metricsReceiver.process(requestMap,
+                    dispatchResult.perTargetTransformedRequests,
+                    allResponses,
+                    dispatchResult.perTargetTransformMetrics);
+            } catch (Exception e) {
+                log.error("Error in metrics collection", e);
+            }
+        }
     }
 
     /**
