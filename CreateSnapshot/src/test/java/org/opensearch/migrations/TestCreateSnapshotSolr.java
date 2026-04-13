@@ -12,11 +12,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * Integration tests for CreateSnapshot against real Solr instances via testcontainers.
- *
- * <p>Regression: standalone Solr core discovery was broken because
- * {@code parseJsonObjectKeys("status")} matched {@code "status":0} in
- * {@code responseHeader} instead of the actual {@code "status":{"dummy":{...}}} object.
+ * Integration tests for Solr backup via testcontainers.
  */
 @Slf4j
 @Testcontainers
@@ -31,9 +27,8 @@ public class TestCreateSnapshotSolr {
 
     @Test
     public void testDiscoverCores_standaloneSolr() throws Exception {
-        // The standalone container starts with a "dummy" core via solr-precreate
         var solrUrl = STANDALONE_SOLR.getSolrUrl();
-        var cores = CreateSnapshot.discoverSolrCollections(solrUrl, null, null);
+        var cores = SolrBackupStrategy.discoverCollections(solrUrl, null, null);
 
         log.info("Discovered standalone cores: {}", cores);
         Assertions.assertFalse(cores.isEmpty(), "Should discover at least the 'dummy' core");
@@ -44,12 +39,11 @@ public class TestCreateSnapshotSolr {
     public void testDiscoverCollections_solrCloud() throws Exception {
         var solrUrl = CLOUD_SOLR.getSolrUrl();
 
-        // Create a collection in SolrCloud
         CLOUD_SOLR.execInContainer("curl", "-s",
             "http://localhost:8983/solr/admin/collections?action=CREATE"
                 + "&name=testcoll&numShards=1&replicationFactor=1&wt=json");
 
-        var collections = CreateSnapshot.discoverSolrCollections(solrUrl, null, null);
+        var collections = SolrBackupStrategy.discoverCollections(solrUrl, null, null);
 
         log.info("Discovered SolrCloud collections: {}", collections);
         Assertions.assertTrue(collections.contains("testcoll"), "Should find 'testcoll' collection");
@@ -58,15 +52,15 @@ public class TestCreateSnapshotSolr {
     @Test
     public void testIsSolrCloud_standalone_returnsFalse() {
         var solrUrl = STANDALONE_SOLR.getSolrUrl();
-        boolean isCloud = CreateSnapshot.isSolrCloud(solrUrl, null, null);
-        Assertions.assertFalse(isCloud, "Standalone Solr should not be detected as SolrCloud");
+        Assertions.assertFalse(SolrBackupStrategy.isSolrCloud(solrUrl, null, null),
+            "Standalone Solr should not be detected as SolrCloud");
     }
 
     @Test
     public void testIsSolrCloud_cloud_returnsTrue() {
         var solrUrl = CLOUD_SOLR.getSolrUrl();
-        boolean isCloud = CreateSnapshot.isSolrCloud(solrUrl, null, null);
-        Assertions.assertTrue(isCloud, "SolrCloud should be detected as SolrCloud");
+        Assertions.assertTrue(SolrBackupStrategy.isSolrCloud(solrUrl, null, null),
+            "SolrCloud should be detected as SolrCloud");
     }
 
     @Test
@@ -77,6 +71,7 @@ public class TestCreateSnapshotSolr {
         var args = new CreateSnapshot.Args();
         args.sourceArgs.host = solrUrl;
         args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
         args.snapshotName = "test_standalone_backup";
         args.fileSystemRepoPath = "/var/solr/data";
         args.noWait = false;
@@ -96,7 +91,6 @@ public class TestCreateSnapshotSolr {
         var solrUrl = CLOUD_SOLR.getSolrUrl();
         var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
-        // Create a collection with data
         CLOUD_SOLR.execInContainer("curl", "-s",
             "http://localhost:8983/solr/admin/collections?action=CREATE"
                 + "&name=cloudcoll&numShards=1&replicationFactor=1&wt=json");
@@ -108,17 +102,16 @@ public class TestCreateSnapshotSolr {
         var args = new CreateSnapshot.Args();
         args.sourceArgs.host = solrUrl;
         args.sourceArgs.insecure = true;
+        args.sourceType = "solr";
         args.snapshotName = "test_cloud_backup";
         args.fileSystemRepoPath = "/var/solr/data/backups";
         args.noWait = false;
 
-        // Ensure backup location exists
         CLOUD_SOLR.execInContainer("mkdir", "-p", "/var/solr/data/backups");
 
         var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
         creator.run();
 
-        // Verify backup directory was created
         var result = CLOUD_SOLR.execInContainer("ls", "/var/solr/data/backups");
         log.info("Cloud backup directory contents: {}", result.getStdout());
         Assertions.assertTrue(result.getStdout().contains("test_cloud_backup"),
