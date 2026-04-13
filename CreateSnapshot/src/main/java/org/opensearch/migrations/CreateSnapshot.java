@@ -187,11 +187,11 @@ public class CreateSnapshot {
         try {
             var version = ClusterVersionDetector.detect(arguments.sourceArgs.toConnectionContext());
             if (version.getFlavor() == Flavor.SOLR) {
-                log.info("Detected Solr source ({}), using Solr backup path", version);
+                log.atInfo().setMessage("Detected Solr source ({}), using Solr backup path").addArgument(version).log();
                 return true;
             }
         } catch (Exception e) {
-            log.debug("Version detection failed, assuming Elasticsearch: {}", e.getMessage());
+            log.atWarn().setMessage("Version detection failed, assuming Elasticsearch: {}").addArgument(e.getMessage()).log();
         }
         return false;
     }

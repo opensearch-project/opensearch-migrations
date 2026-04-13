@@ -67,14 +67,14 @@ public class SolrClusterContainer extends GenericContainer<SolrClusterContainer>
 
     @Override
     public void start() {
-        log.info("Starting Solr container: {} (cloud={})", solrVersion, cloudMode);
+        log.atInfo().setMessage("Starting Solr container: {} (cloud={})").addArgument(solrVersion).addArgument(cloudMode).log();
         super.start();
     }
 
     @Override
     public void close() {
-        log.info("Stopping Solr container: {}", solrVersion);
-        log.debug("Solr logs:\n{}", getLogs());
+        log.atInfo().setMessage("Stopping Solr container: {}").addArgument(solrVersion).log();
+        log.atDebug().setMessage("Solr logs:\n{}").addArgument(this::getLogs).log();
         super.close();
     }
 

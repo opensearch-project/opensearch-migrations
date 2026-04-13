@@ -70,7 +70,7 @@ public class SolrMultiCollectionSource implements DocumentSource {
             return;
         }
         preparedCollections.computeIfAbsent(collection, c -> {
-            log.info("Preparing collection '{}' for reading", c);
+            log.atInfo().setMessage("Preparing collection '{}' for reading").addArgument(c).log();
             collectionPreparer.accept(c);
             return true;
         });
@@ -105,7 +105,7 @@ public class SolrMultiCollectionSource implements DocumentSource {
         ensureCollectionPrepared(partition.collectionName());
         if (shardPreparer != null && partition instanceof SolrShardPartition solrPartition) {
             preparedShards.computeIfAbsent(solrPartition.name(), key -> {
-                log.info("Preparing shard '{}' for reading", key);
+                log.atInfo().setMessage("Preparing shard '{}' for reading").addArgument(key).log();
                 shardPreparer.accept(solrPartition);
                 return true;
             });

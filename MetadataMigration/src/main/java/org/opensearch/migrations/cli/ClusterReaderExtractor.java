@@ -120,7 +120,7 @@ public class ClusterReaderExtractor {
             schemas.keySet().retainAll(arguments.dataFilterArgs.indexAllowlist);
         }
 
-        log.info("Solr snapshot reader: found {} collection(s) in {}", schemas.size(), backupDir);
+        log.atInfo().setMessage("Solr snapshot reader: found {} collection(s) in {}").addArgument(schemas.size()).addArgument(backupDir).log();
         return new SolrSnapshotReader(arguments.sourceVersion, backupDir, schemas);
     }
 

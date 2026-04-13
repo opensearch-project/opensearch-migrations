@@ -93,8 +93,8 @@ public class SolrBackupSource implements DocumentSource {
             solrSchema.path("fieldTypes")
         );
         var partitionCount = listPartitions(collectionName).size();
-        log.info("Converted Solr schema to OpenSearch mappings: {} fields, {} shards",
-            mappings.path("properties").size(), partitionCount);
+        log.atInfo().setMessage("Converted Solr schema to OpenSearch mappings: {} fields, {} shards")
+            .addArgument(mappings.path("properties").size()).addArgument(partitionCount).log();
         return new CollectionMetadata(collectionName, partitionCount, Map.of(
             CollectionMetadata.ES_MAPPINGS, mappings
         ));
@@ -140,10 +140,10 @@ public class SolrBackupSource implements DocumentSource {
                 });
                 result.put(shardName, mapping);
             }
-            log.info("Parsed shard mappings for {} shard(s) from {}", result.size(), metadataDir);
+            log.atInfo().setMessage("Parsed shard mappings for {} shard(s) from {}").addArgument(result.size()).addArgument(metadataDir).log();
             return result;
         } catch (IOException e) {
-            log.warn("Failed to read shard metadata from {}: {}", metadataDir, e.getMessage());
+            log.atWarn().setCause(e).setMessage("Failed to read shard metadata from {}").addArgument(metadataDir).log();
             return null;
         }
     }
@@ -178,7 +178,7 @@ public class SolrBackupSource implements DocumentSource {
                 .toList();
 
             if (!shardDirs.isEmpty()) {
-                log.info("Discovered {} shard(s) in backup: {}", shardDirs.size(), backupDir);
+                log.atInfo().setMessage("Discovered {} shard(s) in backup: {}").addArgument(shardDirs.size()).addArgument(backupDir).log();
                 return shardDirs;
             }
         } catch (IOException e) {
@@ -214,8 +214,8 @@ public class SolrBackupSource implements DocumentSource {
             var reader = new IndexReader9(indexDir, false, null);
             var directoryReader = reader.getReader(mappedDir, segmentsFile);
 
-            log.info("Reading Solr backup (mapped): {} docs in {} segments from {}",
-                directoryReader.maxDoc(), directoryReader.leaves().size(), indexDir);
+            log.atInfo().setMessage("Reading Solr backup (mapped): {} docs in {} segments from {}")
+                .addArgument(directoryReader.maxDoc()).addArgument(directoryReader.leaves().size()).addArgument(indexDir).log();
 
             return readFromDirectoryReader(directoryReader, startingDocOffset);
         } catch (IOException e) {
@@ -232,8 +232,8 @@ public class SolrBackupSource implements DocumentSource {
             var segmentsFile = findSegmentsFile(indexDir);
             var directoryReader = reader.getReader(segmentsFile);
 
-            log.info("Reading Solr backup: {} docs in {} segments from {}",
-                directoryReader.maxDoc(), directoryReader.leaves().size(), indexDir);
+            log.atInfo().setMessage("Reading Solr backup: {} docs in {} segments from {}")
+                .addArgument(directoryReader.maxDoc()).addArgument(directoryReader.leaves().size()).addArgument(indexDir).log();
 
             return readFromDirectoryReader(directoryReader, startingDocOffset);
         } catch (IOException e) {
