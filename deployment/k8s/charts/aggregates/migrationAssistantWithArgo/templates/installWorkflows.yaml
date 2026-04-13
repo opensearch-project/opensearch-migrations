@@ -41,16 +41,14 @@ spec:
 
                 for f in *.yaml; do
                   [ -f "$f" ] || continue
-                  JSFILE="${f%.yaml}.json"
-                  python3 -c 'import sys, yaml, json; json.dump(yaml.safe_load(sys.stdin), sys.stdout)' < "$f" > $JSFILE
+                  kubectl create --dry-run=client -o json -f "$f" | \
                   jq --arg app "$APP_NAME" \
                       --arg version "$VERSION" \
                       --arg managedBy "$OWNER" \
                       '.metadata.labels.app = $app |
                       .metadata.labels.version = $version |
-                      .metadata.labels."managed-by" = $managedBy' \
-                      "$JSFILE" > "$JSFILE.tmp"
-                  kubectl apply -f $JSFILE.tmp -n $NAMESPACE
+                      .metadata.labels."managed-by" = $managedBy' | \
+                  kubectl apply -f - -n $NAMESPACE
                 done
                 popd
               }

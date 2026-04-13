@@ -1,11 +1,11 @@
 package org.opensearch.migrations.transform.shim.reporting;
 
 /**
- * Pluggable sink for validation metric documents.
+ * Pluggable sink for validation report documents.
  * Implementations must be thread-safe — submit() may be called
  * from Netty event loop threads concurrently.
  */
-public interface MetricsSink extends AutoCloseable {
+public interface ReportingSink extends AutoCloseable {
 
     /**
      * Accept a validation document for delivery.
