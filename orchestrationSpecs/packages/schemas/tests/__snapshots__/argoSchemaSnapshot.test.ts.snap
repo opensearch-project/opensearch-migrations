@@ -86,12 +86,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "items": {
                     "type": "string"
                   }
+                },
+                "configChecksum": {
+                  "type": "string"
                 }
               },
               "required": [
                 "name",
                 "version",
-                "topics"
+                "topics",
+                "configChecksum"
               ]
             },
             "minItems": 1
@@ -180,11 +184,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "label": {
                       "type": "string"
+                    },
+                    "configChecksum": {
+                      "type": "string"
                     }
                   },
                   "required": [
                     "kafkaConnection",
-                    "label"
+                    "label",
+                    "configChecksum"
                   ]
                 },
                 "sourceEndpoint": {
@@ -289,7 +297,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "items": {
                         "type": "string"
                       },
-                      "description": "List of static headers to add to proxied requests, each in 'Header-Name: value' format."
+                      "description": "List of static headers to add to proxied requests, each in 'Header-Name: value' format.",
+                      "checksumFor": [
+                        "snapshot",
+                        "replayer"
+                      ],
+                      "changeRestriction": "gated"
                     },
                     "destinationConnectionPoolSize": {
                       "type": "number",
@@ -306,7 +319,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "listenPort": {
                       "type": "number",
-                      "description": "TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL."
+                      "description": "TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL.",
+                      "checksumFor": [
+                        "snapshot",
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
                     },
                     "maxTrafficBufferSize": {
                       "type": "number",
@@ -417,7 +435,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "description": "Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."
                         }
                       ],
-                      "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile."
+                      "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile.",
+                      "changeRestriction": "gated"
                     },
                     "enableMSKAuth": {
                       "type": "boolean",
@@ -446,13 +465,25 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "required": [
                     "listenPort"
                   ]
+                },
+                "configChecksum": {
+                  "type": "string"
+                },
+                "checksumForSnapshot": {
+                  "type": "string"
+                },
+                "checksumForReplayer": {
+                  "type": "string"
                 }
               },
               "required": [
                 "name",
                 "kafkaConfig",
                 "sourceEndpoint",
-                "proxyConfig"
+                "proxyConfig",
+                "configChecksum",
+                "checksumForSnapshot",
+                "checksumForReplayer"
               ]
             },
             "default": []
@@ -550,8 +581,23 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "dependsOnProxySetups": {
                         "type": "array",
                         "items": {
-                          "type": "string"
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "configChecksum": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "configChecksum"
+                          ]
                         }
+                      },
+                      "configChecksum": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -561,7 +607,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "repo",
                       "semaphoreConfigMapName",
                       "semaphoreKey",
-                      "dependsOnProxySetups"
+                      "dependsOnProxySetups",
+                      "configChecksum"
                     ]
                   },
                   "minItems": 1
@@ -732,6 +779,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ]
                     }
                   ]
+                },
+                "snapshotConfigChecksum": {
+                  "type": "string"
                 },
                 "migrations": {
                   "type": "array",
@@ -914,11 +964,19 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           },
                           "docTransformerConfig": {
                             "type": "string",
-                            "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion)."
+                            "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion).",
+                            "checksumFor": [
+                              "replayer"
+                            ],
+                            "changeRestriction": "impossible"
                           },
                           "docTransformerConfigFile": {
                             "type": "string",
-                            "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                            "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                            "checksumFor": [
+                              "replayer"
+                            ],
+                            "changeRestriction": "impossible"
                           },
                           "documentsPerBulkRequest": {
                             "type": "number",
@@ -1145,16 +1203,25 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "sourceAuth": {
                   "nullable": true
+                },
+                "configChecksum": {
+                  "type": "string"
+                },
+                "checksumForReplayer": {
+                  "type": "string"
                 }
               },
               "required": [
                 "label",
                 "snapshotNameResolution",
+                "snapshotConfigChecksum",
                 "migrations",
                 "sourceVersion",
                 "sourceLabel",
                 "targetConfig",
-                "snapshotConfig"
+                "snapshotConfig",
+                "configChecksum",
+                "checksumForReplayer"
               ]
             },
             "default": []
@@ -1164,6 +1231,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             "items": {
               "type": "object",
               "properties": {
+                "name": {
+                  "type": "string"
+                },
                 "dependsOnSnapshotMigrations": {
                   "type": "array",
                   "items": {
@@ -1176,16 +1246,22 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "snapshot": {
                         "type": "string",
                         "description": "Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots."
+                      },
+                      "configChecksum": {
+                        "type": "string"
                       }
                     },
                     "required": [
                       "source",
-                      "snapshot"
-                    ],
-                    "description": "Reference to a specific snapshot from a specific source cluster, used to express dependencies."
+                      "snapshot",
+                      "configChecksum"
+                    ]
                   }
                 },
                 "fromProxy": {
+                  "type": "string"
+                },
+                "fromProxyConfigChecksum": {
                   "type": "string"
                 },
                 "kafkaClusterName": {
@@ -1267,11 +1343,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "label": {
                       "type": "string"
+                    },
+                    "configChecksum": {
+                      "type": "string"
                     }
                   },
                   "required": [
                     "kafkaConnection",
-                    "label"
+                    "label",
+                    "configChecksum"
                   ]
                 },
                 "replayerConfig": {
@@ -1356,7 +1436,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "kafkaTrafficPropertyFile": {
                       "type": "string",
-                      "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                      "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                      "changeRestriction": "impossible"
                     },
                     "lookaheadTimeSeconds": {
                       "type": "number",
@@ -1403,27 +1484,33 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "transformerConfig": {
                       "type": "string",
-                      "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
+                      "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
+                      "changeRestriction": "gated"
                     },
                     "transformerConfigEncoded": {
                       "type": "string",
-                      "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
+                      "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
+                      "changeRestriction": "gated"
                     },
                     "transformerConfigFile": {
                       "type": "string",
-                      "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                      "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                      "changeRestriction": "gated"
                     },
                     "tupleTransformerConfig": {
                       "type": "string",
-                      "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
+                      "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
+                      "changeRestriction": "gated"
                     },
                     "tupleTransformerConfigBase64": {
                       "type": "string",
-                      "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
+                      "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
+                      "changeRestriction": "gated"
                     },
                     "tupleTransformerConfigFile": {
                       "type": "string",
-                      "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                      "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                      "changeRestriction": "gated"
                     },
                     "userAgent": {
                       "type": "string",
@@ -1531,15 +1618,21 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "endpoint",
                     "label"
                   ]
+                },
+                "configChecksum": {
+                  "type": "string"
                 }
               },
               "required": [
+                "name",
                 "dependsOnSnapshotMigrations",
                 "fromProxy",
+                "fromProxyConfigChecksum",
                 "kafkaClusterName",
                 "kafkaConfig",
                 "replayerConfig",
-                "toTarget"
+                "toTarget",
+                "configChecksum"
               ]
             },
             "default": []
@@ -2275,25 +2368,45 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "List of index names to include in the document backfill. Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). An empty list includes all non-system indices from the snapshot."
+                        "description": "List of index names to include in the document backfill. Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). An empty list includes all non-system indices from the snapshot.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "allowLooseVersionMatching": {
                         "type": "boolean",
                         "default": true,
-                        "description": "[Expert] Allows document migration between clusters with non-exact version compatibility. Only disable if snapshot parsing issues require strict version matching."
+                        "description": "[Expert] Allows document migration between clusters with non-exact version compatibility. Only disable if snapshot parsing issues require strict version matching.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "docTransformerConfigBase64": {
                         "type": "string",
                         "default": "",
-                        "description": "Base64-encoded JSON transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion)."
+                        "description": "Base64-encoded JSON transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion).",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "docTransformerConfig": {
                         "type": "string",
-                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion)."
+                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion).",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "docTransformerConfigFile": {
                         "type": "string",
-                        "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                        "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "documentsPerBulkRequest": {
                         "type": "number",
@@ -2309,17 +2422,20 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "string",
                         "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
                         "default": "PT1H",
-                        "description": "ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration."
+                        "description": "ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration.",
+                        "changeRestriction": "gated"
                       },
                       "maxConnections": {
                         "type": "number",
                         "default": 10,
-                        "description": "Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing."
+                        "description": "Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing.",
+                        "changeRestriction": "gated"
                       },
                       "maxShardSizeBytes": {
                         "type": "number",
                         "default": 85899345920,
-                        "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."
+                        "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.",
+                        "changeRestriction": "gated"
                       },
                       "otelCollectorEndpoint": {
                         "type": "string",
@@ -2411,7 +2527,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "internetFacing": {
                     "type": "boolean",
                     "default": false,
-                    "description": "When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC."
+                    "description": "When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.",
+                    "changeRestriction": "impossible"
                   },
                   "podReplicas": {
                     "type": "number",
@@ -2499,7 +2616,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "items": {
                       "type": "string"
                     },
-                    "description": "List of static headers to add to proxied requests, each in 'Header-Name: value' format."
+                    "description": "List of static headers to add to proxied requests, each in 'Header-Name: value' format.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "gated"
                   },
                   "destinationConnectionPoolSize": {
                     "type": "number",
@@ -2519,19 +2641,30 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "listenPort": {
                     "type": "number",
-                    "description": "TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL."
+                    "description": "TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
                   },
                   "maxTrafficBufferSize": {
                     "type": "number",
                     "minimum": 1,
                     "maximum": 1048576,
                     "default": 1048576,
-                    "description": "Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka."
+                    "description": "Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka.",
+                    "changeRestriction": "gated"
                   },
                   "noCapture": {
                     "type": "boolean",
                     "default": false,
-                    "description": "When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording."
+                    "description": "When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "gated"
                   },
                   "numThreads": {
                     "type": "number",
@@ -2633,12 +2766,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "description": "Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."
                       }
                     ],
-                    "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile."
+                    "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile.",
+                    "changeRestriction": "gated"
                   },
                   "enableMSKAuth": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity."
+                    "description": "Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.",
+                    "changeRestriction": "gated"
                   },
                   "suppressCaptureForHeaderMatch": {
                     "type": "array",
@@ -2646,22 +2781,42 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "type": "string"
                     },
                     "default": [],
-                    "description": "List of header patterns. Requests matching any of these header patterns will be forwarded but not captured to Kafka."
+                    "description": "List of header patterns. Requests matching any of these header patterns will be forwarded but not captured to Kafka.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "gated"
                   },
                   "suppressCaptureForMethod": {
                     "type": "string",
                     "default": "",
-                    "description": "HTTP method to suppress from capture (e.g. 'HEAD'). Requests with this method are forwarded but not recorded."
+                    "description": "HTTP method to suppress from capture (e.g. 'HEAD'). Requests with this method are forwarded but not recorded.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "gated"
                   },
                   "suppressCaptureForUriPath": {
                     "type": "string",
                     "default": "",
-                    "description": "URI path pattern to suppress from capture. Requests matching this path are forwarded but not recorded."
+                    "description": "URI path pattern to suppress from capture. Requests matching this path are forwarded but not recorded.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "gated"
                   },
                   "suppressMethodAndPath": {
                     "type": "string",
                     "default": "",
-                    "description": "Combined method and path pattern for capture suppression in 'METHOD /path' format."
+                    "description": "Combined method and path pattern for capture suppression in 'METHOD /path' format.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "gated"
                   }
                 },
                 "required": [
@@ -2796,11 +2951,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "kafkaTrafficEnableMSKAuth": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity."
+                    "description": "Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.",
+                    "changeRestriction": "impossible"
                   },
                   "kafkaTrafficPropertyFile": {
                     "type": "string",
-                    "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                    "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                    "changeRestriction": "impossible"
                   },
                   "lookaheadTimeSeconds": {
                     "type": "number",
@@ -2842,7 +2999,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "removeAuthHeader": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately."
+                    "description": "Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately.",
+                    "changeRestriction": "gated"
                   },
                   "speedupFactor": {
                     "type": "number",
@@ -2856,27 +3014,33 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "transformerConfig": {
                     "type": "string",
-                    "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
+                    "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
+                    "changeRestriction": "gated"
                   },
                   "transformerConfigEncoded": {
                     "type": "string",
-                    "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
+                    "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
+                    "changeRestriction": "gated"
                   },
                   "transformerConfigFile": {
                     "type": "string",
-                    "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                    "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                    "changeRestriction": "gated"
                   },
                   "tupleTransformerConfig": {
                     "type": "string",
-                    "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
+                    "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
+                    "changeRestriction": "gated"
                   },
                   "tupleTransformerConfigBase64": {
                     "type": "string",
-                    "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
+                    "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
+                    "changeRestriction": "gated"
                   },
                   "tupleTransformerConfigFile": {
                     "type": "string",
-                    "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                    "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                    "changeRestriction": "gated"
                   },
                   "userAgent": {
                     "type": "string",
