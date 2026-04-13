@@ -148,7 +148,7 @@ class TestRunner:
 
     def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False,
                   reuse_clusters: bool = False, test_reports_dir: str = None) -> TestReport:
-        """Runs pytest tests."""
+        """Runs pytest tests via background exec + poll to survive WebSocket drops."""
         logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
         command_list = [
             "pipenv",
@@ -171,7 +171,16 @@ class TestRunner:
         if self.registry_prefix:
             command_list.append(f"--image_registry_prefix={self.registry_prefix}")
         command_list.append("-s")
-        self.k8s_service.exec_migration_console_cmd(command_list=command_list)
+
+        log_file = f"/tmp/{self.unique_id}_pytest.log"
+        exit_code_file = f"/tmp/{self.unique_id}_exit_code"
+
+        self.k8s_service.exec_background_cmd(
+            command_list=command_list, log_file=log_file, exit_code_file=exit_code_file)
+
+        exit_code = self.k8s_service.poll_cmd_completion(
+            log_file=log_file, exit_code_file=exit_code_file)
+
         output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
         logger.info(f"Retrieving test report at {output_file_path}")
         cmd_response = self.k8s_service.exec_migration_console_cmd(command_list=["cat", output_file_path],
@@ -184,6 +193,9 @@ class TestRunner:
         test_report = self._parse_test_report(test_data)
         print(f"Test cases passed: {test_report.summary.passed}")
         print(f"Test cases failed: {test_report.summary.failed}")
+        if exit_code != 0 and test_report.summary.failed == 0:
+            logger.warning(f"pytest exited with code {exit_code} but report shows no failures — "
+                           f"possible infrastructure error")
         return test_report
 
     def cleanup_clusters(self) -> None:
