@@ -1418,7 +1418,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                     },
-                    "tupleMaxLagSeconds": {
+                    "tupleMaxBufferSeconds": {
                       "type": "number",
                       "default": 60
                     },
@@ -2872,7 +2872,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "string",
                     "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                   },
-                  "tupleMaxLagSeconds": {
+                  "tupleMaxBufferSeconds": {
                     "type": "number",
                     "default": 60,
                     "description": "Maximum seconds before rotating/uploading a tuple file to S3."
