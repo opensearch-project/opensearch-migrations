@@ -103,7 +103,7 @@
           "setOwnerReference": false
         },
         "retryStrategy": {
-          "limit": "60",
+          "limit": "6",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",

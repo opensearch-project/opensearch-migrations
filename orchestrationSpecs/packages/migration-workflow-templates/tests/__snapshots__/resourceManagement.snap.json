@@ -185,7 +185,7 @@
           "action": "get"
         },
         "retryStrategy": {
-          "limit": "60",
+          "limit": "6",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -383,7 +383,7 @@
           ]
         },
         "retryStrategy": {
-          "limit": "60",
+          "limit": "6",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -417,7 +417,7 @@
           ]
         },
         "retryStrategy": {
-          "limit": "60",
+          "limit": "6",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -448,7 +448,7 @@
           ]
         },
         "retryStrategy": {
-          "limit": "60",
+          "limit": "6",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
@@ -474,7 +474,7 @@
           "action": "get"
         },
         "retryStrategy": {
-          "limit": "60",
+          "limit": "6",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "10",

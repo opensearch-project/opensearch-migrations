@@ -103,9 +103,9 @@ def wait_for_replayer_consuming(namespace: str, timeout_seconds: int = 120, inte
         except Exception as e:
             logger.debug("Replayer log check failed: %s", e)
         time.sleep(interval)
-    logger.error(
-        "LIKELY TEST FAILURE: Could not confirm replayer is consuming from Kafka within %ds. "
-        "CDC docs sent after this point may not be replayed to target.", timeout_seconds
+    raise TimeoutError(
+        f"Replayer did not join Kafka consumer group within {timeout_seconds}s. "
+        f"CDC docs sent after this point will not be replayed to target."
     )
 
 
