@@ -25,6 +25,8 @@ import { buildChecksumReport } from './checksumReporter';
 import { expandMatrix } from './matrixExpander';
 import { defaultMutatorRegistry } from './approvedMutators';
 import { assertRun, formatAssertResult } from './assertLogic';
+import { defaultFixtures } from './fixtures';
+import type { FixtureAction, TestFixtures } from './fixtures';
 import type { MatrixSpec, RunExpectation, ScenarioObservation, ChecksumReport } from './types';
 
 const NAMESPACE = process.argv.includes('--namespace')
@@ -55,6 +57,21 @@ function consoleExec(cmd: string): string {
 
 function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ─── Fixture runner ─────────────────────────────────────────────────
+
+function runFixtures(label: string, actions: FixtureAction[]): void {
+    if (actions.length === 0) return;
+    console.log(`\n  [${label}] Running ${actions.length} fixture action(s)...`);
+    for (const action of actions) {
+        console.log(`    ${action.name}: ${action.description}`);
+        try {
+            consoleExec(action.consoleCommand);
+        } catch (e) {
+            console.log(`      (warning: ${e})`);
+        }
+    }
 }
 
 // ─── CRD helpers ────────────────────────────────────────────────────
@@ -156,6 +173,69 @@ function printWorkflowFailures(): void {
     }
 }
 
+/**
+ * Dump full namespace diagnostics on failure, matching the Python e2e pattern:
+ * - Resource summary (pods, services, deployments, statefulsets, workflows)
+ * - Migration CRDs
+ * - Recent events sorted by timestamp
+ * - Cluster indices via migration console
+ * - Pod logs for failed/errored pods
+ */
+function dumpNamespaceDiagnostics(): void {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log('=== NAMESPACE DIAGNOSTICS ===');
+
+    const diagnosticCommands = [
+        { label: 'Resource summary', cmd: `get pods,services,deployments,statefulsets,workflows -o wide` },
+        { label: 'Migration CRDs', cmd: `get capturedtraffics,datasnapshots,snapshotmigrations,trafficreplays -o wide` },
+        { label: 'Recent events', cmd: `get events --sort-by=.lastTimestamp` },
+    ];
+
+    for (const { label, cmd } of diagnosticCommands) {
+        console.log(`\n--- ${label} ---`);
+        try {
+            const out = execSync(`kubectl -n ${NAMESPACE} ${cmd}`, {
+                encoding: 'utf-8', timeout: 30000, maxBuffer: 50 * 1024 * 1024
+            }).trim();
+            console.log(out);
+        } catch (e) {
+            console.log(`  (error: ${e})`);
+        }
+    }
+
+    // Cluster indices via migration console
+    console.log(`\n--- Cluster indices ---`);
+    try {
+        const indices = execSync(
+            `kubectl -n ${NAMESPACE} exec migration-console-0 -c console -- console clusters cat-indices 2>&1`,
+            { encoding: 'utf-8', timeout: 30000, maxBuffer: 50 * 1024 * 1024 }
+        ).trim();
+        console.log(indices);
+    } catch (e) {
+        console.log(`  (error: ${e})`);
+    }
+
+    // Pod logs for non-running pods (failed/error/crashloop)
+    console.log(`\n--- Failed/Error pod logs ---`);
+    try {
+        const podJson = execSync(
+            `kubectl -n ${NAMESPACE} get pods -o json | jq -r '.items[] | select(.status.phase != "Running" and .status.phase != "Succeeded") | .metadata.name'`,
+            { encoding: 'utf-8', timeout: 15000, maxBuffer: 50 * 1024 * 1024 }
+        ).trim();
+        for (const pod of podJson.split('\n').filter(Boolean).slice(0, 5)) {
+            console.log(`\n  --- logs: ${pod} ---`);
+            try {
+                const logs = execSync(`kubectl -n ${NAMESPACE} logs ${pod} --tail=30 2>&1`, {
+                    encoding: 'utf-8', timeout: 10000, maxBuffer: 10 * 1024 * 1024
+                }).trim();
+                console.log(logs);
+            } catch { console.log('  (no logs)'); }
+        }
+    } catch { /* no failed pods */ }
+
+    console.log(`\n${'='.repeat(60)}`);
+}
+
 // ─── Cleanup ────────────────────────────────────────────────────────
 
 function collectAllCrdResources(reports: ChecksumReport[]): Array<{ kind: string; resourceName: string }> {
@@ -231,9 +311,16 @@ async function main() {
 
     let priorObservation: ScenarioObservation | null = null;
     let allPassed = true;
+    const fixtures: TestFixtures = defaultFixtures;
 
     // Wrap in try/finally so cleanup always runs
     try {
+        // Backstop: clean cluster data from any prior crashed run
+        runFixtures('pre-cleanup', fixtures.cleanup);
+
+        // Setup: load test data, etc.
+        runFixtures('setup', fixtures.setup);
+
         for (const run of runs) {
             console.log(`\n${'='.repeat(60)}`);
             console.log(`=== Run: ${run.name} ===`);
@@ -244,12 +331,13 @@ async function main() {
             if (phase !== 'Succeeded') {
                 console.log(`\n  ✗ ${run.name} workflow failed: ${phase}`);
                 printWorkflowFailures();
-                allPassed = false;
                 const obs = readCrdStates(run.checksumReport, runs.indexOf(run), run.name);
                 console.log('  CRD states at failure:');
                 for (const [k, v] of Object.entries(obs.resources)) {
                     console.log(`    ${k}: phase=${v.phase} checksum=${v.configChecksum}`);
                 }
+                dumpNamespaceDiagnostics();
+                allPassed = false;
                 break;
             }
 
@@ -257,11 +345,15 @@ async function main() {
             const result = assertRun(run.expectation, run.checksumReport, priorObservation, obs);
             console.log(`\n  Assert (${run.expectation.mode}):`);
             console.log(formatAssertResult(result));
-            if (result.status === 'fail') { allPassed = false; }
+            if (result.status === 'fail') {
+                dumpNamespaceDiagnostics();
+                allPassed = false;
+            }
             priorObservation = obs;
         }
     } finally {
         cleanup(allCrdResources);
+        runFixtures('post-cleanup', fixtures.cleanup);
     }
 
     console.log(`\n${'='.repeat(60)}`);

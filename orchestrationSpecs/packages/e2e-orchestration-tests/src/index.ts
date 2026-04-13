@@ -7,3 +7,4 @@ export * from './reportSchema';
 export * from './stateStore';
 export * from './assertLogic';
 export * from './buildOuterWorkflow';
+export * from './fixtures';
