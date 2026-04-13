@@ -191,7 +191,9 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("httpTransaction"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("accumulatingRequest"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("accumulatingResponse"));
-        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("transformation"));
+        // 1 transformation span per request from HttpJsonTransformingConsumer, plus 4 per request
+        // from ParsedHttpMessagesAsDicts parsing (source req, source resp, target req, target resp)
+        Assertions.assertEquals(numRequests * 5, traceProcessor.getCountAndRemoveSpan("transformation"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("targetTransaction"));
         Assertions.assertEquals(numRequests * 2, traceProcessor.getCountAndRemoveSpan("scheduled"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("requestSending"));
