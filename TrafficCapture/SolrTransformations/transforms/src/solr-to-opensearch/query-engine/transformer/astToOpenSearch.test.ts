@@ -25,8 +25,9 @@ describe('transformNode – GroupNode handling', () => {
       child: { type: 'field', field: 'title', value: 'java' },
     });
 
+    // fieldRule produces expanded form: {"match": {"field": {"query": "value"}}}
     expect(result).toEqual(new Map([
-      ['match', new Map([['title', 'java']])],
+      ['match', new Map([['title', new Map([['query', 'java']])]])],
     ]));
   });
 
@@ -60,8 +61,9 @@ describe('transformNode – GroupNode handling', () => {
       },
     });
 
+    // fieldRule produces expanded form: {"match": {"field": {"query": "value"}}}
     expect(result).toEqual(new Map([
-      ['match', new Map([['title', 'java']])],
+      ['match', new Map([['title', new Map([['query', 'java']])]])],
     ]));
   });
 });

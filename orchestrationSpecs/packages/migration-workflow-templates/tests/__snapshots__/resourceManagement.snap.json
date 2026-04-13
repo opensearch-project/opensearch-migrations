@@ -59,7 +59,7 @@
             },
             "requests": {
               "cpu": "50m",
-              "memory": "64Mi"
+              "memory": "32Mi"
             }
           }
         },
@@ -172,6 +172,51 @@
         }
       },
       {
+        "name": "readkafkaconnectionprofile",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
+          "action": "get"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "bootstrapServers",
+              "valueFrom": {
+                "jsonPath": "{.status.listeners[0].bootstrapServers}"
+              }
+            },
+            {
+              "name": "listenerName",
+              "valueFrom": {
+                "jsonPath": "{.status.listeners[0].name}"
+              }
+            },
+            {
+              "name": "authType",
+              "valueFrom": {
+                "jsonPath": "{.spec.kafka.listeners[0].authentication.type}"
+              }
+            }
+          ]
+        }
+      },
+      {
         "name": "waitforkafkatopic",
         "inputs": {
           "parameters": [
@@ -206,7 +251,7 @@
             },
             "requests": {
               "cpu": "50m",
-              "memory": "64Mi"
+              "memory": "32Mi"
             }
           }
         },

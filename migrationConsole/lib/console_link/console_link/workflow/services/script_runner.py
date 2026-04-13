@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
+SAMPLE_CONFIG_PATH_ENV = "MIGRATION_SAMPLE_CONFIG_PATH"
 
 
 class ScriptRunner:
@@ -157,9 +158,10 @@ class ScriptRunner:
     def get_sample_config(self) -> str:
         """Get sample workflow configuration.
 
-        Reads sample.yaml from the configured script directory. If sample.yaml
-        doesn't exist (e.g., when CONFIG_PROCESSOR_DIR is not set), returns a
-        blank starter configuration template instead.
+        Reads the configured sample path when MIGRATION_SAMPLE_CONFIG_PATH is
+        set. Otherwise reads sample.yaml from the configured script directory.
+        If no sample file exists, returns a blank starter configuration
+        template instead.
 
         Returns:
             YAML content as string (either from sample.yaml or blank starter)
@@ -168,7 +170,8 @@ class ScriptRunner:
             IOError: If sample.yaml exists but cannot be read
         """
         logger.info("Getting sample configuration")
-        sample_path = self.script_dir / "sample.yaml"
+        sample_path_override = os.environ.get(SAMPLE_CONFIG_PATH_ENV)
+        sample_path = Path(sample_path_override) if sample_path_override else self.script_dir / "sample.yaml"
 
         if not sample_path.exists():
             logger.info(f"Sample configuration not found at {sample_path}, using blank starter config")

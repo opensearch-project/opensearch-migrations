@@ -216,12 +216,14 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         @NonNull String brokers,
         @NonNull String topic,
         @NonNull String groupId,
-        boolean enableMSKAuth,
+        @NonNull String authType,
+        String kafkaUserName,
+        String kafkaPassword,
         String propertyFilePath,
         @NonNull Clock clock,
         @NonNull KafkaBehavioralPolicy behavioralPolicy
     ) throws IOException {
-        var kafkaProps = buildKafkaProperties(brokers, groupId, enableMSKAuth, propertyFilePath);
+        var kafkaProps = buildKafkaProperties(brokers, groupId, authType, kafkaUserName, kafkaPassword, propertyFilePath);
         kafkaProps.putIfAbsent(MAX_POLL_INTERVAL_KEY, DEFAULT_POLL_INTERVAL_MS);
         var pollPeriod = Duration.ofMillis(Long.valueOf((String) kafkaProps.get(MAX_POLL_INTERVAL_KEY)));
         var keepAlivePeriod = getKeepAlivePeriodFromPollPeriod(pollPeriod);
@@ -249,7 +251,9 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     public static Properties buildKafkaProperties(
         @NonNull String brokers,
         @NonNull String groupId,
-        boolean enableMSKAuth,
+        @NonNull String authType,
+        String kafkaUserName,
+        String kafkaPassword,
         String propertyFilePath
     ) throws IOException {
         var kafkaProps = new Properties();
@@ -265,16 +269,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 throw ex;
             }
         }
-        // Required for using SASL auth with MSK public endpoint
-        if (enableMSKAuth) {
-            kafkaProps.setProperty("security.protocol", "SASL_SSL");
-            kafkaProps.setProperty("sasl.mechanism", "AWS_MSK_IAM");
-            kafkaProps.setProperty("sasl.jaas.config", "software.amazon.msk.auth.iam.IAMLoginModule required;");
-            kafkaProps.setProperty(
-                "sasl.client.callback.handler.class",
-                "software.amazon.msk.auth.iam.IAMClientCallbackHandler"
-            );
-        }
+        KafkaSaslAuthHelper.applySaslAuthProperties(kafkaProps, authType, kafkaUserName, kafkaPassword);
         kafkaProps.setProperty(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, brokers);
         kafkaProps.setProperty(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         // Use cooperative sticky rebalancing to avoid stop-the-world partition revocation

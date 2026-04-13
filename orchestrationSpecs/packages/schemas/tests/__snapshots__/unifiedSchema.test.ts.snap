@@ -1,0 +1,90 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`unified schema builder merges Strimzi definitions from a static OpenAPI fixture 1`] = `
+"{
+  "mode": "full",
+  "autoCreate": {
+    "auth": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "none"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "scram-sha-512"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      ],
+      "description": "Workflow-owned Kafka client auth for auto-created Strimzi clusters. If omitted, transform-time resolution currently defaults workflow-managed Kafka to \`scram-sha-512\` as the secure-by-default policy. This default is intentionally resolved outside the deep-merged Strimzi object defaults so auth policy can change without being hidden inside the structural Kafka/NodePool/Topic default merge."
+    },
+    "clusterSpecOverrides": {
+      "$ref": "#/$defs/StrimziKafkaSpec",
+      "description": "Strimzi Kafka.spec overrides merged into the workflow-managed Kafka resource."
+    },
+    "nodePoolSpecOverrides": {
+      "$ref": "#/$defs/StrimziKafkaNodePoolSpec",
+      "description": "Strimzi KafkaNodePool.spec overrides merged into the workflow-managed node pool resource."
+    },
+    "topicSpecOverrides": {
+      "$ref": "#/$defs/StrimziKafkaTopicSpec",
+      "description": "Strimzi KafkaTopic.spec overrides merged into workflow-created Kafka topics."
+    }
+  },
+  "defs": {
+    "StrimziKafkaSpec": {
+      "$ref": "#/$defs/io.strimzi.api.kafka.model.KafkaSpec"
+    },
+    "StrimziKafkaNodePoolSpec": {
+      "$ref": "#/$defs/io.strimzi.api.kafka.model.nodepool.KafkaNodePoolSpec"
+    },
+    "StrimziKafkaTopicSpec": {
+      "$ref": "#/$defs/io.strimzi.api.kafka.model.topic.KafkaTopicSpec"
+    },
+    "GenericKafkaListener": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "internal",
+            "loadbalancer"
+          ]
+        },
+        "tls": {
+          "type": "boolean"
+        },
+        "authentication": {
+          "$ref": "#/$defs/io.strimzi.api.kafka.model.KafkaListenerAuthentication"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}"
+`;
