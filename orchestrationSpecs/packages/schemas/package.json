@@ -5,6 +5,7 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./buildUnifiedSchema": "./src/buildUnifiedSchema.ts",
     "./makeSample": "./src/makeSample.ts",
     "./showUserSchema": "./src/showUserSchema.ts",
     "./package.json": "./package.json"
@@ -12,12 +13,15 @@
   "scripts": {
     "build": "echo 'schemas: no build step needed (exports .ts directly)'",
     "type-check": "tsc --noEmit",
+    "build-unified-schema": "node --import tsx src/buildUnifiedSchema.ts",
+    "rebuild-kafka-broker-config-schema": "node --import tsx src/generateKafkaBrokerConfigSchema.ts",
     "schema": "tsx src/showUserSchema.ts",
     "argo-schema": "tsx src/showArgoSchema.ts",
     "make-sample": "tsx src/makeSample.ts",
     "test": "jest"
   },
   "dependencies": {
+    "ajv": "^8.17.1",
     "zod": "^4",
     "@asteasolutions/zod-to-openapi": "^8.1.0",
     "@opensearch-migrations/strimzi-types": "*",
@@ -25,6 +29,7 @@
   },
   "devDependencies": {
     "@types/jest": "*",
-    "expect-type": "*"
+    "expect-type": "*",
+    "testcontainers": "^11.12.0"
   }
 }

@@ -7,7 +7,7 @@ def call(Map config = [:]) {
     def vpcMode = config.vpcMode ?: 'create'
     def isImportVpc = (vpcMode == 'import')
     def jobName = config.jobName ?: (isImportVpc ? "eksImportVPCSolutionsCFNTest" : "eksCreateVPCSolutionsCFNTest")
-    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
 
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -20,6 +20,8 @@ def call(Map config = [:]) {
             string(name: 'REGION', defaultValue: "us-east-1", description: 'AWS region for deployment')
             booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source instead of using public images')
             booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
+            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
+            string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
         }
 
         options {
@@ -48,9 +50,22 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     script {
-                        def pool = jobName.startsWith("main-") ? "m" : "p"
+                        def pool = jobName.startsWith("main-") ? "m" : jobName.startsWith("release-") ? "r" : "p"
                         env.maStageName = "${params.STAGE}-${pool}${currentBuild.number}"
                         env.TEST_VPC_STACK_NAME = "test-vpc-${env.maStageName}-${params.REGION}"
+                        echo """
+    ================================================================
+    EKS Solutions CFN Test (${vpcMode} VPC)
+    ================================================================
+    Git:                    ${params.GIT_REPO_URL} @ ${params.GIT_BRANCH}
+    Stage:                  ${env.maStageName}
+    Region:                 ${params.REGION}
+    Build Images:           ${params.BUILD_IMAGES}
+    Build Chart:            ${params.BUILD_CHART_AND_DASHBOARDS}
+    Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
+    Version:                ${params.VERSION}
+    ================================================================
+"""
                     }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                 }
@@ -101,26 +116,26 @@ def call(Map config = [:]) {
                             def bootstrapArgs = isImportVpc ?
                                 "--deploy-import-vpc-cfn --vpc-id ${env.TEST_VPC_ID} --subnet-ids ${env.TEST_SUBNET_IDS}" :
                                 "--deploy-create-vpc-cfn"
-                            def buildImagesArg = params.BUILD_IMAGES ? "--build-images" : ""
-                            def buildChartArg = params.BUILD_CHART_AND_DASHBOARDS ? "--build-chart-and-dashboards" : ""
+
+                            def bootstrap = resolveBootstrap(
+                                useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
+                                buildImages: params.BUILD_IMAGES,
+                                buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
+                                version: params.VERSION
+                            )
 
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 7200, roleSessionName: 'jenkins-session') {
                                     sh """
                                         set -euo pipefail
-                                        ./deployment/k8s/aws/assemble-bootstrap.sh
-                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
+                                        ${bootstrap.script} \
                                           ${bootstrapArgs} \
-                                          --build-cfn \
-                                          ${buildImagesArg} \
-                                          ${buildChartArg} \
                                           --stack-name "${env.STACK_NAME}" \
                                           --stage "${maStageName}" \
                                           --region "${params.REGION}" \
-                                          --version latest \
                                           --skip-console-exec \
                                           --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          --base-dir "\$(pwd)"
+                                          ${bootstrap.flags}
                                     """
                                 }
                             }

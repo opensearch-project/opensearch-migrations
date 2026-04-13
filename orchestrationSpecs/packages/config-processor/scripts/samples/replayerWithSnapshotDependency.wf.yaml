@@ -21,7 +21,6 @@ sourceClusters:
         snap1:
           config:
             createSnapshotConfig: {}
-            requiredForCompleteMigration: true
           repoName: "default"
 
 targetClusters:

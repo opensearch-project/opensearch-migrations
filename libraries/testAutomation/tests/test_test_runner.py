@@ -105,6 +105,18 @@ class TestFailureDetection:
         with patch.object(runner, "run_tests", return_value=_make_report(passed=3, failed=0, expected=None)):
             runner.run()  # Should not raise
 
+    def test_zero_expected_tests_succeeds(self):
+        """Version pair with no compatible tests (expected=0) should not fail.
+
+        Reproduces the OS_1.3 → OS_2.19 Jenkins failure: conftest.py reports
+        expected=0, passed=0, failed=0 — this is a legitimately empty version
+        pair, not a test failure.
+        """
+        runner = _make_runner(combinations=[("OS_1.3", "OS_2.19")])
+        with patch.object(runner, "run_tests", return_value=_make_report(
+                passed=0, failed=0, expected=0, source="OS_1.3", target="OS_2.19")):
+            runner.run()  # Should not raise
+
 
 from test_runner import get_version_combinations, TargetType, VALID_SOURCE_VERSIONS
 

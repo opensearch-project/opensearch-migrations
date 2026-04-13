@@ -30,7 +30,7 @@ static def expandVersionString(String input) {
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksbyos"
     def jobName = config.jobName ?: "eks-byos-integ-test"
-    def lockLabel = config.lockLabel ?: (jobName.startsWith("main-") ? "aws-main-slot" : "aws-pr-slot")
+    def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
     def clusterContextFilePath = "tmp/cluster-context-byos-${currentBuild.number}.json"
     def testIds = config.testIds ?: "0010"
     def sourceVersion = config.sourceVersion ?: ""
@@ -95,6 +95,10 @@ def call(Map config = [:]) {
                 choices: ['default', 'large'],
                 description: 'Target cluster size (default: 2x r8g.large, large: 24x r8g.8xlarge with dedicated masters)'
             )
+            booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source instead of using public images')
+            booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
+            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
+            string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
         }
         options {
             lock(label: lockLabel, quantity: 1)
@@ -121,8 +125,21 @@ def call(Map config = [:]) {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
-                        def pool = jobName.startsWith("main-") ? "m" : "p"
+                        def pool = jobName.startsWith("main-") ? "m" : jobName.startsWith("release-") ? "r" : "p"
                         env.maStageName = "${params.STAGE}-${pool}${currentBuild.number}"
+                        echo """
+    ================================================================
+    EKS BYOS Integration Test
+    ================================================================
+    Git:                    ${params.GIT_REPO_URL} @ ${params.GIT_BRANCH}
+    Stage:                  ${env.maStageName}
+    Region:                 ${params.REGION}
+    Build Images:           ${params.BUILD_IMAGES}
+    Build Chart:            ${params.BUILD_CHART_AND_DASHBOARDS}
+    Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
+    Version:                ${params.VERSION}
+    ================================================================
+"""
                         // Resolve TEST_PRESET → effective parameter values
                         def testPresets = [
                             'large-es7x-24B': [s3RepoUri: 's3://migrations-snapshots-library-us-east-1/large-snapshot-es7x/', snapshotName: 'large-snapshot', sourceVersion: 'ES_7.10', rfsWorkers: '90', targetClusterSize: 'large'],
@@ -184,7 +201,10 @@ def call(Map config = [:]) {
                 }
             }
 
+            // Skip source build when using release bootstrap or when not building
+            // any artifacts from source (images/chart).
             stage('Build') {
+                when { expression { !params.USE_RELEASE_BOOTSTRAP && (params.BUILD_IMAGES || params.BUILD_CHART_AND_DASHBOARDS) } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         script {
@@ -203,18 +223,20 @@ def call(Map config = [:]) {
 
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+                                    def bootstrap = resolveBootstrap(
+                                        useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
+                                        buildImages: params.BUILD_IMAGES,
+                                        buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
+                                        skipTestImages: true,
+                                        version: params.VERSION
+                                    )
                                     sh """
-                                        ./deployment/k8s/aws/assemble-bootstrap.sh
-                                        ./deployment/k8s/aws/dist/aws-bootstrap.sh \
+                                        ${bootstrap.script} \
                                           --deploy-create-vpc-cfn \
-                                          --build-cfn \
                                           --stack-name "${env.MA_STACK_NAME}" \
                                           --stage "${maStageName}" \
                                           --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          --build-images \
-                                          --skip-test-images \
-                                          --build-chart-and-dashboards \
-                                          --base-dir "\$(pwd)" \
+                                          ${bootstrap.flags} \
                                           --skip-console-exec \
                                           --skip-setting-k8s-context \
                                           --region ${params.REGION} \

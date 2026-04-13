@@ -1,4 +1,5 @@
-import { MigrationConfigTransformer } from '../src/migrationConfigTransformer';
+import { MigrationConfigTransformer, normalizeUserConfig } from '../src/migrationConfigTransformer';
+import { OVERALL_MIGRATION_CONFIG } from '@opensearch-migrations/schemas';
 
 describe('MigrationConfigTransformer validation', () => {
     let transformer: MigrationConfigTransformer;
@@ -147,6 +148,135 @@ describe('MigrationConfigTransformer validation', () => {
         expect(() => {
             transformer.validateInput(baseConfig);
         }).not.toThrow();
+    });
+
+    it('should normalize workflow-managed Kafka auth and drop empty kafkaTopic placeholders before AJV validation', () => {
+        const parsed = OVERALL_MIGRATION_CONFIG.parse(baseConfig);
+        const normalized = normalizeUserConfig(parsed);
+
+        expect(normalized.kafkaClusterConfiguration.default).toMatchObject({
+            autoCreate: {
+                auth: {
+                    type: "scram-sha-512"
+                }
+            }
+        });
+        expect(normalized.traffic?.proxies?.proxy1).not.toHaveProperty("kafkaTopic");
+    });
+
+    it('should derive managed Kafka auth profile for auto-created SCRAM clusters', async () => {
+        const configWithScramKafka = {
+            ...baseConfig,
+            kafkaClusterConfiguration: {
+                default: {
+                    autoCreate: {
+                        auth: {
+                            type: "scram-sha-512"
+                        }
+                    }
+                }
+            }
+        };
+
+        const result = await transformer.processFromObject(configWithScramKafka);
+        expect(result.trafficReplays?.[0]?.kafkaConfig).toMatchObject({
+            managedByWorkflow: true,
+            listenerName: "tls",
+            authType: "scram-sha-512",
+            secretName: "default-migration-app",
+            caSecretName: "default-cluster-ca-cert",
+            kafkaUserName: "default-migration-app",
+            kafkaConnection: "default-kafka-bootstrap:9093",
+        });
+    });
+
+    it('should materialize baseline Kafka defaults during parsing for auto-created clusters', async () => {
+        const result = await transformer.processFromObject(baseConfig);
+        expect(result.kafkaClusters?.[0]).toMatchObject({
+            name: "default",
+            config: {
+                auth: {type: "scram-sha-512"},
+                nodePoolSpecOverrides: {
+                    replicas: 1,
+                    roles: ["controller", "broker"],
+                    storage: {
+                        type: "persistent-claim",
+                        size: "1Gi",
+                        deleteClaim: true,
+                    }
+                },
+                topicSpecOverrides: {
+                    partitions: 1,
+                    replicas: 1,
+                    config: {
+                        "retention.ms": 604800000,
+                        "segment.bytes": 1073741824,
+                    }
+                },
+                clusterSpecOverrides: {
+                    kafka: {
+                        config: {
+                            "auto.create.topics.enable": false,
+                            "default.replication.factor": 1,
+                            "min.insync.replicas": 1,
+                            "offsets.topic.replication.factor": 1,
+                            "transaction.state.log.min.isr": 1,
+                            "transaction.state.log.replication.factor": 1,
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    it('should require a CA secret for existing SCRAM-managed Kafka clusters', () => {
+        const configWithInvalidExistingScramKafka = {
+            ...baseConfig,
+            kafkaClusterConfiguration: {
+                default: {
+                    existing: {
+                        kafkaConnection: "broker.example.org:9093",
+                        kafkaTopic: "capture-proxy",
+                        auth: {
+                            type: "scram-sha-512",
+                            secretName: "existing-kafka-user-secret"
+                        }
+                    }
+                }
+            }
+        };
+
+        expect(() => {
+            transformer.validateInput(configWithInvalidExistingScramKafka);
+        }).toThrow(/existing/);
+    });
+
+    it('should report an unknown Kafka broker key without union noise', () => {
+        const configWithBogusKafkaKey = {
+            ...baseConfig,
+            kafkaClusterConfiguration: {
+                default: {
+                    autoCreate: {
+                        clusterSpecOverrides: {
+                            kafka: {
+                                config: {
+                                    "auto.create.topics.enable": false,
+                                    "bogus.inner.key": true,
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        expect(() => {
+            transformer.validateInput(configWithBogusKafkaKey);
+        }).toThrow(/Kafka broker config 'bogus\.inner\.key' is not part of the pinned Kafka 4\.2\.0 broker config catalog/);
+
+        expect(() => {
+            transformer.validateInput(configWithBogusKafkaKey);
+        }).not.toThrow(/must have required property 'existing'|must match a schema in anyOf/);
     });
 
     it('should attach a derived proxy route onto the transformed source config', async () => {

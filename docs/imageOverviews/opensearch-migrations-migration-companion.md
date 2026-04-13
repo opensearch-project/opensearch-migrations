@@ -1,0 +1,48 @@
+## Quick Reference
+
+- **Maintained by:** [OpenSearch team](https://github.com/opensearch-project)
+- **Need help?** Ask questions and discuss on our [community forum](https://forum.opensearch.org/tag/migration)
+- **Need to file issues?** Use our [issue tracker](https://github.com/opensearch-project/opensearch-migrations/issues) to report problems with Migration Assistant for OpenSearch or the Docker images
+
+## What is the Migration Assistant for OpenSearch?
+
+The Migration Assistant for OpenSearch is a tool that simplifies the migration of data from Elasticsearch to OpenSearch. It provides a comprehensive solution for migrating historical and/or live data.
+
+Learn more at the documentation for the [Migration Assistant for OpenSearch](https://docs.opensearch.org/docs/latest/migration-assistant).
+
+## What is OpenSearch Migration Companion?
+
+The OpenSearch Migration Companion is an AI-powered component of the Migration Assistant for OpenSearch that serves as a persistent guide throughout the entire migration journey — from initial assessment through final cutover. Rather than requiring deep expertise in both source and target systems, the Migration Companion analyzes source clusters, identifies compatibility issues, generates transforms, and produces actionable migration plans through a conversational interface.
+
+The Migration Companion helps users:
+- Assess migration readiness with confidence scoring and risk identification
+- Deploy and configure migration tooling, including the transformation shim
+- Generate equivalent OpenSearch mappings with field-by-field translation
+- Produce workflow configuration files and migration playbooks
+- Monitor and validate migration progress with observability support
+
+The Migration Companion operates across multiple deployment models — as a standalone Docker container with a built-in AI CLI, bootstrapped into AWS CloudShell with Bedrock integration, or as an IDE agent (Cursor, VSCode + Cline, Kiro) where the repository itself becomes the companion workspace.
+
+Learn more at the [OpenSearch Migration Companion RFC](https://github.com/opensearch-project/opensearch-migrations/issues/2444).
+
+## How to Pull This Image
+
+You can pull the OpenSearch Migration Companion Docker image just like any other image:
+
+```bash
+docker pull public.ecr.aws/opensearchproject/opensearch-migrations-migration-companion:latest
+```
+
+See [ECR](https://gallery.ecr.aws/opensearchproject/opensearch-migrations-migration-companion) for a list of all available versions.
+
+## How to Use This Image
+
+OpenSearch Migration Companion is a component of the Migration Assistant for OpenSearch. We recommend following the instructions in the [OpenSearch Migration Companion RFC](https://github.com/opensearch-project/opensearch-migrations/issues/2444) to get started.
+
+## Licensing
+
+OpenSearch Migration Companion is licensed under the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0).
+
+## How to Contribute
+
+OpenSearch Migration Companion is open source under the Apache 2.0 license. We welcome contributions and strive to make it easy for you to get started—no lengthy Contributor License Agreement required. Visit the [OpenSearch website](https://opensearch.org) to learn more and join our community.

@@ -332,7 +332,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
         try {
             long reqTransformStart = System.nanoTime();
-            Map<String, Object> targetMap = applyRequestTransform(target, requestMap, dispatchCtx);
+            Map<String, Object> targetMap = applyRequestTransformOrThrow(target, requestMap, dispatchCtx);
             Duration reqTransformDuration = Duration.ofNanos(System.nanoTime() - reqTransformStart);
 
             FullHttpRequest targetRequest = applyAuth(target, HttpMessageUtil.mapToRequest(targetMap));
@@ -406,6 +406,21 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
             }
         }
         return doRequestTransform(target, requestMap);
+    }
+
+    /**
+     * Apply the request transform, wrapping any failure in TransformException
+     * so callers can distinguish transform errors from upstream failures.
+     */
+    private Map<String, Object> applyRequestTransformOrThrow(
+        Target target, Map<String, Object> requestMap, TargetDispatchContext dispatchCtx
+    ) {
+        try {
+            return applyRequestTransform(target, requestMap, dispatchCtx);
+        } catch (Exception e) {
+            throw new TransformException(
+                String.format("Request transform failed for target '%s'", target.name()), e);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -526,9 +541,18 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
     private FullHttpResponse buildPrimaryResponse(TargetResponse primary) {
         if (!primary.isSuccess()) {
+            final Throwable err = primary.error();
+            // Transform failures (wrapped in TransformException) return 500
+            // upstream communication failures return 502
+            final HttpResponseStatus status;
+            if (err instanceof TransformException) {
+                status = HttpResponseStatus.INTERNAL_SERVER_ERROR;
+            } else {
+                status = HttpResponseStatus.BAD_GATEWAY;
+            }
             return HttpMessageUtil.errorResponse(
-                HttpResponseStatus.BAD_GATEWAY,
-                "Primary target '" + primary.targetName() + "' failed: " + primary.error().getMessage());
+                status,
+                String.format("Primary target '%s' failed: %s", primary.targetName(), err.getMessage()));
         }
         byte[] body = primary.rawBody() != null ? primary.rawBody() : new byte[0];
         FullHttpResponse response = new DefaultFullHttpResponse(
