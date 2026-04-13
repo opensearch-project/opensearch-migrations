@@ -97,6 +97,7 @@ spec:
               | del(.no_auth)
             ')
 
+            # speedupFactor 20 is for testing purposes only
             CDC_CONFIG=$(jq -n \
               --argjson source "$SOURCE_CLUSTER" \
               --argjson target "$TARGET_CLUSTER" \
