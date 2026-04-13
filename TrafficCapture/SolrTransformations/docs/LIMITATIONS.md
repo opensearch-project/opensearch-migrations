@@ -14,6 +14,7 @@ the root cause, and provides a workaround where one exists.
 | [DATE-RANGE-GAP](#date-range-gap) | Multi-unit date range gaps approximated as fixed intervals |
 | [CURSOR-UNIQUEKEY](#cursor-uniquekey) | Cursor pagination assumes `id` as Solr's uniqueKey field |
 | [CURSOR-REPLAY](#cursor-replay) | Traffic replay with cursorMark not supported |
+| [SOLRCONFIG-REPLAYER](#solrconfig-replayer) | Traffic replayer requires manual solrConfig in bindingsObject |
 
 ---
 
@@ -164,3 +165,49 @@ works during replay.
 **Current workaround:**
 This applies only to offline traffic replay. The live shim proxy handles
 cursor pagination correctly using its own base64-encoded tokens.
+
+
+---
+
+## SOLRCONFIG-REPLAYER
+
+**Feature:** Solrconfig defaults in traffic replayer mode
+
+**Limitation:**
+The traffic replayer uses `JsonJSTransformerProvider` which does not have
+access to `SolrConfigProvider` for XML parsing. The solrConfig must be
+provided as pre-built JSON in the `bindingsObject` of `--transformerConfig`.
+
+Both the shim proxy and the traffic replayer use `--transformerConfig`
+with the same provider-based JSON array format. The shim uses
+`SolrTransformerProvider` which auto-prepends the GraalVM polyfill and
+supports `solrConfigXmlFile` for automatic XML parsing.
+
+**Example (shim proxy — with solrconfig.xml auto-parsing):**
+```
+--transformerConfig '[{"SolrTransformerProvider": {
+  "initializationScriptFile": "/path/to/request.js",
+  "bindingsObject": "{}",
+  "solrConfigXmlFile": "/path/to/solrconfig.xml"
+}}]'
+```
+
+**Example (shim proxy — with inline solrConfig JSON in bindings):**
+```
+--transformerConfig '[{"SolrTransformerProvider": {
+  "initializationScriptFile": "/path/to/request.js",
+  "bindingsObject": "{\"solrConfig\": {\"/select\": {\"defaults\": {\"df\": \"title\"}}}}"
+}}]'
+```
+
+**Example (traffic replayer — uses JsonJSTransformerProvider):**
+```
+--transformerConfig '[{"JsonJSTransformerProvider": {
+  "initializationScriptFile": "/path/to/request.js",
+  "bindingsObject": "{\"solrConfig\": {\"/select\": {\"defaults\": {\"df\": \"title\"}}}}"
+}}]'
+```
+
+**Note:** The traffic replayer cannot use `SolrTransformerProvider` directly
+because `SolrConfigProvider` lives in the `transformationShim` module.
+A future PR can move it to a shared module.

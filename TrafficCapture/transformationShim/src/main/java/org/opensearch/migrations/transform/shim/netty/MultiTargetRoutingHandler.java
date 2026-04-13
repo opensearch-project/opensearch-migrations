@@ -211,7 +211,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
         for (String name : activeTargets) {
             Target target = targets.get(name);
-            Map<String, Object> targetRequestMap = (target.requestTransform() != null || hasCursorMark)
+            Map<String, Object> targetRequestMap = (dualMode || target.requestTransform() != null)
                 ? deepCopyMap(requestMap) : requestMap;
             targetRequestMap.put("_targetName", name);
             targetRequestMap.put("_mode", dualMode ? "dual" : "single");
@@ -581,7 +581,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         if (cursorMark == null || "*".equals(cursorMark)) return;
 
         try {
-            String decoded = new String(java.util.Base64.getDecoder().decode(cursorMark), StandardCharsets.UTF_8);
+            String decoded = new String(java.util.Base64.getUrlDecoder().decode(cursorMark), StandardCharsets.UTF_8);
             Map<String, Object> combined = MAPPER.readValue(decoded, MAP_TYPE_REF);
 
             String targetToken;
@@ -651,7 +651,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         }
         try {
             String decoded = new String(
-                java.util.Base64.getDecoder().decode(sentCursorMark), StandardCharsets.UTF_8);
+                java.util.Base64.getUrlDecoder().decode(sentCursorMark), StandardCharsets.UTF_8);
             Map<String, Object> sentCombined = MAPPER.readValue(decoded, MAP_TYPE_REF);
             String sentSolr = (String) sentCombined.get("solr");
             String sentOs = (String) sentCombined.get("os");
@@ -677,7 +677,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         combined.put("v", 1);
         combined.put("solr", solrToken);
         combined.put("os", osToken);
-        return java.util.Base64.getEncoder().encodeToString(MAPPER.writeValueAsBytes(combined));
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(MAPPER.writeValueAsBytes(combined));
     }
 
     private FullHttpResponse rewriteResponseWithToken(
