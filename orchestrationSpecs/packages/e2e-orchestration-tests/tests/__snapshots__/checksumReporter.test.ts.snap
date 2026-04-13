@@ -31,7 +31,7 @@ exports[`buildChecksumReport produces a report with all expected components 1`] 
     "resourceName": "capture-proxy-target-replay1",
   },
   "snapshot:source-snap1": {
-    "configChecksum": "afbe905ae83fc0d8",
+    "configChecksum": "cfa34c0070499f06",
     "dependsOn": [
       "proxy:capture-proxy",
     ],
@@ -40,7 +40,7 @@ exports[`buildChecksumReport produces a report with all expected components 1`] 
     "resourceName": "source-snap1",
   },
   "snapshotMigration:source-target-snap1": {
-    "configChecksum": "3902ceadb6f2f349",
+    "configChecksum": "fa4941c297ebd7cf",
     "dependsOn": [
       "snapshot:source-snap1",
     ],

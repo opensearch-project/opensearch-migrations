@@ -19,19 +19,22 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import readline from 'node:readline';
 import { execSync } from 'node:child_process';
 import yaml from 'yaml';
 import { buildChecksumReport } from './checksumReporter';
 import { expandMatrix } from './matrixExpander';
 import { defaultMutatorRegistry } from './approvedMutators';
 import { assertRun, formatAssertResult } from './assertLogic';
-import { defaultFixtures } from './fixtures';
-import type { FixtureAction, TestFixtures } from './fixtures';
+import { loadTestSpec } from './specLoader';
+import type { ApprovalGate, FixtureAction, TestFixtures } from './fixtures';
 import type { MatrixSpec, RunExpectation, ScenarioObservation, ChecksumReport } from './types';
 
 const NAMESPACE = process.argv.includes('--namespace')
     ? process.argv[process.argv.indexOf('--namespace') + 1]
     : 'ma';
+
+const WAIT_BEFORE_CLEANUP = process.argv.includes('--wait-before-cleanup');
 
 const WORKFLOW_NAME = 'migration-workflow';
 const OVERALL_TIMEOUT = 3600;       // 1 hour max for the entire test
@@ -59,9 +62,16 @@ function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function waitForConfirmation(prompt: string): Promise<void> {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    return new Promise(resolve => {
+        rl.question(prompt, () => { rl.close(); resolve(); });
+    });
+}
+
 // ─── Fixture runner ─────────────────────────────────────────────────
 
-function runFixtures(label: string, actions: FixtureAction[]): void {
+function runFixtures(label: string, actions: FixtureAction[], failOnError: boolean = false): void {
     if (actions.length === 0) return;
     console.log(`\n  [${label}] Running ${actions.length} fixture action(s)...`);
     for (const action of actions) {
@@ -69,6 +79,9 @@ function runFixtures(label: string, actions: FixtureAction[]): void {
         try {
             consoleExec(action.consoleCommand);
         } catch (e) {
+            if (failOnError) {
+                throw new Error(`Setup fixture "${action.name}" failed: ${e}`);
+            }
             console.log(`      (warning: ${e})`);
         }
     }
@@ -119,11 +132,12 @@ function configureAndSubmit(rawConfig: Record<string, unknown>): void {
  * Wait for workflow with progress-based stall detection.
  * Fails fast if no node changes phase for STALL_TIMEOUT seconds.
  */
-async function waitForWorkflow(): Promise<string> {
+async function waitForWorkflow(approvalGates: ApprovalGate[]): Promise<string> {
     console.log(`  Waiting for workflow ${WORKFLOW_NAME} (stall timeout ${STALL_TIMEOUT}s)...`);
     const overallStart = Date.now();
     let lastNodeSnapshot = '';
     let lastProgressTime = Date.now();
+    let nextGateIndex = 0;
 
     while (Date.now() - overallStart < OVERALL_TIMEOUT * 1000) {
         try {
@@ -131,6 +145,53 @@ async function waitForWorkflow(): Promise<string> {
             if (['Succeeded', 'Failed', 'Error'].includes(phase)) {
                 console.log(`\n  Workflow ${WORKFLOW_NAME}: ${phase}`);
                 return phase;
+            }
+
+            // Check for suspended nodes (approval gates)
+            if (nextGateIndex < approvalGates.length) {
+                // Get full node names of suspended nodes (includes path like source.target.snap1.migration-0.evaluateMetadata)
+                const suspendedNames = execSync(
+                    `kubectl -n ${NAMESPACE} get workflow ${WORKFLOW_NAME} -o json 2>/dev/null | jq -r '[.status.nodes // {} | to_entries[] | select(.value.type == "Suspend" and .value.phase == "Running") | .value.displayName] | .[]'`,
+                    { encoding: 'utf-8', timeout: 30000, maxBuffer: 50 * 1024 * 1024 }
+                ).trim().split('\n').filter(Boolean);
+
+                if (suspendedNames.length > 0) {
+                    // Find the gate whose pattern matches a suspended node
+                    const gate = approvalGates.slice(nextGateIndex).find(g => {
+                        const suffix = g.approvePattern.replace('*.', '');
+                        return suspendedNames.some(n => n.endsWith(suffix) || n.includes(suffix));
+                    });
+
+                    if (gate) {
+                        console.log(`\n  ⏸ Suspended at: ${suspendedNames.join(', ')}`);
+                        console.log(`  Gate: ${gate.description} (${gate.approvePattern})`);
+
+                        // Run validations — all must pass before approving
+                        let validationsPassed = true;
+                        for (const v of gate.validations) {
+                            console.log(`    [validate] ${v.name}: ${v.description}`);
+                            try {
+                                const out = consoleExec(v.consoleCommand);
+                                console.log(out);
+                            } catch (e) {
+                                console.log(`    ✗ validation failed: ${e}`);
+                                validationsPassed = false;
+                            }
+                        }
+
+                        if (!validationsPassed) {
+                            console.log(`\n  ✗ Gate validation failed — not approving`);
+                            return 'Failed';
+                        }
+
+                        // Approve
+                        console.log(`    [approve] ${gate.approvePattern}`);
+                        consoleExec(`workflow approve "${gate.approvePattern}"`);
+                        nextGateIndex = approvalGates.indexOf(gate) + 1;
+                        lastProgressTime = Date.now();
+                        continue;
+                    }
+                }
             }
 
             // Check for progress: snapshot all node phases (nodes is a map, not array)
@@ -269,21 +330,18 @@ function cleanup(allResources: Array<{ kind: string; resourceName: string }>): v
 // ─── Main ───────────────────────────────────────────────────────────
 
 async function main() {
-    const fixturePath = path.resolve(
-        __dirname, '..', '..', 'config-processor', 'scripts', 'samples', 'fullMigrationWithTraffic.wf.yaml'
-    );
-    const baseConfig = yaml.parse(fs.readFileSync(fixturePath, 'utf-8')) as Record<string, unknown>;
+    const specPath = process.argv.find(a => a.endsWith('.json'))
+        ?? path.resolve(__dirname, '..', 'specs', 'proxy-focus-change.test.json');
+    const testSpec = loadTestSpec(specPath);
+    const baseConfig = yaml.parse(fs.readFileSync(testSpec.baseConfigPath, 'utf-8')) as Record<string, unknown>;
 
     console.log('=== E2E Live Runner ===');
     console.log(`  namespace: ${NAMESPACE}`);
-    console.log(`  base config: ${path.basename(fixturePath)}\n`);
+    console.log(`  spec: ${path.basename(specPath)}`);
+    console.log(`  base config: ${path.basename(testSpec.baseConfigPath)}\n`);
 
     const baseReport = await buildChecksumReport(baseConfig);
-    const spec: MatrixSpec = {
-        focus: 'proxy:capture-proxy',
-        select: [{ changeClass: 'safe', patterns: ['focus-change'] }],
-    };
-    const [testCase] = await expandMatrix(spec, baseReport, defaultMutatorRegistry, baseConfig, baseReport);
+    const [testCase] = await expandMatrix(testSpec.matrix, baseReport, defaultMutatorRegistry, baseConfig, baseReport);
     console.log(`Test case: ${testCase.name}`);
     console.log(`  expect reran:     [${testCase.expect.reran.join(', ')}]`);
     console.log(`  expect unchanged: [${testCase.expect.unchanged.join(', ')}]`);
@@ -298,20 +356,27 @@ async function main() {
     const mutatedReportCrd = filterToCrdComponents(testCase.mutatedChecksumReport);
     const allCrdResources = collectAllCrdResources([baseReportCrd, mutatedReportCrd]);
 
+    const fixtures: TestFixtures = testSpec.fixtures;
+
+    // Baseline uses skipApprovals: false so we can validate at each gate
+    const baselineConfig = { ...baseConfig, skipApprovals: false };
+    // Noop and mutate use skipApprovals: true — the migration steps are skipped anyway
+    const noopConfig = { ...baseConfig, skipApprovals: true };
+
     const runs: Array<{
         name: string;
         config: Record<string, unknown>;
         checksumReport: ChecksumReport;
         expectation: RunExpectation;
+        approvalGates: ApprovalGate[];
     }> = [
-        { name: 'baseline', config: baseConfig, checksumReport: baseReportCrd, expectation: { mode: 'allCompleted' } },
-        { name: 'noop', config: baseConfig, checksumReport: baseReportCrd, expectation: { mode: 'allSkipped' } },
-        { name: 'mutate', config: testCase.mutatedConfig, checksumReport: mutatedReportCrd, expectation: { mode: 'selective', reran: testCase.expect.reran.filter(k => !k.startsWith('kafka:')), unchanged: testCase.expect.unchanged.filter(k => !k.startsWith('kafka:')) } },
+        { name: 'baseline', config: baselineConfig, checksumReport: baseReportCrd, expectation: { mode: 'allCompleted' }, approvalGates: fixtures.approvalGates },
+        { name: 'noop', config: noopConfig, checksumReport: baseReportCrd, expectation: { mode: 'allSkipped' }, approvalGates: [] },
+        { name: 'mutate', config: { ...testCase.mutatedConfig, skipApprovals: true }, checksumReport: mutatedReportCrd, expectation: { mode: 'selective', reran: testCase.expect.reran.filter(k => !k.startsWith('kafka:')), unchanged: testCase.expect.unchanged.filter(k => !k.startsWith('kafka:')) }, approvalGates: [] },
     ];
 
     let priorObservation: ScenarioObservation | null = null;
     let allPassed = true;
-    const fixtures: TestFixtures = defaultFixtures;
 
     // Wrap in try/finally so cleanup always runs
     try {
@@ -319,14 +384,14 @@ async function main() {
         runFixtures('pre-cleanup', fixtures.cleanup);
 
         // Setup: load test data, etc.
-        runFixtures('setup', fixtures.setup);
+        runFixtures('setup', fixtures.setup, true);
 
         for (const run of runs) {
             console.log(`\n${'='.repeat(60)}`);
             console.log(`=== Run: ${run.name} ===`);
 
             configureAndSubmit(run.config);
-            const phase = await waitForWorkflow();
+            const phase = await waitForWorkflow(run.approvalGates);
 
             if (phase !== 'Succeeded') {
                 console.log(`\n  ✗ ${run.name} workflow failed: ${phase}`);
@@ -352,6 +417,10 @@ async function main() {
             priorObservation = obs;
         }
     } finally {
+        if (WAIT_BEFORE_CLEANUP) {
+            console.log('\n  Resources are still up. Poke around, then press Enter to clean up.');
+            await waitForConfirmation('  Press Enter to proceed with cleanup...');
+        }
         cleanup(allCrdResources);
         runFixtures('post-cleanup', fixtures.cleanup);
     }
