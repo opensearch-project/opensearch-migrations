@@ -1,0 +1,84 @@
+plugins {
+    id 'base'
+}
+
+def goDir = file('opensearch-pricing-calculator')
+def pyDir = file('skills/solr-opensearch-migration-advisor')
+def goVersion = '1.24.3'
+def os = System.getProperty('os.name').toLowerCase().contains('mac') ? 'darwin' : 'linux'
+def arch = System.getProperty('os.arch').contains('aarch64') ? 'arm64' : 'amd64'
+def goRoot = new File(gradle.gradleUserHomeDir, "go/${goVersion}/${os}-${arch}")
+
+def commonExcludes = [
+        "**/__pycache__/**",
+        "**/.pytest_cache/**",
+        "**/.venv/**",
+        "**/node_modules/**",
+        "**/*.pyc",
+]
+
+tasks.register('syncDockerBuildContext', Sync) {
+    into layout.buildDirectory.dir("dockerContext")
+
+    from(project.file("Dockerfile"))
+    from(rootProject.layout.projectDirectory.file("VERSION"))
+
+    from(project.file("opensearch-pricing-calculator")) {
+        into "opensearch-pricing-calculator"
+        exclude commonExcludes
+        exclude "*_test.go"
+        exclude "docker-compose.yml"
+    }
+    from(project.file("skills/solr-opensearch-migration-advisor")) {
+        into "skills/solr-opensearch-migration-advisor"
+        exclude commonExcludes
+        exclude "tests/**"
+        exclude ".gitignore"
+        exclude ".env.example"
+    }
+}
+
+tasks.register('setupGo') {
+    description = 'Download Go toolchain from go.dev (cached in ~/.gradle/go/)'
+    group = 'build setup'
+    outputs.dir(goRoot)
+    doLast {
+        if (new File(goRoot, "bin/go").exists()) return
+        def url = "https://go.dev/dl/go${goVersion}.${os}-${arch}.tar.gz"
+        def tarball = new File(temporaryDir, "go.tar.gz")
+        ant.get(src: url, dest: tarball)
+        ant.mkdir(dir: goRoot)
+        exec {
+            commandLine 'tar', '-xzf', tarball.absolutePath, '--strip-components=1', '-C', goRoot.absolutePath
+        }
+    }
+}
+
+tasks.register('goTest', Exec) {
+    description = 'Run Go tests for opensearch-pricing-calculator'
+    group = 'verification'
+    dependsOn setupGo
+    workingDir goDir
+    environment 'GOROOT', goRoot.absolutePath
+    environment 'PATH', "${goRoot}/bin${File.pathSeparator}${System.getenv('PATH')}"
+    commandLine "${goRoot}/bin/go", 'test', './...', '-count=1'
+}
+
+tasks.register('pythonSetup', Exec) {
+    description = 'Install solr-migration-advisor Python dependencies'
+    group = 'verification'
+    workingDir pyDir
+    commandLine 'pip', 'install', '-e', '.[dev]'
+}
+
+tasks.register('pythonTest', Exec) {
+    description = 'Run Python tests for solr-opensearch-migration-advisor'
+    group = 'verification'
+    dependsOn pythonSetup
+    workingDir pyDir
+    commandLine 'python3', '-m', 'pytest', '--cov=scripts', '--cov-report=xml'
+}
+
+tasks.named('check').configure {
+    dependsOn goTest
+}

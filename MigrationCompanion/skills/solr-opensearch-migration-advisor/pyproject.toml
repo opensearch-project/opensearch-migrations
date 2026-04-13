@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "solr-to-opensearch"
-version = "0.2.0"
+version = "0.1"
 description = "Agent skill for migrating from Apache Solr to OpenSearch"
 readme = "README.md"
 requires-python = ">=3.11"
