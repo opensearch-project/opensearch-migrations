@@ -12,21 +12,10 @@ class WorkflowConfig:
 
         Args:
             data: Raw configuration dictionary (used by tests and legacy callers)
-            raw_yaml: Original YAML string to preserve formatting.
-                      If not provided and data is given, YAML is generated from data.
+            raw_yaml: Original YAML string to preserve formatting
         """
         self.data = data or {}
-        if raw_yaml is not None:
-            self.raw_yaml = raw_yaml
-        elif self.data:
-            from io import StringIO
-            yaml = YAML()
-            yaml.preserve_quotes = True
-            stream = StringIO()
-            yaml.dump(dict(self.data), stream)
-            self.raw_yaml = stream.getvalue()
-        else:
-            self.raw_yaml = ""
+        self.raw_yaml = raw_yaml or ""
 
     @classmethod
     def from_yaml(cls, yaml_str: str) -> 'WorkflowConfig':
