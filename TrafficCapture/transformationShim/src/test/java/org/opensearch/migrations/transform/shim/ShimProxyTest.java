@@ -366,34 +366,6 @@ class ShimProxyTest {
         verify(mockSink).close();
     }
 
-    @Test
-    void parseReportingConfig_validJson() {
-        var config = ShimMain.parseReportingConfig(
-            "{\"outputDir\":\"/tmp/reports\",\"bufferSize\":2048,\"includeRequestBody\":true}");
-        assertEquals("/tmp/reports", config.get("outputDir"));
-        assertEquals(2048, ((Number) config.get("bufferSize")).intValue());
-        assertEquals(true, config.get("includeRequestBody"));
-    }
-
-    @Test
-    void parseReportingConfig_minimalJson() {
-        var config = ShimMain.parseReportingConfig("{\"outputDir\":\"/tmp/reports\"}");
-        assertEquals("/tmp/reports", config.get("outputDir"));
-    }
-
-    @Test
-    void parseReportingConfig_missingOutputDir_throws() {
-        var ex = org.junit.jupiter.api.Assertions.assertThrows(Exception.class,
-            () -> ShimMain.parseReportingConfig("{\"bufferSize\":1024}"));
-        assertTrue(ex.getMessage().contains("outputDir"));
-    }
-
-    @Test
-    void parseReportingConfig_invalidJson_throws() {
-        org.junit.jupiter.api.Assertions.assertThrows(Exception.class,
-            () -> ShimMain.parseReportingConfig("not json"));
-    }
-
     // --- Helpers ---
 
     private static HttpResponse<String> httpGet(String url) throws Exception {

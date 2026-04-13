@@ -24,6 +24,7 @@ class ShimMainTest {
             .addObject(params)
             .addObject(params.requestTransformationParams)
             .addObject(params.responseTransformationParams)
+            .addObject(params.reportingParams)
             .build()
             .parse(args);
         return params;
@@ -392,6 +393,97 @@ class ShimMainTest {
         assertEquals(1, targets.size());
         // single target is primary, no non-primary to apply transforms to
         assertNull(targets.get("os").requestTransform());
+    }
+
+    // --- Reporting config ---
+
+    @Test
+    void reportingConfig_camelCase() {
+        var p = parse("--listenPort", "8080", "--target", "os=http://localhost:9200",
+            "--primary", "os", "--reportingConfig",
+            "[{\"FileSystemReportingSink\":{\"outputDir\":\"/tmp/reports\"}}]");
+        assertNotNull(p.reportingParams.reportingConfig);
+    }
+
+    @Test
+    void reportingConfig_kebabCase() {
+        var p = parse("--listenPort", "8080", "--target", "os=http://localhost:9200",
+            "--primary", "os", "--reporting-config",
+            "[{\"FileSystemReportingSink\":{\"outputDir\":\"/tmp/reports\"}}]");
+        assertNotNull(p.reportingParams.reportingConfig);
+    }
+
+    @Test
+    void reportingConfig_defaultsToNull() {
+        var p = parse("--listenPort", "8080", "--target", "os=http://localhost:9200", "--primary", "os");
+        assertNull(p.reportingParams.reportingConfig);
+    }
+
+    @Test
+    void parseReportingConfig_validJson() {
+        var config = ShimMain.parseReportingConfig(
+            "[{\"FileSystemReportingSink\":{\"outputDir\":\"/tmp/reports\",\"bufferSize\":2048,\"includeRequestBody\":true}}]");
+        assertEquals("/tmp/reports", config.get("outputDir"));
+        assertEquals(2048, ((Number) config.get("bufferSize")).intValue());
+        assertEquals(true, config.get("includeRequestBody"));
+    }
+
+    @Test
+    void parseReportingConfig_minimalJson() {
+        var config = ShimMain.parseReportingConfig(
+            "[{\"FileSystemReportingSink\":{\"outputDir\":\"/tmp/reports\"}}]");
+        assertEquals("/tmp/reports", config.get("outputDir"));
+    }
+
+    @Test
+    void parseReportingConfig_missingOutputDir_throws() {
+        assertThrows(Exception.class,
+            () -> ShimMain.parseReportingConfig("[{\"FileSystemReportingSink\":{\"bufferSize\":1024}}]"));
+    }
+
+    @Test
+    void parseReportingConfig_invalidJson_throws() {
+        assertThrows(Exception.class, () -> ShimMain.parseReportingConfig("not json"));
+    }
+
+    @Test
+    void parseReportingConfig_emptyArray_throws() {
+        assertThrows(Exception.class, () -> ShimMain.parseReportingConfig("[]"));
+    }
+
+    @Test
+    void createReportingSink_createsWithDefaults(@TempDir java.nio.file.Path tmpDir) {
+        var sink = ShimMain.createReportingSink(
+            "[{\"FileSystemReportingSink\":{\"outputDir\":\"" + tmpDir.toAbsolutePath() + "\"}}]");
+        assertNotNull(sink);
+        sink.close();
+    }
+
+    @Test
+    void createReportingSink_respectsBufferSize(@TempDir java.nio.file.Path tmpDir) {
+        var sink = ShimMain.createReportingSink(
+            "[{\"FileSystemReportingSink\":{\"outputDir\":\"" + tmpDir.toAbsolutePath() + "\",\"bufferSize\":512}}]");
+        assertNotNull(sink);
+        sink.close();
+    }
+
+    @Test
+    void createMetricsReceiver_defaultFlags() {
+        var mockSink = org.mockito.Mockito.mock(
+            org.opensearch.migrations.transform.shim.reporting.ReportingSink.class);
+        var receiver = ShimMain.createMetricsReceiver(
+            "[{\"FileSystemReportingSink\":{\"outputDir\":\"/tmp/x\"}}]", mockSink);
+        assertNotNull(receiver);
+    }
+
+    @Test
+    void createMetricsReceiver_withBodyFlags() {
+        var mockSink = org.mockito.Mockito.mock(
+            org.opensearch.migrations.transform.shim.reporting.ReportingSink.class);
+        var receiver = ShimMain.createMetricsReceiver(
+            "[{\"FileSystemReportingSink\":{\"outputDir\":\"/tmp/x\",\"includeRequestBody\":true,\"includeResponseBody\":true}}]",
+            mockSink);
+        assertNotNull(receiver);
     }
 
     // --- ServiceLoader discovery ---

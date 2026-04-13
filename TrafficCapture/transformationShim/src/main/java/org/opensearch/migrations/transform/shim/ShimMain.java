@@ -190,18 +190,16 @@ public class ShimMain {
      *
      * <p>Example:
      * <pre>{@code
-     * --reportingConfig '{"outputDir":"/var/shim/reports","bufferSize":2048,"includeRequestBody":true,"includeResponseBody":false}'
+     * --reportingConfig '[{"FileSystemReportingSink":{"outputDir":"/var/shim/reports","bufferSize":2048,"includeRequestBody":true}}]'
      * }</pre>
      *
-     * <p>Only {@code outputDir} is required. When {@code --reportingConfig} is omitted,
-     * reporting is disabled entirely.
+     * <p>Currently supports {@code FileSystemReportingSink} as the only provider.
+     * When {@code --reportingConfig} is omitted, reporting is disabled entirely.
      */
     public static class ReportingParams {
         @Parameter(names = {"--reportingConfig", "--reporting-config"},
-            description = "Reporting config JSON object. Required key: \"outputDir\". "
-                + "Optional: \"bufferSize\" (default 1024), \"includeRequestBody\" (default false), "
-                + "\"includeResponseBody\" (default false). "
-                + "Example: '{\"outputDir\":\"/var/shim/reports\",\"bufferSize\":2048}'")
+            description = "Reporting config JSON array (same format as --transformerConfig). "
+                + "Example: '[{\"FileSystemReportingSink\":{\"outputDir\":\"/var/shim/reports\"}}]'")
         public String reportingConfig;
     }
 
@@ -240,13 +238,8 @@ public class ShimMain {
         ReportingSink reportingSink = null;
         MetricsReceiver metricsReceiver = null;
         if (params.reportingParams.reportingConfig != null) {
-            var parsed = parseReportingConfig(params.reportingParams.reportingConfig);
-            reportingSink = new FileSystemReportingSink(
-                Path.of((String) parsed.get("outputDir")),
-                parsed.containsKey("bufferSize") ? ((Number) parsed.get("bufferSize")).intValue() : 1024);
-            metricsReceiver = new MetricsReceiver(reportingSink, new SolrMetricsExtractor(),
-                Boolean.TRUE.equals(parsed.get("includeRequestBody")),
-                Boolean.TRUE.equals(parsed.get("includeResponseBody")));
+            reportingSink = createReportingSink(params.reportingParams.reportingConfig);
+            metricsReceiver = createMetricsReceiver(params.reportingParams.reportingConfig, reportingSink);
             log.info("Reporting enabled: {}", params.reportingParams.reportingConfig);
         }
 
@@ -280,6 +273,22 @@ public class ShimMain {
         }
         log.info("Shim running on port {}", params.listenPort);
         proxy.waitForClose();
+    }
+
+    /** Create a {@link FileSystemReportingSink} from the reporting config JSON array. */
+    static FileSystemReportingSink createReportingSink(String reportingConfigJson) {
+        var parsed = parseReportingConfig(reportingConfigJson);
+        return new FileSystemReportingSink(
+            Path.of((String) parsed.get("outputDir")),
+            parsed.containsKey("bufferSize") ? ((Number) parsed.get("bufferSize")).intValue() : 1024);
+    }
+
+    /** Create a {@link MetricsReceiver} from the reporting config JSON array and a sink. */
+    static MetricsReceiver createMetricsReceiver(String reportingConfigJson, ReportingSink sink) {
+        var parsed = parseReportingConfig(reportingConfigJson);
+        return new MetricsReceiver(sink, new SolrMetricsExtractor(),
+            Boolean.TRUE.equals(parsed.get("includeRequestBody")),
+            Boolean.TRUE.equals(parsed.get("includeResponseBody")));
     }
 
     /**
@@ -359,14 +368,33 @@ public class ShimMain {
     }
 
     /**
-     * Parse the {@code --reportingConfig} JSON string into a map.
-     * Validates that the required {@code outputDir} key is present.
+     * Parse the {@code --reportingConfig} JSON array string into a provider config map.
+     * Expects format: {@code [{"FileSystemReportingSink": {"outputDir": "...", ...}}]}
+     * Returns the inner config map for the first (and only) provider entry.
      */
     @SuppressWarnings("unchecked")
     static Map<String, Object> parseReportingConfig(String json) {
         try {
-            var config = new com.fasterxml.jackson.databind.ObjectMapper()
-                .readValue(json, Map.class);
+            var entries = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(json, List.class);
+            if (entries.isEmpty()) {
+                throw new ParameterException("--reportingConfig array must not be empty");
+            }
+            var first = entries.get(0);
+            if (!(first instanceof Map)) {
+                throw new ParameterException("--reportingConfig entries must be JSON objects");
+            }
+            var providerMap = (Map<String, Object>) first;
+            if (providerMap.size() != 1) {
+                throw new ParameterException(
+                    "--reportingConfig entry must have exactly one provider key");
+            }
+            var providerEntry = providerMap.entrySet().iterator().next();
+            if (!(providerEntry.getValue() instanceof Map)) {
+                throw new ParameterException(
+                    "--reportingConfig provider value must be a JSON object");
+            }
+            var config = (Map<String, Object>) providerEntry.getValue();
             if (!config.containsKey("outputDir") || !(config.get("outputDir") instanceof String)) {
                 throw new ParameterException(
                     "--reportingConfig requires \"outputDir\" key with a string value");

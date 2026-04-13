@@ -131,7 +131,7 @@ services:
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
       - --reportingConfig
-      - '{"outputDir":"/var/shim/reports","includeRequestBody":true,"includeResponseBody":true}'
+      - '[{"FileSystemReportingSink":{"outputDir":"/var/shim/reports","includeRequestBody":true,"includeResponseBody":true}}]'
 
   # Dual-target shim (OpenSearch primary): sends to both, returns OpenSearch
   # response, validates against Solr. Port 18084.
@@ -178,7 +178,7 @@ services:
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
       - --reportingConfig
-      - '{"outputDir":"/var/shim/reports","includeRequestBody":true,"includeResponseBody":true}'
+      - '[{"FileSystemReportingSink":{"outputDir":"/var/shim/reports","includeRequestBody":true,"includeResponseBody":true}}]'
 
 volumes:
   transform-dist:
