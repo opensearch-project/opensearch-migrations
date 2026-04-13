@@ -1,5 +1,6 @@
 package org.opensearch.migrations;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
@@ -26,6 +27,8 @@ import org.opensearch.migrations.utils.ProcessHelpers;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -247,6 +250,8 @@ public class CreateSnapshot {
         }
     }
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     /**
      * Discover Solr collections (SolrCloud) or cores (standalone) via HTTP API.
      */
@@ -265,91 +270,36 @@ public class CreateSnapshot {
     }
 
     /** Extract string array values from a top-level JSON field, e.g. {"collections":["a","b"]} → ["a","b"] */
-    static List<String> parseJsonStringArray(String json, String fieldName) {
-        var result = new java.util.ArrayList<String>();
-        var key = "\"" + fieldName + "\"";
-        int idx = json.indexOf(key);
-        if (idx < 0) return result;
-        int arrStart = json.indexOf('[', idx);
-        if (arrStart < 0) return result;
-        int arrEnd = json.indexOf(']', arrStart);
-        if (arrEnd < 0) return result;
-        var arrContent = json.substring(arrStart + 1, arrEnd);
-        for (var part : arrContent.split(",")) {
-            var trimmed = part.trim();
-            if (trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
-                result.add(trimmed.substring(1, trimmed.length() - 1));
-            }
+    static List<String> parseJsonStringArray(String json, String fieldName) throws java.io.IOException {
+        var result = new ArrayList<String>();
+        JsonNode node = MAPPER.readTree(json).path(fieldName);
+        if (node.isArray()) {
+            node.forEach(n -> result.add(n.asText()));
         }
         return result;
     }
 
-    /** Extract top-level keys from a JSON object field, e.g. {"status":{"core1":{},"core2":{}}} → ["core1","core2"] */
-    static List<String> parseJsonObjectKeys(String json, String fieldName) {
-        var result = new java.util.ArrayList<String>();
-        var key = "\"" + fieldName + "\"";
-        // Find the occurrence of "fieldName" whose value is a '{' (object), not a number/string.
-        // Solr responses have "status":0 in responseHeader AND "status":{...} at top level.
-        int idx = 0;
-        while (true) {
-            idx = json.indexOf(key, idx);
-            if (idx < 0) return result;
-            // Skip past the key and any whitespace/colon
-            int afterKey = idx + key.length();
-            int colon = json.indexOf(':', afterKey);
-            if (colon < 0) return result;
-            // Find first non-whitespace after colon
-            int valStart = colon + 1;
-            while (valStart < json.length() && Character.isWhitespace(json.charAt(valStart))) {
-                valStart++;
+    /**
+     * Extract top-level keys from the first JSON object field matching {@code fieldName}.
+     * Walks the tree to skip non-object occurrences (e.g. {@code "status":0} in responseHeader).
+     */
+    static List<String> parseJsonObjectKeys(String json, String fieldName) throws java.io.IOException {
+        var result = new ArrayList<String>();
+        findObjectFieldKeys(MAPPER.readTree(json), fieldName, result);
+        return result;
+    }
+
+    private static boolean findObjectFieldKeys(JsonNode node, String fieldName, List<String> result) {
+        if (node.has(fieldName) && node.get(fieldName).isObject()) {
+            node.get(fieldName).fieldNames().forEachRemaining(result::add);
+            return true;
+        }
+        for (JsonNode child : node) {
+            if (child.isObject() && findObjectFieldKeys(child, fieldName, result)) {
+                return true;
             }
-            if (valStart < json.length() && json.charAt(valStart) == '{') {
-                int objEnd = findMatchingBrace(json, valStart);
-                var objContent = json.substring(valStart + 1, objEnd);
-                extractTopLevelKeys(objContent, result);
-                return result;
-            }
-            idx = afterKey; // try next occurrence
         }
-    }
-
-    /** Find the position of the closing brace matching the opening brace at {@code openPos}. */
-    static int findMatchingBrace(String s, int openPos) {
-        int depth = 1;
-        int pos = openPos + 1;
-        while (pos < s.length() && depth > 0) {
-            char c = s.charAt(pos);
-            if (c == '{') depth++;
-            else if (c == '}') depth--;
-            pos++;
-        }
-        return pos - 1;
-    }
-
-    /** Extract top-level quoted keys (followed by ':') from the content of a JSON object. */
-    static void extractTopLevelKeys(String objContent, List<String> result) {
-        int i = 0;
-        while (i < objContent.length()) {
-            int qStart = objContent.indexOf('"', i);
-            if (qStart < 0) return;
-            int qEnd = objContent.indexOf('"', qStart + 1);
-            if (qEnd < 0) return;
-            i = processKeyCandidate(objContent, qStart, qEnd, result);
-        }
-    }
-
-    /** Check if the quoted string is a key (followed by ':') and advance past its value. Returns next scan position. */
-    static int processKeyCandidate(String objContent, int qStart, int qEnd, List<String> result) {
-        int colon = objContent.indexOf(':', qEnd);
-        if (colon < 0 || !objContent.substring(qEnd + 1, colon).trim().isEmpty()) {
-            return qEnd + 1;
-        }
-        result.add(objContent.substring(qStart + 1, qEnd));
-        int valStart = objContent.indexOf('{', colon);
-        if (valStart >= 0) {
-            return findMatchingBrace(objContent, valStart) + 1;
-        }
-        return colon + 1;
+        return false;
     }
 
     private static String solrHttpGet(String url, String username, String password) throws java.io.IOException {
