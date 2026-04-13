@@ -192,7 +192,7 @@ public class S3TupleSink implements TupleSink {
             .contentType("application/gzip")
             .build();
         uploadFuture = s3Client.putObject(putRequest, requestBody)
-            .thenApply(r -> (Void) null);
+            .thenApply(r -> null);
 
         s3OutputStream = requestBody.outputStream();
         try {
