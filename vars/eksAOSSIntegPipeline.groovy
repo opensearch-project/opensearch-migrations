@@ -223,7 +223,8 @@ def call(Map config = [:]) {
                                 // 2. Clean up EKS resources (namespace, instance profiles, security groups)
                                 eksCleanupStep(
                                     stackName: env.STACK_NAME,
-                                    eksClusterName: eksClusterName
+                                    eksClusterName: eksClusterName,
+                                    kubeContext: env.eksKubeContext
                                 )
 
                                 // 3. Delete MA stack last (owns the VPC)
