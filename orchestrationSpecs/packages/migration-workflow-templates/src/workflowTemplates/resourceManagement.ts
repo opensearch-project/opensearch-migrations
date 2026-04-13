@@ -131,17 +131,9 @@ export const ResourceManagement = WorkflowBuilder.create({
                     kind: "DataSnapshot",
                     name: b.inputs.resourceName
                 },
-                conditions: {
-                    successCondition: "status.phase == Ready",
-                    failureCondition: "status.phase == Failed"
-                }
+                conditions: {successCondition: "status.phase == Ready"}
             })
-            // Use OnError so transient pod issues (OOM, eviction, resource-not-found) are retried,
-            // but a matched failureCondition (phase==Failed) fails immediately without retrying.
-            .addRetryParameters({
-                ...K8S_RESOURCE_RETRY_STRATEGY,
-                retryPolicy: "OnError"
-            })
+            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
         )
     )
 
@@ -194,23 +186,6 @@ export const ResourceManagement = WorkflowBuilder.create({
                     kind: "DataSnapshot",
                     metadata: {name: b.inputs.resourceName},
                     status: {phase: "Ready", snapshotName: b.inputs.snapshotName}
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
-    .addTemplate("patchDataSnapshotFailed", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "patch",
-                flags: ["--type", "merge", "--subresource=status"],
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: "DataSnapshot",
-                    metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Failed"}
                 }
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
