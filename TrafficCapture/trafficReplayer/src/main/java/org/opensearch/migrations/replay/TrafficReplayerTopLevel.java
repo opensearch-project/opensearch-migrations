@@ -19,6 +19,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
@@ -104,6 +105,20 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         TrafficStreamLimiter trafficStreamLimiter,
         IStreamableWorkTracker<Void> workTracker
     ) {
+        this(context, serverUri, authTransformerFactory, jsonTransformerSupplier,
+            clientConnectionPool, trafficStreamLimiter, workTracker, new BulkItemErrorClassifier());
+    }
+
+    public TrafficReplayerTopLevel(
+        IRootReplayerContext context,
+        URI serverUri,
+        IAuthTransformerFactory authTransformerFactory,
+        Supplier<IJsonTransformer> jsonTransformerSupplier,
+        ClientConnectionPool clientConnectionPool,
+        TrafficStreamLimiter trafficStreamLimiter,
+        IStreamableWorkTracker<Void> workTracker,
+        BulkItemErrorClassifier errorClassifier
+    ) {
         super(
             context,
             serverUri,
@@ -111,7 +126,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             jsonTransformerSupplier,
             trafficStreamLimiter,
             workTracker,
-            new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry())
+            new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry(errorClassifier))
         );
         this.clientConnectionPool = clientConnectionPool;
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();

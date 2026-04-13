@@ -392,6 +392,15 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
         .describe("Maximum number of HTTP requests that can be in-flight simultaneously to the target cluster. Limits concurrency to prevent overwhelming the target."),
     numClientThreads: z.number().default(0).optional()
         .describe("Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."),
+    nonRetryableDocExceptionTypes: z.array(z.string()).optional()
+        .describe("List of document-level exception types that should not be retried during bulk replay. " +
+            "These errors still count as failures in the output but are not retried because they are " +
+            "deterministic client or mapping errors that will produce the same result on every attempt. " +
+            "When omitted, defaults to a built-in set including version_conflict_engine_exception, " +
+            "mapper_parsing_exception, strict_dynamic_mapping_exception, and others. " +
+            "Set explicitly to override the defaults entirely (not additive). " +
+            "Common values: version_conflict_engine_exception, mapper_parsing_exception, " +
+            "illegal_argument_exception, resource_already_exists_exception."),
     observedPacketConnectionTimeout: z.number().default(360).optional()
         .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
     otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
@@ -591,9 +600,13 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "'ALWAYS': always use server-generated IDs (discards source IDs). " +
             "'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."),
     allowedDocExceptionTypes: z.array(z.string()).default([]).optional()
-        .describe("List of document-level exception types to treat as non-fatal during bulk migration. " +
-            "For example, set to ['version_conflict_engine_exception'] when migrating into a data stream, " +
-            "where backing index writes may conflict with existing documents."),
+        .describe("List of document-level exception types to treat as successful operations during bulk migration. " +
+            "Documents that fail with these errors are not retried and not counted as failures — they are silently accepted. " +
+            "Use this for idempotent migrations where certain errors are expected and harmless. " +
+            "For example, set to ['version_conflict_engine_exception'] when migrating into a data stream " +
+            "where backing index writes may conflict with existing documents. " +
+            "Defaults to empty (all errors are treated as failures). " +
+            "See BulkDocErrorTypes for common OpenSearch exception type strings."),
     coordinatorRetryMaxRetries: z.number().default(7).optional()
         .describe("[Expert] Maximum number of retries when marking work items as completed on the coordinator."),
     coordinatorRetryInitialDelayMs: z.number().default(1000).optional()
