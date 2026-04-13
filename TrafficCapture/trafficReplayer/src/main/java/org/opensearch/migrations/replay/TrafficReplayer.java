@@ -7,6 +7,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -16,6 +17,7 @@ import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
+import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
@@ -323,6 +325,17 @@ public class TrafficReplayer {
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
 
+        @Parameter(
+            required = false,
+            names = { "--non-retryable-doc-exception-types", "--nonRetryableDocExceptionTypes" },
+            description = "Optional. Comma-separated list of document-level exception types that should NOT be "
+                + "retried during bulk replay. These errors still count as failures but won't be retried since "
+                + "they are client/logic errors that will produce the same result on every attempt. "
+                + "Defaults to a built-in set including version_conflict_engine_exception, "
+                + "mapper_parsing_exception, etc. "
+                + "Example: --non-retryable-doc-exception-types version_conflict_engine_exception")
+        List<String> nonRetryableDocExceptionTypes;
+
         void validateKafkaAuthFlags() {
             if (kafkaTrafficAuthType != null && !kafkaTrafficAuthType.isBlank()) {
                 if (Boolean.TRUE.equals(kafkaTrafficEnableMSKAuth)
@@ -580,6 +593,10 @@ public class TrafficReplayer {
             final var orderedRequestTracker = new OrderedWorkerTracker<Void>();
             final var hostname = uri.getHost();
 
+            var errorClassifier = params.nonRetryableDocExceptionTypes != null
+                ? new BulkItemErrorClassifier(new java.util.HashSet<>(params.nonRetryableDocExceptionTypes))
+                : new BulkItemErrorClassifier();
+
             var transformationLoader = new TransformationLoader();
             var tr = new TrafficReplayerTopLevel(
                 topContext,
@@ -592,7 +609,8 @@ public class TrafficReplayer {
                     params.numClientThreads
                 ),
                 trafficStreamLimiter,
-                orderedRequestTracker
+                orderedRequestTracker,
+                errorClassifier
             );
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +

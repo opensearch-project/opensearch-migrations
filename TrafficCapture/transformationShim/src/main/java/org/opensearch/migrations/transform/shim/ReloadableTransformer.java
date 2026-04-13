@@ -7,11 +7,13 @@
  */
 package org.opensearch.migrations.transform.shim;
 
+import java.util.Map;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.ThreadSafeTransformerWrapper;
 
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -21,9 +23,13 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ReloadableTransformer implements IJsonTransformer {
     private volatile IJsonTransformer delegate;
+    /** Original bindings (including solrConfig) preserved for hot-reload. */
+    @Getter
+    private final Map<String, Object> bindings;
 
-    public ReloadableTransformer(Supplier<IJsonTransformer> supplier) {
+    public ReloadableTransformer(Supplier<IJsonTransformer> supplier, Map<String, Object> bindings) {
         this.delegate = new ThreadSafeTransformerWrapper(supplier);
+        this.bindings = bindings != null ? bindings : Map.of();
     }
 
     @Override

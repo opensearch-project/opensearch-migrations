@@ -12,8 +12,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.transform.JavascriptTransformer;
-import org.opensearch.migrations.transform.shim.ShimMain;
 import org.opensearch.migrations.transform.shim.ShimProxy;
+import org.opensearch.migrations.transform.shim.SolrTransformerProvider;
 import org.opensearch.migrations.transform.shim.validation.Target;
 
 import io.netty.bootstrap.ServerBootstrap;
@@ -55,7 +55,7 @@ class URLSearchParamsPolyfillTest {
     /** Minimal URLSearchParams polyfill — uses the production polyfill from ShimMain. */
 
     /** Transform that parses query params with URLSearchParams and exercises all polyfill methods. */
-    private static final String TRANSFORM = ShimMain.JS_POLYFILL +
+    private static final String TRANSFORM = SolrTransformerProvider.JS_POLYFILL +
         "(function(bindings) {\n" +
         "  return function(request) {\n" +
         "    var uri = request.get('URI');\n" +
