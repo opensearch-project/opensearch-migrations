@@ -24,11 +24,10 @@ export type K8sActionVerb = "create" | "get" | "apply" | "delete" | "replace" | 
 /** Partial representation of io.argoproj.workflow.v1alpha1.ResourceTemplate */
 export type ResourceWorkflowDefinition = {
     action: AllowLiteralOrExpression<K8sActionVerb>,
-    failureCondition?: string,
+    failureCondition?: AllowLiteralOrExpression<string>,
     flags?: string[],
     setOwnerReference?: AllowLiteralOrExpression<boolean>,
-    // make these more strongly typed!
-    successCondition?: string, // this should be an expression
+    successCondition?: AllowLiteralOrExpression<string>,
     manifest: Record<string, any>
 };
 

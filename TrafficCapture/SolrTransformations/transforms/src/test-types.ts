@@ -200,6 +200,8 @@ export interface TestCase {
   opensearchMapping?: OpenSearchMapping;
   solrVersions?: string[];
   plugins?: string[];
+  /** Optional bindings passed to transforms at init (e.g., solrConfig defaults from solrconfig.xml). */
+  transformBindings?: Record<string, unknown>;
 }
 
 /** Solr-internal fields that OpenSearch doesn't have — always safe to ignore. */
