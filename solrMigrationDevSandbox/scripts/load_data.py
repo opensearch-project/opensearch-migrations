@@ -7,7 +7,7 @@ Usage:
         --dataset data/dataset.json \
         --solr-url http://localhost:18983 \
         --opensearch-url http://localhost:19200 \
-        [--collection validation] [--index validation] [--batch-size 500]
+        [--collection testharness] [--index testharness] [--batch-size 500]
 """
 
 import argparse

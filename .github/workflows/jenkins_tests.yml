@@ -67,8 +67,7 @@ jobs:
   eks-integ-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -92,8 +91,7 @@ jobs:
   eks-aoss-search-integ-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-aoss-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -117,8 +115,7 @@ jobs:
   eks-aoss-timeseries-integ-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-aoss-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -142,8 +139,7 @@ jobs:
   eks-aoss-vector-integ-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-aoss-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -167,8 +163,7 @@ jobs:
   eks-byos-integ-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-byos-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-byos-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-eks-byos-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -191,8 +186,7 @@ jobs:
 
   eks-cdc-only-integ-test:
     if: |
-      (github.event.action == 'labeled' && github.event.label.name == 'run-cdc-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-cdc-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-cdc-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -216,8 +210,7 @@ jobs:
   eks-cfn-create-vpc-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-cfn-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-cfn-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-cfn-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -241,8 +234,7 @@ jobs:
   eks-cfn-import-vpc-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-cfn-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-cfn-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-cfn-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
