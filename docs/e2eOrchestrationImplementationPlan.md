@@ -20,6 +20,23 @@ Only after that initial slice is stable should the implementation expand to gate
 - Run one outer test workflow at a time
 - Run one inner migration workflow at a time
 - Require teardown for success
+- Keep the live runner and the outer-workflow path semantically aligned
+
+## Planned PR Boundary
+
+The current branch should stop after the first visible runtime slice, cut a PR, and then merge `#2462` before the next round of hardening.
+
+Why this boundary exists:
+
+- the current work proves matrix expansion, reporting, and a live runtime path
+- `#2462` changes the workflow lifecycle in exactly the area the next improvements depend on
+- approval/reset/resubmit/delete behavior should be aligned to the post-`#2462` CLI and CRD lifecycle, not implemented twice
+
+Working assumption for follow-up work:
+
+- land the current MVP-oriented PR first
+- merge or rebase in `opensearch-project/opensearch-migrations#2462`
+- only then implement the full gated/impossible/delete hardening
 
 ## Phase 0: Package And Contracts
 
@@ -107,6 +124,7 @@ and returns:
 - the focus component
 - immediate dependents
 - transitive dependents
+- upstream prerequisites
 - independent components
 
 Target API:
@@ -116,6 +134,7 @@ type DerivedSubgraph = {
   focus: string;
   immediateDependents: string[];
   transitiveDependents: string[];
+  upstreamPrerequisites: string[];
   independent: string[];
 };
 
@@ -129,7 +148,7 @@ First cut:
 
 Exit criteria:
 
-- for `capture-proxy`, the helper can identify one downstream chain and one unrelated branch
+- for `capture-proxy`, the helper can identify one downstream chain, one upstream prerequisite, and one unrelated branch
 
 ## Phase 3: Approved Mutator Registry
 
@@ -138,7 +157,7 @@ Implement `approvedMutators.ts` with only a small reviewed set.
 Minimum first-cut set:
 
 - one safe `focus-change` mutator on `capture-proxy`
-- one safe `immediate-dependent-change` mutator on `snap1`
+- one safe `immediate-dependent-change` mutator on `snap1` or replay
 - optionally one safe `transitive-dependent-change` mutator on `migration1`
 
 Suggested shape:
@@ -179,7 +198,7 @@ Example output:
 
 ```text
 capture-proxy-chain-behaviors/focus-change/safe/noCapture
-capture-proxy-chain-behaviors/immediate-dependent-change/safe/snapshot.someSafeField
+capture-proxy-chain-behaviors/immediate-dependent-change/safe/replay.someSafeField
 ```
 
 Exit criteria:
@@ -300,7 +319,49 @@ Exit criteria:
 
 - a developer can run one known-failing case and inspect the report shape
 
-## Phase 10: Teardown Hardening
+## Phase 10: Merge And Reconcile With #2462
+
+After the current MVP-oriented PR is cut, merge or rebase in `#2462` before continuing.
+
+Required reconciliation work:
+
+- re-run the live runner against the post-`#2462` workflow CLI
+- align the outer-workflow control flow with the new reset/resubmit/approval/delete semantics
+- replace any pre-`#2462` assumptions about workflow lifecycle, teardown, or gate progression
+- update docs and examples so the plan describes the post-merge control surface, not the pre-merge spike
+
+Exit criteria:
+
+- the package still runs the safe matrix slice correctly after the `#2462` merge
+- the plan and code agree on the new workflow lifecycle primitives
+
+## Phase 11: Runtime Hardening After #2462
+
+Harden the runtime paths before expanding breadth.
+
+Required hardening:
+
+1. make the outer workflow match the live runner's semantics
+2. require validation before approval in gated paths
+3. remove any silent-success or auto-approve-only shortcuts from the final gated implementation
+4. keep the TypeScript assert logic and shell/outer-workflow assertions equivalent
+5. ensure teardown and observation collection cover all resources touched across all runs, not just the final mutated set
+
+Concrete implementation direction:
+
+- split the outer workflow's gate handling into monitor, validate, approve, and continue steps
+- pass fixture-driven validations into the outer-workflow gate path, not just the live runner
+- make approval conditional on validation success
+- fail fast when setup fixtures fail
+- keep cleanup in `finally`-style control flow where possible
+
+Exit criteria:
+
+- the live runner and the outer-workflow path enforce the same approval semantics
+- failed validations stop the scenario before approval
+- teardown leaves the scenario context clean after success or failure
+
+## Phase 12: Teardown Hardening
 
 Make teardown mandatory for success.
 
@@ -317,19 +378,21 @@ Exit criteria:
 
 - repeated runs start from the same clean context
 
-## Phase 11: Expand Safe Matrix Coverage
+## Phase 13: Expand Safe Matrix Coverage
 
-Only after the MVP works:
+Only after the MVP works and the post-`#2462` runtime hardening is done:
 
 - add `transitive-dependent-change`
 - add more reviewed safe mutators
 - add coverage accounting for unexpanded cases
+- add direct tests for spec loading, fixture resolution, gate matching, and outer-workflow rendering
 
 Exit criteria:
 
 - the framework can exercise a broader safe-change matrix with understandable reports
+- the expanded authoring/report surface has direct automated coverage
 
-## Phase 12: Add Gated Flow
+## Phase 14: Add Gated Flow
 
 Implement one gated case only:
 
@@ -339,6 +402,7 @@ Required additions:
 
 - wait-for-block step
 - assert-before-action
+- validation-before-approval step
 - approve action
 - assert-after-action
 
@@ -346,8 +410,9 @@ Exit criteria:
 
 - blocked dependents are visible before approval
 - progression after approval is visible in the report
+- the same gate validations run in both the live runner and the outer workflow
 
-## Phase 13: Add Impossible/Delete Flow
+## Phase 15: Add Impossible/Delete Flow
 
 Implement one impossible case only:
 
@@ -365,6 +430,10 @@ Important semantic:
 
 - impossible means impossible to update in place
 - not impossible to proceed after deleting the old resource and retrying
+
+Post-`#2462` expectation:
+
+- this flow should use the merged workflow lifecycle primitives rather than a parallel custom recovery path
 
 Exit criteria:
 
@@ -391,11 +460,12 @@ That milestone should deliver:
 
 It should not yet attempt:
 
-- approval automation
+- full approval validation in the outer workflow
 - impossible/delete recovery
 - broad matrix coverage
 - multiple focuses
 - complex scenario packs
+- post-`#2462` lifecycle reconciliation
 
 ## Suggested First Scenario
 
@@ -420,7 +490,7 @@ Expected value of this slice:
 - you can see failure rendering
 - you can verify teardown
 
-That is enough confidence to move on to gated and impossible behavior.
+That is enough confidence to cut the first PR, merge `#2462`, and then move on to gated and impossible behavior.
 
 ## Agent Handoff Checklist
 
@@ -434,6 +504,7 @@ This section is written as a direct execution guide for another agent.
 - Keep all mutations manually authored.
 - Keep the first matrix limited to `safe` cases only.
 - Do not implement approval or impossible/delete flows in the first slice.
+- After the first slice lands, merge `#2462` before continuing into gated and impossible behavior.
 
 ### Workspace Targets
 
@@ -552,6 +623,7 @@ Done means:
   - focus
   - one immediate dependent
   - one transitive dependent
+  - one upstream prerequisite
   - one independent component
 
 #### Phase 3
@@ -575,6 +647,7 @@ Done means:
 
 - mutators can be resolved by `changeClass` and `pattern`
 - mutators produce valid configs for the chosen baseline
+- mis-tagged mutators are rejected by expansion-time validation
 
 #### Phase 4
 
@@ -608,6 +681,8 @@ First-cut supported inputs:
 Done means:
 
 - one matrix spec expands into concrete test cases with stable names
+- `requireFullCoverage` is enforced
+- expectations are derived from topology, not just raw checksum diffs
 
 #### Phase 5
 
@@ -710,6 +785,7 @@ Done means:
 
 - one simple generated matrix case runs end to end
 - a structured report is emitted
+- the live runner and outer workflow can both exercise the same safe scenario
 
 #### Phase 9
 
@@ -727,6 +803,42 @@ Done means:
   - the scenario report
 
 #### Phase 10
+
+After the first PR lands, merge `#2462` and reconcile the runtime path.
+
+Files to revisit:
+
+```text
+packages/e2e-orchestration-tests/src/e2e-run.ts
+packages/e2e-orchestration-tests/src/buildOuterWorkflow.ts
+packages/e2e-orchestration-tests/src/fixtures.ts
+packages/e2e-orchestration-tests/src/fixtureRegistry.ts
+```
+
+Done means:
+
+- the safe scenario still runs after the `#2462` merge
+- runtime lifecycle control matches the merged CLI/CRD behavior
+- docs and code no longer rely on pre-`#2462` lifecycle assumptions
+
+#### Phase 11
+
+Harden the post-`#2462` runtime semantics.
+
+Key requirements:
+
+- validation must run before approval in gated paths
+- the outer workflow must not be weaker than the live runner
+- setup failures should stop the scenario
+- teardown and observation must account for all touched resources
+
+Done means:
+
+- a failed validation prevents approval
+- the live runner and outer workflow enforce the same gate semantics
+- cleanup leaves the environment clean on success and failure
+
+#### Phase 12
 
 Harden teardown.
 
@@ -768,11 +880,12 @@ The first deliverable handed back by the agent should include:
 
 The agent should not implement yet:
 
-- gated approval flow automation
+- gated approval flow automation in the outer workflow
 - impossible/delete recovery flow
 - broad scenario packs
 - multi-focus scenarios
 - full coverage accounting across many components
+- post-`#2462` lifecycle reconciliation beyond keeping the plan ready for it
 
 ### Suggested First Scenario Fixture
 
