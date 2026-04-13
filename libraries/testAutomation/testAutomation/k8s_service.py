@@ -116,6 +116,77 @@ class K8sService:
         console_pod_id = pods[-1].metadata.name
         return console_pod_id
 
+    def exec_background_cmd(self, command_list: List, log_file: str, exit_code_file: str) -> None:
+        """Launch a command in the background inside the migration console pod.
+
+        The command's output is written to log_file so Jenkins can tail it.
+        On completion, the exit code is written to exit_code_file.
+        """
+        inner_cmd = " ".join(shlex.quote(arg) for arg in command_list)
+        # Clean up stale files from any previous run
+        self.exec_migration_console_cmd(
+            command_list=["sh", "-c", f"rm -f {log_file} {exit_code_file}"],
+            unbuffered=False)
+        wrapper = (
+            f"nohup sh -c '"
+            f"{inner_cmd} > {log_file} 2>&1; "
+            f"echo $? > {exit_code_file}"
+            f"' > /dev/null 2>&1 &"
+        )
+        self.exec_migration_console_cmd(command_list=["sh", "-c", wrapper], unbuffered=False)
+        time.sleep(2)
+        check = self.exec_migration_console_cmd(
+            command_list=["sh", "-c", f"test -f {log_file} && echo ok || echo missing"],
+            unbuffered=False)
+        if "missing" in (check or ""):
+            raise RuntimeError(f"Background command failed to start — {log_file} not created")
+        logger.info(f"Background command launched. Log: {log_file}, exit code: {exit_code_file}")
+
+    def poll_cmd_completion(self, log_file: str, exit_code_file: str,
+                            poll_interval: int = 30, timeout: int = 0) -> int:
+        """Poll until a background command completes, tailing its log for Jenkins console output.
+
+        Returns the exit code of the background command.
+        """
+        start_time = time.time()
+        next_byte = 0
+        while True:
+            if timeout > 0 and (time.time() - start_time) > timeout:
+                raise TimeoutError(f"Background command did not complete within {timeout}s")
+            time.sleep(poll_interval)
+
+            # Print new log bytes since last poll (no filtering/rewrapping for Jenkins parity)
+            try:
+                resp = self.exec_migration_console_cmd(
+                    command_list=["tail", "-c", f"+{next_byte + 1}", log_file],
+                    unbuffered=False)
+                if resp:
+                    print(resp, end="", flush=True)
+                    next_byte += len(resp.encode("utf-8"))
+            except Exception as e:
+                logger.info(f"Log tail failed (may be transient): {e}")
+
+            # Check if the command has finished
+            try:
+                result = self.exec_migration_console_cmd(
+                    command_list=["cat", exit_code_file], unbuffered=False)
+                if result and result.strip():
+                    exit_code = int(result.strip())
+                    # Print any remaining log output
+                    try:
+                        resp = self.exec_migration_console_cmd(
+                            command_list=["tail", "-c", f"+{next_byte + 1}", log_file],
+                            unbuffered=False)
+                        if resp:
+                            print(resp, end="", flush=True)
+                    except Exception:
+                        pass
+                    logger.info(f"Background command completed with exit code: {exit_code}")
+                    return exit_code
+            except Exception:
+                # exit_code_file doesn't exist yet — command still running
+                pass
+
     def exec_migration_console_cmd(self, command_list: List, unbuffered: bool = True) -> str | WSClient:
         """Executes a command inside the latest migration console pod"""
         console_pod_id = self.get_migration_console_pod_id()
