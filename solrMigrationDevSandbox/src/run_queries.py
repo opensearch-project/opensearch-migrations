@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Query executor — runs queries against Solr-direct and the Translation Shim,
 optionally also against a dual-target shim for cross-validation.
@@ -43,7 +42,7 @@ def _print_dual_summary(results):
         for r in errors:
             print(f"    {r.query_id}: {r.error}")
     if lats:
-        print(f"\n  Avg latency:  {sum(lats)/len(lats):.0f}ms")
+        print(f"\n  Avg latency:  {sum(lats) / len(lats):.0f}ms")
     print(SEPARATOR)
     return len(errors) > 0
 
@@ -73,9 +72,9 @@ def _print_single_summary(results):
         for r in shim_errors:
             print(f"    {r.query_id}: {r.shim_error}")
     if solr_lats:
-        print(f"\n  Avg Solr latency:  {sum(solr_lats)/len(solr_lats):.0f}ms")
+        print(f"\n  Avg Solr latency:  {sum(solr_lats) / len(solr_lats):.0f}ms")
     if shim_lats:
-        print(f"  Avg Shim latency:  {sum(shim_lats)/len(shim_lats):.0f}ms")
+        print(f"  Avg Shim latency:  {sum(shim_lats) / len(shim_lats):.0f}ms")
     print(SEPARATOR)
     return len(shim_errors) > 0
 

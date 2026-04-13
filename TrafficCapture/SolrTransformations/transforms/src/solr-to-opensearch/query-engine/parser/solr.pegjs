@@ -113,8 +113,13 @@ group
 
 // MatchAllNode: `*:*` matches every document.
 // Must be checked before fieldExpr to prevent `*` being parsed as a field name.
+// Supports optional boost: `*:*^2` → BoostNode wrapping MatchAllNode.
 matchAll
-  = "*:*" { return { type: 'matchAll' }; }
+  = "*:*" boost:boost? {
+      const node = { type: 'matchAll' };
+      if (boost !== null) return { type: 'boost', child: node, value: boost };
+      return node;
+    }
 
 // ─── Field expressions ───────────────────────────────────────────────────────
 // Matches field:value, field:"phrase", and field:[range] / field:{range}.

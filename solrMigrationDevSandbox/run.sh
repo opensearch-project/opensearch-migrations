@@ -145,6 +145,8 @@ else
   SHIM_JAVA_HOME="${JAVA_HOME:-}"
   if [[ -d "/Library/Java/JavaVirtualMachines/amazon-corretto-17.jdk/Contents/Home" ]]; then
     SHIM_JAVA_HOME="/Library/Java/JavaVirtualMachines/amazon-corretto-17.jdk/Contents/Home"
+  elif [[ -d "/usr/lib/jvm/java-17-amazon-corretto" ]]; then
+    SHIM_JAVA_HOME="/usr/lib/jvm/java-17-amazon-corretto"
   fi
   set +e
   JAVA_HOME="$SHIM_JAVA_HOME" \

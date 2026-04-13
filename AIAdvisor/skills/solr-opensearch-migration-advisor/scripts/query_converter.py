@@ -16,6 +16,21 @@ Supported Solr query patterns
 * ``*:*``                            → ``match_all``
 * Plain ``term`` (no field)          → ``query_string``
 
+eDisMax parameters (via ``convert_edismax``)
+--------------------------------------------
+* ``q``   — query text; translated using standard query conversion
+* ``qf``  — query fields with optional per-field boosts (``field^boost``)
+             → ``multi_match`` across those fields
+* ``mm``  — minimum_should_match passed through to the bool query
+* ``pf``  — phrase boost fields → ``should`` ``multi_match`` with type ``phrase``
+* ``pf2`` — bigram phrase boost fields → ``should`` ``multi_match`` with type ``phrase``
+* ``pf3`` — trigram phrase boost fields → ``should`` ``multi_match`` with type ``phrase``
+* ``ps``  — phrase slop applied to ``pf`` phrase clauses
+* ``qs``  — query slop applied to ``qf`` match clauses
+* ``tie`` — tiebreaker for ``multi_match`` cross-field scoring
+* ``bq``  — additive boost query → extra ``should`` clause (Behavioral: additive vs multiplicative)
+* ``bf``  — boost function expression → ``script_score`` wrapper (Behavioral: approximation only)
+
 Limitations
 -----------
 * Nested parentheses grouping is limited; complex nested expressions will
@@ -23,6 +38,9 @@ Limitations
 * Boost values (``^n``) are stripped from query terms.
 * Fuzzy operators (``~``) are not converted and fall back to
   ``query_string``.
+* ``bf`` (boost function) is approximated as a Painless ``script_score``
+  wrapping the main query; complex Solr function expressions may require
+  manual adjustment.
 """
 
 from __future__ import annotations
@@ -262,6 +280,142 @@ class QueryConverter:
         # OR
         return {"query": {"bool": {"should": clauses, "minimum_should_match": 1}}}
 
+    def convert_edismax(
+        self,
+        q: str,
+        *,
+        qf: str | None = None,
+        mm: str | None = None,
+        pf: str | None = None,
+        pf2: str | None = None,
+        pf3: str | None = None,
+        ps: int | None = None,
+        qs: int | None = None,
+        tie: float | None = None,
+        bq: str | list[str] | None = None,
+        bf: str | None = None,
+    ) -> dict[str, Any]:
+        """Convert an eDisMax query to OpenSearch Query DSL.
+
+        Args:
+            q:   The main query text (Solr ``q`` parameter).
+            qf:  Query fields with optional boosts, e.g. ``"title^2 body^0.5"``.
+                 When provided, a ``multi_match`` query is used instead of the
+                 standard query conversion.
+            mm:  Minimum should match, passed through verbatim to the bool query
+                 (e.g. ``"75%"`` or ``"2"``).
+            pf:  Phrase boost fields.  Translated to ``should`` ``multi_match``
+                 clauses with ``type: phrase``.
+            pf2: Bigram phrase boost fields (same translation as ``pf``).
+            pf3: Trigram phrase boost fields (same translation as ``pf``).
+            ps:  Phrase slop applied to ``pf`` phrase clauses.
+            qs:  Query slop applied to the ``qf`` ``multi_match`` clause.
+            tie: Tiebreaker for ``multi_match`` cross-field scoring.
+            bq:  Additive boost query (or list of queries).  Each is translated
+                 and added as a ``should`` clause.  Note: Solr ``bq`` is additive
+                 while OpenSearch ``should`` is multiplicative — this is a
+                 Behavioral difference.
+            bf:  Boost function expression.  Wrapped in a ``script_score`` query
+                 as a Painless script approximation.  Complex Solr function
+                 expressions will require manual adjustment.
+
+        Returns:
+            An OpenSearch Query DSL dict (the full ``{"query": …}`` envelope).
+
+        Raises:
+            ValueError: If ``q`` is empty.
+        """
+        if not q or not q.strip():
+            raise ValueError("q must not be empty")
+
+        query_text = q.strip()
+
+        # --- Main query clause ---
+        main_clause = _build_edismax_main_clause(
+            query_text, qf=qf, tie=tie, qs=qs,
+            fallback=self.convert(query_text)["query"] if not qf else None,
+        )
+
+        # --- Phrase boost clauses (pf / pf2 / pf3) ---
+        should_clauses: list[dict[str, Any]] = []
+        for phrase_field_str in filter(None, [pf, pf2, pf3]):
+            should_clauses.extend(
+                _build_phrase_should_clauses(phrase_field_str, query_text, ps)
+            )
+
+        # --- Boost queries (bq) ---
+        if isinstance(bq, str):
+            bq_list: list[str] = [bq]
+        elif bq:
+            bq_list = list(bq)
+        else:
+            bq_list = []
+        for bq_item in bq_list:
+            should_clauses.append(self.convert(bq_item.strip())["query"])
+
+        # --- Assemble bool query ---
+        assembled = _assemble_edismax_bool(main_clause, should_clauses, mm)
+
+        # --- Boost function (bf) wraps everything in script_score ---
+        if bf:
+            assembled = {
+                "script_score": {
+                    "query": assembled,
+                    "script": {"source": bf},
+                }
+            }
+
+        return {"query": assembled}
+
+
+def _build_edismax_main_clause(
+    query_text: str,
+    *,
+    qf: str | None,
+    tie: float | None,
+    qs: int | None,
+    fallback: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build the main query clause for an eDisMax query."""
+    if not qf:
+        return fallback  # type: ignore[return-value]
+    clause: dict[str, Any] = {
+        "multi_match": {
+            "query": query_text,
+            "fields": _parse_qf(qf),
+            "type": "best_fields",
+        }
+    }
+    if tie is not None:
+        clause["multi_match"]["tie_breaker"] = tie
+    if qs is not None:
+        clause["multi_match"]["slop"] = qs
+    return clause
+
+
+def _assemble_edismax_bool(
+    main_clause: dict[str, Any],
+    should_clauses: list[dict[str, Any]],
+    mm: str | None,
+) -> dict[str, Any]:
+    """Assemble the final bool query from main + should clauses, applying mm."""
+    if should_clauses:
+        bool_query: dict[str, Any] = {
+            "bool": {"must": [main_clause], "should": should_clauses}
+        }
+        if mm is not None:
+            bool_query["bool"]["minimum_should_match"] = mm
+        return bool_query
+
+    # No should clauses — apply mm directly if possible
+    if mm is not None:
+        if isinstance(main_clause, dict) and "bool" in main_clause:
+            main_clause["bool"]["minimum_should_match"] = mm
+            return main_clause
+        return {"bool": {"must": [main_clause], "minimum_should_match": mm}}
+
+    return main_clause
+
 
 def _unwrap_parens(query: str) -> str:
     """Remove a single layer of matching outer parentheses if present."""
@@ -280,3 +434,48 @@ def _unwrap_parens(query: str) -> str:
             # group, don't strip.
             return query
     return query[1:-1].strip()
+
+
+# ---------------------------------------------------------------------------
+# eDisMax helpers
+# ---------------------------------------------------------------------------
+
+_QF_FIELD_RE = re.compile(r'^(?P<field>\w+)(?:\^(?P<boost>[\d.]+))?$')
+
+
+def _parse_qf(qf: str) -> list[str]:
+    """Parse a Solr ``qf`` string into a list of ``field^boost`` strings
+    suitable for OpenSearch ``multi_match`` ``fields``.
+
+    Examples::
+
+        "title^2 body^0.5" → ["title^2", "body^0.5"]
+        "title body"       → ["title", "body"]
+    """
+    fields: list[str] = []
+    for token in qf.split():
+        m = _QF_FIELD_RE.match(token)
+        if m:
+            field = m.group("field")
+            boost = m.group("boost")
+            fields.append(f"{field}^{boost}" if boost else field)
+    return fields
+
+
+def _build_phrase_should_clauses(
+    pf: str, query_text: str, slop: int | None
+) -> list[dict[str, Any]]:
+    """Build ``should`` ``multi_match`` phrase clauses from a ``pf``/``pf2``/``pf3`` string."""
+    fields = _parse_qf(pf)
+    if not fields:
+        return []
+    clause: dict[str, Any] = {
+        "multi_match": {
+            "query": query_text,
+            "type": "phrase",
+            "fields": fields,
+        }
+    }
+    if slop is not None:
+        clause["multi_match"]["slop"] = slop
+    return [clause]

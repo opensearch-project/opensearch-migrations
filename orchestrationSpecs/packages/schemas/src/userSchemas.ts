@@ -126,6 +126,9 @@ export const HOSTNAME_PATTERN = "[^:\\/\\s]+";
 export const HTTP_ENDPOINT_PATTERN = `^https?:\\/\\/${HOSTNAME_PATTERN}${OPTIONAL_PORT_PATTERN}(?:\\/)?$`;
 export const OPTIONAL_HTTP_ENDPOINT_PATTERN = `^(?:https?:\\/\\/${HOSTNAME_PATTERN}${OPTIONAL_PORT_PATTERN}(?:\\/)?)?$`;
 
+export const GENERIC_JSON_OBJECT = z.record(z.string(), z.any());
+export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+
 const OTEL_COLLECTOR_ENDPOINT = z.string().default("http://otel-collector:4317").optional()
     .describe("URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317').");
 
@@ -139,9 +142,105 @@ export const KAFKA_CLIENT_CONFIG = z.object({
     kafkaTopic: z.string()
         .describe("Default Kafka topic name for this cluster. Can be overridden per-proxy via the capture config's kafkaTopic field.")
         .default(""),
+    managedByWorkflow: z.boolean().default(false).optional()
+      .describe("Internal flag indicating whether the Kafka cluster is created and resolved by the workflow."),
+    listenerName: z.string().default("").optional()
+      .describe("Resolved Kafka listener name used by migration applications."),
+    authType: z.enum(["none", "scram-sha-512"]).default("none").optional()
+      .describe("Resolved Kafka auth mode used by migration applications."),
+    secretName: z.string().default("").optional()
+      .describe("Resolved Kubernetes secret containing Kafka client credentials."),
+    caSecretName: z.string().default("").optional()
+      .describe("Resolved Kubernetes secret containing the Kafka cluster CA certificate for TLS trust."),
+    kafkaUserName: z.string().default("").optional()
+      .describe("Resolved Kafka principal name used by migration applications."),
+    topicSpecOverrides: GENERIC_JSON_OBJECT.default({}).optional()
+      .describe("Resolved Strimzi KafkaTopic.spec overrides used when the workflow creates the topic resource."),
 }).describe("Connection configuration for an externally managed Kafka cluster.");
 
-export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+export const KAFKA_EXISTING_AUTH_CONFIG = z.discriminatedUnion("type", [
+    z.object({
+        type: z.literal("none"),
+    }),
+    z.object({
+        type: z.literal("scram-sha-512"),
+        secretName: z.string().regex(K8S_NAMING_PATTERN),
+        caSecretName: z.string().regex(K8S_NAMING_PATTERN),
+        kafkaUserName: z.string().regex(K8S_NAMING_PATTERN).optional(),
+    }),
+]);
+
+export const KAFKA_AUTO_CREATE_AUTH_CONFIG = z.discriminatedUnion("type", [
+    z.object({
+        type: z.literal("none"),
+    }),
+    z.object({
+        type: z.literal("scram-sha-512"),
+    }),
+]);
+
+export const DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES = {
+    partitions: 1,
+    replicas: 1,
+    config: {
+        "retention.ms": 604800000,
+        "segment.bytes": 1073741824,
+    }
+} as const;
+
+// These defaults are resolved during initialization so workflow templates do not
+// need to invent their own Kafka defaults. That keeps default ownership here,
+// even though some workflow templates currently unpack pieces of the resolved
+// Strimzi objects into explicit fields for Argo rendering safety.
+const DEFAULT_AUTO_CREATE_KAFKA = {
+    clusterSpecOverrides: {
+        kafka: {
+            readinessProbe: {
+                initialDelaySeconds: 10,
+                periodSeconds: 10,
+                timeoutSeconds: 5,
+                failureThreshold: 12,
+            },
+            livenessProbe: {
+                initialDelaySeconds: 30,
+                periodSeconds: 15,
+                timeoutSeconds: 5,
+                failureThreshold: 8,
+            },
+            config: {
+                "auto.create.topics.enable": false,
+                "offsets.topic.replication.factor": 1,
+                "transaction.state.log.replication.factor": 1,
+                "transaction.state.log.min.isr": 1,
+                "default.replication.factor": 1,
+                "min.insync.replicas": 1,
+            }
+        }
+    },
+    nodePoolSpecOverrides: {
+        replicas: 1,
+        roles: ["controller", "broker"],
+        storage: {
+            type: "persistent-claim",
+            size: "1Gi",
+            deleteClaim: true,
+        }
+    },
+    topicSpecOverrides: {
+        ...DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES
+    },
+};
+
+const replaceArrayMerge = (_destinationArray: unknown[], sourceArray: unknown[]) => sourceArray;
+
+export const KAFKA_EXISTING_CLUSTER_CONFIG = z.object({
+    enableMSKAuth: z.boolean().default(false).optional(),
+    kafkaConnection: z.string()
+        .describe("Sequence of <HOSTNAME:PORT> values delimited by ','.")
+        .regex(new RegExp(`^(?:[a-z0-9][-a-z0-9.]*:${PORT_NUMBER_PATTERN}(?:,(?!$)|$))*$`)),
+    kafkaTopic: z.string().describe("Empty defaults to the name of the target label").default(""),
+    auth: KAFKA_EXISTING_AUTH_CONFIG.default({type: "none"}).optional(),
+});
 
 export const CPU_QUANTITY = z.string()
     .regex(/^[0-9]+m$/)
@@ -545,34 +644,43 @@ export const USER_RFS_OPTIONS = z.object({
         );
 });
 
-export const KAFKA_CLUSTER_CREATION_CONFIG = z.object({
-    replicas:      z.number().int().min(1).default(1).optional()
-        .describe("Number of Kafka broker replicas in the Strimzi Kafka cluster. Increase for higher availability and throughput."),
-    storage: z.discriminatedUnion("type", [
-        z.object({ type: z.literal("ephemeral") })
-            .describe("Use ephemeral (emptyDir) storage. Data is lost when pods restart. Suitable for development and testing."),
-        z.object({
-            type: z.literal("persistent-claim"),
-            size: z.string()
-                .describe("Size of the PersistentVolumeClaim (e.g. '10Gi', '100Gi').")
-        }).describe("Use persistent storage backed by a PersistentVolumeClaim. Required for production workloads. " +
-            // TODO: Add guidance on sizing based on traffic volume and retention duration.
-            // Kafka does not gracefully handle disk exhaustion — brokers may become unresponsive.
-            "Size should account for expected traffic volume and Kafka retention period. " +
-            "If the disk fills up, Kafka brokers will become unresponsive and require manual intervention.")
-    ]).default({ type: "ephemeral" }).optional()
-        .describe("Storage configuration for Kafka broker data."),
-    partitions:    z.number().int().min(1).default(1).optional()
-        .describe("[Expert] Number of partitions for auto-created Kafka topics. Values greater than 1 are experimental and have not been fully tested."),
-    topicReplicas: z.number().int().min(1).default(1).optional()
-        .describe("Replication factor for auto-created Kafka topics. Must not exceed the number of broker replicas. Higher values improve durability."),
-}).describe("Configuration for auto-creating a Strimzi Kafka cluster. Used when no existing Kafka cluster is provided.");
+export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
+    (value) => deepmerge(DEFAULT_AUTO_CREATE_KAFKA, (value ?? {}), {arrayMerge: replaceArrayMerge}),
+    z.object({
+        auth: KAFKA_AUTO_CREATE_AUTH_CONFIG.optional()
+            .describe("Workflow-owned Kafka client auth for auto-created Strimzi clusters. "
+                + "If omitted, transform-time resolution currently defaults workflow-managed Kafka to "
+                + "`scram-sha-512` as the secure-by-default policy. This default is intentionally "
+                + "resolved outside the deep-merged Strimzi object defaults so auth policy can change "
+                + "without being hidden inside the structural Kafka/NodePool/Topic default merge."),
+        // Intended contract: users provide Strimzi-shaped partial Kafka.spec values and
+        // initialization deep-merges them with the baseline defaults above.
+        //
+        // Current limitation: some workflow templates still render selected nested
+        // Strimzi fields explicitly instead of passing the merged subtree through
+        // verbatim, because Argo resource-manifest rendering has proven unreliable
+        // for certain whole-object injections. That means new Strimzi fields may
+        // require workflow-template updates before they can flow end to end.
+        //
+        // Future direction: move Strimzi resource application onto a rendering/apply
+        // path that can preserve full merged subtrees without unpacking them into
+        // explicit Argo parameters, restoring better fidelity as Strimzi evolves.
+        clusterSpecOverrides: GENERIC_JSON_OBJECT.optional()
+            .describe("Optional overrides merged into the generated Strimzi Kafka.spec. " +
+                "Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."),
+        nodePoolSpecOverrides: GENERIC_JSON_OBJECT.optional()
+            .describe("Optional overrides merged into the generated Strimzi KafkaNodePool.spec. " +
+                "Workflow-managed fields such as cluster labels may be overwritten by the workflow."),
+        topicSpecOverrides: GENERIC_JSON_OBJECT.optional()
+            .describe("Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics."),
+    }).describe("Workflow-managed Strimzi Kafka cluster creation. Structural defaults for broker config, node pool, and topic settings are deep-merged here, while the auth default is resolved separately during transform-time policy application.")
+);
 
 export const KAFKA_CLUSTER_CONFIG = z.union([
     z.object({autoCreate: KAFKA_CLUSTER_CREATION_CONFIG})
         .describe("Auto-create a new Strimzi Kafka cluster with the specified configuration. " +
             "The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."),
-    z.object({existing: KAFKA_CLIENT_CONFIG })
+    z.object({existing: KAFKA_EXISTING_CLUSTER_CONFIG })
         .describe("Use an existing Kafka cluster by providing connection details.")
 ]).describe("Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one.");
 

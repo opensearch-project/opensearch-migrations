@@ -269,3 +269,49 @@ Map { "query_string" → Map { "query" → "the original solr query" } }
 - **The AST is Solr-specific** — represents what the user wrote, not how it maps to any target system.
 - **The parser handles all Solr parser types** — Lucene, eDisMax, DisMax share the same core syntax. Parser-specific behavior (e.g., eDisMax qf distribution) is a post-parse AST transformation.
 - **The caller provides configuration** — `df`, `qf`, `pf` etc. come from the params map. The query engine does not read config files.
+
+
+## Output Format Requirements
+
+All transformer rules MUST return `Map<string, any>` objects (not plain JS objects). This is a GraalVM requirement for Java interop.
+
+### Boost Compatibility
+
+When creating rules that may be boosted (wrapped in BoostNode), the output MUST follow one of these two patterns:
+
+#### 1. Field-Level Pattern
+
+For queries that target a specific field (match, match_phrase, range, term, etc.):
+
+```typescript
+// Structure: {"queryType": {"fieldName": {"param": "value"}}}
+return new Map([
+  ['match', new Map([
+    ['title', new Map([['query', 'java']])]  // ← Field params in nested Map
+  ])]
+]);
+```
+
+**WRONG** (boost will be applied at wrong level):
+```typescript
+return new Map([
+  ['match', new Map([['title', 'java']])]  // ← String value, not Map!
+]);
+```
+
+#### 2. Query-Level Pattern
+
+For queries without a specific field (query_string, bool, match_all, exists):
+
+```typescript
+// Structure: {"queryType": {"param": "value"}}
+return new Map([
+  ['query_string', new Map([['query', 'java']])]
+]);
+```
+
+### How boostRule Detects the Pattern
+
+The `boostRule` checks if the first value in the query body is a `Map`:
+- If `Map` → field-level pattern, boost added inside field params
+- If primitive (string/number/array) → query-level pattern, boost added at query body level
