@@ -32,18 +32,12 @@ $INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR $@
 
 echo "Applying Kubernetes resources..."
 
-# Apply CRD resources
-if [ -f "$TEMP_DIR/crdResources.yaml" ]; then
-    echo "Applying CRD resources..."
-    if kubectl create -f "$TEMP_DIR/crdResources.yaml" 2>/dev/null; then
-        # Patch status subresource (kubectl create ignores status)
-        if [ -f "$TEMP_DIR/patchCrdStatus.sh" ]; then
-            echo "Patching CRD status subresources..."
-            sh "$TEMP_DIR/patchCrdStatus.sh"
-        fi
-    else
-        echo "CRD resources already exist, skipping."
-    fi
+# Create CRD resources and initialize status for new ones.
+# patchCrdStatus.sh handles both creation and status initialization atomically:
+# each resource is created individually, and status is only patched for newly created ones.
+if [ -f "$TEMP_DIR/patchCrdStatus.sh" ]; then
+    echo "Creating/initializing CRD resources..."
+    sh "$TEMP_DIR/patchCrdStatus.sh"
 fi
 
 # Apply approval config maps

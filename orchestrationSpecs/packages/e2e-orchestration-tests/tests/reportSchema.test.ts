@@ -5,11 +5,11 @@ import {
 import type { ExpandedTestCase } from '../src/types';
 
 const mockTestCase: ExpandedTestCase = {
-    name: 'proxy:capture-proxy/focus-change/proxy-noCapture-toggle',
+    name: 'proxy:capture-proxy/focus-change/proxy-numThreads',
     focus: 'proxy:capture-proxy',
     pattern: 'focus-change',
     changeClass: 'safe',
-    mutatorId: 'proxy-noCapture-toggle',
+    mutatorId: 'proxy-numThreads',
     baselineChecksumReport: { components: {} },
     mutatedConfig: {},
     mutatedChecksumReport: { components: {} },

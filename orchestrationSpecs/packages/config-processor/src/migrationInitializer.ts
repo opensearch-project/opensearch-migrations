@@ -15,6 +15,7 @@ type StatusPatchableResource = {
     apiVersion: string;
     kind: string;
     metadata: {name: string};
+    spec?: Record<string, unknown>;
     status?: Record<string, unknown>;
 };
 
@@ -74,18 +75,29 @@ export class MigrationInitializer {
         const concurrencyPath = path.join(outputDir, 'concurrencyConfigMaps.yaml');
         await fs.writeFile(concurrencyPath, stringify(bundle.concurrencyConfigMaps));
 
-        // 4. Write CRD resources
+        // 4. Write CRD resources (reference only — patchCrdStatus.sh handles creation + status init)
         const crdPath = path.join(outputDir, 'crdResources.yaml');
         await fs.writeFile(crdPath, stringify(bundle.crdResources));
 
-        // 5. Write CRD status patches (status subresource must be patched separately)
+        // 5. Write CRD create-and-init script.
+        // Each resource is created atomically: kubectl create (fails if exists) && kubectl patch status.
+        // Existing resources are left untouched — their phase and checksum are preserved.
+        // This is the only file that should be executed for CRD setup.
         const statusPatches = (bundle.crdResources.items || [])
             .filter((item: StatusPatchableResource) => item.status !== undefined)
             .map((item: StatusPatchableResource) => {
                 const group = item.apiVersion.split('/')[0];
                 const kind = item.kind.toLowerCase() + 's.' + group;
                 const patch = JSON.stringify({ status: item.status });
-                return `kubectl patch ${kind}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
+                const manifest = JSON.stringify({
+                    apiVersion: item.apiVersion,
+                    kind: item.kind,
+                    metadata: item.metadata,
+                    spec: item.spec ?? {},
+                });
+                // Atomic: create fails if exists, so patch only runs for new resources
+                return `echo '${manifest.replace(/'/g, "'\\''")}' | kubectl create -f - 2>/dev/null && \\\n`
+                    + `  kubectl patch ${kind}/${item.metadata.name} --subresource=status --type=merge -p '${patch}' || true`;
             });
         if (statusPatches.length > 0) {
             const patchScript = '#!/bin/sh\nset -e\n' + statusPatches.join('\n') + '\n';

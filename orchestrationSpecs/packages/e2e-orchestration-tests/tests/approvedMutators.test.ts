@@ -16,7 +16,7 @@ describe('approvedMutators', () => {
     it('findMutators returns focus-change safe mutators', () => {
         const result = findMutators(defaultMutatorRegistry, 'safe', 'focus-change');
         expect(result.length).toBeGreaterThanOrEqual(1);
-        expect(result[0].id).toBe('proxy-noCapture-toggle');
+        expect(result[0].id).toBe('proxy-numThreads');
     });
 
     it('findMutators returns immediate-dependent-change safe mutators', () => {

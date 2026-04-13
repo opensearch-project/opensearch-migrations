@@ -16,8 +16,8 @@ exports[`reportSchema builds a failing result 1`] = `
     "kafka:default was expected unchanged but changed",
   ],
   "focus": "proxy:capture-proxy",
-  "mutatorId": "proxy-noCapture-toggle",
-  "name": "proxy:capture-proxy/focus-change/proxy-noCapture-toggle",
+  "mutatorId": "proxy-numThreads",
+  "name": "proxy:capture-proxy/focus-change/proxy-numThreads",
   "observed": {
     "kafka:default": {
       "changed": true,
@@ -50,8 +50,8 @@ exports[`reportSchema builds a passing result 1`] = `
     ],
   },
   "focus": "proxy:capture-proxy",
-  "mutatorId": "proxy-noCapture-toggle",
-  "name": "proxy:capture-proxy/focus-change/proxy-noCapture-toggle",
+  "mutatorId": "proxy-numThreads",
+  "name": "proxy:capture-proxy/focus-change/proxy-numThreads",
   "observed": {
     "kafka:default": {
       "changed": false,
@@ -75,7 +75,7 @@ exports[`reportSchema builds a scenario report 1`] = `
 {
   "coverage": {
     "expandedCases": [
-      "proxy:capture-proxy/focus-change/proxy-noCapture-toggle",
+      "proxy:capture-proxy/focus-change/proxy-numThreads",
     ],
     "selectedCases": [
       "focus-change",
@@ -95,8 +95,8 @@ exports[`reportSchema builds a scenario report 1`] = `
         ],
       },
       "focus": "proxy:capture-proxy",
-      "mutatorId": "proxy-noCapture-toggle",
-      "name": "proxy:capture-proxy/focus-change/proxy-noCapture-toggle",
+      "mutatorId": "proxy-numThreads",
+      "name": "proxy:capture-proxy/focus-change/proxy-numThreads",
       "observed": {
         "kafka:default": {
           "changed": false,

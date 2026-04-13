@@ -71,7 +71,7 @@ async function main() {
     const outerWorkflow = buildOuterWorkflow(testCase, config);
 
     console.log('\n=== Generated Outer Workflow (first test case) ===\n');
-    console.log(yaml.stringify(outerWorkflow, { lineWidth: 120 }));
+    console.log(outerWorkflow);
 
     // ─── Simulated assert logic ─────────────────────────────────────
     // Show what the assert step does when it runs inside the workflow.

@@ -25,12 +25,20 @@ export { deepSet };
 
 export const defaultMutatorRegistry: ApprovedMutator[] = [
     {
-        id: 'proxy-noCapture-toggle',
-        path: 'traffic.proxies.capture-proxy.proxyConfig.noCapture',
+        id: 'proxy-numThreads',
+        path: 'traffic.proxies.capture-proxy.proxyConfig.numThreads',
         changeClass: 'safe',
         patterns: ['focus-change'],
+        apply: (config) => deepSet(config, 'traffic.proxies.capture-proxy.proxyConfig.numThreads', 2),
+        rationale: 'Changing numThreads is a safe proxy change — not gated by admission policy — that cascades to snapshot and replayer via checksumForSnapshot/checksumForReplayer',
+    },
+    {
+        id: 'proxy-noCapture-toggle',
+        path: 'traffic.proxies.capture-proxy.proxyConfig.noCapture',
+        changeClass: 'gated',
+        patterns: ['focus-gated-change'],
         apply: (config) => deepSet(config, 'traffic.proxies.capture-proxy.proxyConfig.noCapture', true),
-        rationale: 'Toggling noCapture is a safe material proxy change that cascades to snapshot and replayer via checksumForSnapshot/checksumForReplayer',
+        rationale: 'Toggling noCapture is gated by ValidatingAdmissionPolicy — requires approval annotation to proceed',
     },
     {
         id: 'replayer-speedupFactor',

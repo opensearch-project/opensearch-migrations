@@ -16,12 +16,13 @@ describe('expandMatrix', () => {
 
         const cases = await expandMatrix(spec, report, defaultMutatorRegistry, config, report);
         expect(cases).toHaveLength(1);
-        expect(cases[0].name).toBe('proxy:capture-proxy/focus-change/proxy-noCapture-toggle');
+        expect(cases[0].name).toBe('proxy:capture-proxy/focus-change/proxy-numThreads');
 
-        // noCapture is checksumFor(snapshot, replayer), so proxy + snapshot + migration + replay should rerun
+        // numThreads changes the proxy's own configChecksum but is NOT in checksumForSnapshot/checksumForReplayer,
+        // so only the proxy itself should rerun — downstream components are unchanged.
         expect(cases[0].expect.reran).toContain('proxy:capture-proxy');
-        expect(cases[0].expect.reran).toContain('snapshot:source-snap1');
-        expect(cases[0].expect.reran).toContain('replay:capture-proxy-target-replay1');
+        expect(cases[0].expect.reran).not.toContain('snapshot:source-snap1');
+        expect(cases[0].expect.reran).not.toContain('replay:capture-proxy-target-replay1');
         // kafka should be unchanged (upstream prerequisite)
         expect(cases[0].expect.unchanged).toContain('kafka:default');
     });
@@ -86,8 +87,8 @@ describe('expandMatrix', () => {
         const spec: MatrixSpec = {
             focus: 'proxy:capture-proxy',
             select: [{
-                changeClass: 'gated',
-                patterns: ['focus-gated-change'],
+                changeClass: 'impossible',
+                patterns: ['immediate-dependent-impossible-change'],
                 requireFullCoverage: true,
             }],
         };
