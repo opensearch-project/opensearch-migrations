@@ -418,11 +418,11 @@ public class RfsMigrateDocuments {
                     "When --experimental-delta-mode is specified, --experimental-previous-snapshot-name must be provided."
                 );
             }
-            log.warn("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. " +
-                    "This feature is experimental and should not be used in production.", 
-                    args.experimental.experimentalDeltaMode);
+            log.atWarn().setMessage("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. " +
+                    "This feature is experimental and should not be used in production.")
+                    .addArgument(args.experimental.experimentalDeltaMode).log();
         } else if (args.experimental.previousSnapshotName != null) {
-            log.error("--experimental-previous-snapshot-name was provided but --experimental-delta-mode is not specified.");
+            log.atError().setMessage("--experimental-previous-snapshot-name was provided but --experimental-delta-mode is not specified.").log();
             throw new ParameterException(
                 "When --experimental-previous-snapshot-name is specified, --experimental-delta-mode must be provided."
             );
@@ -431,7 +431,7 @@ public class RfsMigrateDocuments {
         // Validate coordinator args - the ConnectionContext constructor will validate auth param consistency,
         // but we log here if coordinator is enabled for visibility
         if (args.coordinatorArgs.isEnabled()) {
-            log.info("Coordinator connection enabled with host: {}", args.coordinatorArgs.host);
+            log.atInfo().setMessage("Coordinator connection enabled with host: {}").addArgument(args.coordinatorArgs.host).log();
         }
     }
 
@@ -441,7 +441,7 @@ public class RfsMigrateDocuments {
         // Ensure that log4j2 doesn't execute shutdown hooks until ours have completed. This means that we need to take
         // responsibility for calling `LogManager.shutdown()` in our own shutdown hook..
         System.setProperty("log4j2.shutdownHookEnabled", "false");
-        log.info("Starting RfsMigrateDocuments with workerId=" + workerId);
+        log.atInfo().setMessage("Starting RfsMigrateDocuments with workerId={}").addArgument(workerId).log();
 
         Args arguments = EnvVarParameterPuller.injectFromEnv(new Args(), "RFS_");
         var jCommander = JsonCommandLineParser.newBuilder().addObject(arguments).build();
@@ -472,7 +472,7 @@ public class RfsMigrateDocuments {
             case AUTO -> {
                 var collectionType = targetClientFactory.detectServerlessCollectionType();
                 if (collectionType.requiresServerGeneratedIds()) {
-                    log.info("Auto-enabling server-generated IDs for {} serverless collection", collectionType);
+                    log.atInfo().setMessage("Auto-enabling server-generated IDs for {} serverless collection").addArgument(collectionType).log();
                     yield true;
                 }
                 yield false;
@@ -864,12 +864,12 @@ public class RfsMigrateDocuments {
         S3Repo s3Repo = null;
         if (arguments.snapshotLocalDir != null) {
             backupDir = Paths.get(arguments.snapshotLocalDir);
-            log.info("Starting Solr backup document migration from local dir: {}", backupDir);
+            log.atInfo().setMessage("Starting Solr backup document migration from local dir: {}").addArgument(backupDir).log();
         } else if (arguments.s3RepoUri != null && arguments.s3Region != null && arguments.s3LocalDir != null) {
             // Solr BACKUP API writes to s3://<bucket>/<backupName>/ (location=/ at repo root).
             var repoUri = new S3Uri(arguments.s3RepoUri);
             var backupS3Uri = "s3://" + repoUri.bucketName + "/" + arguments.snapshotName;
-            log.info("Downloading Solr backup metadata from S3: {}", backupS3Uri);
+            log.atInfo().setMessage("Downloading Solr backup metadata from S3: {}").addArgument(backupS3Uri).log();
             s3Repo = S3Repo.createRaw(
                 Paths.get(arguments.s3LocalDir),
                 new S3Uri(backupS3Uri),
@@ -912,22 +912,22 @@ public class RfsMigrateDocuments {
             // then download only the specific shard's index files when readDocuments is called.
             final S3Repo finalS3Repo = s3Repo;
             java.util.function.Consumer<String> collectionPreparer = (finalS3Repo != null) ? collection -> {
-                log.info("Downloading shard metadata for collection '{}' from S3", collection);
+                log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
                 finalS3Repo.downloadPrefix(collection + "/shard_backup_metadata");
             } : null;
             java.util.function.Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
                 var mapping = partition.fileNameMapping();
                 if (mapping != null) {
                     // SolrCloud UUID backup: download only the UUID files for this shard
-                    log.info("Downloading {} index files for shard '{}/{}' from S3",
-                        mapping.size(), partition.collection(), partition.shard());
+                    log.atInfo().setMessage("Downloading {} index files for shard '{}/{}' from S3")
+                        .addArgument(mapping.size()).addArgument(partition.collection()).addArgument(partition.shard()).log();
                     for (var uuid : mapping.values()) {
                         finalS3Repo.downloadFile(partition.collection() + "/index/" + uuid);
                     }
                 } else {
                     // Non-UUID layout: download the shard's directory
-                    log.info("Downloading index data for shard '{}/{}' from S3",
-                        partition.collection(), partition.shard());
+                    log.atInfo().setMessage("Downloading index data for shard '{}/{}' from S3")
+                        .addArgument(partition.collection()).addArgument(partition.shard()).log();
                     finalS3Repo.downloadPrefix(partition.collection() + "/index");
                 }
             } : null;
@@ -992,9 +992,9 @@ public class RfsMigrateDocuments {
                 runner.migrateOneShard(context::createReindexContext);
                 cleanShutdownCompleted.set(true);
             }
-            log.info("Solr backup document migration completed successfully");
+            log.atInfo().setMessage("Solr backup document migration completed successfully").log();
         } catch (NoWorkLeftException e) {
-            log.info("No more Solr work items to process: {}", e.getMessage());
+            log.atInfo().setMessage("No more Solr work items to process: {}").addArgument(e.getMessage()).log();
         } catch (Exception e) {
             throw new RuntimeException("Failed to migrate Solr backup", e);
         }

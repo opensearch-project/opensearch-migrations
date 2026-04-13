@@ -2,14 +2,12 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrHttpClient;
 import org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator;
 import org.opensearch.migrations.bulkload.solr.SolrStandaloneBackupCreator;
 
@@ -21,48 +19,51 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Backup strategy for Solr sources. Handles both SolrCloud (Collections API)
  * and standalone (Core Admin / replication API) modes.
+ * Uses {@link ConnectionContext} for authentication, sharing the same auth
+ * path as the Elasticsearch side.
  */
 @Slf4j
 public class SolrBackupStrategy implements SourceBackupStrategy {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
 
     private final CreateSnapshot.Args args;
+    private final ConnectionContext connectionContext;
+    private final SolrHttpClient httpClient;
 
     public SolrBackupStrategy(CreateSnapshot.Args args) {
         this.args = args;
+        this.connectionContext = args.sourceArgs.toConnectionContext();
+        this.httpClient = new SolrHttpClient(connectionContext);
     }
 
     @Override
     public void run() {
         var backupLocation = args.fileSystemRepoPath != null ? args.fileSystemRepoPath : args.s3RepoUri;
-        var solrUrl = args.sourceArgs.toConnectionContext().getUri().toString();
-        var username = args.sourceArgs.getUsername();
-        var password = args.sourceArgs.getPassword();
+        var solrUrl = connectionContext.getUri().toString();
 
         if (args.solrCollections.isEmpty()) {
             try {
-                args.solrCollections = discoverCollections(solrUrl, username, password);
+                args.solrCollections = discoverCollections(solrUrl, httpClient);
                 log.info("Auto-discovered {} Solr collection(s): {}", args.solrCollections.size(), args.solrCollections);
             } catch (Exception e) {
                 throw new ParameterException("Failed to discover Solr collections: " + e.getMessage());
             }
         }
 
-        if (isSolrCloud(solrUrl, username, password)) {
-            runCloudBackup(solrUrl, backupLocation, username, password);
+        if (isSolrCloud(solrUrl, httpClient)) {
+            runCloudBackup(solrUrl, backupLocation);
         } else {
-            runStandaloneBackup(solrUrl, backupLocation, username, password);
+            runStandaloneBackup(solrUrl, backupLocation);
         }
     }
 
     // ---- Cloud vs standalone detection ----
 
-    static boolean isSolrCloud(String solrUrl, String username, String password) {
+    static boolean isSolrCloud(String solrUrl, SolrHttpClient httpClient) {
         try {
-            var response = httpGet(solrUrl + "/solr/admin/collections?action=LIST&wt=json",
-                username, password, Duration.ofSeconds(5));
+            var response = httpClient.getRaw(
+                solrUrl + "/solr/admin/collections?action=LIST&wt=json", Duration.ofSeconds(5));
             return response.statusCode() == 200;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -76,10 +77,11 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     // ---- Collection / core discovery ----
 
-    static List<String> discoverCollections(String solrUrl, String username, String password) throws IOException {
+    static List<String> discoverCollections(String solrUrl, SolrHttpClient httpClient) throws IOException {
         // Try SolrCloud Collections API first
         try {
-            var json = httpGetBody(solrUrl + "/solr/admin/collections?action=LIST&wt=json", username, password);
+            var json = httpClient.getString(
+                solrUrl + "/solr/admin/collections?action=LIST&wt=json", Duration.ofSeconds(10));
             var node = MAPPER.readTree(json).path("collections");
             var collections = new ArrayList<String>();
             if (node.isArray()) {
@@ -90,15 +92,11 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             log.debug("Collections API failed, trying Core Admin: {}", e.getMessage());
         }
         // Fall back to Core Admin API (standalone)
-        var json = httpGetBody(solrUrl + "/solr/admin/cores?action=STATUS&wt=json", username, password);
+        var json = httpClient.getString(
+            solrUrl + "/solr/admin/cores?action=STATUS&wt=json", Duration.ofSeconds(10));
         return objectFieldKeys(MAPPER.readTree(json), "status");
     }
 
-    /**
-     * Find the first occurrence of {@code fieldName} whose value is a JSON object,
-     * and return that object's top-level keys. Skips non-object occurrences
-     * (e.g. {@code "status":0} in Solr's responseHeader).
-     */
     private static List<String> objectFieldKeys(JsonNode root, String fieldName) {
         var result = new ArrayList<String>();
         collectObjectFieldKeys(root, fieldName, result);
@@ -120,18 +118,18 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     // ---- Backup execution ----
 
-    private void runCloudBackup(String solrUrl, String backupLocation, String username, String password) {
+    private void runCloudBackup(String solrUrl, String backupLocation) {
         log.info("Detected SolrCloud — using Collections API backup");
         var creator = new SolrSnapshotCreator(
             solrUrl, args.snapshotName, backupLocation,
-            args.solrCollections, username, password, args.snapshotRepoName
+            args.solrCollections, connectionContext, args.snapshotRepoName
         );
         creator.registerRepo();
         creator.createSnapshot();
         waitForCompletion(creator::isSnapshotFinished);
     }
 
-    private void runStandaloneBackup(String solrUrl, String backupLocation, String username, String password) {
+    private void runStandaloneBackup(String solrUrl, String backupLocation) {
         log.info("Detected standalone Solr — using replication API backup");
         String repositoryName = null;
         if (args.s3RepoUri != null) {
@@ -145,7 +143,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
         var creator = new SolrStandaloneBackupCreator(
             solrUrl, args.snapshotName, backupLocation,
-            args.solrCollections, username, password, repositoryName
+            args.solrCollections, connectionContext, repositoryName
         );
         creator.createBackup();
         waitForCompletion(creator::isBackupFinished);
@@ -165,31 +163,6 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             log.info("Solr backup '{}' completed", args.snapshotName);
         } else {
             log.info("Solr backup '{}' initiated (no-wait mode)", args.snapshotName);
-        }
-    }
-
-    // ---- HTTP helpers ----
-
-    private static HttpResponse<String> httpGet(String url, String username, String password, Duration timeout)
-        throws IOException, InterruptedException {
-        var builder = HttpRequest.newBuilder().uri(URI.create(url)).GET().timeout(timeout);
-        if (username != null && password != null) {
-            builder.header("Authorization",
-                "Basic " + Base64.getEncoder().encodeToString((username + ":" + password).getBytes()));
-        }
-        return HTTP_CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-    }
-
-    private static String httpGetBody(String url, String username, String password) throws IOException {
-        try {
-            var response = httpGet(url, username, password, Duration.ofSeconds(10));
-            if (response.statusCode() != 200) {
-                throw new IOException("HTTP " + response.statusCode() + " from " + url);
-            }
-            return response.body();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted during HTTP request to " + url, e);
         }
     }
 }

@@ -11,6 +11,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
@@ -138,7 +139,7 @@ public class SolrToOpenSearchEndToEndTest {
             );
             var properties = MAPPER.readTree(mappingResp.body)
                 .path(COLLECTION_NAME).path("mappings").path("properties");
-            log.info("OpenSearch mappings: {}", properties);
+            log.atInfo().setMessage("OpenSearch mappings: {}").addArgument(properties).log();
 
             assertThat("id → keyword", properties.path("id").path("type").asText(), equalTo("keyword"));
             assertThat("stored_keyword → keyword", properties.path("stored_keyword").path("type").asText(), equalTo("keyword"));
@@ -162,7 +163,7 @@ public class SolrToOpenSearchEndToEndTest {
             assertThat("Should find doc1", hits.size(), equalTo(1));
 
             var doc = hits.get(0).path("_source");
-            log.info("Migrated doc: {}", doc);
+            log.atInfo().setMessage("Migrated doc: {}").addArgument(doc).log();
 
             assertThat("stored_keyword value", doc.path("stored_keyword").asText(), equalTo("hello"));
             assertThat("nodv_keyword value", doc.path("nodv_keyword").asText(), equalTo("no-docvalues"));
@@ -402,9 +403,10 @@ public class SolrToOpenSearchEndToEndTest {
             populateSolrDocuments(solr, COLLECTION_NAME, 8);
 
             // Use SolrStandaloneBackupCreator to trigger backup via replication API
+            var solrContext = new ConnectionContext.SourceArgs() {{ host = solr.getSolrUrl(); insecure = true; }}.toConnectionContext();
             var creator = new SolrStandaloneBackupCreator(
                 solr.getSolrUrl(), "test_backup", "/var/solr/data",
-                List.of(COLLECTION_NAME)
+                List.of(COLLECTION_NAME), solrContext
             );
             creator.createBackup();
 
@@ -471,7 +473,7 @@ public class SolrToOpenSearchEndToEndTest {
                     + "&replicationFactor=1"
                     + "&maxShardsPerNode=" + numShards
                     + "&wt=json");
-            log.info("Create collection response: {}", createResult.getStdout());
+            log.atInfo().setMessage("Create collection response: {}").addArgument(createResult.getStdout()).log();
 
             // Index 20 documents (distributed across shards by Solr's hash routing)
             populateSolrDocuments(solr, collection, 20);
@@ -486,7 +488,7 @@ public class SolrToOpenSearchEndToEndTest {
                     + "&collection=" + collection
                     + "&location=" + backupLocation
                     + "&wt=json");
-            log.info("Backup response: {}", backupResult.getStdout());
+            log.atInfo().setMessage("Backup response: {}").addArgument(backupResult.getStdout()).log();
 
             // Copy the backup directory tree from container to local
             var localBackupRoot = tempDir.toPath().resolve("cloud_backup");
@@ -582,7 +584,7 @@ public class SolrToOpenSearchEndToEndTest {
                 schemaNode.path("fieldTypes")
             );
             var properties = mappings.path("properties");
-            log.info("SolrCloud backup schema mappings: {}", properties);
+            log.atInfo().setMessage("SolrCloud backup schema mappings: {}").addArgument(properties).log();
 
             // Verify field type conversions from the backup schema
             assertThat("title → text", properties.path("title").path("type").asText(), equalTo("text"));
@@ -622,7 +624,7 @@ public class SolrToOpenSearchEndToEndTest {
             Files.createDirectories(localFile.getParent());
             solr.copyFileFromContainer(line, localFile.toString());
         }
-        log.info("Copied {} to {}", containerDir, localDir);
+        log.atInfo().setMessage("Copied {} to {}").addArgument(containerDir).addArgument(localDir).log();
     }
 
     private static void populateSolrDocuments(SolrClusterContainer solr, String collection, int count)

@@ -339,7 +339,7 @@ public class S3Repo implements SourceRepo {
             continuationToken = response.isTruncated() ? response.nextContinuationToken() : null;
         } while (continuationToken != null);
 
-        log.info("Downloaded files from {} prefix '{}' to {}", s3RepoUri, prefix, s3LocalDir);
+        log.atInfo().setMessage("Downloaded files from {} prefix '{}' to {}").addArgument(s3RepoUri).addArgument(prefix).addArgument(s3LocalDir).log();
         return s3LocalDir;
     }
 

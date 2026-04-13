@@ -206,7 +206,7 @@ public class SolrSnapshotToOpenSearchTest {
                      Clock.systemUTC(),
                      workItemRef::set);
                  var processManager = new LeaseExpireTrigger(w -> {
-                     log.debug("Lease expired for {} (test)", w);
+                     log.atDebug().setMessage("Lease expired for {} (test)").addArgument(w).log();
                  })) {
 
                 var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);
@@ -316,7 +316,7 @@ public class SolrSnapshotToOpenSearchTest {
                      Clock.systemUTC(),
                      workItemRef::set);
                  var processManager = new LeaseExpireTrigger(w -> {
-                     log.debug("Lease expired for {} (test)", w);
+                     log.atDebug().setMessage("Lease expired for {} (test)").addArgument(w).log();
                  })) {
 
                 var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);

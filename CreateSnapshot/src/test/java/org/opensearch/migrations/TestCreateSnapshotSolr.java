@@ -1,6 +1,7 @@
 package org.opensearch.migrations;
 
-
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrHttpClient;
 import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
@@ -25,12 +26,20 @@ public class TestCreateSnapshotSolr {
     @Container
     static final SolrClusterContainer CLOUD_SOLR = SolrClusterContainer.cloud(SolrClusterContainer.SOLR_8);
 
+    private static SolrHttpClient clientFor(SolrClusterContainer container) {
+        return new SolrHttpClient(connectionContextFor(container));
+    }
+
+    private static ConnectionContext connectionContextFor(SolrClusterContainer container) {
+        return new ConnectionContext.SourceArgs() {{ host = container.getSolrUrl(); insecure = true; }}.toConnectionContext();
+    }
+
     @Test
     public void testDiscoverCores_standaloneSolr() throws Exception {
         var solrUrl = STANDALONE_SOLR.getSolrUrl();
-        var cores = SolrBackupStrategy.discoverCollections(solrUrl, null, null);
+        var cores = SolrBackupStrategy.discoverCollections(solrUrl, clientFor(STANDALONE_SOLR));
 
-        log.info("Discovered standalone cores: {}", cores);
+        log.atInfo().setMessage("Discovered standalone cores: {}").addArgument(cores).log();
         Assertions.assertFalse(cores.isEmpty(), "Should discover at least the 'dummy' core");
         Assertions.assertTrue(cores.contains("dummy"), "Should find the 'dummy' core");
     }
@@ -43,23 +52,23 @@ public class TestCreateSnapshotSolr {
             "http://localhost:8983/solr/admin/collections?action=CREATE"
                 + "&name=testcoll&numShards=1&replicationFactor=1&wt=json");
 
-        var collections = SolrBackupStrategy.discoverCollections(solrUrl, null, null);
+        var collections = SolrBackupStrategy.discoverCollections(solrUrl, clientFor(CLOUD_SOLR));
 
-        log.info("Discovered SolrCloud collections: {}", collections);
+        log.atInfo().setMessage("Discovered SolrCloud collections: {}").addArgument(collections).log();
         Assertions.assertTrue(collections.contains("testcoll"), "Should find 'testcoll' collection");
     }
 
     @Test
     public void testIsSolrCloud_standalone_returnsFalse() {
         var solrUrl = STANDALONE_SOLR.getSolrUrl();
-        Assertions.assertFalse(SolrBackupStrategy.isSolrCloud(solrUrl, null, null),
+        Assertions.assertFalse(SolrBackupStrategy.isSolrCloud(solrUrl, clientFor(STANDALONE_SOLR)),
             "Standalone Solr should not be detected as SolrCloud");
     }
 
     @Test
     public void testIsSolrCloud_cloud_returnsTrue() {
         var solrUrl = CLOUD_SOLR.getSolrUrl();
-        Assertions.assertTrue(SolrBackupStrategy.isSolrCloud(solrUrl, null, null),
+        Assertions.assertTrue(SolrBackupStrategy.isSolrCloud(solrUrl, clientFor(CLOUD_SOLR)),
             "SolrCloud should be detected as SolrCloud");
     }
 
@@ -81,7 +90,7 @@ public class TestCreateSnapshotSolr {
 
         var result = STANDALONE_SOLR.execInContainer("curl", "-s",
             "http://localhost:8983/solr/dummy/replication?command=details&wt=json");
-        log.info("Replication details after backup: {}", result.getStdout());
+        log.atInfo().setMessage("Replication details after backup: {}").addArgument(result.getStdout()).log();
         Assertions.assertTrue(result.getStdout().contains("backup"),
             "Replication details should show backup info");
     }
@@ -113,7 +122,7 @@ public class TestCreateSnapshotSolr {
         creator.run();
 
         var result = CLOUD_SOLR.execInContainer("ls", "/var/solr/data/backups");
-        log.info("Cloud backup directory contents: {}", result.getStdout());
+        log.atInfo().setMessage("Cloud backup directory contents: {}").addArgument(result.getStdout()).log();
         Assertions.assertTrue(result.getStdout().contains("test_cloud_backup"),
             "Backup directory should contain the backup");
     }

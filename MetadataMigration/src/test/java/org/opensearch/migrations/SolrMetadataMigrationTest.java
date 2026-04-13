@@ -104,7 +104,7 @@ class SolrMetadataMigrationTest {
             var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
             var result = new MetadataMigration().migrate(args).execute(metadataContext);
 
-            log.info("Migration result: {}", result.asCliOutput());
+            log.atInfo().setMessage("Migration result: {}").addArgument(result.asCliOutput()).log();
             assertThat("Migration should succeed", result.getExitCode(), equalTo(0));
 
             // Verify OpenSearch index was created with correct mappings
@@ -128,7 +128,7 @@ class SolrMetadataMigrationTest {
             "-H", "Content-Type: application/json",
             "-d", "{\"add-field\":{\"name\":\"" + name + "\",\"type\":\"" + type + "\",\"stored\":true}}"
         );
-        log.info("Add field {} ({}): {}", name, type, result.getStdout());
+        log.atInfo().setMessage("Add field {} ({}): {}").addArgument(name).addArgument(type).addArgument(result.getStdout()).log();
     }
 
     private static void exec(SolrClusterContainer solr, String... cmd) throws Exception {
