@@ -30,6 +30,10 @@ public record ValidationDocument(
     // Comparisons (variable — only present when applicable)
     @JsonProperty("comparisons") List<ComparisonEntry> comparisons,
 
+    // Response context
+    @JsonProperty("baseline_response") ResponseRecord baselineResponse,
+    @JsonProperty("candidate_response") ResponseRecord candidateResponse,
+
     // Custom transform metrics (transform-emitted)
     @JsonProperty("custom_metrics") Map<String, Object> customMetrics
 ) {
@@ -39,6 +43,13 @@ public record ValidationDocument(
         @JsonProperty("uri") String uri,
         @JsonProperty("headers") Map<String, Object> headers,
         @JsonProperty("body") String body              // null unless include_request_body is true
+    ) {}
+
+    /** HTTP response record — captures status and optionally the body. */
+    public record ResponseRecord(
+        @JsonProperty("status_code") int statusCode,
+        @JsonProperty("error") String error,           // non-null only on failure
+        @JsonProperty("body") String body              // null unless include_response_body is true
     ) {}
 
     /** A single query-specific comparison result (e.g., facet bucket diff). */

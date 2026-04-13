@@ -69,7 +69,7 @@ export const testCases: TestCase[] = [
       { id: '3', title: 'gamma', price: 30 },
       { id: '4', title: 'delta', price: 40 },
     ],
-    requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+asc,id+asc&cursorMark=*&wt=json',
+    requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=' + encodeURIComponent('price asc,id asc') + '&cursorMark=*&wt=json',
     solrSchema: {
       fields: {
         title: { type: 'text_general' },
@@ -78,6 +78,7 @@ export const testCases: TestCase[] = [
     },
     opensearchMapping: {
       properties: {
+        id: { type: 'keyword' },
         title: { type: 'text' },
         price: { type: 'float' },
       },
@@ -97,11 +98,11 @@ export const testCases: TestCase[] = [
       { id: '4', title: 'delta', price: 40 },
       { id: '5', title: 'epsilon', price: 50 },
     ],
-    requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+asc,id+asc&cursorMark=*&wt=json',
+    requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=' + encodeURIComponent('price asc,id asc') + '&cursorMark=*&wt=json',
     requestSequence: [
-      { requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+asc,id+asc&cursorMark={{nextCursorMark}}&wt=json' },
-      { requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+asc,id+asc&cursorMark={{nextCursorMark}}&wt=json' },
-      { requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+asc,id+asc&cursorMark={{nextCursorMark}}&wt=json' },
+      { requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=' + encodeURIComponent('price asc,id asc') + '&cursorMark={{nextCursorMark}}&wt=json' },
+      { requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=' + encodeURIComponent('price asc,id asc') + '&cursorMark={{nextCursorMark}}&wt=json' },
+      { requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=' + encodeURIComponent('price asc,id asc') + '&cursorMark={{nextCursorMark}}&wt=json' },
     ],
     solrSchema: {
       fields: {
@@ -111,6 +112,7 @@ export const testCases: TestCase[] = [
     },
     opensearchMapping: {
       properties: {
+        id: { type: 'keyword' },
         title: { type: 'text' },
         price: { type: 'float' },
       },
@@ -128,9 +130,9 @@ export const testCases: TestCase[] = [
       { id: '2', title: 'beta', price: 20 },
       { id: '3', title: 'gamma', price: 30 },
     ],
-    requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+desc,id+asc&cursorMark=*&wt=json',
+    requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=' + encodeURIComponent('price desc,id asc') + '&cursorMark=*&wt=json',
     requestSequence: [
-      { requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=price+desc,id+asc&cursorMark={{nextCursorMark}}&wt=json' },
+      { requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=' + encodeURIComponent('price desc,id asc') + '&cursorMark={{nextCursorMark}}&wt=json' },
     ],
     solrSchema: {
       fields: {
@@ -140,6 +142,7 @@ export const testCases: TestCase[] = [
     },
     opensearchMapping: {
       properties: {
+        id: { type: 'keyword' },
         title: { type: 'text' },
         price: { type: 'float' },
       },
@@ -157,7 +160,7 @@ export const testCases: TestCase[] = [
       { id: '2', title: 'beta' },
       { id: '3', title: 'gamma' },
     ],
-    requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=id+asc&cursorMark=*&wt=json',
+    requestPath: '/solr/testcollection/select?q=*:*&rows=2&sort=' + encodeURIComponent('id asc') + '&cursorMark=*&wt=json',
     solrSchema: {
       fields: {
         title: { type: 'text_general' },
@@ -165,6 +168,7 @@ export const testCases: TestCase[] = [
     },
     opensearchMapping: {
       properties: {
+        id: { type: 'keyword' },
         title: { type: 'text' },
       },
     },

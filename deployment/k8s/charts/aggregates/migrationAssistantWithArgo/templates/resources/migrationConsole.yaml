@@ -40,6 +40,32 @@ roleRef:
   name: migration-console-access-role
   apiGroup: rbac.authorization.k8s.io
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: migration-console-openapi-access-role
+rules:
+  - nonResourceURLs:
+      - /openapi
+      - /openapi/*
+      - /openapi/v3
+      - /openapi/v3/*
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: migration-console-openapi-access-role
+subjects:
+  - kind: ServiceAccount
+    name: migration-console-access-role
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: migration-console-openapi-access-role
+  apiGroup: rbac.authorization.k8s.io
+---
 {{- if .Values.cluster.dedicatedKarpenterNodePoolForMigrationConsole }}
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -51,10 +77,13 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   # Limits on the TOTAL aggregate size of the pool.
-  # The Migration Console is intended only to be a very small control-plane
+  # The Migration Console is intended only to be a very small control-plane.
+  # Memory limit is set to 8Gi to allow scheduling on instances with up to
+  # 8 GiB RAM (e.g. t3.large). Daemonsets (fluent-bit, otel-collector) are
+  # excluded from this node via nodeAffinity to keep overhead minimal.
   limits:
     cpu: 4000m
-    memory: 4Gi
+    memory: 8Gi
   disruption:
     consolidationPolicy: WhenEmpty
     consolidateAfter: 5m  # No reason to wait long if the console exits
@@ -103,6 +132,44 @@ spec:
         env: v1
     spec:
       serviceAccountName: migration-console-access-role
+      initContainers:
+        - name: workflow-schema-generator
+          image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+          imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -euo pipefail
+
+              OPENAPI_PATH=/tmp/strimzi-openapi.json
+              SCHEMA_PATH=/root/schema/workflowMigration.schema.json
+              SAMPLE_PATH=/root/schema/sample.yaml
+
+              echo "Waiting for Strimzi OpenAPI to become available..."
+              for attempt in $(seq 1 180); do
+                if kubectl get --raw /openapi/v3/apis/kafka.strimzi.io/v1 > "$OPENAPI_PATH" 2>/dev/null; then
+                  break
+                fi
+                if [ "$attempt" -eq 180 ]; then
+                  echo "Timed out waiting for Strimzi OpenAPI /openapi/v3/apis/kafka.strimzi.io/v1"
+                  exit 1
+                fi
+                sleep 2
+              done
+
+              echo "Generating unified workflow schema from live Strimzi OpenAPI..."
+              ${NODEJS:-node-22} /root/configProcessor/index.js buildUnifiedSchema \
+                --strimzi-openapi "$OPENAPI_PATH" \
+                --output "$SCHEMA_PATH"
+
+              echo "Generating sample workflow config..."
+              MIGRATION_UNIFIED_SCHEMA_PATH="$SCHEMA_PATH" \
+                ${NODEJS:-node-22} /root/configProcessor/index.js makeSample > "$SAMPLE_PATH"
+              printf '# yaml-language-server: $schema=/root/schema/workflowMigration.schema.json\n%s' "$(cat "$SAMPLE_PATH")" > "$SAMPLE_PATH"
+          volumeMounts:
+            - name: workflow-schema
+              mountPath: /root/schema
       {{- if .Values.cluster.dedicatedKarpenterNodePoolForMigrationConsole }}
       tolerations: # Set the metadata so that the dedicated nodepool will let this pod schedule to it
         - key: "migration-console"
@@ -132,25 +199,33 @@ spec:
           resources:
             requests:
               cpu: 1500m
-              memory: 2.5Gi
+              memory: 2Gi
             limits:
               cpu: 1500m
               memory:
-                2.5Gi
+                2Gi
           env:
             - name: MIGRATIONS_CLI_CONSOLE_DISABLE_LEGACY_COMMANDS
               value: "true"
+            - name: MIGRATION_UNIFIED_SCHEMA_PATH
+              value: "/root/schema/workflowMigration.schema.json"
+            - name: MIGRATION_SAMPLE_CONFIG_PATH
+              value: "/root/schema/sample.yaml"
           command:
             - "/bin/sh"
             - "-c"
             - |
               /root/start-console.sh
           volumeMounts:
+            - name: workflow-schema
+              mountPath: /root/schema
     {{- if $sharedLogsVolumeEnabled }}
             - name: shared-logs
               mountPath: /shared-logs-output
     {{- end }}
       volumes:
+        - name: workflow-schema
+          emptyDir: {}
     {{- if $sharedLogsVolumeEnabled  }}
         - name: shared-logs
           persistentVolumeClaim:

@@ -31,6 +31,9 @@ module.exports = {
     moduleNameMapper: {
         "@opensearch-migrations/schemas": "<rootDir>/../schemas/src"
     },
+    setupFiles: [
+        "<rootDir>/tests/setupUnifiedSchemaPath.ts"
+    ],
 
     moduleFileExtensions: ["ts", "js", "json", "yaml", "yml", "sh"],
     coveragePathIgnorePatterns: ["\\.sh$", "\\.ya?ml$"]
