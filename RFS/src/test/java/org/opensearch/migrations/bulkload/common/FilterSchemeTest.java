@@ -15,6 +15,9 @@ public class FilterSchemeTest {
         // Should be excluded due to prefix
         assertThat(filter.test("apm-test"), equalTo(false));
         assertThat(filter.test(".hidden"), equalTo(false));
+        assertThat(filter.test("searchguard"), equalTo(false));
+        assertThat(filter.test("searchguard_config"), equalTo(false));
+        assertThat(filter.test("sg7-auditlog-2026.04.10"), equalTo(false));
         
         // Should not be excluded (no matching prefix)
         assertThat(filter.test("myindex"), equalTo(true));
