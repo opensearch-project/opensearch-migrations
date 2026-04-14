@@ -12,7 +12,7 @@ def call(Map config = [:]) {
             config.enablePeriodicSchedule :
             !jobName.startsWith("pr-")
 
-    def allSourceVersions = ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10']
+    def allSourceVersions = ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10', 'SOLR_8.11']
     def allTargetVersions = ['OS_1.3', 'OS_2.19', 'OS_3.1']
 
     pipeline {

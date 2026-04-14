@@ -9,7 +9,6 @@ import org.opensearch.migrations.bulkload.common.ClusterVersionDetector;
 import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
-import org.opensearch.migrations.bulkload.solr.SolrRemoteReader;
 import org.opensearch.migrations.bulkload.version_es_1_7.SnapshotReader_ES_1_7;
 import org.opensearch.migrations.bulkload.version_es_2_4.SnapshotReader_ES_2_4;
 import org.opensearch.migrations.bulkload.version_es_6_8.SnapshotReader_ES_6_8;
@@ -30,8 +29,7 @@ public class SnapshotReaderRegistry {
             new SnapshotReader_ES_2_4(),
             new SnapshotReader_ES_6_8(),
             new SnapshotReader_ES_7_10(),
-            new RemoteReader(),
-            new SolrRemoteReader()
+            new RemoteReader()
         );
     }
 
