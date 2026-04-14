@@ -18,9 +18,9 @@ defaultTest:
         response_format: json_object
 
 prompts:
-  - id: migration-advisor-prompt
-    label: "Migration advisor requests"
-    raw: "{{query}}"
+  - |-
+    Load the skill in .claude/skills/migration-advisor (if you have not already done so) before answering the following query: 
+    {{query}}
 
 tests:
 
@@ -299,8 +299,8 @@ tests:
       continue: false
     vars:
       query: |
-        I am a Search Engineer and want to migrate solr to opensearch.
-        In our current solr setup we use kerberos auth. Help me migrate this to opensearch.
+        I am a Devops Engineer and want to migrate solr to opensearch.
+        In our current solr setup we use kerberos authentication. Help me migrate this authentication to opensearch.
     assert:
       - type: llm-rubric
         value: >-
@@ -341,7 +341,7 @@ tests:
       continue: false
     vars:
       query: |
-        I am a Search Engineer and want to migrate solr to opensearch. 
+        I am a Search Engineer and want to migrate solr to opensearch.
         Id like to migrate the solr feature of wormhole vectors to opensearch, help me with that.
     assert:
       - type: llm-rubric
@@ -353,7 +353,7 @@ tests:
       continue: false
     vars:
       query: |
-        I am a Search Engineer and want to migrate solr to opensearch. 
+        I am a Search Engineer and want to migrate solr to opensearch.
         We are using the libraries SolrJ and pysolr. Help me migrating those.
     assert:
       - type: llm-rubric
@@ -373,7 +373,7 @@ tests:
     vars:
       query: |
         I am a DevOps engineer. We are currently running a solr setup consisting of the following:
-        3-node SolrCloud with 8gb ram and 4 cores each, 2 shards, 50M docs, 10GB index. Help me migrate this to respective infra needed to run this
+        3-node SolrCloud with 8gb ram (4gb heap) and 4 cores each, 2 shards, 50M docs, 10GB index. Help me migrate this to respective infra needed to run this
         migrated to OpenSearch.
     assert:
       - type: llm-rubric
@@ -381,8 +381,8 @@ tests:
           Response shall be close to the following recommendations:
           - 2 - 4 OpenSearch shards
           - replicas: 1
-          - 3 OpenSearch nodes with 8gb ram and 4 cores each
-          - 4gb jvm heap per node
+          - 3 OpenSearch nodes with 8gb - 16gb ram and 4 cores each
+          - 4gb - 8gb jvm heap per node
           - SolrCloud setup needs migration to OpenSearch ClusterManager
           - if ZooKeeper was mentioned as SolrCloud dependency, that is not valid for OpenSearch, this dependency is not needed anymore
-        metric: sizing-recommendation
+        metric: sizing-recommendationn
