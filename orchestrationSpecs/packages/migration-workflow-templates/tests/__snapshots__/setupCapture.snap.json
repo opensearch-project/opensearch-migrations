@@ -25,6 +25,185 @@
     },
     "templates": [
       {
+        "name": "suspendforretry",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "name"
+            }
+          ]
+        },
+        "suspend": {},
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "applycapturedtraffic",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyConfig"
+            },
+            {
+              "name": "proxyName"
+            },
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "kafkaTopicName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  labels:\n    workflows.argoproj.io/run-uid: \"{{workflow.uid}}\"\nspec:\n  loggingConfigurationOverrideConfigMap: \"{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  internetFacing: {{=sprig.dig('internetFacing', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  podReplicas: {{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  resources: {{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources']}}\n  otelCollectorEndpoint: \"{{=sprig.dig('otelCollectorEndpoint', 'http://otel-collector:4317', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  setHeader: {{=sprig.dig('setHeader', [], fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  destinationConnectionPoolSize: {{=sprig.dig('destinationConnectionPoolSize', 0, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  destinationConnectionPoolTimeout: \"{{=sprig.dig('destinationConnectionPoolTimeout', 'PT30S', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  kafkaClientId: \"{{=sprig.dig('kafkaClientId', 'HttpCaptureProxyProducer', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  listenPort: {{=fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['listenPort']}}\n  maxTrafficBufferSize: {{=sprig.dig('maxTrafficBufferSize', 1048576, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  noCapture: {{=sprig.dig('noCapture', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  numThreads: {{=sprig.dig('numThreads', 1, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  sslConfigFile: \"{{=sprig.dig('sslConfigFile', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  tls: {{=sprig.dig('tls', sprig.dict(), fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  enableMSKAuth: {{=sprig.dig('enableMSKAuth', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  kafkaClusterName: \"{{inputs.parameters.kafkaClusterName}}\"\n  kafkaTopicName: \"{{inputs.parameters.kafkaTopicName}}\"\n  suppressCaptureForHeaderMatch: {{=sprig.dig('suppressCaptureForHeaderMatch', [], fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\n  suppressCaptureForMethod: \"{{=sprig.dig('suppressCaptureForMethod', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  suppressCaptureForUriPath: \"{{=sprig.dig('suppressCaptureForUriPath', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n  suppressMethodAndPath: \"{{=sprig.dig('suppressMethodAndPath', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}\"\n",
+          "action": "apply",
+          "setOwnerReference": false
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "applycapturedtrafficwithretry",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyConfig"
+            },
+            {
+              "name": "proxyName"
+            },
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "kafkaTopicName"
+            },
+            {
+              "name": "retryGroupName_view",
+              "value": "Apply"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "applycapturedtraffic",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyConfig",
+                    "value": "{{inputs.parameters.proxyConfig}}"
+                  },
+                  {
+                    "name": "proxyName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  }
+                ]
+              },
+              "name": "tryApply",
+              "continueOn": {
+                "failed": true
+              }
+            }
+          ],
+          [
+            {
+              "template": "suspendforretry",
+              "when": "{{=steps.tryApply.status == 'Failed'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "CapturedTraffic"
+                  }
+                ]
+              },
+              "name": "waitForFix"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchapprovalannotation",
+                "name": "resource-management"
+              },
+              "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceApiVersion",
+                    "value": "migrations.opensearch.org/v1alpha1"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "CapturedTraffic"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  }
+                ]
+              },
+              "name": "patchApproval"
+            }
+          ],
+          [
+            {
+              "template": "applycapturedtrafficwithretry",
+              "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyConfig",
+                    "value": "{{inputs.parameters.proxyConfig}}"
+                  },
+                  {
+                    "name": "proxyName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{inputs.parameters.retryGroupName_view}}"
+                  }
+                ]
+              },
+              "name": "retryLoop"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "deployproxyservice",
         "inputs": {
           "parameters": [
@@ -47,7 +226,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -109,7 +288,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -170,7 +349,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -197,7 +376,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -245,7 +424,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -557,6 +736,351 @@
                 ]
               },
               "name": "deployProxyWithTls"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "setupproxywithlifecycle",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyConfig"
+            },
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "kafkaTopicName"
+            },
+            {
+              "name": "proxyName"
+            },
+            {
+              "name": "configChecksum"
+            },
+            {
+              "name": "checksumForSnapshot"
+            },
+            {
+              "name": "checksumForReplayer"
+            },
+            {
+              "name": "listenPort"
+            },
+            {
+              "name": "podReplicas"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "imageCaptureProxyLocation"
+            },
+            {
+              "name": "imageCaptureProxyPullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "readresourcephase",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceKind",
+                    "value": "CapturedTraffic"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  }
+                ]
+              },
+              "name": "checkPhase"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforkafkacluster",
+                "name": "resource-management"
+              },
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=sprig.dig('kafkaConfig', 'configChecksum', '', fromJSON(inputs.parameters.proxyConfig))}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  }
+                ]
+              },
+              "name": "waitForKafkaCluster"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "readkafkaconnectionprofile",
+                "name": "resource-management"
+              },
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  }
+                ]
+              },
+              "name": "readKafkaConnectionProfile"
+            }
+          ],
+          [
+            {
+              "template": "applycapturedtrafficwithretry",
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyConfig",
+                    "value": "{{inputs.parameters.proxyConfig}}"
+                  },
+                  {
+                    "name": "proxyName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='CapturedTraffic: '+inputs.parameters.proxyName}}"
+                  }
+                ]
+              },
+              "name": "applyCapturedTraffic"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchresourcephase",
+                "name": "resource-management"
+              },
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceKind",
+                    "value": "CapturedTraffic"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Running"
+                  }
+                ]
+              },
+              "name": "markRunning"
+            }
+          ],
+          [
+            {
+              "template": "setupproxy",
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyConfig",
+                    "value": "{{inputs.parameters.proxyConfig}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "proxyName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "listenPort",
+                    "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "podReplicas",
+                    "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "resolvedKafkaConnection",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.bootstrapServers}}"
+                  },
+                  {
+                    "name": "resolvedKafkaListenerName",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.listenerName}}"
+                  },
+                  {
+                    "name": "resolvedKafkaAuthType",
+                    "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.authType}}"
+                  }
+                ]
+              },
+              "name": "setupProxy",
+              "continueOn": {
+                "failed": true
+              }
+            }
+          ],
+          [
+            {
+              "template": "setupproxy",
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && !(sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig)))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyConfig",
+                    "value": "{{inputs.parameters.proxyConfig}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "proxyName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "listenPort",
+                    "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "podReplicas",
+                    "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyLocation",
+                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
+                  },
+                  {
+                    "name": "imageCaptureProxyPullPolicy",
+                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  }
+                ]
+              },
+              "name": "setupProxyWithConfiguredKafka",
+              "continueOn": {
+                "failed": true
+              }
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchresourcephase",
+                "name": "resource-management"
+              },
+              "when": "{{=steps.setupProxy.status == 'Succeeded' || steps.setupProxyWithConfiguredKafka.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceKind",
+                    "value": "CapturedTraffic"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Ready"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "checksumForSnapshot",
+                    "value": "{{inputs.parameters.checksumForSnapshot}}"
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{inputs.parameters.checksumForReplayer}}"
+                  }
+                ]
+              },
+              "name": "markReady"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchresourcephase",
+                "name": "resource-management"
+              },
+              "when": "{{=steps.setupProxy.status == 'Failed' || steps.setupProxyWithConfiguredKafka.status == 'Failed'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceKind",
+                    "value": "CapturedTraffic"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Error"
+                  }
+                ]
+              },
+              "name": "markError"
             }
           ]
         ],

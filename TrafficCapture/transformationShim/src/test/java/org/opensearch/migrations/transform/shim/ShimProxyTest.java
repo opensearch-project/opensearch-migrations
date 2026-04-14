@@ -181,7 +181,7 @@ class ShimProxyTest {
         assertNotNull(combinedToken, "Expected merged nextCursorMark");
 
         // Decode and verify combined token
-        String decoded = new String(java.util.Base64.getDecoder().decode(combinedToken), StandardCharsets.UTF_8);
+        String decoded = new String(java.util.Base64.getUrlDecoder().decode(combinedToken), StandardCharsets.UTF_8);
         var tokenMap = MAPPER.readValue(decoded, Map.class);
         assertEquals("SOLR_TOKEN", tokenMap.get("solr"));
         assertEquals("OS_TOKEN", tokenMap.get("os"));

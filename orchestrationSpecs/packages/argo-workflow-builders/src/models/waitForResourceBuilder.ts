@@ -41,8 +41,8 @@ export type WaitForNewResourceDefinition = {
 };
 
 export type WaitForConditions = {
-    successCondition?: string;
-    failureCondition?: string;
+    successCondition?: AllowLiteralOrExpression<string>;
+    failureCondition?: AllowLiteralOrExpression<string>;
 };
 
 type ExistingResourceSpecifier = {

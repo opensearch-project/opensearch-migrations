@@ -13,20 +13,6 @@
 
 import groovy.json.JsonOutput
 
-static def expandVersionString(String input) {
-    def trimmed = input.trim()
-    def pattern = ~/^(ES|OS)_(\d+)\.(\d+)$/
-    def matcher = trimmed =~ pattern
-    if (!matcher.matches()) {
-        error("Invalid version string format: '${input}'. Expected something like ES_7.10 or OS_2.19")
-    }
-    def prefix = matcher[0][1]
-    def major  = matcher[0][2]
-    def minor  = matcher[0][3]
-    def name   = (prefix == 'ES') ? 'elasticsearch' : 'opensearch'
-    return "${name}-${major}-${minor}"
-}
-
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksbyos"
     def jobName = config.jobName ?: "eks-byos-integ-test"
@@ -218,57 +204,24 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 150, unit: 'MINUTES') {
                         script {
-                            env.STACK_NAME_SUFFIX = "${maStageName}-${params.REGION}"
-                            env.MA_STACK_NAME = "Migration-Assistant-Infra-Create-VPC-eks-${env.STACK_NAME_SUFFIX}"
+                            env.MA_STACK_NAME = "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${params.REGION}"
 
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
-                                    def bootstrap = resolveBootstrap(
-                                        useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
-                                        buildImages: params.BUILD_IMAGES,
-                                        buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
-                                        skipTestImages: true,
-                                        version: params.VERSION
-                                    )
-                                    sh """
-                                        ${bootstrap.script} \
-                                          --deploy-create-vpc-cfn \
-                                          --stack-name "${env.MA_STACK_NAME}" \
-                                          --stage "${maStageName}" \
-                                          --eks-access-principal-arn "arn:aws:iam::\${MIGRATIONS_TEST_ACCOUNT_ID}:role/JenkinsDeploymentRole" \
-                                          ${bootstrap.flags} \
-                                          --skip-console-exec \
-                                          --skip-setting-k8s-context \
-                                          --region ${params.REGION} \
-                                          2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
-                                    """
-
-                                    // Capture env vars for later stages and cleanup
-                                    def rawOutput = sh(
-                                        script: """
-                                            aws cloudformation describe-stacks \
-                                                --stack-name ${env.MA_STACK_NAME} \
-                                                --query "Stacks[0].Outputs[?OutputKey=='MigrationsExportString'].OutputValue" \
-                                                --output text
-                                        """,
-                                        returnStdout: true
-                                    ).trim()
-                                    if (!rawOutput) {
-                                        error("Could not retrieve CloudFormation Output 'MigrationsExportString'")
-                                    }
-                                    def exportsMap = rawOutput.split(';')
-                                            .collect { it.trim().replaceFirst(/^export\s+/, '') }
-                                            .findAll { it.contains('=') }
-                                            .collectEntries {
-                                                def (key, value) = it.split('=', 2)
-                                                [(key): value]
-                                            }
-                                    env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']
-                                    env.eksClusterName = exportsMap['MIGRATIONS_EKS_CLUSTER_NAME']
-                                    env.clusterSecurityGroup = exportsMap['EKS_CLUSTER_SECURITY_GROUP']
-                                    env.maVpcId = exportsMap['VPC_ID']
-                                    env.eksKubeContext = "migration-eks-cluster-${maStageName}-${params.REGION}"
-                                }
+                            withMigrationsTestAccount(region: params.REGION) { accountId ->
+                                def bootstrap = resolveBootstrap(
+                                    useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
+                                    buildImages: params.BUILD_IMAGES,
+                                    buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
+                                    skipTestImages: true,
+                                    version: params.VERSION
+                                )
+                                bootstrapMA(
+                                    stackName: env.MA_STACK_NAME,
+                                    stage: maStageName,
+                                    region: params.REGION,
+                                    bootstrap: bootstrap,
+                                    eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
+                                    kubectlContext: "migration-eks-${maStageName}"
+                                )
                             }
                         }
                     }
@@ -302,8 +255,7 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 15, unit: 'MINUTES') {
                         script {
-                            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 1200, roleSessionName: 'jenkins-session') {
+                            withMigrationsTestAccount(region: params.REGION, duration: 1200) { accountId ->
                                     def clusterDetails = readJSON text: env.clusterDetailsJson
                                     def targetCluster = clusterDetails.target
                                     def targetVersionExpanded = expandVersionString("${env.targetVer}")
@@ -358,7 +310,6 @@ def call(Map config = [:]) {
                                     """
 
                                 }
-                            }
                         }
                     }
                 }
@@ -375,10 +326,8 @@ def call(Map config = [:]) {
                                     testIdsArg = "--test-ids='$testIdsResolved'"
                                 }
                                 sh "pipenv install --deploy"
-                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 43200, roleSessionName: 'jenkins-session') {
-                                        sh "pipenv run app --source-version=${env.sourceVer} --target-version=${env.targetVer} $testIdsArg --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
-                                    }
+                                withMigrationsTestAccount(region: params.REGION, duration: 43200) { accountId ->
+                                    sh "pipenv run app --source-version=${env.sourceVer} --target-version=${env.targetVer} $testIdsArg --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
                                 }
                             }
                         }
@@ -395,8 +344,7 @@ def call(Map config = [:]) {
                         def maStackName = env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
 
 
-                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: region, duration: 4500, roleSessionName: 'jenkins-session') {
+                        withMigrationsTestAccount(region: region, duration: 4500) { accountId ->
                                 // EKS/k8s cleanup (only if EKS was deployed)
                                 if (env.eksClusterName) {
                                     dir('libraries/testAutomation') {
@@ -443,7 +391,6 @@ def call(Map config = [:]) {
                                 echo "CLEANUP: Deleting MA stack ${maStackName}"
                                 sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
                                 sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
-                            }
                         }
                     }
                 }
@@ -481,10 +428,8 @@ def deployTargetClusterOnly(Map config) {
     def contextJsonStr = JsonOutput.prettyPrint(JsonOutput.toJson(clusterContextValues))
     writeFile(file: config.clusterContextFilePath, text: contextJsonStr)
     sh "echo 'Using cluster context file options:' && cat ${config.clusterContextFilePath}"
-    withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-        withAWS(role: 'JenkinsDeploymentRole', roleAccount: MIGRATIONS_TEST_ACCOUNT_ID, region: params.REGION, duration: 3600, roleSessionName: 'jenkins-session') {
+    withMigrationsTestAccount(region: params.REGION) { accountId ->
             sh "./awsDeployCluster.sh --stage ${config.stage} --context-file ${config.clusterContextFilePath} --vpc-id ${config.vpcId}"
-        }
     }
 
     def rawJsonFile = readFile "tmp/cluster-details-${config.stage}.json"
