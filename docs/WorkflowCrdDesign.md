@@ -64,28 +64,19 @@ The capture proxy has three states:
 
 1. **Created → Capturing**: Workflow deploys proxy with `kafkaConnection` parameters, patches CRD to `Ready`.
 
-2. **Capturing → Non-Capture** (Kafka deleted, proxy stays alive): When KafkaCluster CRD is deleted, the workflow's `kafkaGonePath` detects it and redeploys the proxy without Kafka parameters. Client traffic continues flowing to the source cluster.
+2. **Capturing → Non-Capture** (proxy stays alive, stops writing to Kafka): The CLI command `workflow proxy disable-capture` reads the running workflow's denormalized config, sets `noCapture=true`, and resubmits the workflow through the config processor. The proxy is redeployed without Kafka parameters. Client traffic continues flowing to the source cluster.
 
 3. **Non-Capture → Deleted**: Deleting the CapturedTraffic CRD cascades to the Proxy Deployment and pods via ownerReferences.
 
 4. **Capturing → Deleted** (direct): If CapturedTraffic CRD is deleted while Kafka is alive, the proxy is deleted immediately — no intermediate non-capture state.
 
-### Workflow dual-mode parallel teardown
+### Proxy teardown
 
-The `setupSingleProxy` template races two teardown signals:
+The proxy workflow (`setupProxyWithLifecycle`) is sequential — there is no parallel race. Teardown is entirely external:
 
-```
-[parallel — first signal wins]:
-  a. kafkaGonePath:
-     → deleteCrd(KafkaCluster)
-     → redeployProxyNoCapture (rolling update)
-     → deleteCrd(CapturedTraffic)
-  b. directTeardown:
-     → deleteCrd(CapturedTraffic)
-```
-
-- **Path (a) wins** when Kafka is deleted first → proxy transitions to non-capture, then waits for full teardown
-- **Path (b) wins** when CapturedTraffic is deleted directly → proxy deleted immediately, path (a) cancelled
+- **Non-capture transition**: CLI runs `workflow proxy disable-capture`, which reads the running workflow config, sets `noCapture=true`, and resubmits through the config processor. The proxy is redeployed without Kafka parameters via a rolling update.
+- **Full deletion**: CLI deletes the CapturedTraffic CRD with foreground propagation. Kubernetes ownership cascade deletes the Proxy Deployment, Service, and Pods.
+- **During `workflow reset --all`**: Proxies are protected by default — they are switched to non-capture mode instead of being deleted. Use `--include-proxies` to delete them.
 
 ---
 
@@ -119,18 +110,9 @@ By default, proxies are **not deleted** — they are switched to non-capture mod
 
 ### Dependency-aware deletion
 
-Resources declare dependencies via `spec.dependsOn` on their CRDs. The CLI builds a DAG and deletes resources in parallel, respecting the constraint that a resource is only deleted after all its dependents are gone. Independent branches proceed concurrently.
+Resources declare dependencies via `spec.dependsOn` on their CRDs. The CLI builds a DAG and deletes resources with maximum concurrency, respecting the constraint that a resource is only deleted after all its dependents are gone. Independent branches proceed in parallel without waiting for each other.
 
-### `--all` ordering
-
-```
-Phase 1: Delete TrafficReplay CRDs    → replayer dies
-Phase 2: Delete SnapshotMigration CRDs → RFS dies, coordinator dies
-Phase 3: Delete KafkaCluster CRDs     → Kafka dies, proxy → non-capture
-Phase 4: Delete CapturedTraffic CRDs  → proxy dies (only with --include-proxies)
-Phase 5: Delete ApprovalGate CRDs
-Phase 6: argo stop + delete workflow
-```
+When `--all` is used without `--include-proxies`, proxies are switched to non-capture mode (via config processor resubmit) instead of being deleted. All other CRDs are deleted via the DAG. After CRDs are gone, the CLI stops and deletes any Argo workflow in the namespace.
 
 ---
 
