@@ -178,168 +178,6 @@
         }
       },
       {
-        "name": "proxykafkagoneteardown",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "proxyName"
-            },
-            {
-              "name": "kafkaClusterName"
-            },
-            {
-              "name": "proxyConfig"
-            },
-            {
-              "name": "listenPort"
-            },
-            {
-              "name": "podReplicas"
-            },
-            {
-              "name": "imageMigrationConsoleLocation"
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy"
-            },
-            {
-              "name": "imageCaptureProxyLocation"
-            },
-            {
-              "name": "imageCaptureProxyPullPolicy"
-            }
-          ]
-        },
-        "steps": [
-          [
-            {
-              "templateRef": {
-                "template": "waitforcrddeletion",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  },
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.kafkaClusterName}}"
-                  },
-                  {
-                    "name": "resourceKind",
-                    "value": "KafkaCluster"
-                  }
-                ]
-              },
-              "name": "waitForKafkaDeletion"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "deployproxydeployment",
-                "name": "setup-capture"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "proxyName",
-                    "value": "{{inputs.parameters.proxyName}}"
-                  },
-                  {
-                    "name": "listenPort",
-                    "value": "{{inputs.parameters.listenPort}}"
-                  },
-                  {
-                    "name": "podReplicas",
-                    "value": "{{inputs.parameters.podReplicas}}"
-                  },
-                  {
-                    "name": "imageCaptureProxyLocation",
-                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
-                  },
-                  {
-                    "name": "imageCaptureProxyPullPolicy",
-                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
-                  },
-                  {
-                    "name": "resources",
-                    "value": "{{=toJSON(fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources'])}}"
-                  },
-                  {
-                    "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'noCapture', 'resources', 'internetFacing', 'tls', 'podReplicas', 'listenPort'), sprig.dict(\"destinationUri\", fromJSON(inputs.parameters.proxyConfig)['sourceEndpoint'], \"insecureDestination\", fromJSON(inputs.parameters.proxyConfig)['sourceAllowInsecure'])))}}"
-                  },
-                  {
-                    "name": "kafkaAuthConfigMapName",
-                    "value": ""
-                  },
-                  {
-                    "name": "kafkaAuthType",
-                    "value": ""
-                  },
-                  {
-                    "name": "kafkaSecretName",
-                    "value": ""
-                  },
-                  {
-                    "name": "kafkaCaSecretName",
-                    "value": ""
-                  },
-                  {
-                    "name": "crdName",
-                    "value": ""
-                  },
-                  {
-                    "name": "crdUid",
-                    "value": ""
-                  }
-                ]
-              },
-              "name": "redeployNoCapture"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "waitforcrddeletion",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  },
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.proxyName}}"
-                  },
-                  {
-                    "name": "resourceKind",
-                    "value": "CapturedTraffic"
-                  }
-                ]
-              },
-              "name": "waitForCapturedTrafficDeletion"
-            }
-          ]
-        ],
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
         "name": "setupsingleproxy",
         "inputs": {
           "parameters": [
@@ -491,98 +329,39 @@
           [
             {
               "templateRef": {
-                "template": "patchcapturedtrafficready",
+                "template": "patchresourcephase",
                 "name": "resource-management"
               },
               "when": "{{=!(steps.getCrdUid.outputs.parameters.phase == 'Ready')}}",
               "arguments": {
                 "parameters": [
                   {
+                    "name": "resourceKind",
+                    "value": "CapturedTraffic"
+                  },
+                  {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Ready"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{=sprig.dig('configChecksum', '', fromJSON(inputs.parameters.proxyConfig))}}"
+                  },
+                  {
+                    "name": "checksumForSnapshot",
+                    "value": "{{=sprig.dig('checksumForSnapshot', '', fromJSON(inputs.parameters.proxyConfig))}}"
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{=sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.proxyConfig))}}"
                   }
                 ]
               },
               "name": "patchCapturedTraffic"
-            }
-          ],
-          [
-            {
-              "template": "proxykafkagoneteardown",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "proxyName",
-                    "value": "{{inputs.parameters.proxyName}}"
-                  },
-                  {
-                    "name": "kafkaClusterName",
-                    "value": "{{inputs.parameters.kafkaClusterName}}"
-                  },
-                  {
-                    "name": "proxyConfig",
-                    "value": "{{inputs.parameters.proxyConfig}}"
-                  },
-                  {
-                    "name": "listenPort",
-                    "value": "{{inputs.parameters.listenPort}}"
-                  },
-                  {
-                    "name": "podReplicas",
-                    "value": "{{inputs.parameters.podReplicas}}"
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  },
-                  {
-                    "name": "imageCaptureProxyLocation",
-                    "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
-                  },
-                  {
-                    "name": "imageCaptureProxyPullPolicy",
-                    "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
-                  }
-                ]
-              },
-              "name": "kafkaGonePath",
-              "continueOn": {
-                "failed": true
-              }
-            },
-            {
-              "templateRef": {
-                "template": "waitforcrddeletion",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  },
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.proxyName}}"
-                  },
-                  {
-                    "name": "resourceKind",
-                    "value": "CapturedTraffic"
-                  }
-                ]
-              },
-              "name": "directTeardown",
-              "continueOn": {
-                "failed": true
-              }
             }
           ]
         ],

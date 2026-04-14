@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
-SAMPLE_CONFIG_PATH_ENV = "MIGRATION_SAMPLE_CONFIG_PATH"
 
 
 class ScriptRunner:
@@ -94,9 +93,9 @@ class ScriptRunner:
                 if e.stderr:
                     print(f"stderr: {e.stderr}", file=sys.stderr)
             else:
-                logger.debug(f"Script failed with exit code {e.returncode}")
+                logger.error(f"Script failed with exit code {e.returncode}")
                 if e.stderr:
-                    logger.debug(f"stderr: {e.stderr}")
+                    logger.error(f"stderr: {e.stderr}")
             raise subprocess.CalledProcessError(
                 e.returncode, e.cmd, e.stdout, e.stderr
             ) from None
@@ -158,10 +157,9 @@ class ScriptRunner:
     def get_sample_config(self) -> str:
         """Get sample workflow configuration.
 
-        Reads the configured sample path when MIGRATION_SAMPLE_CONFIG_PATH is
-        set. Otherwise reads sample.yaml from the configured script directory.
-        If no sample file exists, returns a blank starter configuration
-        template instead.
+        Reads sample.yaml from the configured script directory. If sample.yaml
+        doesn't exist (e.g., when CONFIG_PROCESSOR_DIR is not set), returns a
+        blank starter configuration template instead.
 
         Returns:
             YAML content as string (either from sample.yaml or blank starter)
@@ -170,8 +168,7 @@ class ScriptRunner:
             IOError: If sample.yaml exists but cannot be read
         """
         logger.info("Getting sample configuration")
-        sample_path_override = os.environ.get(SAMPLE_CONFIG_PATH_ENV)
-        sample_path = Path(sample_path_override) if sample_path_override else self.script_dir / "sample.yaml"
+        sample_path = self.script_dir / "sample.yaml"
 
         if not sample_path.exists():
             logger.info(f"Sample configuration not found at {sample_path}, using blank starter config")
@@ -219,7 +216,7 @@ class ScriptRunner:
         try:
             logger.debug(f"Config file: {temp_file_path}")
             output = self.run_script("createMigrationWorkflowFromUserConfiguration.sh", None,
-                                     *([temp_file_path] + args), direct_output=False)
+                                     *([temp_file_path] + args), direct_output=True)
 
             # Parse kubectl output to extract workflow information
             # The script should output workflow creation details
@@ -288,13 +285,7 @@ class ScriptRunner:
         try:
             result_str = self.run_config_processor_node_script(
                 command, temp_file_path)
-            try:
-                return json.loads(result_str)
-            except json.JSONDecodeError:
-                # Handle case where config processor outputs multiple JSON objects
-                decoder = json.JSONDecoder()
-                obj, _ = decoder.raw_decode(result_str)
-                return obj
+            return json.loads(result_str)
         finally:
             try:
                 os.unlink(temp_file_path)

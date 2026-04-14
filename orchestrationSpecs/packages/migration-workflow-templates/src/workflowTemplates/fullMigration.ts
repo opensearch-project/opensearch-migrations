@@ -137,60 +137,6 @@ export const FullMigration = WorkflowBuilder.create({
 
     // ── Section 2: Proxies ───────────────────────────────────────────────
 
-    // Helper: when Kafka is deleted, redeploy proxy in non-capture mode, then wait for CapturedTraffic deletion
-    .addTemplate("proxyKafkaGoneTeardown", t => t
-        .addRequiredInput("proxyName", typeToken<string>())
-        .addRequiredInput("kafkaClusterName", typeToken<string>())
-        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
-        .addRequiredInput("listenPort", typeToken<number>())
-        .addRequiredInput("podReplicas", typeToken<number>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "CaptureProxy"]))
-
-        .addSteps(b => b
-            .addStep("waitForKafkaDeletion", ResourceManagement, "waitForCrdDeletion", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    resourceName: b.inputs.kafkaClusterName,
-                    resourceKind: expr.literal("KafkaCluster"),
-                })
-            )
-            .addStep("redeployNoCapture", SetupCapture, "deployProxyDeployment", c => {
-                const config = expr.deserializeRecord(b.inputs.proxyConfig);
-                const proxyOpts = expr.get(config, "proxyConfig") as any;
-                return c.register({
-                    ...selectInputsForRegister(b, c),
-                    proxyName: b.inputs.proxyName,
-                    listenPort: b.inputs.listenPort,
-                    podReplicas: b.inputs.podReplicas,
-                    resources: expr.serialize(expr.get(proxyOpts, "resources") as any),
-                    jsonConfig: expr.asString(expr.serialize(
-                        expr.mergeDicts(
-                            expr.omit(proxyOpts, "noCapture", "resources", "internetFacing", "tls", "podReplicas", "listenPort"),
-                            expr.makeDict({
-                                destinationUri: expr.get(config, "sourceEndpoint"),
-                                insecureDestination: expr.get(config, "sourceAllowInsecure"),
-                            })
-                        ) as any
-                    )),
-                    kafkaAuthConfigMapName: expr.literal(""),
-                    kafkaAuthType: expr.literal(""),
-                    kafkaSecretName: expr.literal(""),
-                    kafkaCaSecretName: expr.literal(""),
-                    crdName: expr.literal(""),
-                    crdUid: expr.literal(""),
-                });
-            })
-            .addStep("waitForCapturedTrafficDeletion", ResourceManagement, "waitForCrdDeletion", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    resourceName: b.inputs.proxyName,
-                    resourceKind: expr.literal("CapturedTraffic"),
-                })
-            )
-        )
-    )
-
-
     .addTemplate("setupSingleProxy", t => t
         .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
@@ -231,33 +177,16 @@ export const FullMigration = WorkflowBuilder.create({
                 }),
                 {when: c => ({templateExp: expr.not(expr.equals(c.getCrdUid.outputs.phase, "Ready"))})}
             )
-            .addStep("patchCapturedTraffic", ResourceManagement, "patchCapturedTrafficReady", c =>
+            .addStep("patchCapturedTraffic", ResourceManagement, "patchResourcePhase", c =>
                 c.register({
+                    resourceKind: expr.literal("CapturedTraffic"),
                     resourceName: b.inputs.proxyName,
+                    phase: expr.literal("Ready"),
+                    configChecksum: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["configChecksum"], ""),
+                    checksumForSnapshot: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForSnapshot"], ""),
+                    checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForReplayer"], ""),
                 }),
                 {when: c => ({templateExp: expr.not(expr.equals(c.getCrdUid.outputs.phase, "Ready"))})}
-            )
-            // Dual-mode teardown: Kafka deletion → non-capture mode, CapturedTraffic deletion → full teardown
-            .addStepGroup(g => g
-                .addStep("kafkaGonePath", INTERNAL, "proxyKafkaGoneTeardown", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        proxyName: b.inputs.proxyName,
-                        kafkaClusterName: b.inputs.kafkaClusterName,
-                        proxyConfig: b.inputs.proxyConfig,
-                        listenPort: b.inputs.listenPort,
-                        podReplicas: b.inputs.podReplicas,
-                    }),
-                    {continueOn: {failed: true}}
-                )
-                .addStep("directTeardown", ResourceManagement, "waitForCrdDeletion", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        resourceName: b.inputs.proxyName,
-                        resourceKind: expr.literal("CapturedTraffic"),
-                    }),
-                    {continueOn: {failed: true}}
-                )
             )
         )
     )
