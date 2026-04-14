@@ -37,7 +37,6 @@ spec:
                   minimum: 0
                 resources:
                   type: object
-                  x-kubernetes-preserve-unknown-fields: true
                 # Proxy CLI params
                 otelCollectorEndpoint:
                   type: string
@@ -63,7 +62,6 @@ spec:
                   type: string
                 tls:
                   type: object
-                  x-kubernetes-preserve-unknown-fields: true
                 enableMSKAuth:
                   type: boolean
                 internetFacing:
@@ -98,7 +96,6 @@ spec:
                   type: string
                 checksumForReplayer:
                   type: string
-              x-kubernetes-preserve-unknown-fields: true
 ---
 # DataSnapshot: represents a source cluster snapshot operation.
 # Terminal resource — transitions to Completed. Spec is frozen after initial apply.
@@ -156,7 +153,6 @@ spec:
                   type: string
                 checksumForSnapshotMigration:
                   type: string
-              x-kubernetes-preserve-unknown-fields: true
 ---
 # SnapshotMigration: represents a migration from snapshot (metadata + document backfill).
 # Terminal resource — transitions to Completed. Contains sub-configs for each phase.
@@ -220,10 +216,8 @@ spec:
                       type: boolean
                     resources:
                       type: object
-                      x-kubernetes-preserve-unknown-fields: true
                 metadataMigrationConfig:
                   type: object
-                  x-kubernetes-preserve-unknown-fields: true
             status:
               type: object
               properties:
@@ -238,7 +232,6 @@ spec:
                   type: string
                 checksumForReplayer:
                   type: string
-              x-kubernetes-preserve-unknown-fields: true
 ---
 # TrafficReplay: represents a traffic replayer and its configuration.
 # Long-lived resource — transitions to Ready when the replayer is consuming and replaying traffic.
@@ -280,7 +273,6 @@ spec:
                   minimum: 0
                 resources:
                   type: object
-                  x-kubernetes-preserve-unknown-fields: true
                 # Replayer CLI params
                 authHeaderValue:
                   type: string
@@ -332,7 +324,6 @@ spec:
                   type: integer
                 configChecksum:
                   type: string
-              x-kubernetes-preserve-unknown-fields: true
 ---
 # KafkaCluster: represents a Kafka cluster managed by the migration workflow.
 # Long-lived resource — transitions to Ready when the cluster is operational.
@@ -364,7 +355,6 @@ spec:
                   type: array
                   items:
                     type: string
-              x-kubernetes-preserve-unknown-fields: true
             status:
               type: object
               properties:
@@ -373,7 +363,6 @@ spec:
                   enum: [Initialized, Created, Ready, Error]
                 configChecksum:
                   type: string
-              x-kubernetes-preserve-unknown-fields: true
 ---
 # ApprovalGate: represents a user approval checkpoint in the migration workflow.
 # Transitions from Pending to Approved when the user approves the step.
@@ -405,11 +394,9 @@ spec:
                   type: array
                   items:
                     type: string
-              x-kubernetes-preserve-unknown-fields: true
             status:
               type: object
               properties:
                 phase:
                   type: string
                   enum: [Initialized, Pending, Approved]
-              x-kubernetes-preserve-unknown-fields: true
