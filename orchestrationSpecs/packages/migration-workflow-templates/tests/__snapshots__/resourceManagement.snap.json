@@ -640,8 +640,12 @@
         },
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: ApprovalGate\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Pending\n",
-          "action": "apply",
-          "setOwnerReference": false
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
         },
         "retryStrategy": {
           "limit": "6",
@@ -798,33 +802,6 @@
         }
       },
       {
-        "name": "createtrafficreplay",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: TrafficReplay\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Running\n",
-          "action": "apply",
-          "setOwnerReference": false
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
         "name": "patchtrafficreplayready",
         "inputs": {
           "parameters": [
@@ -877,87 +854,6 @@
             "--type",
             "merge"
           ]
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "createkafkacluster",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: KafkaCluster\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Created\n",
-          "action": "apply",
-          "setOwnerReference": false
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "createsnapshotmigration",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Created\n",
-          "action": "apply",
-          "setOwnerReference": false
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "createcapturedtraffic",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Created\n",
-          "action": "apply",
-          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",

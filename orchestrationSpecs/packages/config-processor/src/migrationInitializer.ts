@@ -221,6 +221,29 @@ export class MigrationInitializer {
             });
         }
 
+        // ApprovalGate resources from snapshot migrations (for metadata migration approvals)
+        for (const migration of workflows.snapshotMigrations ?? []) {
+            const targetLabel = migration.targetConfig.label;
+            const snapshotLabel = migration.snapshotConfig.label;
+            for (const m of migration.migrations) {
+                if (m.metadataMigrationConfig) {
+                    const prefix = `${migration.sourceLabel}.${targetLabel}.${snapshotLabel}.${m.label}.`;
+                    items.push({
+                        apiVersion: CRD_API_VERSION,
+                        kind: 'ApprovalGate',
+                        metadata: { name: `${prefix}evaluateMetadata` },
+                        status: { phase: 'Initialized' }
+                    });
+                    items.push({
+                        apiVersion: CRD_API_VERSION,
+                        kind: 'ApprovalGate',
+                        metadata: { name: `${prefix}migrateMetadata` },
+                        status: { phase: 'Initialized' }
+                    });
+                }
+            }
+        }
+
         return {
             apiVersion: 'v1',
             kind: 'List',

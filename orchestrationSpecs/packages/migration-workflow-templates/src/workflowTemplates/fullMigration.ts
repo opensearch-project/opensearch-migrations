@@ -102,9 +102,6 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
-            .addStep("createCrd", ResourceManagement, "createKafkaCluster", c =>
-                c.register({resourceName: b.inputs.clusterName})
-            )
             .addStep("getCrdUid", ResourceManagement, "getResourceUid", c =>
                 c.register({
                     resourceName: b.inputs.clusterName,
@@ -212,9 +209,6 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.kafkaClusterName,
                     configChecksum: expr.literal(""),
                 })
-            )
-            .addStep("createCrd", ResourceManagement, "createCapturedTraffic", c =>
-                c.register({resourceName: b.inputs.proxyName})
             )
             .addStep("getCrdUid", ResourceManagement, "getResourceUid", c =>
                 c.register({
@@ -507,9 +501,6 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.resourceName,
                 })
             )
-            .addStep("createCrd", ResourceManagement, "createSnapshotMigration", c =>
-                c.register({resourceName: b.inputs.resourceName})
-            )
             .addStep("getCrdUid", ResourceManagement, "getResourceUid", c =>
                 c.register({
                     resourceName: b.inputs.resourceName,
@@ -704,13 +695,7 @@ export const FullMigration = WorkflowBuilder.create({
                         )
                     )}),
                 })
-                // Create TrafficReplay CRD and read its UID
-                .addStep("createTrafficReplay", ResourceManagement, "createTrafficReplay", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        resourceName: replayerName,
-                    })
-                )
+                // Read TrafficReplay CRD UID (pre-created by init)
                 .addStep("getCrdUid", ResourceManagement, "getResourceUid", c =>
                     c.register({
                         resourceName: replayerName,

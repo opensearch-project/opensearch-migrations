@@ -363,8 +363,8 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("kafkaTopicName", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
-                action: "apply",
-                setOwnerReference: false,
+                action: "patch",
+                flags: ["--type", "merge"],
                 manifest: makeCapturedTrafficManifest(b.inputs.proxyConfig, b.inputs.proxyName, b.inputs.kafkaClusterName, b.inputs.kafkaTopicName)
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)

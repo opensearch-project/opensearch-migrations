@@ -330,8 +330,8 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("resourceName", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
-                action: "apply",
-                setOwnerReference: false,
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "ApprovalGate",
@@ -436,23 +436,6 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
 
-    .addTemplate("createTrafficReplay", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: false,
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: "TrafficReplay",
-                    metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Running"}
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
     .addTemplate("patchTrafficReplayReady", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addResourceTask(b => b
@@ -490,59 +473,6 @@ export const ResourceManagement = WorkflowBuilder.create({
                                 makeStringTypeProxy(expr.getWorkflowValue("uid"))
                         }
                     }
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
-    // ── CRD creation templates ──────────────────────────────────────────
-
-    .addTemplate("createKafkaCluster", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: false,
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: "KafkaCluster",
-                    metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Created"}
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
-    .addTemplate("createSnapshotMigration", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: false,
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: "SnapshotMigration",
-                    metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Created"}
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
-    .addTemplate("createCapturedTraffic", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: false,
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: "CapturedTraffic",
-                    metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Created"}
                 }
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)

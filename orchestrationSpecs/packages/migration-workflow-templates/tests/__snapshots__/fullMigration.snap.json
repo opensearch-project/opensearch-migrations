@@ -73,23 +73,6 @@
           [
             {
               "templateRef": {
-                "template": "createkafkacluster",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.clusterName}}"
-                  }
-                ]
-              },
-              "name": "createCrd"
-            }
-          ],
-          [
-            {
-              "templateRef": {
                 "template": "getresourceuid",
                 "name": "resource-management"
               },
@@ -428,23 +411,6 @@
                 ]
               },
               "name": "waitForKafkaCluster"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "createcapturedtraffic",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.proxyName}}"
-                  }
-                ]
-              },
-              "name": "createCrd"
             }
           ],
           [
@@ -1456,23 +1422,6 @@
           [
             {
               "templateRef": {
-                "template": "createsnapshotmigration",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.resourceName}}"
-                  }
-                ]
-              },
-              "name": "createCrd"
-            }
-          ],
-          [
-            {
-              "templateRef": {
                 "template": "getresourceuid",
                 "name": "resource-management"
               },
@@ -1813,23 +1762,6 @@
                 ]
               },
               "name": "readKafkaConnectionProfile"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "createtrafficreplay",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
-                  }
-                ]
-              },
-              "name": "createTrafficReplay"
             }
           ],
           [
