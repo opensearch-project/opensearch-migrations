@@ -36,3 +36,25 @@ application {
 tasks.withType(Test).configureEach {
     systemProperty 'io.netty.handler.codec.http.defaultStrictLineParsing', false
 }
+
+// Bundle Solr-to-OpenSearch transforms into the Docker image by default.
+// Skip with: ./gradlew :TrafficCapture:transformationShim:jibDockerBuild -PskipBundleTransforms
+if (!project.hasProperty('skipBundleTransforms')) {
+    tasks.register('stageTransformsForImage', Copy) {
+        description = 'Copy built transforms into docker/ for Jib extraDirectories'
+        from "${project(':TrafficCapture:SolrTransformations').projectDir}/transforms/dist"
+        into "${projectDir}/docker/transforms"
+        include '*.js'
+        dependsOn ':TrafficCapture:SolrTransformations:buildTransforms'
+    }
+
+    afterEvaluate {
+        tasks.matching { it.name in ['jib', 'jibDockerBuild'] }.configureEach {
+            dependsOn stageTransformsForImage
+        }
+    }
+
+    clean.doFirst {
+        delete "${projectDir}/docker/transforms"
+    }
+}

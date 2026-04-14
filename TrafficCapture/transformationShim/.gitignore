@@ -1,0 +1,2 @@
+# Staged transforms for Jib image builds (-PbundleTransforms)
+docker/transforms/
