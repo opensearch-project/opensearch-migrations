@@ -1,4 +1,14 @@
 # conftest.py
+#
+# Test ID naming convention:
+#   0001-0009  Basic tests (single doc backfill, coordinator cluster)
+#   0004-0005  Multi-type index tests (union, split)
+#   0006       Benchmark backfill (OpenSearch Benchmark)
+#   0010-0019  Snapshot-only tests (BYOS / externally managed snapshots)
+#   0021-0029  AOSS collection tests (search, time-series, vector)
+#   0030-0039  CDC tests (capture proxy + replayer + live traffic)
+#   0040-0049  CDC full E2E tests (capture proxy + replayer + backfill + generate-data)
+#
 import json
 import os
 from pathlib import Path
@@ -13,6 +23,12 @@ from .test_cases.basic_tests import *
 from .test_cases.multi_type_tests import *
 from .test_cases.backfill_tests import *
 from .test_cases.snapshot_only_tests import *
+from .test_cases.cdc_tests import *
+from .test_cases.cdc_generate_data_tests import *
+from .test_cases.cdc_tls_tests import *
+from .test_cases.cdc_mixed_operations_tests import *
+from .test_cases.cdc_simple_bulk_e2e_tests import *
+from .test_cases.cdc_aoss_tests import *
 from .test_cases.aoss_collection_tests import *
 from .test_cases.solr_tests import *
 
@@ -50,6 +66,10 @@ def pytest_addoption(parser):
                      help="Specify the Migration ALB endpoint for the target proxy")
     parser.addoption("--image_registry_prefix", action="store", default="",
                      help="Registry prefix for custom ES cluster images (e.g. 'localhost:5000/')")
+    parser.addoption("--speedup_factor", type=int, default=20,
+                     help="Speedup factor for traffic replayer (default: 20)")
+    parser.addoption("--observed_packet_timeout", type=int, default=30,
+                     help="Observed packet connection timeout for traffic replayer (default: 30)")
 
 
 def pytest_configure(config):
@@ -80,9 +100,13 @@ def pytest_generate_tests(metafunc):
         metafunc.config.test_summary["target_version"] = target_version if target_type != "AOSS" else "AOSS"
         test_ids_list = metafunc.config.getoption("test_ids")
         image_registry_prefix = metafunc.config.getoption("image_registry_prefix")
+        speedup_factor = metafunc.config.getoption("speedup_factor")
+        observed_packet_timeout = metafunc.config.getoption("observed_packet_timeout")
         user_args = MATestUserArguments(source_version=source_version, target_version=target_version,
                                         target_type=target_type, unique_id=unique_id, reuse_clusters=reuse_clusters,
-                                        image_registry_prefix=image_registry_prefix)
+                                        image_registry_prefix=image_registry_prefix,
+                                        speedup_factor=speedup_factor,
+                                        observed_packet_timeout=observed_packet_timeout)
         test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
         metafunc.config.test_summary["expected"] = len(test_cases_param)
         if not test_cases_param and not test_ids_list:
