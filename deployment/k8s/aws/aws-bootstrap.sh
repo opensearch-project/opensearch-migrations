@@ -45,6 +45,7 @@ skip_console_exec=false
 stage_filter=""
 extra_helm_values=""
 disable_general_purpose_pool=false
+use_general_node_pool=false
 region="${AWS_CFN_REGION:-}"
 deploy_create_vpc=false
 deploy_import_vpc=false
@@ -78,6 +79,7 @@ while [[ $# -gt 0 ]]; do
     --stage) stage_filter="$2"; shift 2 ;;
     --helm-values) extra_helm_values="$2"; shift 2 ;;
     --disable-general-purpose-pool) disable_general_purpose_pool=true; shift 1 ;;
+    --use-general-node-pool) use_general_node_pool=true; shift 1 ;;
     --region) region="$2"; shift 2 ;;
     --deploy-create-vpc-cfn) deploy_create_vpc=true; shift 1 ;;
     --deploy-import-vpc-cfn) deploy_import_vpc=true; shift 1 ;;
@@ -152,6 +154,9 @@ while [[ $# -gt 0 ]]; do
       echo "                                            require another nodepool to be configured (such as with"
       echo "                                            'cluster.useCustomKarpenterNodePool: true' in the file"
       echo "                                            passed to --helm-values)"
+      echo "  --use-general-node-pool                   Use the EKS Auto Mode general-purpose pool instead of"
+      echo "                                            the custom Karpenter NodePool. Useful for CI/test"
+      echo "                                            environments that don't need production-safe settings."
       echo "  --stage <val>                             Stage name for CFN exports filter and CFN Stage parameter (default: dev)"
       echo "  --region <val>                            AWS region"
       echo "  --skip-console-exec                       Don't exec into console pod (default: $skip_console_exec)"
@@ -1061,6 +1066,12 @@ check_existing_ma_release "$namespace" "$namespace"
 # Build TLS-related helm --set flags and create Pod Identity Associations
 TLS_HELM_FLAGS=""
 
+# Override custom nodepool when --use-general-node-pool is set
+NODEPOOL_HELM_FLAGS=""
+if [[ "$use_general_node_pool" == "true" ]]; then
+  NODEPOOL_HELM_FLAGS="--set cluster.useCustomKarpenterNodePool=false"
+fi
+
 # For any PCA mode, ensure Pod Identity Association exists
 if [[ "$tls_mode" == "pca-existing" || "$tls_mode" == "pca-create" ]]; then
   echo "Ensuring Pod Identity Association for aws-pca-issuer..."
@@ -1157,6 +1168,8 @@ echo "Image flags:"
 echo "  ${IMAGE_FLAGS}"
 echo "TLS flags:"
 echo "  ${TLS_HELM_FLAGS}"
+echo "NodePool flags:"
+echo "  ${NODEPOOL_HELM_FLAGS}"
 echo "=== End helm install configuration ==="
 
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
@@ -1183,6 +1196,7 @@ helm install "$namespace" "${ma_chart_dir}" \
   --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
   $IMAGE_FLAGS \
   $TLS_HELM_FLAGS \
+  $NODEPOOL_HELM_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 set -x
 

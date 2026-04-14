@@ -7,6 +7,7 @@ def call(Map config = [:]) {
     def buildImages = config.containsKey('buildImages') ? config.buildImages : false
     def buildChart = config.containsKey('buildChartAndDashboards') ? config.buildChartAndDashboards : false
     def skipTestImages = config.containsKey('skipTestImages') ? config.skipTestImages : false
+    def useGeneralNodePool = config.containsKey('useGeneralNodePool') ? config.useGeneralNodePool : false
 
     if (useRelease) {
         // Download the self-contained aws-bootstrap.sh from the GitHub release.
@@ -29,6 +30,7 @@ def call(Map config = [:]) {
         if (skipTestImages) flags << '--skip-test-images'
     }
     if (buildChart) flags << '--build-chart-and-dashboards'
+    if (useGeneralNodePool) flags << '--use-general-node-pool'
     if (!useRelease) flags << "--base-dir \"\$(pwd)\""
     flags << "--version ${version}"
 

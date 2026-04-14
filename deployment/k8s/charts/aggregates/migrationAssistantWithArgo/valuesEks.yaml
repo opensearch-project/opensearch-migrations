@@ -12,8 +12,10 @@ aws:
 
 cluster:
   dedicatedKarpenterNodePoolForMigrationConsole: true
-  # set this to true and disable the general-purpose pool to put a hard limit resource usage
-  useCustomKarpenterNodePool: false
+  # When true, deploys a custom Karpenter NodePool (general-work-pool) with conservative
+  # settings (WhenEmpty consolidation, 30m cooldown, 4xlarge max) instead of using the
+  # EKS Auto Mode general-purpose pool. Recommended for production stability.
+  useCustomKarpenterNodePool: true
 
 # Enable multi-arch for EKS
 workloadsNodePool:
