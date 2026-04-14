@@ -235,18 +235,12 @@ public class ShimMain {
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 
         // Build reporting components if configured
-        ReportingSink reportingSink = null;
-        MetricsReceiver metricsReceiver = null;
-        if (params.reportingParams.reportingConfig != null) {
-            reportingSink = createReportingSink(params.reportingParams.reportingConfig);
-            metricsReceiver = createMetricsReceiver(params.reportingParams.reportingConfig, reportingSink);
-            log.info("Reporting enabled: {}", params.reportingParams.reportingConfig);
-        }
+        var reporting = buildReporting(params.reportingParams.reportingConfig);
 
         var proxy = new ShimProxy(
             params.listenPort, targets, params.primary, activeTargets, validators,
             null, params.insecureBackend, Duration.ofMillis(params.timeoutMs), params.maxContentLength,
-            rootContext, metricsReceiver, reportingSink);
+            rootContext, reporting.metricsReceiver, reporting.reportingSink);
 
         TransformFileWatcher watcher = null;
         if (params.watchTransforms && !watchedTransforms.isEmpty()) {
@@ -275,20 +269,75 @@ public class ShimMain {
         proxy.waitForClose();
     }
 
-    /** Create a {@link FileSystemReportingSink} from the reporting config JSON array. */
-    static FileSystemReportingSink createReportingSink(String reportingConfigJson) {
-        var parsed = parseReportingConfig(reportingConfigJson);
-        return new FileSystemReportingSink(
-            Path.of((String) parsed.get("outputDir")),
-            parsed.containsKey("bufferSize") ? ((Number) parsed.get("bufferSize")).intValue() : 1024);
+    /** Holds the reporting components built from config. Both fields are null when reporting is disabled. */
+    record ReportingComponents(ReportingSink reportingSink, MetricsReceiver metricsReceiver) {
+        static final ReportingComponents DISABLED = new ReportingComponents(null, null);
     }
 
-    /** Create a {@link MetricsReceiver} from the reporting config JSON array and a sink. */
-    static MetricsReceiver createMetricsReceiver(String reportingConfigJson, ReportingSink sink) {
+    /** Build reporting components from the config string, or return disabled if null. */
+    static ReportingComponents buildReporting(String reportingConfigJson) {
+        if (reportingConfigJson == null) {
+            return ReportingComponents.DISABLED;
+        }
         var parsed = parseReportingConfig(reportingConfigJson);
+        var sink = createReportingSink(parsed.getKey(), parsed.getValue());
+        var receiver = createMetricsReceiver(parsed.getValue(), sink);
+        log.info("Reporting enabled: {}", reportingConfigJson);
+        return new ReportingComponents(sink, receiver);
+    }
+
+    /**
+     * Parse the {@code --reportingConfig} JSON array into a provider name and config map.
+     * Expects format: {@code [{"ProviderName": {...}}]}
+     */
+    @SuppressWarnings("unchecked")
+    static Map.Entry<String, Map<String, Object>> parseReportingConfig(String json) {
+        try {
+            var entries = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(json, List.class);
+            if (entries.isEmpty()) {
+                throw new ParameterException("--reportingConfig array must not be empty");
+            }
+            var first = entries.get(0);
+            if (!(first instanceof Map)) {
+                throw new ParameterException("--reportingConfig entries must be JSON objects");
+            }
+            var providerMap = (Map<String, Object>) first;
+            if (providerMap.size() != 1) {
+                throw new ParameterException(
+                    "--reportingConfig entry must have exactly one provider key");
+            }
+            var providerEntry = providerMap.entrySet().iterator().next();
+            if (!(providerEntry.getValue() instanceof Map)) {
+                throw new ParameterException(
+                    "--reportingConfig provider value must be a JSON object");
+            }
+            return Map.entry(providerEntry.getKey(), (Map<String, Object>) providerEntry.getValue());
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new ParameterException("Invalid --reportingConfig JSON: " + e.getMessage());
+        }
+    }
+
+    /** Create a {@link ReportingSink} for the given provider name and config. */
+    static ReportingSink createReportingSink(String providerName, Map<String, Object> config) {
+        if (!"FileSystemReportingSink".equals(providerName)) {
+            throw new ParameterException("Unknown reporting provider: " + providerName
+                + ". Supported: FileSystemReportingSink");
+        }
+        if (!config.containsKey("outputDir") || !(config.get("outputDir") instanceof String)) {
+            throw new ParameterException(
+                "--reportingConfig requires \"outputDir\" key with a string value");
+        }
+        return new FileSystemReportingSink(
+            Path.of((String) config.get("outputDir")),
+            config.containsKey("bufferSize") ? ((Number) config.get("bufferSize")).intValue() : 1024);
+    }
+
+    /** Create a {@link MetricsReceiver} from a parsed config map and a sink. */
+    static MetricsReceiver createMetricsReceiver(Map<String, Object> config, ReportingSink sink) {
         return new MetricsReceiver(sink, new SolrMetricsExtractor(),
-            Boolean.TRUE.equals(parsed.get("includeRequestBody")),
-            Boolean.TRUE.equals(parsed.get("includeResponseBody")));
+            Boolean.TRUE.equals(config.get("includeRequestBody")),
+            Boolean.TRUE.equals(config.get("includeResponseBody")));
     }
 
     /**
@@ -365,44 +414,6 @@ public class ShimMain {
             log.warn("Could not extract bindings for watch mode: {}", e.getMessage());
         }
         return bindings;
-    }
-
-    /**
-     * Parse the {@code --reportingConfig} JSON array string into a provider config map.
-     * Expects format: {@code [{"FileSystemReportingSink": {"outputDir": "...", ...}}]}
-     * Returns the inner config map for the first (and only) provider entry.
-     */
-    @SuppressWarnings("unchecked")
-    static Map<String, Object> parseReportingConfig(String json) {
-        try {
-            var entries = new com.fasterxml.jackson.databind.ObjectMapper()
-                .readValue(json, List.class);
-            if (entries.isEmpty()) {
-                throw new ParameterException("--reportingConfig array must not be empty");
-            }
-            var first = entries.get(0);
-            if (!(first instanceof Map)) {
-                throw new ParameterException("--reportingConfig entries must be JSON objects");
-            }
-            var providerMap = (Map<String, Object>) first;
-            if (providerMap.size() != 1) {
-                throw new ParameterException(
-                    "--reportingConfig entry must have exactly one provider key");
-            }
-            var providerEntry = providerMap.entrySet().iterator().next();
-            if (!(providerEntry.getValue() instanceof Map)) {
-                throw new ParameterException(
-                    "--reportingConfig provider value must be a JSON object");
-            }
-            var config = (Map<String, Object>) providerEntry.getValue();
-            if (!config.containsKey("outputDir") || !(config.get("outputDir") instanceof String)) {
-                throw new ParameterException(
-                    "--reportingConfig requires \"outputDir\" key with a string value");
-            }
-            return config;
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
-            throw new ParameterException("Invalid --reportingConfig JSON: " + e.getMessage());
-        }
     }
 
     static Map<String, Target> parseTargets(Parameters params,

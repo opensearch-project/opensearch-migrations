@@ -421,24 +421,27 @@ class ShimMainTest {
 
     @Test
     void parseReportingConfig_validJson() {
-        var config = ShimMain.parseReportingConfig(
-            "[{\"FileSystemReportingSink\":{\"outputDir\":\"/tmp/reports\",\"bufferSize\":2048,\"includeRequestBody\":true}}]");
-        assertEquals("/tmp/reports", config.get("outputDir"));
-        assertEquals(2048, ((Number) config.get("bufferSize")).intValue());
-        assertEquals(true, config.get("includeRequestBody"));
+        var entry = ShimMain.parseReportingConfig(
+            "[{\"FileSystemReportingSink\":{\"outputDir\":\"/tmp/reports\",\"bufferSize\":2048}}]");
+        assertEquals("FileSystemReportingSink", entry.getKey());
+        assertEquals("/tmp/reports", entry.getValue().get("outputDir"));
+        assertEquals(2048, ((Number) entry.getValue().get("bufferSize")).intValue());
     }
 
     @Test
     void parseReportingConfig_minimalJson() {
-        var config = ShimMain.parseReportingConfig(
+        var entry = ShimMain.parseReportingConfig(
             "[{\"FileSystemReportingSink\":{\"outputDir\":\"/tmp/reports\"}}]");
-        assertEquals("/tmp/reports", config.get("outputDir"));
+        assertEquals("FileSystemReportingSink", entry.getKey());
+        assertEquals("/tmp/reports", entry.getValue().get("outputDir"));
     }
 
     @Test
-    void parseReportingConfig_missingOutputDir_throws() {
-        assertThrows(Exception.class,
-            () -> ShimMain.parseReportingConfig("[{\"FileSystemReportingSink\":{\"bufferSize\":1024}}]"));
+    void parseReportingConfig_missingOutputDir_doesNotThrow() {
+        // parse only extracts structure — content validation is in createReportingSink
+        var entry = ShimMain.parseReportingConfig(
+            "[{\"FileSystemReportingSink\":{\"bufferSize\":1024}}]");
+        assertEquals("FileSystemReportingSink", entry.getKey());
     }
 
     @Test
@@ -469,27 +472,43 @@ class ShimMainTest {
     }
 
     @Test
-    void createReportingSink_createsWithDefaults(@TempDir java.nio.file.Path tmpDir) {
-        var sink = ShimMain.createReportingSink(
-            "[{\"FileSystemReportingSink\":{\"outputDir\":\"" + tmpDir.toAbsolutePath() + "\"}}]");
+    void createReportingSink_createsWithDefaults(@TempDir java.nio.file.Path tmpDir) throws Exception {
+        var config = java.util.Map.<String, Object>of("outputDir", tmpDir.toAbsolutePath().toString());
+        var sink = ShimMain.createReportingSink("FileSystemReportingSink", config);
         assertNotNull(sink);
         sink.close();
     }
 
     @Test
-    void createReportingSink_respectsBufferSize(@TempDir java.nio.file.Path tmpDir) {
-        var sink = ShimMain.createReportingSink(
-            "[{\"FileSystemReportingSink\":{\"outputDir\":\"" + tmpDir.toAbsolutePath() + "\",\"bufferSize\":512}}]");
+    void createReportingSink_respectsBufferSize(@TempDir java.nio.file.Path tmpDir) throws Exception {
+        var config = java.util.Map.<String, Object>of(
+            "outputDir", tmpDir.toAbsolutePath().toString(), "bufferSize", 512);
+        var sink = ShimMain.createReportingSink("FileSystemReportingSink", config);
         assertNotNull(sink);
         sink.close();
+    }
+
+    @Test
+    void createReportingSink_unknownProvider_throws() {
+        var config = java.util.Map.<String, Object>of("outputDir", "/tmp/reports");
+        var ex = assertThrows(Exception.class,
+            () -> ShimMain.createReportingSink("S3ReportingSink", config));
+        assertTrue(ex.getMessage().contains("Unknown reporting provider"));
+    }
+
+    @Test
+    void createReportingSink_missingOutputDir_throws() {
+        var config = java.util.Map.<String, Object>of("bufferSize", 1024);
+        assertThrows(Exception.class,
+            () -> ShimMain.createReportingSink("FileSystemReportingSink", config));
     }
 
     @Test
     void createMetricsReceiver_defaultFlags() {
         var mockSink = org.mockito.Mockito.mock(
             org.opensearch.migrations.transform.shim.reporting.ReportingSink.class);
-        var receiver = ShimMain.createMetricsReceiver(
-            "[{\"FileSystemReportingSink\":{\"outputDir\":\"/tmp/x\"}}]", mockSink);
+        var config = java.util.Map.<String, Object>of("outputDir", "/tmp/x");
+        var receiver = ShimMain.createMetricsReceiver(config, mockSink);
         assertNotNull(receiver);
     }
 
@@ -497,10 +516,26 @@ class ShimMainTest {
     void createMetricsReceiver_withBodyFlags() {
         var mockSink = org.mockito.Mockito.mock(
             org.opensearch.migrations.transform.shim.reporting.ReportingSink.class);
-        var receiver = ShimMain.createMetricsReceiver(
-            "[{\"FileSystemReportingSink\":{\"outputDir\":\"/tmp/x\",\"includeRequestBody\":true,\"includeResponseBody\":true}}]",
-            mockSink);
+        var config = java.util.Map.<String, Object>of(
+            "outputDir", "/tmp/x", "includeRequestBody", true, "includeResponseBody", true);
+        var receiver = ShimMain.createMetricsReceiver(config, mockSink);
         assertNotNull(receiver);
+    }
+
+    @Test
+    void buildReporting_nullConfig_returnsDisabled() {
+        var result = ShimMain.buildReporting(null);
+        assertNull(result.reportingSink());
+        assertNull(result.metricsReceiver());
+    }
+
+    @Test
+    void buildReporting_validConfig_returnsBothComponents(@TempDir java.nio.file.Path tmpDir) throws Exception {
+        var result = ShimMain.buildReporting(
+            "[{\"FileSystemReportingSink\":{\"outputDir\":\"" + tmpDir.toAbsolutePath() + "\"}}]");
+        assertNotNull(result.reportingSink());
+        assertNotNull(result.metricsReceiver());
+        result.reportingSink().close();
     }
 
     // --- ServiceLoader discovery ---
