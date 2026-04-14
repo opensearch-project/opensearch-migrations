@@ -6,6 +6,7 @@ description: >
   Translates Solr XML/JSON schemas to OpenSearch mappings and converts 
   Solr syntax (Standard, DisMax, eDisMax) into OpenSearch DSL. 
   Provides sizing for nodes, shards, and JVM heap.
+  Provides guidance auf authentication migration from Solr to OpenSearch.
   Uses the AWS Knowledge MCP Server for accurate, up-to-date OpenSearch
   and AWS service information.
 keywords: 
@@ -19,6 +20,7 @@ keywords:
   - "OpenSearch best practices"
   - "AWS OpenSearch Service"
   - "OpenSearch regional availability"
+  - "Authentication migration from Solr to OpenSearch"
 metadata:
   author: jzonthemtn
   version: "0.2.0"
@@ -43,6 +45,7 @@ Use this skill when:
 - A user has Solr query strings and needs them translated to OpenSearch Query DSL.
 - A user needs a migration report covering milestones, blockers, and cost estimates.
 - A user has questions about Amazon OpenSearch Service features, regional availability, or AWS best practices.
+- A user has questions about migrating authentication from Solr to OpenSearch.
 
 **Trigger phrases:** "migrate from Solr", "convert Solr schema", "translate Solr
 query", "Solr to OpenSearch", "migration advisor", "migration report",
@@ -412,7 +415,7 @@ You have access to a verified knowledge base of technical information about Apac
 - Follow the steps in order. If the user jumps ahead, acknowledge their input, store it in the session, and guide them back to complete any skipped steps.
 - If a user asks for migration advice but hasn't provided technical details, proactively request the Solr schema or a sample JSON document (Step 2).
 - **Use `facts.solr_version` throughout every step.** Once the Solr version is known, apply version-specific checks, flag version-specific incompatibilities, and tailor all recommendations accordingly. Never give generic advice when a version-specific answer is more accurate.
-- Use the steering documents (Stakeholders, Query Translation, Index Design, Sizing, Incompatibilities) to inform all reasoning.
+- Use the steering documents (Stakeholders, Query Translation, Index Design, Sizing, Incompatibilities, Authentication) to inform all reasoning.
 - **Incompatibility tracking is mandatory.** Every incompatibility found in any step must be recorded in `facts.incompatibilities` (via `SessionState.add_incompatibility`) before moving on. Never silently skip a known issue.
 - When in doubt about whether something is an incompatibility, flag it conservatively — a false positive is far less harmful than a missed breaking change.
 
