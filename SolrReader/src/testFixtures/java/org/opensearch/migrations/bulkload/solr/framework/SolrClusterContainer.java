@@ -49,9 +49,10 @@ public class SolrClusterContainer extends GenericContainer<SolrClusterContainer>
                     .withStartupTimeout(Duration.ofMinutes(3)));
         } else {
             this.withCommand("solr-precreate", "dummy")
-                .waitingFor(Wait.forHttp("/solr/admin/info/system")
+                .waitingFor(Wait.forHttp("/solr/admin/cores?action=STATUS&indexInfo=false&wt=json")
                     .forPort(8983)
                     .forStatusCode(200)
+                    .forResponsePredicate(body -> body.contains("\"dummy\""))
                     .withStartupTimeout(Duration.ofMinutes(2)));
         }
     }
