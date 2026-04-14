@@ -184,6 +184,10 @@ spec:
             spec:
               type: object
               properties:
+                dependsOn:
+                  type: array
+                  items:
+                    type: string
                 documentBackfillConfig:
                   type: object
                   properties:
@@ -262,6 +266,10 @@ spec:
             spec:
               type: object
               properties:
+                dependsOn:
+                  type: array
+                  items:
+                    type: string
                 # Deployment-level fields
                 jvmArgs:
                   type: string
