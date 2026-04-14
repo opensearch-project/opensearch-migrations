@@ -229,6 +229,18 @@ spec:
                   key: ENDPOINT_HTTP
                   optional: true
             {{- end }}
+            {{- if index .Values.conditionalPackageInstalls "cert-manager" }}
+            - name: PROXY_DEFAULT_ISSUER_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: migration-issuer-config
+                  key: PROXY_DEFAULT_ISSUER_NAME
+            - name: PROXY_DEFAULT_ISSUER_KIND
+              valueFrom:
+                configMapKeyRef:
+                  name: migration-issuer-config
+                  key: PROXY_DEFAULT_ISSUER_KIND
+            {{- end }}
           {{- if .Values.defaultBucketConfiguration.create }}
           securityContext:
             privileged: true

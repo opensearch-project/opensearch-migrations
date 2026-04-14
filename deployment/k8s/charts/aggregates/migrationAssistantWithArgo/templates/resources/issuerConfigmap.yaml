@@ -1,0 +1,9 @@
+{{- if index .Values.conditionalPackageInstalls "cert-manager" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: migration-issuer-config
+data:
+  PROXY_DEFAULT_ISSUER_NAME: "{{ .Values.issuerConfig.issuerName }}"
+  PROXY_DEFAULT_ISSUER_KIND: "{{ .Values.issuerConfig.issuerKind }}"
+{{- end }}

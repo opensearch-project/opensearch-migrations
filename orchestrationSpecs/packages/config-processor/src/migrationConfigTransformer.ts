@@ -197,6 +197,22 @@ function normalizeKafkaClusterConfig(
     };
 }
 
+function defaultProxyTlsConfig(proxyName: string) {
+    return {
+        mode: "certManager" as const,
+        issuerRef: {
+            name: process.env.PROXY_DEFAULT_ISSUER_NAME || "migrations-ca",
+            kind: (process.env.PROXY_DEFAULT_ISSUER_KIND || "ClusterIssuer") as "ClusterIssuer" | "Issuer",
+        },
+        dnsNames: [
+            "*.svc.cluster.local",
+            proxyName,
+        ],
+        duration: "2160h",
+        renewBefore: "360h",
+    };
+}
+
 function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["traffic"] {
     // Drop user-schema sentinel placeholders that are equivalent to omission so
     // AJV validates the canonical user config rather than Zod's empty-string defaults.
@@ -206,9 +222,31 @@ function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["t
 
     const normalizedProxies: NonNullable<InputConfig["traffic"]>["proxies"] = {};
     for (const [key, proxy] of Object.entries(traffic.proxies ?? {})) {
-        normalizedProxies[key] = proxy.kafkaTopic === ""
+        let normalized = proxy.kafkaTopic === ""
             ? (({kafkaTopic, ...rest}) => rest)(proxy)
             : proxy;
+
+        // Secure-by-default: inject self-signed TLS when no TLS config is specified
+        // and no legacy sslConfigFile is in use. Users can opt out with tls.mode: "plaintext".
+        if (!normalized.proxyConfig?.tls && !normalized.proxyConfig?.sslConfigFile) {
+            normalized = {
+                ...normalized,
+                proxyConfig: {
+                    ...normalized.proxyConfig,
+                    tls: defaultProxyTlsConfig(key),
+                },
+            };
+        }
+
+        // Strip plaintext mode so Argo sees no TLS. This preserves existing HTTP behavior.
+        if (normalized.proxyConfig?.tls &&
+            'mode' in normalized.proxyConfig.tls &&
+            normalized.proxyConfig.tls.mode === "plaintext") {
+            const {tls: _, ...proxyConfigWithoutTls} = normalized.proxyConfig;
+            normalized = {...normalized, proxyConfig: proxyConfigWithoutTls};
+        }
+
+        normalizedProxies[key] = normalized;
     }
 
     return {
