@@ -968,6 +968,25 @@ public class RfsMigrateDocuments {
                             context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
                     Clock.systemUTC())) {
 
+                // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
+                // event of a SIGTERM signal.
+                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                    Thread.currentThread().setName("Cleanup-Hook-Thread");
+                    log.atWarn().setMessage("Received shutdown signal. Trying to mark progress and shutdown cleanly.").log();
+                    try {
+                        executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
+                                context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
+                        log.atInfo().setMessage("Clean shutdown completed.").log();
+                    } catch (InterruptedException e) {
+                        log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();
+                        Thread.currentThread().interrupt();
+                    } catch (Exception e) {
+                        log.atError().setMessage("Could not complete clean exit process: {}").addArgument(e).log();
+                    } finally {
+                        LogManager.shutdown();
+                    }
+                }));
+
                 var scopedWorkCoordinator = prepareWorkCoordination(
                     workCoordinator, processManager, indexMetadataFactory,
                     arguments.snapshotName, arguments.indexAllowlist, context);
