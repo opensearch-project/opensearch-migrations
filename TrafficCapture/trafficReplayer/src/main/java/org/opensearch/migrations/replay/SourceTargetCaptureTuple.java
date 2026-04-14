@@ -14,12 +14,14 @@ import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
 import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class SourceTargetCaptureTuple implements AutoCloseable {
     @AllArgsConstructor
+    @Getter
     public static class Response {
         List<byte[]> targetResponseData;
         Throwable errorCause;

@@ -9,6 +9,7 @@
 import type { TransformRegistry } from './pipeline';
 import type { RequestContext, ResponseContext } from './context';
 
+import * as solrconfigDefaults from './features/solrconfig-defaults';
 import * as selectUri from './features/select-uri';
 import * as queryQ from './features/query-q';
 import * as cursorPagination from './features/cursor-pagination';
@@ -24,7 +25,8 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
   global: [],
   byEndpoint: {
     select: [
-      selectUri.request, // URI rewrite — must be first
+      solrconfigDefaults.request, // Apply solrconfig.xml defaults/invariants — must be before all others
+      selectUri.request, // URI rewrite
       queryQ.request, // q=... → query DSL
       cursorPagination.request, // cursorMark → search_after (after query-q sets from)
       jsonFacets.request, // json.facet → aggs

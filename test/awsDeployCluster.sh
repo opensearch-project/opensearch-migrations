@@ -112,7 +112,7 @@ if [[ -z "$PROVIDED_CONTEXT_FILE_PATH" ]]; then
 fi
 
 SAMPLE_CDK_REPO="https://github.com/aws-samples/amazon-opensearch-service-sample-cdk.git"
-SAMPLE_CDK_VERSION="v0.3.8"
+SAMPLE_CDK_VERSION="v0.3.10"
 echo "Using sample CDK version: $SAMPLE_CDK_VERSION"
 if [ ! -d "amazon-opensearch-service-sample-cdk" ]; then
   git clone "$SAMPLE_CDK_REPO"

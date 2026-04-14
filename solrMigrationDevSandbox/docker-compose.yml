@@ -60,6 +60,7 @@ services:
       - "18080:8080"
     volumes:
       - transform-dist:/transforms:ro
+      - ./config/solr/solrconfig.xml:/solr-config/solrconfig.xml:ro
     depends_on:
       opensearch:
         condition: service_healthy
@@ -76,8 +77,12 @@ services:
       - opensearch=http://opensearch:9200
       - --primary
       - opensearch
-      - --targetTransform
-      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
+      - --transformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}","solrConfigXmlFile":"/solr-config/solrconfig.xml"}}]'
+      - --responseTransformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
+      - --transformTarget
+      - opensearch
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
 
@@ -91,6 +96,7 @@ services:
       - "18083:8080"
     volumes:
       - transform-dist:/transforms:ro
+      - ./config/solr/solrconfig.xml:/solr-config/solrconfig.xml:ro
     depends_on:
       solr:
         condition: service_healthy
@@ -107,8 +113,12 @@ services:
       - solr=http://solr:8983
       - --target
       - opensearch=http://opensearch:9200
-      - --targetTransform
-      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
+      - --transformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}","solrConfigXmlFile":"/solr-config/solrconfig.xml"}}]'
+      - --responseTransformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
+      - --transformTarget
+      - opensearch
       - --primary
       - solr
       - --validator
@@ -130,6 +140,7 @@ services:
       - "18084:8080"
     volumes:
       - transform-dist:/transforms:ro
+      - ./config/solr/solrconfig.xml:/solr-config/solrconfig.xml:ro
     depends_on:
       solr:
         condition: service_healthy
@@ -146,8 +157,12 @@ services:
       - solr=http://solr:8983
       - --target
       - opensearch=http://opensearch:9200
-      - --targetTransform
-      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
+      - --transformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}","solrConfigXmlFile":"/solr-config/solrconfig.xml"}}]'
+      - --responseTransformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
+      - --transformTarget
+      - opensearch
       - --primary
       - opensearch
       - --validator

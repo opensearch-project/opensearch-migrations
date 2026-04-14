@@ -9,7 +9,6 @@ import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.opensearch.migrations.transform.JavascriptTransformer;
@@ -89,9 +88,9 @@ public class TransformFileWatcher implements Runnable, AutoCloseable {
 
     private void reloadTransformer(Path path, ReloadableTransformer transformer) {
         try {
-            String script = ShimMain.JS_POLYFILL + Files.readString(path);
+            String script = SolrTransformerProvider.JS_POLYFILL + Files.readString(path);
             transformer.reload(
-                () -> new JavascriptTransformer(script, new LinkedHashMap<>()));
+                () -> new JavascriptTransformer(script, transformer.getBindings()));
             log.info("Hot-reloaded transform: {}", path);
         } catch (Exception e) {
             log.error("Failed to reload transform {}, keeping previous version", path, e);

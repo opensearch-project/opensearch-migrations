@@ -80,8 +80,10 @@ services:
       - opensearch=http://opensearch:9200
       - --primary
       - opensearch
-      - --targetTransform
-      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
+      - --transformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}"}}]'
+      - --responseTransformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
       - --watchTransforms
 
   # Mode 3: Dual-target, Solr primary — returns Solr response, validates against OpenSearch
@@ -96,8 +98,12 @@ services:
       - solr=http://solr:8983
       - --target
       - opensearch=http://opensearch:9200
-      - --targetTransform
-      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
+      - --transformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}"}}]'
+      - --responseTransformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
+      - --transformTarget
+      - opensearch
       - --primary
       - solr
       - --validator
@@ -120,8 +126,12 @@ services:
       - solr=http://solr:8983
       - --target
       - opensearch=http://opensearch:9200
-      - --targetTransform
-      - opensearch=request:/transforms/solr-to-opensearch-request.js,response:/transforms/solr-to-opensearch-response.js
+      - --transformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}"}}]'
+      - --responseTransformerConfig
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
+      - --transformTarget
+      - opensearch
       - --primary
       - opensearch
       - --validator
