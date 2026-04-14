@@ -13,10 +13,22 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
+import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {setupLog4jConfigForContainer} from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+
+function makeOwnerReferences(name: BaseExpression<string>, uid: BaseExpression<string>): OwnerReference[] {
+    return [{
+        apiVersion: "migrations.opensearch.org/v1alpha1",
+        kind: "TrafficReplay",
+        name: makeDirectTypeProxy(name),
+        uid: makeDirectTypeProxy(uid),
+        controller: true,
+        blockOwnerDeletion: true,
+    }];
+}
 
 function makeReplayerTargetParamDict(
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>
@@ -79,7 +91,8 @@ function getReplayerDeploymentManifest
     podReplicas: BaseExpression<number>,
     replayerImageName: BaseExpression<string>,
     replayerImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-    resources: BaseExpression<ResourceRequirementsType>
+    resources: BaseExpression<ResourceRequirementsType>,
+    ownerUid: BaseExpression<string>,
 }): Deployment {
     const baseContainerDefinition = {
         name: "replayer",
@@ -100,6 +113,7 @@ function getReplayerDeploymentManifest
         kind: "Deployment",
         metadata: {
             name: makeDirectTypeProxy(args.name),
+            ownerReferences: makeOwnerReferences(args.name, args.ownerUid),
             labels: {
                 app: "replayer",
                 "workflows.argoproj.io/workflow": makeDirectTypeProxy(args.workflowName)
@@ -144,6 +158,7 @@ export const Replayer = WorkflowBuilder.create({
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("jvmArgs", typeToken<string>())
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
+        .addRequiredInput("ownerUid", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
 
@@ -162,6 +177,7 @@ export const Replayer = WorkflowBuilder.create({
                     workflowName: expr.getWorkflowValue("name"),
                     jsonConfig: expr.toBase64(b.inputs.jsonConfig),
                     resources: expr.deserializeRecord(b.inputs.resources),
+                    ownerUid: b.inputs.ownerUid,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -174,6 +190,7 @@ export const Replayer = WorkflowBuilder.create({
         .addRequiredInput("name", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
+        .addRequiredInput("ownerUid", typeToken<string>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
 
@@ -192,7 +209,8 @@ export const Replayer = WorkflowBuilder.create({
                             b.inputs.kafkaGroupId
                         ) as any
                     )),
-                    resources: expr.serialize(expr.jsonPathStrict(b.inputs.replayerOptions, "resources"))
+                    resources: expr.serialize(expr.jsonPathStrict(b.inputs.replayerOptions, "resources")),
+                    ownerUid: b.inputs.ownerUid
 
                 })))
     )

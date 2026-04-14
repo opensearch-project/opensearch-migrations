@@ -1,4 +1,5 @@
-import {ARGO_WORKFLOW_SCHEMA} from "@opensearch-migrations/schemas";
+import {ARGO_MIGRATION_CONFIG_PRE_ENRICH} from "@opensearch-migrations/schemas";
+import {z} from "zod";
 import {MigrationInitializer} from "./migrationInitializer";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {parse} from "yaml";
@@ -83,13 +84,13 @@ export async function main() {
     }
 
     try {
-        const workflows: ARGO_WORKFLOW_SCHEMA = await (async ()=>{
+        const workflows: z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH> = await (async ()=>{
             if (userConfigFile) {
                 const processor = new MigrationConfigTransformer();
                 const userConfig = await parseInput(userConfigFile) as any;
                 return processor.processFromObject(userConfig);
             } else if (workflowConfigFile) {
-                return parseInput(workflowConfigFile) as any;
+                return ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(await parseInput(workflowConfigFile));
             } else {
                 throw new Error("Neither userConfigFile nor workflowConfigFile found");
             }

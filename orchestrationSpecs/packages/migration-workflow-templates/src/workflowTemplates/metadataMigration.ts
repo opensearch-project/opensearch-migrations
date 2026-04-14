@@ -178,8 +178,6 @@ export const MetadataMigration = WorkflowBuilder.create({
     .addTemplate("approveEvaluate", t => t
         .addRequiredInput("name", typeToken<string>())
         .addSteps(b => b
-            .addStep("createGate", ResourceManagement, "createApprovalGate", c =>
-                c.register({resourceName: b.inputs.name}))
             .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
                 c.register({resourceName: b.inputs.name}))
         )
@@ -187,8 +185,6 @@ export const MetadataMigration = WorkflowBuilder.create({
     .addTemplate("approveMigrate", t => t
         .addRequiredInput("name", typeToken<string>())
         .addSteps(b => b
-            .addStep("createGate", ResourceManagement, "createApprovalGate", c =>
-                c.register({resourceName: b.inputs.name}))
             .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
                 c.register({resourceName: b.inputs.name}))
         )

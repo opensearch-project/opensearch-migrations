@@ -51,6 +51,9 @@
               "name": "version"
             },
             {
+              "name": "resourceUid"
+            },
+            {
               "name": "groupName_view",
               "value": "Kafka Cluster"
             },
@@ -64,7 +67,7 @@
           [
             {
               "templateRef": {
-                "template": "deploykafkaclusterwithretry",
+                "template": "deploykafkaclusterandtopicswithretry",
                 "name": "setup-kafka"
               },
               "arguments": {
@@ -80,6 +83,14 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{=jsonpath(inputs.parameters.kafkaClusterConfig, '$.config')}}"
+                  },
+                  {
+                    "name": "topics",
+                    "value": "{{=jsonpath(inputs.parameters.kafkaClusterConfig, '$.topics')}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
                   }
                 ]
               },
@@ -102,9 +113,6 @@
               "name": "kafkaClusterName"
             },
             {
-              "name": "kafkaTopicName"
-            },
-            {
               "name": "proxyName"
             },
             {
@@ -112,6 +120,9 @@
             },
             {
               "name": "podReplicas"
+            },
+            {
+              "name": "resourceUid"
             },
             {
               "name": "groupName_view",
@@ -178,10 +189,6 @@
                     "value": "{{inputs.parameters.kafkaClusterName}}"
                   },
                   {
-                    "name": "kafkaTopicName",
-                    "value": "{{inputs.parameters.kafkaTopicName}}"
-                  },
-                  {
                     "name": "proxyName",
                     "value": "{{inputs.parameters.proxyName}}"
                   },
@@ -200,6 +207,10 @@
                   {
                     "name": "imageCaptureProxyPullPolicy",
                     "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
                   }
                 ]
               },
@@ -1110,6 +1121,9 @@
               "name": "replayerOptions"
             },
             {
+              "name": "resourceUid"
+            },
+            {
               "name": "groupName_view",
               "value": "Traffic Replay"
             },
@@ -1247,27 +1261,14 @@
                   {
                     "name": "name",
                     "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
                   }
                 ]
               },
               "name": "deployReplayer"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "createtrafficreplay",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
-                  }
-                ]
-              },
-              "name": "createTrafficReplay"
             }
           ],
           [
@@ -1426,11 +1427,15 @@
                 "parameters": [
                   {
                     "name": "kafkaClusterConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"version\", item['version'], \"config\", fromJSON(item['config']), \"topics\", fromJSON(item['topics'])))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"version\", item['version'], \"config\", fromJSON(item['config']), \"topics\", fromJSON(item['topics']), \"resourceUid\", item['resourceUid']))}}"
                   },
                   {
                     "name": "clusterName",
                     "value": "{{=item['name']}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=item['resourceUid']}}"
                   },
                   {
                     "name": "version",
@@ -1471,19 +1476,19 @@
                   },
                   {
                     "name": "proxyConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig'])))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig']), \"resourceUid\", item['resourceUid']))}}"
                   },
                   {
                     "name": "kafkaClusterName",
                     "value": "{{=sprig.dig('label', '', fromJSON(item['kafkaConfig']))}}"
                   },
                   {
-                    "name": "kafkaTopicName",
-                    "value": "{{=sprig.dig('kafkaTopic', '', fromJSON(item['kafkaConfig']))}}"
-                  },
-                  {
                     "name": "proxyName",
                     "value": "{{=item['name']}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=item['resourceUid']}}"
                   },
                   {
                     "name": "listenPort",
@@ -1683,6 +1688,10 @@
                   {
                     "name": "toTarget",
                     "value": "{{=jsonpath(toJSON(item), '$.toTarget')}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=item['resourceUid']}}"
                   },
                   {
                     "name": "targetConfig",

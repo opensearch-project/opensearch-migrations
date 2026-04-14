@@ -44,6 +44,9 @@
               "name": "loggingConfigurationOverrideConfigMap"
             },
             {
+              "name": "ownerUid"
+            },
+            {
               "name": "imageTrafficReplayerLocation"
             },
             {
@@ -55,7 +58,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{inputs.parameters.name}}\n  labels:\n    app: replayer\n    workflows.argoproj.io/workflow: {{workflow.name}}\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      app: replayer\n  template:\n    metadata:\n      labels:\n        app: replayer\n        workflows.argoproj.io/workflow: {{workflow.name}}\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: replayer\n          image: \"{{inputs.parameters.imageTrafficReplayerLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageTrafficReplayerPullPolicy}}\"\n          args:\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: JDK_JAVA_OPTIONS\n              value: \"{{=inputs.parameters.jvmArgs + ' ' + (('' == inputs.parameters.loggingConfigurationOverrideConfigMap) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}\"\n          volumeMounts:\n            - name: log4j-configuration\n              mountPath: /config/logConfiguration\n              readOnly: true\n      volumes:\n        - name: log4j-configuration\n          configMap:\n            name: \"{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}\"\n            optional: {{=!('' == inputs.parameters.loggingConfigurationOverrideConfigMap)}}\n",
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{inputs.parameters.name}}\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: TrafficReplay\n      name: {{inputs.parameters.name}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    app: replayer\n    workflows.argoproj.io/workflow: {{workflow.name}}\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  selector:\n    matchLabels:\n      app: replayer\n  template:\n    metadata:\n      labels:\n        app: replayer\n        workflows.argoproj.io/workflow: {{workflow.name}}\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: replayer\n          image: \"{{inputs.parameters.imageTrafficReplayerLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageTrafficReplayerPullPolicy}}\"\n          args:\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.jsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: JDK_JAVA_OPTIONS\n              value: \"{{=inputs.parameters.jvmArgs + ' ' + (('' == inputs.parameters.loggingConfigurationOverrideConfigMap) ? ('-Dlog4j2.configurationFile=/config/logConfiguration') : (''))}}\"\n          volumeMounts:\n            - name: log4j-configuration\n              mountPath: /config/logConfiguration\n              readOnly: true\n      volumes:\n        - name: log4j-configuration\n          configMap:\n            name: \"{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}\"\n            optional: {{=!('' == inputs.parameters.loggingConfigurationOverrideConfigMap)}}\n",
           "action": "create",
           "setOwnerReference": true
         },
@@ -92,6 +95,9 @@
               "name": "replayerOptions"
             },
             {
+              "name": "ownerUid"
+            },
+            {
               "name": "imageTrafficReplayerLocation"
             },
             {
@@ -108,6 +114,10 @@
                   {
                     "name": "name",
                     "value": "{{inputs.parameters.name}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.ownerUid}}"
                   },
                   {
                     "name": "imageTrafficReplayerLocation",

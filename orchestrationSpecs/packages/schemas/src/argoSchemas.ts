@@ -88,7 +88,8 @@ export const NAMED_KAFKA_CLUSTER_CONFIG = z.object({
     name: z.string(),
     version: z.string(),
     config: makeOptionalDefaultedFieldsRequired(KAFKA_CLUSTER_CREATION_CONFIG),
-    topics: z.array(z.string()).readonly()
+    topics: z.array(z.string()).readonly(),
+    resourceUid: z.string()
 });
 
 export const NAMED_SOURCE_CLUSTER_CONFIG =
@@ -213,7 +214,8 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     sourceEndpoint: z.string(),
     sourceAllowInsecure: z.boolean().default(false),
-    proxyConfig: ARGO_PROXY_OPTIONS
+    proxyConfig: ARGO_PROXY_OPTIONS,
+    resourceUid: z.string()
 })
 
 export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
@@ -237,7 +239,8 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
     kafkaClusterName: z.string(),
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     replayerConfig: ARGO_REPLAYER_OPTIONS,
-    toTarget: NAMED_TARGET_CLUSTER_CONFIG
+    toTarget: NAMED_TARGET_CLUSTER_CONFIG,
+    resourceUid: z.string()
 })
 
 export const ARGO_MIGRATION_CONFIG = z.object({
@@ -248,6 +251,22 @@ export const ARGO_MIGRATION_CONFIG = z.object({
     trafficReplays: z.array(DENORMALIZED_REPLAY_CONFIG).default([]),
 
 })
+
+function makePreEnrichMigrationConfigSchema() {
+    return ARGO_MIGRATION_CONFIG.extend({
+        kafkaClusters: z.array(
+            NAMED_KAFKA_CLUSTER_CONFIG.extend({resourceUid: z.string().optional()})
+        ).min(1).optional(),
+        proxies: z.array(
+            DENORMALIZED_PROXY_CONFIG.extend({resourceUid: z.string().optional()})
+        ).default([]),
+        trafficReplays: z.array(
+            DENORMALIZED_REPLAY_CONFIG.extend({resourceUid: z.string().optional()})
+        ).default([]),
+    });
+}
+
+export const ARGO_MIGRATION_CONFIG_PRE_ENRICH = makePreEnrichMigrationConfigSchema();
 
 
 export type ARGO_WORKFLOW_SCHEMA = z.infer<typeof ARGO_MIGRATION_CONFIG>;

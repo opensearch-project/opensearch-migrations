@@ -1,8 +1,8 @@
 import {StreamSchemaParser} from "./streamSchemaTransformer";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {
-    ARGO_MIGRATION_CONFIG,
-    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN
+    ARGO_MIGRATION_CONFIG_PRE_ENRICH,
+    K8S_NAMING_PATTERN
 } from "@opensearch-migrations/schemas";
 import {stringify} from "yaml";
 import * as fs from "fs/promises";
@@ -10,21 +10,24 @@ import * as path from "path";
 import {scrapeApprovals} from "./formatApprovals";
 import {setNamesInUserConfig} from "./migrationConfigTransformer";
 import { generateSemaphoreKey } from './semaphoreUtils';
+import {z} from "zod";
+
+type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 
 export class MigrationInitializer {
-    readonly loader: StreamSchemaParser<typeof ARGO_MIGRATION_CONFIG>;
+    readonly loader: StreamSchemaParser<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
     readonly transformer: MigrationConfigTransformer;
     constructor() {
         // this is an interactive process meant to be used at the beginning of a workflow -
         // no reason to try excessively.  Modest retries and then the user can resubmit or investigate.
-        this.loader = new StreamSchemaParser(ARGO_MIGRATION_CONFIG);
+        this.loader = new StreamSchemaParser(ARGO_MIGRATION_CONFIG_PRE_ENRICH);
         this.transformer = new MigrationConfigTransformer();
     }
 
     /**
      * Generate output files including workflow config, approval ConfigMaps, and concurrency ConfigMaps with semaphores
      */
-    async generateOutputFiles(workflows: ARGO_WORKFLOW_SCHEMA, outputDir: string, userConfig: any): Promise<void> {
+    async generateOutputFiles(workflows: WorkflowConfig, outputDir: string, userConfig: any): Promise<void> {
         const bundle = await this.generateMigrationBundle(userConfig);
         await this.writeBundleToFiles(bundle, outputDir);
     }
@@ -70,6 +73,11 @@ export class MigrationInitializer {
         // 4. Write CRD resources
         const crdPath = path.join(outputDir, 'crdResources.yaml');
         await fs.writeFile(crdPath, stringify(bundle.crdResources));
+
+        // 5. Write workflow UID enrichment script
+        const enrichPath = path.join(outputDir, 'enrichWorkflowConfigWithUids.sh');
+        await fs.writeFile(enrichPath, this.generateUidEnrichmentScript(bundle.workflows));
+        await fs.chmod(enrichPath, 0o755);
     }
 
     private generateApprovalConfigMaps(userConfig: any) {
@@ -128,13 +136,28 @@ export class MigrationInitializer {
         };
     }
 
-    private makeCrdName(...labels: string[]): string {
-        return labels.join('-');
+    private makeResourceName(parts: string[]): string {
+        return parts.join('-');
     }
 
-    private generateCRDResources(workflows: ARGO_WORKFLOW_SCHEMA) {
+    private makeApprovalGateName(parts: string[], action: string): string {
+        return [...parts, action].join('.');
+    }
+
+    private generateCRDResources(workflows: WorkflowConfig) {
         const CRD_API_VERSION = 'migrations.opensearch.org/v1alpha1';
         const items: any[] = [];
+
+        // KafkaCluster resources
+        for (const cluster of workflows.kafkaClusters ?? []) {
+            items.push({
+                apiVersion: CRD_API_VERSION,
+                kind: 'KafkaCluster',
+                metadata: { name: cluster.name },
+                spec: { dependsOn: [] },
+                status: { phase: 'Initialized' }
+            });
+        }
 
         // CapturedTraffic resources from proxies
         for (const proxy of workflows.proxies ?? []) {
@@ -142,7 +165,7 @@ export class MigrationInitializer {
                 apiVersion: CRD_API_VERSION,
                 kind: 'CapturedTraffic',
                 metadata: { name: proxy.name },
-                spec: {},
+                spec: { dependsOn: [proxy.kafkaConfig.label] },
                 status: { phase: 'Initialized' }
             });
         }
@@ -153,8 +176,8 @@ export class MigrationInitializer {
                 items.push({
                     apiVersion: CRD_API_VERSION,
                     kind: 'DataSnapshot',
-                    metadata: { name: this.makeCrdName(snapshot.sourceConfig.label, item.label) },
-                    spec: {},
+                    metadata: { name: this.makeResourceName([snapshot.sourceConfig.label, item.label]) },
+                    spec: { dependsOn: item.dependsOnProxySetups ?? [] },
                     status: { phase: 'Initialized' }
                 });
             }
@@ -165,8 +188,49 @@ export class MigrationInitializer {
             items.push({
                 apiVersion: CRD_API_VERSION,
                 kind: 'SnapshotMigration',
-                metadata: { name: this.makeCrdName(migration.sourceLabel, migration.targetConfig.label, migration.label) },
-                spec: {},
+                metadata: { name: this.makeResourceName([migration.sourceLabel, migration.targetConfig.label, migration.label]) },
+                spec: {
+                    dependsOn: 'dataSnapshotResourceName' in migration.snapshotNameResolution
+                        ? [migration.snapshotNameResolution.dataSnapshotResourceName]
+                        : []
+                },
+                status: { phase: 'Initialized' }
+            });
+
+            for (const perMigration of migration.migrations ?? []) {
+                const gatePath = [
+                    migration.sourceLabel,
+                    migration.targetConfig.label,
+                    migration.label,
+                    perMigration.label,
+                ];
+
+                if (perMigration.metadataMigrationConfig !== undefined) {
+                    items.push({
+                        apiVersion: CRD_API_VERSION,
+                        kind: 'ApprovalGate',
+                        metadata: { name: this.makeApprovalGateName(gatePath, 'evaluateMetadata') },
+                        spec: {},
+                        status: { phase: 'Initialized' }
+                    });
+                    items.push({
+                        apiVersion: CRD_API_VERSION,
+                        kind: 'ApprovalGate',
+                        metadata: { name: this.makeApprovalGateName(gatePath, 'migrateMetadata') },
+                        spec: {},
+                        status: { phase: 'Initialized' }
+                    });
+                }
+            }
+        }
+
+        // TrafficReplay resources from trafficReplays
+        for (const replay of workflows.trafficReplays ?? []) {
+            items.push({
+                apiVersion: CRD_API_VERSION,
+                kind: 'TrafficReplay',
+                metadata: { name: this.makeResourceName([replay.fromProxy, replay.toTarget.label, 'replayer']) },
+                spec: { dependsOn: [replay.fromProxy] },
                 status: { phase: 'Initialized' }
             });
         }
@@ -176,6 +240,53 @@ export class MigrationInitializer {
             kind: 'List',
             items
         };
+    }
+
+    private generateUidEnrichmentScript(workflows: WorkflowConfig) {
+        const kafkaEntries = (workflows.kafkaClusters ?? [])
+            .map(cluster => `"${cluster.name}": "$(kubectl get kafkacluster ${cluster.name} -o jsonpath='{.metadata.uid}')"`).join(',\n');
+        const proxyEntries = workflows.proxies
+            .map(proxy => `"${proxy.name}": "$(kubectl get capturedtraffic ${proxy.name} -o jsonpath='{.metadata.uid}')"`).join(',\n');
+        const replayEntries = workflows.trafficReplays
+            .map(replay => {
+                const replayName = this.makeResourceName([replay.fromProxy, replay.toTarget.label, 'replayer']);
+                return `"${replayName}": "$(kubectl get trafficreplay ${replayName} -o jsonpath='{.metadata.uid}')"`;
+            }).join(',\n');
+
+        return `#!/bin/bash
+set -euo pipefail
+
+CONFIG_PATH="\${1:?Usage: $0 <workflowMigration.config.yaml>}"
+TMP_FILE="$(mktemp)"
+trap 'rm -f "$TMP_FILE"' EXIT
+
+UID_MAP_JSON=$(cat <<EOF
+{
+  "kafkaClusters": {
+${kafkaEntries}
+  },
+  "proxies": {
+${proxyEntries}
+  },
+  "trafficReplays": {
+${replayEntries}
+  }
+}
+EOF
+)
+
+jq --argjson uids "$UID_MAP_JSON" '
+  .kafkaClusters |= ((. // []) | map(. + {resourceUid: $uids.kafkaClusters[.name]}))
+  | .proxies |= ((. // []) | map(. + {resourceUid: $uids.proxies[.name]}))
+  | .trafficReplays |= ((. // []) | map(
+      . + {
+        resourceUid: $uids.trafficReplays[(.fromProxy + "-" + .toTarget.label + "-replayer")]
+      }
+    ))
+' "$CONFIG_PATH" > "$TMP_FILE"
+
+mv "$TMP_FILE" "$CONFIG_PATH"
+`;
     }
 
     private generateSemaphoreKeys(userConfig: any): string[] {

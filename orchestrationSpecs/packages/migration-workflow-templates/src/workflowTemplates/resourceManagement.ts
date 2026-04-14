@@ -206,26 +206,6 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
-
-    // ── Approval gate templates ─────────────────────────────────────────
-
-    .addTemplate("createApprovalGate", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: true,
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: "ApprovalGate",
-                    metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Pending"}
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
     .addTemplate("waitForApproval", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addWaitForExistingResource(b => b
@@ -291,25 +271,6 @@ export const ResourceManagement = WorkflowBuilder.create({
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
-
-
-    .addTemplate("createTrafficReplay", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: true,
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: "TrafficReplay",
-                    metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Running"}
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
     .addTemplate("patchTrafficReplayReady", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addResourceTask(b => b

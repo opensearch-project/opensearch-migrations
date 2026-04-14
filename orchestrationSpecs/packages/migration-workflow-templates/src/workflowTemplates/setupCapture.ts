@@ -9,6 +9,7 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
+import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {SetupKafka} from "./setupKafka";
 import {
@@ -21,16 +22,29 @@ import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions
 import {z} from "zod";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
+function makeOwnerReferences(name: BaseExpression<string>, uid: BaseExpression<string>): OwnerReference[] {
+    return [{
+        apiVersion: "migrations.opensearch.org/v1alpha1",
+        kind: "CapturedTraffic",
+        name: makeDirectTypeProxy(name),
+        uid: makeDirectTypeProxy(uid),
+        controller: true,
+        blockOwnerDeletion: true,
+    }];
+}
+
 function makeProxyServiceManifest(
     proxyName: BaseExpression<string>,
     listenPort: BaseExpression<Serialized<number>>,
-    internetFacing: BaseExpression<boolean>
+    internetFacing: BaseExpression<boolean>,
+    ownerUid: BaseExpression<string>
 ) {
     return {
         apiVersion: "v1",
         kind: "Service",
         metadata: {
             name: proxyName,
+            ownerReferences: makeOwnerReferences(proxyName, ownerUid),
             annotations: {
                 // NLB IP mode for EKS Auto Mode — ignored on minikube/standard K8s
                 "service.beta.kubernetes.io/aws-load-balancer-type": "external",
@@ -83,6 +97,7 @@ function makeProxyDeploymentManifest(args: {
     podReplicas: BaseExpression<number>,
     resources: BaseExpression<ResourceRequirementsType>,
     jsonConfig: BaseExpression<string>,
+    ownerUid: BaseExpression<string>,
     tlsSecretName?: BaseExpression<string>,
 }) {
     const container: Record<string, any> = {
@@ -108,7 +123,10 @@ function makeProxyDeploymentManifest(args: {
     return {
         apiVersion: "apps/v1",
         kind: "Deployment",
-        metadata: {name: args.proxyName},
+        metadata: {
+            name: args.proxyName,
+            ownerReferences: makeOwnerReferences(args.proxyName, args.ownerUid),
+        },
         spec: {
             replicas: makeDirectTypeProxy(args.podReplicas),
             selector: {matchLabels: {"migrations/proxy": args.proxyName}},
@@ -129,13 +147,18 @@ function makeCertificateManifest(args: {
     dnsNames: BaseExpression<string>,
     duration: BaseExpression<string>,
     renewBefore: BaseExpression<string>,
+    ownerName: BaseExpression<string>,
+    ownerUid: BaseExpression<string>,
 }) {
     // dnsNames must be rendered as a raw JSON array in the manifest, not quoted.
     // We use makeDirectTypeProxy to prevent quoting so the JSON array is inlined directly.
     return {
         apiVersion: "cert-manager.io/v1",
         kind: "Certificate",
-        metadata: {name: args.certName},
+        metadata: {
+            name: args.certName,
+            ownerReferences: makeOwnerReferences(args.ownerName, args.ownerUid),
+        },
         spec: {
             secretName: args.secretName,
             issuerRef: {
@@ -163,6 +186,7 @@ export const SetupCapture = WorkflowBuilder.create({
     .addTemplate("deployProxyService", t => t
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
+        .addRequiredInput("ownerUid", typeToken<string>())
         .addOptionalInput("internetFacing", c => false)
         .addResourceTask(b => b
             .setDefinition({
@@ -171,7 +195,8 @@ export const SetupCapture = WorkflowBuilder.create({
                 manifest: makeProxyServiceManifest(
                     b.inputs.proxyName,
                     b.inputs.listenPort,
-                    expr.deserializeRecord(b.inputs.internetFacing)
+                    expr.deserializeRecord(b.inputs.internetFacing),
+                    b.inputs.ownerUid
                 )
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -184,6 +209,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
+        .addRequiredInput("ownerUid", typeToken<string>())
         .addOptionalInput("tlsSecretName", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
         .addResourceTask(b => b
@@ -198,6 +224,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     resources: expr.deserializeRecord(b.inputs.resources),
                     jsonConfig: expr.toBase64(b.inputs.jsonConfig),
+                    ownerUid: b.inputs.ownerUid,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -210,6 +237,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
+        .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("tlsSecretName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
         .addResourceTask(b => b
@@ -224,6 +252,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     resources: expr.deserializeRecord(b.inputs.resources),
                     jsonConfig: expr.toBase64(b.inputs.jsonConfig),
+                    ownerUid: b.inputs.ownerUid,
                     tlsSecretName: b.inputs.tlsSecretName,
                 })
             }))
@@ -240,6 +269,8 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("dnsNames", typeToken<string>())
         .addRequiredInput("duration", typeToken<string>())
         .addRequiredInput("renewBefore", typeToken<string>())
+        .addRequiredInput("ownerName", typeToken<string>())
+        .addRequiredInput("ownerUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -253,6 +284,8 @@ export const SetupCapture = WorkflowBuilder.create({
                     dnsNames: b.inputs.dnsNames,
                     duration: b.inputs.duration,
                     renewBefore: b.inputs.renewBefore,
+                    ownerName: b.inputs.ownerName,
+                    ownerUid: b.inputs.ownerUid,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -279,10 +312,10 @@ export const SetupCapture = WorkflowBuilder.create({
     .addTemplate("setupProxy", t => t
         .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
-        .addRequiredInput("kafkaTopicName", typeToken<string>())
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
+        .addRequiredInput("ownerUid", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
 
         .addSteps(b => {
@@ -304,20 +337,12 @@ export const SetupCapture = WorkflowBuilder.create({
             const issuerRef = expr.get(tlsBlock, "issuerRef") as any;
 
             return b
-                .addStep("createKafkaTopic", SetupKafka, "createKafkaTopicWithRetry", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        clusterName: b.inputs.kafkaClusterName,
-                        topicName: b.inputs.kafkaTopicName,
-                        clusterConfig: expr.serialize(expr.literal({})),
-                        retryGroupName_view: expr.concat(expr.literal("KafkaTopic: "), b.inputs.kafkaTopicName),
-                    })
-                )
                 .addStepGroup(g => g
                     .addStep("deployService", INTERNAL, "deployProxyService", c =>
                         c.register({
                             proxyName: b.inputs.proxyName,
                             listenPort: b.inputs.listenPort,
+                            ownerUid: b.inputs.ownerUid,
                             internetFacing: expr.dig(proxyOpts, ["internetFacing"], false),
                         })
                     )
@@ -331,6 +356,8 @@ export const SetupCapture = WorkflowBuilder.create({
                                 dnsNames: expr.recordToString(expr.get(tlsBlock, "dnsNames") as any),
                                 duration: expr.get(tlsBlock, "duration") as any,
                                 renewBefore: expr.get(tlsBlock, "renewBefore") as any,
+                                ownerName: b.inputs.proxyName,
+                                ownerUid: b.inputs.ownerUid,
                             }),
                         {when: {templateExp: hasCertManagerTls}}
                     )
@@ -349,6 +376,7 @@ export const SetupCapture = WorkflowBuilder.create({
                                 listenPort: b.inputs.listenPort,
                                 podReplicas: b.inputs.podReplicas,
                                 resources: expr.serialize(expr.get(proxyOpts, "resources") as any),
+                                ownerUid: b.inputs.ownerUid,
                                 jsonConfig: expr.asString(expr.serialize(
                                     makeProxyParamsDict(b.inputs.proxyConfig) as any
                                 )),
@@ -362,6 +390,7 @@ export const SetupCapture = WorkflowBuilder.create({
                                 listenPort: b.inputs.listenPort,
                                 podReplicas: b.inputs.podReplicas,
                                 resources: expr.serialize(expr.get(proxyOpts, "resources") as any),
+                                ownerUid: b.inputs.ownerUid,
                                 tlsSecretName: tlsSecretName,
                                 jsonConfig: expr.asString(expr.serialize(
                                     expr.mergeDicts(

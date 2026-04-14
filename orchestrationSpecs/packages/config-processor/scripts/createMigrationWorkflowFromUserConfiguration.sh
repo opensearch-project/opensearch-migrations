@@ -51,6 +51,11 @@ if [ -f "$TEMP_DIR/concurrencyConfigMaps.yaml" ]; then
     kubectl apply -f "$TEMP_DIR/concurrencyConfigMaps.yaml"
 fi
 
+if [ -x "$TEMP_DIR/enrichWorkflowConfigWithUids.sh" ]; then
+    echo "Enriching workflow config with CR UIDs..."
+    "$TEMP_DIR/enrichWorkflowConfigWithUids.sh" "$TEMP_DIR/workflowMigration.config.yaml"
+fi
+
 # Set the name field based on environment variable
 if [ -n "$USE_GENERATE_NAME" ] && [ "$USE_GENERATE_NAME" != "false" ] && [ "$USE_GENERATE_NAME" != "0" ]; then
   # Keeping this as 'full-migration' so that it's intentionally different than the
