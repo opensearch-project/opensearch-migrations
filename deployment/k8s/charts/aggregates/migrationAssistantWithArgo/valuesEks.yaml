@@ -107,11 +107,19 @@ otelConfiguration:
         verbosity: detailed
         sampling_initial: 5
         sampling_thereafter: 200
-      awsemf:
+      awsemf/app:
         namespace: 'OpenSearchMigrations'
-        dimension_rollup_option: NoDimensionRollup # Reduce number of metrics by only publishing with all dimensions
+        dimension_rollup_option: NoDimensionRollup
         resource_to_telemetry_conversion:
           enabled: true
+      awsemf/cadvisor:
+        namespace: 'OpenSearchMigrations'
+        dimension_rollup_option: NoDimensionRollup
+        metric_declarations:
+          - dimensions: [[container, namespace]]
+            metric_name_selectors:
+              - container_cpu_usage_seconds_total
+              - container_memory_working_set_bytes
       prometheus:
         endpoint: "0.0.0.0:8889"
         send_timestamps: true
@@ -120,10 +128,14 @@ otelConfiguration:
     service:
       extensions: [health_check]
       pipelines:
-        metrics:
-          receivers: [otlp, prometheus]
+        metrics/app:
+          receivers: [otlp]
           processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
-          exporters: [awsemf, prometheus]
+          exporters: [awsemf/app, prometheus]
+        metrics/cadvisor:
+          receivers: [prometheus]
+          processors: [batch]
+          exporters: [awsemf/cadvisor, prometheus]
 
 charts:
   argo-workflows:
