@@ -100,7 +100,7 @@ describe('migration initializer CRD resource generation', () => {
         expect(byKind('CapturedTraffic')).toContain('source-proxy');
         expect(byKind('DataSnapshot')).toContain('source-snap1');
         expect(byKind('SnapshotMigration')).toContain('source-target-snap1');
-        expect(byKind('TrafficReplay')).toContain('source-proxy-target-replayer');
+        expect(byKind('TrafficReplay')).toContain('source-proxy-target-target-replay');
         expect(byKind('ApprovalGate')).toEqual(expect.arrayContaining([
             'source.target.snap1.migration-0.evaluateMetadata',
             'source.target.snap1.migration-0.migrateMetadata',
@@ -110,6 +110,6 @@ describe('migration initializer CRD resource generation', () => {
         expect(getResource('CapturedTraffic', 'source-proxy')?.spec.dependsOn).toEqual(['default']);
         expect(getResource('DataSnapshot', 'source-snap1')?.spec.dependsOn).toEqual(['source-proxy']);
         expect(getResource('SnapshotMigration', 'source-target-snap1')?.spec.dependsOn).toEqual(['source-snap1']);
-        expect(getResource('TrafficReplay', 'source-proxy-target-replayer')?.spec.dependsOn).toEqual(['source-proxy']);
+        expect(getResource('TrafficReplay', 'source-proxy-target-target-replay')?.spec.dependsOn).toEqual(['source-proxy']);
     });
 });

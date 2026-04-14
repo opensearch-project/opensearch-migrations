@@ -5,7 +5,7 @@ import {
     OVERALL_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
-    ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
+    ARGO_MIGRATION_CONFIG_PRE_ENRICH, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
     GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT, PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
     FieldMeta, ChecksumDependency,
     USER_PROXY_PROCESS_OPTIONS, USER_PROXY_WORKFLOW_OPTIONS,
@@ -19,7 +19,7 @@ import { generateSemaphoreKey } from './semaphoreUtils';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
-type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG>;
+type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration"> & {
     kafkaClusterConfiguration: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>;
 };
@@ -298,10 +298,10 @@ function isGenerateSnapshot(config: any): config is z.infer<typeof GENERATE_SNAP
 
 export class MigrationConfigTransformer extends StreamSchemaTransformer<
     typeof OVERALL_MIGRATION_CONFIG,
-    typeof ARGO_MIGRATION_CONFIG
+    typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH
 > {
     constructor() {
-        super(OVERALL_MIGRATION_CONFIG, ARGO_MIGRATION_CONFIG);
+        super(OVERALL_MIGRATION_CONFIG, ARGO_MIGRATION_CONFIG_PRE_ENRICH);
     }
 
     validateInput(data: unknown): NormalizedUserConfig {
@@ -435,7 +435,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         };
 
         try {
-            return ARGO_MIGRATION_CONFIG.parse(output);
+            return ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(output);
         } catch (error) {
             throw new Error("Error while safely parsing the transformed workflow " +
                 "as a configuration for the argo workflow.", { cause: error });
