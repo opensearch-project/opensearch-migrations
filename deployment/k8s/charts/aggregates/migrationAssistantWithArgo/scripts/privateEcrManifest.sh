@@ -15,7 +15,7 @@ CHARTS="
 cert-manager|1.17.2|https://charts.jetstack.io
 strimzi-kafka-operator|0.50.1|https://strimzi.io/charts/
 argo-workflows|1.0.5|https://argoproj.github.io/argo-helm
-fluent-bit|0.49.0|https://fluent.github.io/helm-charts
+fluent-bit|0.51.0|https://fluent.github.io/helm-charts
 kube-prometheus-stack|72.0.0|https://prometheus-community.github.io/helm-charts
 etcd-operator|0.4.2|oci://ghcr.io/aenix-io/charts
 opentelemetry-operator|0.86.4|https://open-telemetry.github.io/opentelemetry-helm-charts
@@ -63,7 +63,7 @@ quay.io/argoproj/argocli:v4.0.3
 quay.io/argoproj/argoexec:v4.0.3
 
 # --- fluent-bit ---
-cr.fluentbit.io/fluent/fluent-bit:4.0.4
+cr.fluentbit.io/fluent/fluent-bit:4.0.7
 mirror.gcr.io/library/busybox:latest
 
 # --- kube-prometheus-stack ---
@@ -72,7 +72,7 @@ quay.io/prometheus-operator/prometheus-operator:v0.82.0
 quay.io/prometheus-operator/prometheus-config-reloader:v0.82.0
 quay.io/prometheus/node-exporter:v1.9.1
 quay.io/prometheus/alertmanager:v0.28.1
-quay.io/kiwigrid/k8s-sidecar:1.30.5
+quay.io/kiwigrid/k8s-sidecar:1.30.11
 registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0
 registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.5.3
 mirror.gcr.io/bats/bats:v1.4.1
