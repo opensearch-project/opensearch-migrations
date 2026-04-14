@@ -335,8 +335,8 @@ export class MigrationInitializer {
             "    trafficReplays: {",
             mapEntries(trafficReplays, 'replay'),
             "    }",
-            "  }'\"",
-            ")",
+            "  }'",
+            ")\"",
         ].join('\n');
 
         return [
