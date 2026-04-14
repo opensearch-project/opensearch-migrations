@@ -164,10 +164,10 @@ class ScriptRunner:
         template instead.
 
         Returns:
-            YAML content as string (either from sample.yaml or blank starter)
+            YAML content as string (either from override, sample.yaml, or blank starter)
 
         Raises:
-            IOError: If sample.yaml exists but cannot be read
+            IOError: If the sample file exists but cannot be read
         """
         logger.info("Getting sample configuration")
         sample_path_override = os.environ.get(SAMPLE_CONFIG_PATH_ENV)
