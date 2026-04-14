@@ -157,22 +157,18 @@ class ScriptRunner:
     def get_sample_config(self) -> str:
         """Get sample workflow configuration.
 
-        Checks MIGRATION_SAMPLE_CONFIG_PATH env var first, then falls back to
-        sample.yaml in the configured script directory. If neither exists,
-        returns a blank starter configuration template.
+        Reads sample.yaml from the configured script directory. If sample.yaml
+        doesn't exist (e.g., when CONFIG_PROCESSOR_DIR is not set), returns a
+        blank starter configuration template instead.
 
         Returns:
-            YAML content as string (either from override, sample.yaml, or blank starter)
+            YAML content as string (either from sample.yaml or blank starter)
 
         Raises:
-            IOError: If the sample file exists but cannot be read
+            IOError: If sample.yaml exists but cannot be read
         """
         logger.info("Getting sample configuration")
-        override_path = os.environ.get('MIGRATION_SAMPLE_CONFIG_PATH')
-        if override_path:
-            sample_path = Path(override_path)
-        else:
-            sample_path = self.script_dir / "sample.yaml"
+        sample_path = self.script_dir / "sample.yaml"
 
         if not sample_path.exists():
             logger.info(f"Sample configuration not found at {sample_path}, using blank starter config")
