@@ -212,7 +212,8 @@ def call(Map config = [:]) {
                                     buildImages: params.BUILD_IMAGES,
                                     buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
                                     skipTestImages: true,
-                                    version: params.VERSION
+                                    version: params.VERSION,
+                                    useGeneralNodePool: true
                                 )
                                 bootstrapMA(
                                     stackName: env.MA_STACK_NAME,
