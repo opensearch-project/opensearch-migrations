@@ -10,7 +10,7 @@ public class ArgNameConstants {
     }
 
     public static final Pattern POSSIBLE_CREDENTIALS_ARG_FLAG_NAMES =
-        Pattern.compile("--(?:target|source|coordinator)(?:(?:-u|U)sername|(?:-p|P)assword)");
+        Pattern.compile("--(?:target|source|coordinator|kafka(?:Traffic)?)(?:(?:-u|U)sername|(?:-p|P)assword)");
 
     public static final String TARGET_PASSWORD_ARG_KEBAB_CASE = "--target-password";
     public static final String TARGET_PASSWORD_ARG_CAMEL_CASE = "--targetPassword";
@@ -30,6 +30,10 @@ public class ArgNameConstants {
         SOURCE_PASSWORD_ARG_KEBAB_CASE,
         SOURCE_PASSWORD_ARG_CAMEL_CASE,
         COORDINATOR_PASSWORD_ARG_KEBAB_CASE,
-        COORDINATOR_PASSWORD_ARG_CAMEL_CASE
+        COORDINATOR_PASSWORD_ARG_CAMEL_CASE,
+        "--kafkaPassword",
+        "--kafka-password",
+        "--kafkaTrafficPassword",
+        "--kafka-traffic-password"
     );
 }

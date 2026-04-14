@@ -217,15 +217,15 @@ class TestWorkflowCLICommands:
         assert 'workflow-2' in result.output
 
     @patch('console_link.workflow.commands.approve.approve_gate')
-    @patch('console_link.workflow.commands.approve.list_approval_gates')
+    @patch('console_link.workflow.commands.approve.list_migration_resources')
     @patch('console_link.workflow.commands.approve.load_k8s_config')
     def test_approve_command_with_exact_key(self, mock_k8s, mock_list, mock_approve):
         """Test approve command with exact key match."""
         runner = CliRunner()
 
         mock_list.return_value = [
-            ('source.target.metadataMigrate', 'Pending'),
-            ('source.target.backfill', 'Pending')
+            ('approvalgates', 'source.target.metadataMigrate', 'Pending', []),
+            ('approvalgates', 'source.target.backfill', 'Pending', [])
         ]
         mock_approve.return_value = True
 
@@ -236,16 +236,16 @@ class TestWorkflowCLICommands:
         mock_approve.assert_called_once_with('ma', 'source.target.metadataMigrate')
 
     @patch('console_link.workflow.commands.approve.approve_gate')
-    @patch('console_link.workflow.commands.approve.list_approval_gates')
+    @patch('console_link.workflow.commands.approve.list_migration_resources')
     @patch('console_link.workflow.commands.approve.load_k8s_config')
     def test_approve_command_with_glob_pattern(self, mock_k8s, mock_list, mock_approve):
         """Test approve command with glob pattern matching multiple steps."""
         runner = CliRunner()
 
         mock_list.return_value = [
-            ('a.b.metadataMigrate', 'Pending'),
-            ('x.y.metadataMigrate', 'Pending'),
-            ('a.b.backfill', 'Pending')
+            ('approvalgates', 'a.b.metadataMigrate', 'Pending', []),
+            ('approvalgates', 'x.y.metadataMigrate', 'Pending', []),
+            ('approvalgates', 'a.b.backfill', 'Pending', [])
         ]
         mock_approve.return_value = True
 
@@ -256,16 +256,16 @@ class TestWorkflowCLICommands:
         assert mock_approve.call_count == 2
 
     @patch('console_link.workflow.commands.approve.approve_gate')
-    @patch('console_link.workflow.commands.approve.list_approval_gates')
+    @patch('console_link.workflow.commands.approve.list_migration_resources')
     @patch('console_link.workflow.commands.approve.load_k8s_config')
     def test_approve_command_with_multiple_task_names(self, mock_k8s, mock_list, mock_approve):
         """Test approve command with multiple task names."""
         runner = CliRunner()
 
         mock_list.return_value = [
-            ('step1', 'Pending'),
-            ('step2', 'Pending'),
-            ('step3', 'Pending')
+            ('approvalgates', 'step1', 'Pending', []),
+            ('approvalgates', 'step2', 'Pending', []),
+            ('approvalgates', 'step3', 'Pending', [])
         ]
         mock_approve.return_value = True
 
@@ -275,13 +275,13 @@ class TestWorkflowCLICommands:
         assert 'Approved 2 gate' in result.output
         assert mock_approve.call_count == 2
 
-    @patch('console_link.workflow.commands.approve.list_approval_gates')
+    @patch('console_link.workflow.commands.approve.list_migration_resources')
     @patch('console_link.workflow.commands.approve.load_k8s_config')
     def test_approve_command_no_matches(self, mock_k8s, mock_list):
         """Test approve command when key matches no pending gates."""
         runner = CliRunner()
 
-        mock_list.return_value = [('source.target.backfill', 'Pending')]
+        mock_list.return_value = [('approvalgates', 'source.target.backfill', 'Pending', [])]
 
         result = runner.invoke(workflow_cli, ['approve', 'nonexistent'])
 
@@ -289,7 +289,7 @@ class TestWorkflowCLICommands:
         assert "No pending gates match" in result.output
         assert 'source.target.backfill' in result.output
 
-    @patch('console_link.workflow.commands.approve.list_approval_gates')
+    @patch('console_link.workflow.commands.approve.list_migration_resources')
     @patch('console_link.workflow.commands.approve.load_k8s_config')
     def test_approve_command_no_pending_gates(self, mock_k8s, mock_list):
         """Test approve command fails when no gates are pending."""

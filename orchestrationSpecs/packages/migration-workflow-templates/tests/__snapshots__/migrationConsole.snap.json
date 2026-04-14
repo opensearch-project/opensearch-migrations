@@ -35,7 +35,7 @@
             },
             {
               "name": "kafkaInfo",
-              "description": "Snapshot configuration information (JSON)",
+              "description": "Kafka client configuration information (JSON)",
               "value": ""
             },
             {
@@ -63,7 +63,7 @@
             {
               "name": "configContents",
               "valueFrom": {
-                "expression": "toJSON(sprig.merge(sprig.merge(sprig.merge(((0 == len(inputs.parameters.kafkaInfo)) ? ({}) : (sprig.dict(\"kafka\", fromJSON(inputs.parameters.kafkaInfo)))), ((0 == len(inputs.parameters.sourceConfig)) ? ({}) : (sprig.dict(\"source_cluster\", fromJSON(inputs.parameters.sourceConfig))))), sprig.merge(((0 == len(inputs.parameters.targetConfig)) ? ({}) : (sprig.dict(\"target_cluster\", fromJSON(inputs.parameters.targetConfig)))), ((0 == len(inputs.parameters.snapshotConfig)) ? ({}) : (sprig.dict(\"snapshot\", fromJSON(inputs.parameters.snapshotConfig)))))), ((0 == len(inputs.parameters.backfillSession)) ? ({}) : (sprig.dict(\"backfill\", sprig.dict(\"reindex_from_snapshot\", sprig.dict(\"k8s\", sprig.dict(\"namespace\", \"{{workflow.namespace}}\", \"deployment_name\", fromJSON(inputs.parameters.backfillSession)['deploymentName']), \"backfill_session_name\", fromJSON(inputs.parameters.backfillSession)['sessionName'])))))))"
+                "expression": "toJSON(sprig.merge(sprig.merge(sprig.merge(((0 == len(inputs.parameters.kafkaInfo)) ? (sprig.dict()) : (sprig.dict(\"kafka\", fromJSON(inputs.parameters.kafkaInfo)))), ((0 == len(inputs.parameters.sourceConfig)) ? (sprig.dict()) : (sprig.dict(\"source_cluster\", fromJSON(inputs.parameters.sourceConfig))))), sprig.merge(((0 == len(inputs.parameters.targetConfig)) ? (sprig.dict()) : (sprig.dict(\"target_cluster\", fromJSON(inputs.parameters.targetConfig)))), ((0 == len(inputs.parameters.snapshotConfig)) ? (sprig.dict()) : (sprig.dict(\"snapshot\", fromJSON(inputs.parameters.snapshotConfig)))))), ((0 == len(inputs.parameters.backfillSession)) ? (sprig.dict()) : (sprig.dict(\"backfill\", sprig.dict(\"reindex_from_snapshot\", sprig.dict(\"k8s\", sprig.dict(\"namespace\", \"{{workflow.namespace}}\", \"deployment_name\", fromJSON(inputs.parameters.backfillSession)['deploymentName']), \"backfill_session_name\", fromJSON(inputs.parameters.backfillSession)['sessionName'])))))))"
               }
             }
           ]
@@ -216,7 +216,7 @@
             },
             {
               "name": "kafkaInfo",
-              "description": "Snapshot configuration information (JSON)",
+              "description": "Kafka client configuration information (JSON)",
               "value": ""
             },
             {

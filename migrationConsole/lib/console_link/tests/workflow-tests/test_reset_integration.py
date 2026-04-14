@@ -29,10 +29,10 @@ from testcontainers.k3s import K3SContainer
 
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.commands.reset import (
-    _list_migration_resources, _delete_crd,
+    _delete_crd,
 )
-from console_link.workflow.commands.crd_utils import CRD_GROUP, CRD_VERSION
-from console_link.workflow.commands.approve import list_approval_gates, approve_gate
+from console_link.workflow.commands.crd_utils import CRD_GROUP, CRD_VERSION, list_migration_resources
+from console_link.workflow.commands.approve import approve_gate
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +210,7 @@ def _get_phase(namespace, plural, name):
 
 
 # ============================================================================
-# Tests: _list_migration_resources
+# Tests: list_migration_resources
 # ============================================================================
 
 @pytest.mark.slow
@@ -221,16 +221,16 @@ class TestListMigrationCrdsIntegration:
         _create_crd_instance(reset_ns, "snapshotmigrations", "snap-a", phase="Running")
         _create_crd_instance(reset_ns, "trafficreplays", "replay-a", phase="Ready")
 
-        results = _list_migration_resources(reset_ns)
+        results = list_migration_resources(reset_ns)
         names = {n for _, n, _, _ in results}
         assert names == {"proxy-a", "snap-a", "replay-a"}
 
     def test_empty_namespace(self, reset_ns):
-        assert _list_migration_resources(reset_ns) == []
+        assert list_migration_resources(reset_ns) == []
 
     def test_shows_unknown_when_no_status(self, reset_ns):
         _create_crd_instance(reset_ns, "capturedtraffics", "no-status")
-        results = _list_migration_resources(reset_ns)
+        results = list_migration_resources(reset_ns)
         assert results == [("capturedtraffics", "no-status", "Unknown", [])]
 
 
@@ -299,7 +299,7 @@ class TestResetSingleIntegration:
         _create_crd_instance(reset_ns, "capturedtraffics", "proxy-c", phase="Ready")
         _create_crd_instance(reset_ns, "snapshotmigrations", "snap-c", phase="Ready")
 
-        result = runner.invoke(workflow_cli, ["reset", "proxy-c", "--namespace", reset_ns])
+        result = runner.invoke(workflow_cli, ["reset", "proxy-c", "--include-proxies", "--namespace", reset_ns])
         assert result.exit_code == 0
         assert "✓ Deleted proxy-c" in result.output
 
@@ -336,7 +336,7 @@ class TestResetAllIntegration:
         _create_crd_instance(reset_ns, "trafficreplays", "replay-f", phase="Ready")
 
         result = runner.invoke(workflow_cli, [
-            "reset", "--all", "--namespace", reset_ns,
+            "reset", "--all", "--include-proxies", "--namespace", reset_ns,
         ])
 
         # All CRDs should be deleted (404)
@@ -373,8 +373,8 @@ class TestApproveIntegration:
         _create_crd_instance(reset_ns, "approvalgates", "gate-a", phase="Pending")
         _create_crd_instance(reset_ns, "approvalgates", "gate-b", phase="Approved")
 
-        gates = list_approval_gates(reset_ns)
-        gate_dict = {n: p for n, p in gates}
+        gates = list_migration_resources(reset_ns, ['approvalgates'])
+        gate_dict = {n: p for _, n, p, _ in gates}
         assert gate_dict["gate-a"] == "Pending"
         assert gate_dict["gate-b"] == "Approved"
 
@@ -424,12 +424,15 @@ class TestApproveIntegration:
 class TestAutocompleteIntegration:
 
     def test_autocomplete_returns_non_teardown_resources(self, reset_ns):
-        from console_link.workflow.commands.reset import _get_resource_completions, _get_reset_cache_file
+        from console_link.workflow.commands.reset import _get_resource_completions
+        from pathlib import Path
+        import tempfile
 
         _create_crd_instance(reset_ns, "capturedtraffics", "proxy-ac", phase="Ready")
         _create_crd_instance(reset_ns, "snapshotmigrations", "snap-ac", phase="Teardown")
 
-        _get_reset_cache_file(reset_ns).unlink(missing_ok=True)
+        cache_file = Path(tempfile.gettempdir()) / "workflow_completions" / f"reset_resources_{reset_ns}.json"
+        cache_file.unlink(missing_ok=True)
 
         class FakeCtx:
             params = {'namespace': reset_ns}
@@ -439,12 +442,15 @@ class TestAutocompleteIntegration:
         assert "snap-ac" not in completions  # already Teardown
 
     def test_autocomplete_filters_by_prefix(self, reset_ns):
-        from console_link.workflow.commands.reset import _get_resource_completions, _get_reset_cache_file
+        from console_link.workflow.commands.reset import _get_resource_completions
+        from pathlib import Path
+        import tempfile
 
         _create_crd_instance(reset_ns, "capturedtraffics", "proxy-x", phase="Ready")
         _create_crd_instance(reset_ns, "capturedtraffics", "other-y", phase="Ready")
 
-        _get_reset_cache_file(reset_ns).unlink(missing_ok=True)
+        cache_file = Path(tempfile.gettempdir()) / "workflow_completions" / f"reset_resources_{reset_ns}.json"
+        cache_file.unlink(missing_ok=True)
 
         class FakeCtx:
             params = {'namespace': reset_ns}
@@ -498,8 +504,7 @@ class TestSubmitErrorPathsIntegration:
         assert "CONFIG_PROCESSOR_DIR" in result.output
 
     def test_submit_script_fails_with_already_exists(self, runner, reset_ns, monkeypatch, tmp_path):
-        """Submit with a script that outputs AlreadyExists shows hint."""
-        # Create a fake submit script that fails with AlreadyExists
+        """Submit with a script that fails with AlreadyExists is treated as a script failure."""
         script = tmp_path / "createMigrationWorkflowFromUserConfiguration.sh"
         script.write_text("#!/bin/bash\necho 'AlreadyExists' >&2; exit 1\n")
         script.chmod(0o755)
@@ -512,8 +517,7 @@ class TestSubmitErrorPathsIntegration:
 
         result = runner.invoke(workflow_cli, ["submit", "--namespace", reset_ns])
         assert result.exit_code != 0
-        assert "workflow already exists" in result.output
-        assert "resubmit" in result.output
+        assert "failed" in result.output.lower()
 
     def test_submit_script_fails_generic(self, runner, reset_ns, monkeypatch, tmp_path):
         """Submit with a script that fails generically shows exit code."""

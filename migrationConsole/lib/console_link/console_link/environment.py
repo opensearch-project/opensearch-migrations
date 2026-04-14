@@ -286,6 +286,24 @@ class Environment:
                 "broker_endpoints": existing_config["kafkaConnection"],
                 "msk" if existing_config.get("enableMSKAuth") else "standard": None
             }
+        elif "autoCreate" in cluster_config:
+            auto_config = cluster_config["autoCreate"]
+            auth_config = auto_config.get("auth") or {}
+            auth_type = auth_config.get("type", "")
+            if auth_type == "scram-sha-512":
+                kafka_config = {
+                    "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9093",
+                    "scram": {
+                        "username": f"{cluster_name}-migration-app",
+                        "password_env": "KAFKA_SCRAM_PASSWORD",
+                        "ca_cert_path": "/config/kafka-ca/ca.crt",
+                    }
+                }
+            else:
+                kafka_config = {
+                    "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9092",
+                    "standard": None
+                }
         else:
             kafka_config = {
                 "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9092",

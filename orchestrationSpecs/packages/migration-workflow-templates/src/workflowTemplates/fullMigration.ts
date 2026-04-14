@@ -9,13 +9,13 @@ import {
     DENORMALIZED_PROXY_CONFIG,
     DENORMALIZED_REPLAY_CONFIG,
     getZodKeys,
-    KAFKA_CLIENT_CONFIG,
+    ENRICHED_SNAPSHOT_MIGRATION_FILTER,
+    NAMED_KAFKA_CLIENT_CONFIG,
     NAMED_KAFKA_CLUSTER_CONFIG,
     NAMED_TARGET_CLUSTER_CONFIG,
     PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
-    SNAPSHOT_MIGRATION_FILTER,
 } from '@opensearch-migrations/schemas'
 import {
     AllowLiteralOrExpression,
@@ -173,6 +173,10 @@ export const FullMigration = WorkflowBuilder.create({
                             })
                         ) as any
                     )),
+                    kafkaAuthConfigMapName: expr.literal(""),
+                    kafkaAuthType: expr.literal(""),
+                    kafkaSecretName: expr.literal(""),
+                    kafkaCaSecretName: expr.literal(""),
                     crdName: expr.literal(""),
                     crdUid: expr.literal(""),
                 });
@@ -204,8 +208,31 @@ export const FullMigration = WorkflowBuilder.create({
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.kafkaClusterName,
+                    configChecksum: expr.literal(""),
                 })
-            )
+            , {
+                when: {
+                    templateExp: expr.dig(
+                        expr.deserializeRecord(b.inputs.proxyConfig),
+                        ["kafkaConfig", "managedByWorkflow"],
+                        false
+                    )
+                }
+            })
+            .addStep("readKafkaConnectionProfile", ResourceManagement, "readKafkaConnectionProfile", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.kafkaClusterName,
+                })
+            , {
+                when: {
+                    templateExp: expr.dig(
+                        expr.deserializeRecord(b.inputs.proxyConfig),
+                        ["kafkaConfig", "managedByWorkflow"],
+                        false
+                    )
+                }
+            })
             .addStep("createCrd", ResourceManagement, "createCapturedTraffic", c =>
                 c.register({resourceName: b.inputs.proxyName})
             )
@@ -227,6 +254,9 @@ export const FullMigration = WorkflowBuilder.create({
                     podReplicas: b.inputs.podReplicas,
                     crdName: b.inputs.proxyName,
                     crdUid: c.steps.getCrdUid.outputs.uid,
+                    resolvedKafkaConnection: c.steps.readKafkaConnectionProfile.outputs.bootstrapServers,
+                    resolvedKafkaListenerName: c.steps.readKafkaConnectionProfile.outputs.listenerName,
+                    resolvedKafkaAuthType: c.steps.readKafkaConnectionProfile.outputs.authType,
                 }),
                 {when: c => ({templateExp: expr.not(expr.equals(c.getCrdUid.outputs.phase, "Ready"))})}
             )
@@ -278,7 +308,9 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("waitForProxyDeps", ResourceManagement, "waitForCapturedTraffic", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
-                        resourceName: c.item
+                        resourceName: expr.get(c.item, "name"),
+                        configChecksum: expr.get(c.item, "configChecksum"),
+                        checksumField: expr.literal("configChecksum"),
                     }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "dependsOnProxySetups")),
@@ -307,7 +339,9 @@ export const FullMigration = WorkflowBuilder.create({
                     semaphoreConfigMapName: expr.get(
                         expr.deserializeRecord(b.inputs.snapshotItemConfig), "semaphoreConfigMapName"),
                     semaphoreKey: expr.get(
-                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "semaphoreKey")
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "semaphoreKey"),
+                    configChecksum: expr.get(
+                        expr.deserializeRecord(b.inputs.snapshotItemConfig), "configChecksum"),
                 })
             )
         )
@@ -336,7 +370,8 @@ export const FullMigration = WorkflowBuilder.create({
                         dependsOnProxySetups: expr.get(
                             expr.deserializeRecord(expr.recordToString(c.item)),
                             "dependsOnProxySetups"
-                        )
+                        ),
+                        configChecksum: expr.get(c.item, "configChecksum"),
                     })),
 //                    snapshotItemConfig: expr.cast(c.item).to<Serialized<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>>(),
                     sourceConfig: expr.serialize(
@@ -432,7 +467,11 @@ export const FullMigration = WorkflowBuilder.create({
                 }
             )
             .addStep("patchSnapshotMigration", ResourceManagement, "patchSnapshotMigrationReady", c =>
-                c.register({resourceName: b.inputs.resourceName})
+                c.register({
+                    resourceName: b.inputs.resourceName,
+                    configChecksum: expr.literal(""),
+                    checksumForReplayer: expr.literal(""),
+                })
             )
             .addStep("selfTeardown", ResourceManagement, "deleteCrd", c =>
                 c.register({
@@ -471,7 +510,9 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: expr.ternary(
                         expr.hasKey(snapshotNameRes, "dataSnapshotResourceName"),
                         expr.getLoose(snapshotNameRes, "dataSnapshotResourceName"),
-                        expr.literal(""))
+                        expr.literal("")),
+                    configChecksum: expr.literal(""),
+                    checksumField: expr.literal("checksumForSnapshotMigration"),
                 });
             }, {
                     when: {
@@ -542,14 +583,14 @@ export const FullMigration = WorkflowBuilder.create({
     // ── Section 5: Traffic Replays ───────────────────────────────────────
 
     .addTemplate("runSingleReplay", t => t
-        .addRequiredInput("kafkaConfig", typeToken<z.infer<typeof KAFKA_CLIENT_CONFIG>>())
+        .addRequiredInput("kafkaConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLIENT_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("fromProxy", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
         .addOptionalInput("groupName_view", c => "Traffic Replay")
         .addOptionalInput("sortOrder_view", c => 999)
-        .addRequiredInput("dependsOnSnapshotMigrations", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_FILTER>[]>())
+        .addRequiredInput("dependsOnSnapshotMigrations", typeToken<z.infer<typeof ENRICHED_SNAPSHOT_MIGRATION_FILTER>[]>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "TrafficReplayer"]))
 
@@ -568,7 +609,9 @@ export const FullMigration = WorkflowBuilder.create({
                                 expr.asString(expr.get(c.item, "source")),
                                 expr.literal("-"),
                                 expr.asString(expr.get(c.item, "snapshot"))
-                            )
+                            ),
+                            configChecksum: expr.asString(expr.get(c.item, "configChecksum")),
+                            checksumField: expr.literal("checksumForReplayer"),
                         });
                     }, {
                         loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.dependsOnSnapshotMigrations)),
@@ -582,14 +625,39 @@ export const FullMigration = WorkflowBuilder.create({
                     c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: b.inputs.fromProxy,
+                        configChecksum: expr.literal(""),
+                        checksumField: expr.literal("configChecksum"),
                     })
                 )
                 .addStep("waitForKafkaCluster", ResourceManagement, "waitForKafkaCluster", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
+                        resourceName: b.inputs.kafkaClusterName,
+                        configChecksum: expr.literal(""),
+                    })
+                , {
+                    when: {
+                        templateExp: expr.dig(
+                            expr.deserializeRecord(b.inputs.kafkaConfig),
+                            ["managedByWorkflow"],
+                            false
+                        )
+                    }
+                })
+                .addStep("readKafkaConnectionProfile", ResourceManagement, "readKafkaConnectionProfile", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
                         resourceName: b.inputs.kafkaClusterName
                     })
-                )
+                , {
+                    when: {
+                        templateExp: expr.dig(
+                            expr.deserializeRecord(b.inputs.kafkaConfig),
+                            ["managedByWorkflow"],
+                            false
+                        )
+                    }
+                })
                 // Create TrafficReplay CRD and read its UID
                 .addStep("createTrafficReplay", ResourceManagement, "createTrafficReplay", c =>
                     c.register({
@@ -611,6 +679,9 @@ export const FullMigration = WorkflowBuilder.create({
                         name: replayerName,
                         crdName: replayerName,
                         crdUid: c.steps.getCrdUid.outputs.uid,
+                        resolvedKafkaConnection: c.steps.readKafkaConnectionProfile.outputs.bootstrapServers,
+                        resolvedKafkaListenerName: c.steps.readKafkaConnectionProfile.outputs.listenerName,
+                        resolvedKafkaAuthType: c.steps.readKafkaConnectionProfile.outputs.authType,
                     })
                 )
                 .addStep("patchTrafficReplayReady", ResourceManagement, "patchTrafficReplayReady", c =>
@@ -647,7 +718,8 @@ export const FullMigration = WorkflowBuilder.create({
                         name: expr.get(c.item, "name"),
                         version: expr.get(c.item, "version"),
                         config: expr.deserializeRecord(expr.get(c.item, "config")),
-                        topics: expr.deserializeRecord(expr.get(c.item, "topics"))
+                        topics: expr.deserializeRecord(expr.get(c.item, "topics")),
+                        configChecksum: expr.get(c.item, "configChecksum"),
                     })),
                     //kafkaClusterConfig: expr.cast(c.item).to<Serialized<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>>(),
                     clusterName: expr.get(c.item, "name"),
@@ -672,7 +744,10 @@ export const FullMigration = WorkflowBuilder.create({
                         kafkaConfig: expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
                         sourceEndpoint: expr.get(c.item, "sourceEndpoint"),
                         sourceAllowInsecure: expr.get(c.item, "sourceAllowInsecure"),
-                        proxyConfig: expr.deserializeRecord(expr.get(c.item, "proxyConfig"))
+                        proxyConfig: expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
+                        configChecksum: expr.get(c.item, "configChecksum"),
+                        checksumForSnapshot: expr.get(c.item, "checksumForSnapshot"),
+                        checksumForReplayer: expr.get(c.item, "checksumForReplayer"),
                     })),
                     // proxyConfig:      expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>(),
                     kafkaClusterName: expr.dig(
@@ -747,12 +822,15 @@ export const FullMigration = WorkflowBuilder.create({
                     snapshotMigrationConfig: expr.serialize(expr.makeDict({
                         label: expr.get(c.item, "label"),
                         snapshotNameResolution: expr.deserializeRecord(expr.get(c.item, "snapshotNameResolution")),
+                        snapshotConfigChecksum: expr.get(c.item, "snapshotConfigChecksum"),
                         migrations: expr.deserializeRecord(expr.get(c.item, "migrations")),
                         sourceVersion: expr.get(c.item, "sourceVersion"),
                         sourceLabel: expr.get(c.item, "sourceLabel"),
                         targetConfig: expr.deserializeRecord(expr.get(c.item, "targetConfig")),
                         snapshotConfig: expr.deserializeRecord(expr.get(c.item, "snapshotConfig")),
-                        sourceEndpoint: expr.dig(c.item, ["sourceEndpoint"], "")
+                        sourceEndpoint: expr.dig(c.item, ["sourceEndpoint"], ""),
+                        configChecksum: expr.get(c.item, "configChecksum"),
+                        checksumForReplayer: expr.get(c.item, "checksumForReplayer"),
                     })),
 //                    snapshotMigrationConfig: expr.cast(c.item).to<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>()
                     sortOrder_view: expr.literal(4),

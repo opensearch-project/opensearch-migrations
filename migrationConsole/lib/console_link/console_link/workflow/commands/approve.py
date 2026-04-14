@@ -1,11 +1,7 @@
 """Approve command for workflow CLI - approves pending gates via CRD status patching."""
 
-import json
 import logging
 import os
-import tempfile
-import time
-from pathlib import Path
 
 import click
 from click.shell_completion import CompletionItem
@@ -14,25 +10,14 @@ from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode, load_k8s_config
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
-from .crd_utils import CRD_GROUP, CRD_VERSION, match_names
+from .crd_utils import CRD_GROUP, CRD_VERSION, cached_crd_completions, list_migration_resources, match_names
 
 logger = logging.getLogger(__name__)
 
-_AUTOCOMPLETE_APPROVAL_CACHE_TTL_SECONDS = 10
 
-
-def list_approval_gates(namespace):
-    """List ApprovalGate CRDs. Returns list of (name, phase)."""
-    custom = client.CustomObjectsApi()
-    try:
-        items = custom.list_namespaced_custom_object(
-            group=CRD_GROUP, version=CRD_VERSION,
-            namespace=namespace, plural='approvalgates'
-        ).get('items', [])
-        return [(item['metadata']['name'], item.get('status', {}).get('phase', 'Unknown'))
-                for item in items]
-    except ApiException:
-        return []
+def _pending_gate_names(namespace):
+    return [n for _, n, phase, _ in list_migration_resources(namespace, ['approvalgates'])
+            if phase == 'Pending']
 
 
 def approve_gate(namespace, name):
@@ -50,39 +35,13 @@ def approve_gate(namespace, name):
         return False
 
 
-def _get_cache_file() -> Path:
-    cache_dir = Path(tempfile.gettempdir()) / "workflow_completions"
-    cache_dir.mkdir(exist_ok=True)
-    return cache_dir / "approval_gates.json"
-
-
-def _get_cached_pending_names(ctx) -> list[str]:
-    """Fetch and cache pending approval gate names."""
-    cache_file = _get_cache_file()
-
-    if cache_file.exists() and (time.time() - cache_file.stat().st_mtime) < _AUTOCOMPLETE_APPROVAL_CACHE_TTL_SECONDS:
-        try:
-            return json.loads(cache_file.read_text()).get('pending', [])
-        except Exception:
-            pass
-
-    try:
-        load_k8s_config()
-        namespace = ctx.params.get('namespace', 'ma')
-        gates = list_approval_gates(namespace)
-        pending = [name for name, phase in gates if phase == 'Pending']
-        cache_file.write_text(json.dumps({'pending': pending}))
-        return pending
-    except Exception:
-        return []
-
-
 def get_approval_task_name_completions(ctx, _, incomplete):
     """Shell completion for pending approval gate names."""
+    ns = ctx.params.get('namespace', 'ma')
     return [
-        CompletionItem(name)
-        for name in _get_cached_pending_names(ctx)
-        if name.startswith(incomplete)
+        CompletionItem(n)
+        for n in cached_crd_completions(ns, 'approval_gates', _pending_gate_names)
+        if n.startswith(incomplete)
     ]
 
 
@@ -114,16 +73,14 @@ def approve_command(ctx, task_names, workflow_name, argo_server, namespace, inse
     """
     try:
         load_k8s_config()
-        gates = list_approval_gates(namespace)
+        pending_names = _pending_gate_names(namespace)
 
-        pending = [(name, phase) for name, phase in gates if phase == 'Pending']
-        if not pending:
+        if not pending_names:
             click.echo("No pending approval gates found.")
             ctx.exit(ExitCode.FAILURE.value)
             return
 
         # Match against patterns
-        pending_names = [name for name, _ in pending]
         matches = []
         for pattern in task_names:
             for name in match_names(pending_names, pattern):
@@ -133,7 +90,7 @@ def approve_command(ctx, task_names, workflow_name, argo_server, namespace, inse
         if not matches:
             click.echo(f"No pending gates match {task_names}.")
             click.echo("Available pending gates:")
-            for name, _ in pending:
+            for name in pending_names:
                 click.echo(f"  - {name}")
             ctx.exit(ExitCode.FAILURE.value)
             return

@@ -211,7 +211,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
         for (String name : activeTargets) {
             Target target = targets.get(name);
-            Map<String, Object> targetRequestMap = (target.requestTransform() != null || hasCursorMark)
+            Map<String, Object> targetRequestMap = (dualMode || target.requestTransform() != null)
                 ? deepCopyMap(requestMap) : requestMap;
             targetRequestMap.put("_targetName", name);
             targetRequestMap.put("_mode", dualMode ? "dual" : "single");
@@ -332,7 +332,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
         try {
             long reqTransformStart = System.nanoTime();
-            Map<String, Object> targetMap = applyRequestTransform(target, requestMap, dispatchCtx);
+            Map<String, Object> targetMap = applyRequestTransformOrThrow(target, requestMap, dispatchCtx);
             Duration reqTransformDuration = Duration.ofNanos(System.nanoTime() - reqTransformStart);
 
             FullHttpRequest targetRequest = applyAuth(target, HttpMessageUtil.mapToRequest(targetMap));
@@ -406,6 +406,21 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
             }
         }
         return doRequestTransform(target, requestMap);
+    }
+
+    /**
+     * Apply the request transform, wrapping any failure in TransformException
+     * so callers can distinguish transform errors from upstream failures.
+     */
+    private Map<String, Object> applyRequestTransformOrThrow(
+        Target target, Map<String, Object> requestMap, TargetDispatchContext dispatchCtx
+    ) {
+        try {
+            return applyRequestTransform(target, requestMap, dispatchCtx);
+        } catch (Exception e) {
+            throw new TransformException(
+                String.format("Request transform failed for target '%s'", target.name()), e);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -526,9 +541,18 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
     private FullHttpResponse buildPrimaryResponse(TargetResponse primary) {
         if (!primary.isSuccess()) {
+            final Throwable err = primary.error();
+            // Transform failures (wrapped in TransformException) return 500
+            // upstream communication failures return 502
+            final HttpResponseStatus status;
+            if (err instanceof TransformException) {
+                status = HttpResponseStatus.INTERNAL_SERVER_ERROR;
+            } else {
+                status = HttpResponseStatus.BAD_GATEWAY;
+            }
             return HttpMessageUtil.errorResponse(
-                HttpResponseStatus.BAD_GATEWAY,
-                "Primary target '" + primary.targetName() + "' failed: " + primary.error().getMessage());
+                status,
+                String.format("Primary target '%s' failed: %s", primary.targetName(), err.getMessage()));
         }
         byte[] body = primary.rawBody() != null ? primary.rawBody() : new byte[0];
         FullHttpResponse response = new DefaultFullHttpResponse(
@@ -557,7 +581,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         if (cursorMark == null || "*".equals(cursorMark)) return;
 
         try {
-            String decoded = new String(java.util.Base64.getDecoder().decode(cursorMark), StandardCharsets.UTF_8);
+            String decoded = new String(java.util.Base64.getUrlDecoder().decode(cursorMark), StandardCharsets.UTF_8);
             Map<String, Object> combined = MAPPER.readValue(decoded, MAP_TYPE_REF);
 
             String targetToken;
@@ -627,7 +651,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         }
         try {
             String decoded = new String(
-                java.util.Base64.getDecoder().decode(sentCursorMark), StandardCharsets.UTF_8);
+                java.util.Base64.getUrlDecoder().decode(sentCursorMark), StandardCharsets.UTF_8);
             Map<String, Object> sentCombined = MAPPER.readValue(decoded, MAP_TYPE_REF);
             String sentSolr = (String) sentCombined.get("solr");
             String sentOs = (String) sentCombined.get("os");
@@ -653,7 +677,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         combined.put("v", 1);
         combined.put("solr", solrToken);
         combined.put("os", osToken);
-        return java.util.Base64.getEncoder().encodeToString(MAPPER.writeValueAsBytes(combined));
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(MAPPER.writeValueAsBytes(combined));
     }
 
     private FullHttpResponse rewriteResponseWithToken(

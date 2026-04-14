@@ -13,7 +13,7 @@ from .commands.status import status_command
 from .commands.output import output_command
 from .commands.manage import manage_command
 from .commands.reset import reset_command
-from .commands.resubmit import resubmit_command
+from .commands.proxy import proxy_group
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ workflow_cli.add_command(status_command)
 workflow_cli.add_command(output_command)
 workflow_cli.add_command(manage_command)
 workflow_cli.add_command(reset_command)
-workflow_cli.add_command(resubmit_command)
+workflow_cli.add_command(proxy_group)
 workflow_cli.add_command(util_group)
 
 

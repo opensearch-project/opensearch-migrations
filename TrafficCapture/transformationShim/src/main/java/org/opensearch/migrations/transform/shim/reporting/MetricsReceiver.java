@@ -15,7 +15,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Extracts comparison metrics from per-request target responses
- * and submits a ValidationDocument to the configured MetricsSink.
+ * and submits a ValidationDocument to the configured ReportingSink.
  * Called from the Netty event loop — must not block.
  */
 public class MetricsReceiver {
@@ -23,14 +23,21 @@ public class MetricsReceiver {
     private static final Logger log = LoggerFactory.getLogger(MetricsReceiver.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private final MetricsSink sink;
+    private final ReportingSink sink;
     private final MetricsExtractor extractor;
     private final boolean includeRequestBody;
+    private final boolean includeResponseBody;
 
-    public MetricsReceiver(MetricsSink sink, MetricsExtractor extractor, boolean includeRequestBody) {
+    public MetricsReceiver(ReportingSink sink, MetricsExtractor extractor, boolean includeRequestBody) {
+        this(sink, extractor, includeRequestBody, false);
+    }
+
+    public MetricsReceiver(ReportingSink sink, MetricsExtractor extractor,
+                           boolean includeRequestBody, boolean includeResponseBody) {
         this.sink = sink;
         this.extractor = extractor;
         this.includeRequestBody = includeRequestBody;
+        this.includeResponseBody = includeResponseBody;
     }
 
     /**
@@ -129,9 +136,12 @@ public class MetricsReceiver {
             Map<String, Object> customMetrics = transformMetrics != null
                     ? new LinkedHashMap<>(transformMetrics) : new LinkedHashMap<>();
 
+            ValidationDocument.ResponseRecord baselineResponseRecord = buildResponseRecord(baselineResponse);
+            ValidationDocument.ResponseRecord candidateResponseRecord = buildResponseRecord(candidateResponse);
+
             ValidationDocument doc = new ValidationDocument(
                     Instant.now().toString(),
-                    UUID.randomUUID().toString(),
+                    UUID.randomUUID().toString().substring(0, 8),
                     originalRequest,
                     transformedRequest,
                     collectionName,
@@ -143,6 +153,8 @@ public class MetricsReceiver {
                     candidateQtime,
                     responseTimeDelta,
                     comparisons.isEmpty() ? null : comparisons,
+                    baselineResponseRecord,
+                    candidateResponseRecord,
                     customMetrics
             );
 
@@ -150,6 +162,20 @@ public class MetricsReceiver {
         } catch (Exception e) {
             log.error("Error collecting validation metrics", e);
         }
+    }
+
+    ValidationDocument.ResponseRecord buildResponseRecord(TargetResponse response) {
+        if (response == null) return null;
+        String errorMsg = response.error() != null ? response.error().getMessage() : null;
+        String body = null;
+        if (includeResponseBody && response.parsedBody() != null) {
+            body = toJsonString(response.parsedBody());
+        }
+        return new ValidationDocument.ResponseRecord(
+                response.statusCode(),
+                errorMsg,
+                body
+        );
     }
 
     @SuppressWarnings("unchecked")

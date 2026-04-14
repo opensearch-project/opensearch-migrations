@@ -38,6 +38,11 @@ charts:
           tag: latest
 
 
+  localstack:
+    values:
+      persistence:
+        enabled: true
+
   strimzi-kafka-operator:
     values:
       # Decrease probe thresholds to make deployment times faster (but less reliable under stress)

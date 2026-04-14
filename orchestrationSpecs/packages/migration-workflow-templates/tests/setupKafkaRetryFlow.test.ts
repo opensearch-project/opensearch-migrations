@@ -12,8 +12,9 @@ describe("setup-kafka retry flow", () => {
         expect(template?.steps?.[1]?.[0]?.name).toBe("waitForFix");
         expect(template?.steps?.[1]?.[0]?.template).toBe("suspendforretry");
         expect(template?.steps?.[1]?.[0]?.when).toContain("steps.tryApply.status");
-        expect(template?.steps?.[2]?.[0]?.name).toBe("retryLoop");
-        expect(template?.steps?.[2]?.[0]?.template).toBe("createkafkatopicwithretry");
-        expect(template?.steps?.[2]?.[0]?.when).toContain("steps.waitForFix.status");
+        expect(template?.steps?.[2]?.[0]?.name).toBe("patchApproval");
+        expect(template?.steps?.[3]?.[0]?.name).toBe("retryLoop");
+        expect(template?.steps?.[3]?.[0]?.template).toBe("createkafkatopicwithretry");
+        expect(template?.steps?.[3]?.[0]?.when).toContain("steps.patchApproval.status");
     });
 });

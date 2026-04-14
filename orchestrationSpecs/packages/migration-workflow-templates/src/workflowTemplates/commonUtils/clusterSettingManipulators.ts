@@ -17,10 +17,10 @@ function makeAuthDict(clusterType: string, targetConfig: BaseExpression<Serializ
                 expr.makeDict({
                     [`${clusterType}CaCert`]: expr.getLoose(expr.getLoose(safeAuthConfig, "mtls"), "caCert"),
                 }),
-                expr.literal({})
+                expr.makeDict({})
             )
         ),
-        expr.literal({}));
+        expr.makeDict({}));
 }
 
 export function getHttpAuthSecretName(clusterConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
@@ -37,7 +37,7 @@ export function makeClusterParamDict(clusterType: string, clusterConfig: BaseExp
                 expr.makeDict({
                     [`${clusterType}Host`]: expr.getLoose(cc, "endpoint")
                 }),
-                expr.literal({})
+                expr.makeDict({})
             )
         ),
         expr.makeDict({

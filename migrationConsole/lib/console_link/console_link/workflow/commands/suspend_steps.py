@@ -10,6 +10,17 @@ logger = logging.getLogger(__name__)
 ENDING_PHASES = {'Succeeded', 'Failed', 'Error', 'Stopped'}
 
 
+def workflow_exists(workflow_name, namespace, argo_server, token, insecure):
+    """Check if an Argo workflow exists. Returns True if it does."""
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
+    try:
+        resp = requests.get(url, headers=headers, verify=not insecure, timeout=10)
+        return resp.status_code == 200
+    except requests.RequestException:
+        return False
+
+
 def wait_for_workflow_completion(workflow_name, namespace, argo_server, token, insecure,
                                  timeout_seconds=300):
     """Poll until workflow reaches an ending phase. Returns final phase or None on timeout."""

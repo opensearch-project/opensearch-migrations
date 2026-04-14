@@ -74,7 +74,6 @@ workflow reset                   # List migration resources and their status
 workflow reset <name>            # Delete a specific resource (blocked if dependents exist)
 workflow reset --cascade <name>  # Delete resource and all its dependents
 workflow reset --all             # Delete all migration CRDs + stop/delete workflows
-workflow resubmit                # Stop + delete workflow, then submit new one (preserves resources)
 ```
 
 ### Before Approving Any Gate
@@ -96,14 +95,14 @@ workflow approve "*.migrateMetadata"
 workflow reset
 ```
 
-### Iterative Development with Reset/Resubmit
+### Iterative Development with Reset/Submit
 
 **Reset individual components without full teardown:**
 ```bash
 # Reset just backfill (proxy + Kafka stay alive)
 workflow reset snapshotmigration/*
 workflow configure edit                # tweak config
-workflow resubmit                      # resubmit — only backfill restarts
+workflow submit                        # auto-replaces existing workflow, only backfill restarts
 
 # Full reset (everything torn down)
 workflow reset --all
@@ -112,7 +111,7 @@ workflow submit                        # fresh start
 
 **Key behaviors:**
 - `workflow reset` uses CRD deletion with foreground cascading — Kubernetes garbage collection handles cleanup ordering
-- `workflow resubmit` preserves existing resources (proxy, Kafka) — only resources whose CRDs were deleted get recreated
+- `workflow submit` auto-replaces existing workflows (stop + delete + resubmit) — preserves CRD-owned resources (proxy, Kafka)
 - Resources are owned by migration CRDs, NOT the Argo workflow — deleting the workflow alone doesn't kill resources
 
 ### Monitoring Long-Running Migrations

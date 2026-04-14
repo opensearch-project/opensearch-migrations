@@ -7,6 +7,7 @@ on:
       - jenkins-trigger-test-*
   pull_request_target:
     types: [opened, synchronize, reopened, labeled]
+  merge_group:
 
 env:
   python-version: '3.11'
@@ -63,11 +64,32 @@ jobs:
           jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
           job_timeout_minutes: "120"
 
+  solr-8x-k8s-local-test:
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'run-solr-tests')
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: ${{ github.workflow }}-solr-8x-k8s-local-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-solr-8x-k8s-local-test' || 'pr-solr-8x-k8s-local-test' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
+
   eks-integ-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -91,8 +113,7 @@ jobs:
   eks-aoss-search-integ-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-aoss-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -116,8 +137,7 @@ jobs:
   eks-aoss-timeseries-integ-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-aoss-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -141,8 +161,7 @@ jobs:
   eks-aoss-vector-integ-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-aoss-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -166,8 +185,7 @@ jobs:
   eks-byos-integ-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-byos-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-byos-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-eks-byos-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -190,8 +208,7 @@ jobs:
 
   eks-cdc-only-integ-test:
     if: |
-      (github.event.action == 'labeled' && github.event.label.name == 'run-cdc-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-cdc-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-cdc-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -215,8 +232,7 @@ jobs:
   eks-cfn-create-vpc-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-cfn-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-cfn-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-cfn-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -240,8 +256,7 @@ jobs:
   eks-cfn-import-vpc-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-cfn-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-cfn-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-cfn-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -261,3 +276,25 @@ jobs:
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
           jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
           job_timeout_minutes: "120"
+
+  all-jenkins-checks-pass:
+    needs:
+      - full-es68-e2e-aws-test
+      - elasticsearch-5x-k8s-local-test
+      - solr-8x-k8s-local-test
+      - eks-integ-test
+      - eks-aoss-search-integ-test
+      - eks-aoss-timeseries-integ-test
+      - eks-aoss-vector-integ-test
+      - eks-byos-integ-test
+      - eks-cdc-only-integ-test
+      - eks-cfn-create-vpc-test
+      - eks-cfn-import-vpc-test
+    if: always()
+    runs-on: ubuntu-22.04
+    steps:
+      - if: ${{ contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'failure') }}
+        run: |
+          echo "One or more job cancelled or failed" && exit 1
+      - run: |
+          echo '## :heavy_check_mark: All Jenkins checks pass' >> $GITHUB_STEP_SUMMARY
