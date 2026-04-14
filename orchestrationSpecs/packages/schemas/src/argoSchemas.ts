@@ -93,7 +93,8 @@ export const NAMED_KAFKA_CLUSTER_CONFIG = z.object({
     name: z.string(),
     version: z.string(),
     config: makeOptionalDefaultedFieldsRequired(KAFKA_CLUSTER_CREATION_CONFIG),
-    topics: z.array(z.string()).readonly()
+    topics: z.array(z.string()).readonly(),
+    configChecksum: z.string(),
 });
 
 export const NAMED_SOURCE_CLUSTER_CONFIG =
@@ -201,6 +202,7 @@ export const SNAPSHOT_REPO_CONFIG = z.object({
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     label: z.string(), // from the record of the user config
     snapshotNameResolution: SNAPSHOT_NAME_RESOLUTION,
+    snapshotConfigChecksum: z.string(),
     migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1),
     sourceVersion: z.string(),
     sourceLabel: z.string(),
@@ -210,6 +212,8 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     sourceEndpoint: z.string().optional(),
     sourceAllowInsecure: z.boolean().optional(),
     sourceAuth: z.any().optional(),
+    configChecksum: z.string(),
+    checksumForReplayer: z.string(),
 });
 
 export const NAMED_KAFKA_CLIENT_CONFIG =
@@ -219,7 +223,8 @@ export const NAMED_KAFKA_CLIENT_CONFIG =
             replicas: z.number(),
             config: z.record(z.string(), z.any()),
         }).default(DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES),
-        label: z.string()
+        label: z.string(),
+        configChecksum: z.string(),
     });
 
 export const DENORMALIZED_PROXY_CONFIG = z.object({
@@ -227,7 +232,10 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     sourceEndpoint: z.string(),
     sourceAllowInsecure: z.boolean().default(false),
-    proxyConfig: ARGO_PROXY_OPTIONS
+    proxyConfig: ARGO_PROXY_OPTIONS,
+    configChecksum: z.string(),
+    checksumForSnapshot: z.string(),
+    checksumForReplayer: z.string(),
 });
 
 export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
@@ -237,7 +245,15 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     repo: DENORMALIZED_S3_REPO_CONFIG,
     semaphoreConfigMapName: z.string(),
     semaphoreKey: z.string(),
-    dependsOnProxySetups: z.array(z.string())
+    dependsOnProxySetups: z.array(z.object({
+        name: z.string(),
+        configChecksum: z.string(),
+    })),
+    configChecksum: z.string(),
+});
+
+export const ENRICHED_SNAPSHOT_MIGRATION_FILTER = SNAPSHOT_MIGRATION_FILTER.extend({
+    configChecksum: z.string(),
 });
 
 export const DENORMALIZED_CREATE_SNAPSHOTS_CONFIG = z.object({
@@ -246,12 +262,15 @@ export const DENORMALIZED_CREATE_SNAPSHOTS_CONFIG = z.object({
 });
 
 export const DENORMALIZED_REPLAY_CONFIG = z.object({
-    dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER),
+    name: z.string(),
+    dependsOnSnapshotMigrations: z.array(ENRICHED_SNAPSHOT_MIGRATION_FILTER),
     fromProxy: z.string(),
+    fromProxyConfigChecksum: z.string(),
     kafkaClusterName: z.string(),
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     replayerConfig: ARGO_REPLAYER_OPTIONS,
-    toTarget: NAMED_TARGET_CLUSTER_CONFIG
+    toTarget: NAMED_TARGET_CLUSTER_CONFIG,
+    configChecksum: z.string(),
 });
 
 export const ARGO_MIGRATION_CONFIG = z.object({

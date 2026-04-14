@@ -116,7 +116,7 @@ jobs:
       - name: Install dependencies (Pipfile)
         if: matrix.py-project != 'AIAdvisor/skills/solr-opensearch-migration-advisor'
         run: |
-          python3 -m pip install --upgrade pipenv
+          python3 -m pip install pipenv==2026.5.0
           pipenv install --deploy --dev
           pipenv graph
 
