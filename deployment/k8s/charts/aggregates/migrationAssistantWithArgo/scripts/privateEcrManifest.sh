@@ -49,7 +49,6 @@ public.ecr.aws/aws-controllers-k8s/cloudwatch-controller:1.4.2
 # --- strimzi (operator + runtime images) ---
 quay.io/strimzi/operator:0.50.1
 quay.io/strimzi/kafka:0.50.1-kafka-4.0.0
-quay.io/strimzi/kafka:0.50.1-kafka-4.0.1
 quay.io/strimzi/kafka-bridge:0.33.1
 quay.io/strimzi/kaniko-executor:0.50.1
 quay.io/strimzi/maven-builder:0.50.1
