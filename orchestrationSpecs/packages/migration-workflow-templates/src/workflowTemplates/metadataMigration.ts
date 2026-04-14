@@ -63,27 +63,60 @@ export function makeRepoParamDict(
     );
 }
 
+function makeSnapshotParamsDict(
+    sourceVersion: BaseExpression<string>,
+    snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>
+) {
+    return expr.mergeDicts(
+        expr.makeDict({
+            "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
+            "sourceVersion": sourceVersion
+        }),
+        makeRepoParamDict(
+            expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"),
+            true)
+    );
+}
+
+function makeSourceHostParamsDict(
+    sourceVersion: BaseExpression<string>,
+    sourceEndpoint: BaseExpression<string>
+) {
+    return expr.makeDict({
+        "sourceHost": sourceEndpoint,
+        "sourceVersion": sourceVersion
+    });
+}
+
 function makeParamsDict(
     sourceVersion: BaseExpression<string>,
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
-    options: BaseExpression<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>
+    options: BaseExpression<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>,
+    sourceEndpoint?: BaseExpression<string>
 ) {
-    return expr.mergeDicts(
-        expr.mergeDicts(
-            makeTargetParamDict(targetConfig),
-            expr.omit(expr.deserializeRecord(options), ...ARGO_METADATA_WORKFLOW_OPTION_KEYS)
-        ),
-        expr.mergeDicts(
-            expr.makeDict({
-                "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
-                "sourceVersion": sourceVersion
-            }),
-            makeRepoParamDict(
-                expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"),
-                true)
-        )
+    const targetAndOptions = expr.mergeDicts(
+        makeTargetParamDict(targetConfig),
+        expr.omit(expr.deserializeRecord(options), ...ARGO_METADATA_WORKFLOW_OPTION_KEYS)
     );
+
+    const snapshotParams = makeSnapshotParamsDict(sourceVersion, snapshotConfig);
+
+    const base = expr.mergeDicts(targetAndOptions, snapshotParams);
+
+    // When sourceEndpoint is non-empty at runtime, add sourceHost param.
+    // MetadataMigration CLI prioritizes --source-host over snapshot params.
+    if (sourceEndpoint) {
+        return expr.mergeDicts(base,
+            expr.ternary(
+                expr.isEmpty(sourceEndpoint),
+                expr.makeDict({}),
+                makeSourceHostParamsDict(sourceVersion, sourceEndpoint)
+            )
+        );
+    }
+
+    return base;
 }
 
 function makeApprovalCheck<
@@ -119,6 +152,7 @@ export const MetadataMigration = WorkflowBuilder.create({
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof ARGO_METADATA_OPTIONS>>())
+        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("targetK8sLabel", typeToken<string>())
@@ -158,7 +192,8 @@ export const MetadataMigration = WorkflowBuilder.create({
                 b.inputs.commandMode,
                 expr.literal("---INLINE-JSON"),
                 expr.asString(expr.serialize(
-                    makeParamsDict(b.inputs.sourceVersion, b.inputs.targetConfig, b.inputs.snapshotConfig, b.inputs.metadataMigrationConfig
+                    makeParamsDict(b.inputs.sourceVersion, b.inputs.targetConfig, b.inputs.snapshotConfig, b.inputs.metadataMigrationConfig,
+                        b.inputs.sourceEndpoint
                     )
                 ))
             ])
@@ -193,6 +228,7 @@ export const MetadataMigration = WorkflowBuilder.create({
 
     .addTemplate("migrateMetaData", t => t
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof ARGO_METADATA_OPTIONS>>())
+        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
         .addInputsFromRecord(
             getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
@@ -224,7 +260,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                 c.register({
                     "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("evaluateMetadata"))
                 }),
-                {when: expr.not(expr.cast(b.inputs.skipEvaluateApproval).to<boolean>())}
+                {when: expr.not(b.inputs.skipEvaluateApproval)}
             )
             .addStep("migrateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
@@ -240,7 +276,7 @@ export const MetadataMigration = WorkflowBuilder.create({
                 c.register({
                     "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("migrateMetadata"))
                 }),
-                {when: {templateExp: expr.not(expr.deserializeRecord(b.inputs.skipMigrateApproval))}}
+                {when: expr.not(b.inputs.skipMigrateApproval)}
             )
         )
     )

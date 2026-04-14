@@ -13,6 +13,7 @@
     - [Performance Limitations](#performance-limitations)
       - [Test Results](#test-results)
   - [Issue Tracking](#issue-tracking)
+  - [Roadmap](#roadmap)
   - [User Guide Documentation](#user-guide-documentation)
   - [Getting Started](#getting-started)
     - [Local Deployment](#local-deployment)
@@ -79,6 +80,7 @@ Note that testing is done on specific minor versions, but any minor versions wit
   - Self-managed (cloud provider hosted)
   - Self-managed (on-premises)
   - Managed cloud offerings (e.g., Amazon OpenSearch)
+  - Managed serverless cloud offerings (e.g. Amazon OpenSearch Serverless)
 
 ### Performance Limitations
 A performance test was performed on 03/10/25 alongside [PR 1337](https://github.com/opensearch-project/opensearch-migrations/pull/1337)
@@ -117,6 +119,10 @@ We encourage users to open bugs and feature requests in this GitHub repository.
 For issue prioritization and management, the migrations team uses Jira, but uses GitHub issues for community intake:
 
 https://opensearch.atlassian.net/
+
+## Roadmap
+
+For upcoming features, enhancements, and priorities, check out the [OpenSearch Migrations Project Board](https://github.com/orgs/opensearch-project/projects/229/views/1).
 
 ## User Guide Documentation
 

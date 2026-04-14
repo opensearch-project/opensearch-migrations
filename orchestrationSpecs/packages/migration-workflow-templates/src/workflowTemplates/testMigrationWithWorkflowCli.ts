@@ -24,8 +24,8 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
     .addParams({
-        // Max retries for monitoring workflow (fixed 60s interval between retries)
-        // Default 33 (~33 min), use 900 for ~15 hours
+        // Max retries for monitoring workflow with fixed 60s interval between attempts
+        // Default 33 (~33 min at 60s intervals); increase (e.g. 900) for longer migrations
         "monitor-retry-limit": defineParam({expression: "33"})
     })
 
@@ -62,6 +62,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
                 typeToken<string>(),
                 "Workflow status output from monitor script"
             )
+            .addArtifactOutput("monitorResult", "/tmp/outputs/monitorResult")
         )
         .addRetryParameters({
             limit: "{{workflow.parameters.monitor-retry-limit}}",
@@ -151,7 +152,7 @@ fi
 
             // Step 4: Delete the migration workflow (skipped when keepMigrationWorkflow=true)
             .addStep("deleteMigrationWorkflow", INTERNAL, "deleteMigrationWorkflow",
-                {when: {templateExp: expr.not(expr.deserializeRecord(b.inputs.keepMigrationWorkflow))}}
+                {when: expr.not(b.inputs.keepMigrationWorkflow)}
             )
         )
     )

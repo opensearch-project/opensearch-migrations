@@ -46,6 +46,7 @@ import org.opensearch.migrations.trafficcapture.proxyserver.netty.HeaderRemoverH
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.ProxyChannelInitializer;
 import org.opensearch.migrations.utils.ProcessHelpers;
+import org.opensearch.migrations.utils.URIHelper;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
 
@@ -204,11 +205,13 @@ public class CaptureProxy {
         try {
             parser.parse(args);
             // Exactly one these 3 options are required. See that exactly one is set by summing up their presence
-            if (Stream.of(p.traceDirectory, p.kafkaParameters.kafkaConnection, (p.noCapture ? "" : null))
+            p.kafkaParameters.validateKafkaAuthFlags();
+            if (Stream.of(p.traceDirectory, p.kafkaParameters.kafkaBrokers, (p.noCapture ? "" : null))
                 .mapToInt(s -> s != null ? 1 : 0)
                 .sum() != 1) {
                 throw new ParameterException(
-                    "Expected exactly one of '--traceDirectory', '--kafkaConnection', or " + "'--noCapture' to be set"
+                    "Expected exactly one of '--traceDirectory', '--kafkaBrokers'/'--kafkaConnection', or "
+                        + "'--noCapture' to be set"
                 );
             }
             return p;
@@ -289,7 +292,7 @@ public class CaptureProxy {
         // Resist the urge for now though until it comes in as a request/need.
         if (params.traceDirectory != null) {
             return new FileConnectionCaptureFactory(nodeId, params.traceDirectory, params.maximumTrafficStreamSize);
-        } else if (params.kafkaParameters.kafkaConnection != null) {
+        } else if (params.kafkaParameters.kafkaBrokers != null) {
             return new KafkaCaptureFactory(
                 rootContext,
                 nodeId,
@@ -307,25 +310,14 @@ public class CaptureProxy {
     // Utility method for converting uri string to an actual URI object. Similar logic is placed in the trafficReplayer
     // module: TrafficReplayer.java
     protected static URI convertStringToUri(String uriString) {
-        URI serverUri;
         try {
-            serverUri = new URI(uriString);
-        } catch (Exception e) {
+            return URIHelper.parseUriWithDefaultPort(uriString);
+        } catch (IllegalArgumentException e) {
             System.err.println("Exception parsing URI string: " + uriString);
             System.err.println(e.getMessage());
             System.exit(3);
             return null;
         }
-        if (serverUri.getPort() < 0) {
-            throw new IllegalArgumentException("Port not present for URI: " + serverUri);
-        }
-        if (serverUri.getHost() == null) {
-            throw new IllegalArgumentException("Hostname not present for URI: " + serverUri);
-        }
-        if (serverUri.getScheme() == null) {
-            throw new IllegalArgumentException("Scheme (http|https) is not present for URI: " + serverUri);
-        }
-        return serverUri;
     }
 
     protected static SslContext loadBacksideSslContext(URI serverUri, boolean allowInsecureConnections)

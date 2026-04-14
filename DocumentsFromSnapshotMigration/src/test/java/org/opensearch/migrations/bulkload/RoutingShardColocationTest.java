@@ -17,7 +17,7 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParam
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
@@ -76,7 +76,7 @@ public class RoutingShardColocationTest extends SourceTestBase {
     private static final SearchClusterContainer.ContainerVersion[] TARGET_VERSIONS = {
         SearchClusterContainer.OS_V1_3_20,
         SearchClusterContainer.OS_V2_19_4,
-        SearchClusterContainer.OS_V3_0_0
+        SearchClusterContainer.OS_LATEST
     };
 
     private static Stream<Arguments> scenarios() {
@@ -161,7 +161,7 @@ public class RoutingShardColocationTest extends SourceTestBase {
 
             var sourceVersion = sourceCluster.getContainerVersion().getVersion();
             var targetVersion = targetCluster.getContainerVersion().getVersion();
-            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(sourceVersion, true);
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(sourceVersion, true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 
             // Migrate metadata (this uses IndexCreator_OS_2_11 which now copies routing_num_shards)

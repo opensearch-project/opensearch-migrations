@@ -197,7 +197,7 @@ class CustomTransformationTest extends BaseMigrationTest {
     public void ngramDiffSettingTransformation() {
         try (
             final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V5_3);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V3_0_0)
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_LATEST)
         ) {
             this.sourceCluster = sourceCluster;
             this.targetCluster = targetCluster;

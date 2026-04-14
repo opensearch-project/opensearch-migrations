@@ -178,7 +178,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
 
     @Test
     public void testBuildPropertiesBaseCase() throws IOException {
-        Properties props = KafkaTrafficCaptureSource.buildKafkaProperties("brokers", "groupId", false, null);
+        Properties props = KafkaTrafficCaptureSource.buildKafkaProperties("brokers", "groupId", "none", null, null, null);
         Assertions.assertEquals("brokers", props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals(
             "org.apache.kafka.common.serialization.StringDeserializer",
@@ -194,7 +194,7 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
 
     @Test
     public void testBuildPropertiesMSKAuthEnabled() throws IOException {
-        Properties props = KafkaTrafficCaptureSource.buildKafkaProperties("brokers", "groupId", true, null);
+        Properties props = KafkaTrafficCaptureSource.buildKafkaProperties("brokers", "groupId", "msk-iam", null, null, null);
         Assertions.assertEquals("brokers", props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
         Assertions.assertEquals(
             "org.apache.kafka.common.serialization.StringDeserializer",
@@ -221,7 +221,9 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
         Properties props = KafkaTrafficCaptureSource.buildKafkaProperties(
             "brokers",
             "groupId",
-            true,
+            "msk-iam",
+            null,
+            null,
             simplePropertiesFile.getPath()
         );
         Assertions.assertEquals("brokers", props.get(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));

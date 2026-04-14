@@ -102,7 +102,7 @@
           },
           "args": [
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceAwsServiceSigningName\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], \"sourceAwsRegion\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceCaCert\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : ({}))))) : ({})), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict(\"sourceHost\", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : ({}))), sprig.dict(\"sourceInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.merge(sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap'), sprig.dict(\"noWait\", true))), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"snapshotRepoName\", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig.repoName')), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], \"s3Region\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))))}}"
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceAwsServiceSigningName\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], \"sourceAwsRegion\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceCaCert\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict(\"sourceHost\", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"sourceInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.merge(sprig.omit(fromJSON(inputs.parameters.createSnapshotConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap'), sprig.dict(\"noWait\", true))), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"snapshotRepoName\", jsonpath(inputs.parameters.snapshotConfig, '$.repoConfig.repoName')), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', fromJSON(inputs.parameters.snapshotConfig)['repoConfig']))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['s3RepoPathUri'], \"s3Region\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['awsRegion'])))))}}"
           ]
         },
         "metadata": {
@@ -111,6 +111,9 @@
             "migrations.opensearch.org/target": "{{inputs.parameters.targetK8sLabel}}",
             "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
             "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}"
+          },
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
           }
         },
         "outputs": {
@@ -184,7 +187,7 @@
                   },
                   {
                     "name": "command",
-                    "value": "set -e\n  touch /tmp/status-output.txt\n  touch /tmp/phase-output.txt\n  \n  # Quick status check - if SUCCESS, we're done\n  status=$(console --config-file=/config/migration_services.yaml snapshot status)\n  if [ \"$status\" = \"SUCCESS\" ]; then\n    echo \"Snapshot completed successfully\" > /tmp/status-output.txt\n    exit 0\n  fi\n  \n  # Deep check and save output in case there was a race condition\n  deep_output=$(console --config-file=/config/migration_services.yaml snapshot status --deep-check)\n  \n  # Check if deep check also returned SUCCESS (snapshot completed during execution)\n  if [ \"$deep_output\" = \"SUCCESS\" ]; then\n    echo \"Snapshot completed successfully\" > /tmp/status-output.txt\n    exit 0\n  fi\n  \n  # Process deep check output with awk for in-progress snapshots\n  echo \"$deep_output\" | awk '\n    /Total shards:/ { total = $3 }\n    /Successful shards:/ { successful = $3 }\n    /Data processed:/ { data = $3; unit = $4 }\n    /Estimated time to completion:/ { \n      sub(/.*: /, \"\");\n      eta = $0\n    }\n    END {\n      if (total) {\n        output = \"Shards: \" successful \"/\" total \" | Data: \" data \" \" unit\n        if (eta != \"0h 0m 0s\") {\n          output = output \" | ETA: \" eta\n        }\n        print output\n      }\n    }\n  ' > /tmp/status-output.txt\n  echo Checked > /tmp/phase-output.txt\n  \n  exit 1"
+                    "value": "set -e\n  touch /tmp/status-output.txt\n  touch /tmp/phase-output.txt\n  \n  # Quick status check - if SUCCESS, we're done\n  status=$(console --config-file=/config/migration_services.yaml snapshot status)\n  if [ \"$status\" = \"SUCCESS\" ]; then\n    echo \"Snapshot completed successfully\" > /tmp/status-output.txt\n    exit 0\n  fi\n\n  # If snapshot has permanently failed, stop retrying\n  if [ \"$status\" = \"FAILED\" ]; then\n    echo \"Snapshot failed\" > /tmp/status-output.txt\n    echo Failed > /tmp/phase-output.txt\n    exit 0\n  fi\n  \n  # Deep check and save output in case there was a race condition\n  deep_output=$(console --config-file=/config/migration_services.yaml snapshot status --deep-check)\n  \n  # Check if deep check also returned SUCCESS (snapshot completed during execution)\n  if [ \"$deep_output\" = \"SUCCESS\" ]; then\n    echo \"Snapshot completed successfully\" > /tmp/status-output.txt\n    exit 0\n  fi\n  \n  # Process deep check output with awk for in-progress snapshots\n  echo \"$deep_output\" | awk '\n    /Total shards:/ { total = $3 }\n    /Successful shards:/ { successful = $3 }\n    /Data processed:/ { data = $3; unit = $4 }\n    /Estimated time to completion:/ { \n      sub(/.*: /, \"\");\n      eta = $0\n    }\n    END {\n      if (total) {\n        output = \"Shards: \" successful \"/\" total \" | Data: \" data \" \" unit\n        if (eta != \"0h 0m 0s\") {\n          output = output \" | ETA: \" eta\n        }\n        print output\n      }\n    }\n  ' > /tmp/status-output.txt\n  echo Checked > /tmp/phase-output.txt\n  \n  exit 1"
                   }
                 ]
               },
@@ -294,6 +297,9 @@
             },
             {
               "name": "semaphoreKey"
+            },
+            {
+              "name": "configChecksum"
             },
             {
               "name": "imageMigrationConsoleLocation"
@@ -416,6 +422,10 @@
                   {
                     "name": "snapshotName",
                     "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.snapshotName')}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
                   }
                 ]
               },

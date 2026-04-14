@@ -1,5 +1,6 @@
 from enum import Enum
 import logging
+import subprocess
 
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
@@ -21,11 +22,14 @@ class ClusterVersionCombinationUnsupported(Exception):
 
 
 class MATestUserArguments:
-    def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool):
+    def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool,
+                 target_type: str = "OS", image_registry_prefix: str = ""):
         self.source_version = source_version
         self.target_version = target_version
+        self.target_type = target_type
         self.unique_id = unique_id
         self.reuse_clusters = reuse_clusters
+        self.image_registry_prefix = image_registry_prefix
 
 
 class MATestBase:
@@ -41,38 +45,54 @@ class MATestBase:
         self.migrations_required = migrations_required if migrations_required else [MigrationType.METADATA,
                                                                                     MigrationType.BACKFILL]
         self.source_version = ClusterVersion(version_str=user_args.source_version)
-        self.target_version = ClusterVersion(version_str=user_args.target_version)
+        self.target_type = user_args.target_type
+        self.target_version = (
+            None if self.is_aoss
+            else ClusterVersion(version_str=user_args.target_version)
+        )
         self.argo_service = ArgoService()
         self.workflow_name = None
         self.source_cluster = None
         self.target_cluster = None
         self.imported_clusters = False
 
-        supported_combo = False
-        for (allowed_source, allowed_target) in allow_source_target_combinations:
-            if (is_incoming_version_supported(allowed_source, self.source_version) and
-                    is_incoming_version_supported(allowed_target, self.target_version)):
-                supported_combo = True
-                break
-        if not supported_combo:
-            raise ClusterVersionCombinationUnsupported(self.source_version, self.target_version)
+        if not self.is_aoss:
+            supported_combo = False
+            for (allowed_source, allowed_target) in allow_source_target_combinations:
+                if (is_incoming_version_supported(allowed_source, self.source_version) and
+                        is_incoming_version_supported(allowed_target, self.target_version)):
+                    supported_combo = True
+                    break
+            if not supported_combo:
+                raise ClusterVersionCombinationUnsupported(self.source_version, self.target_version)
 
         self.source_argo_cluster_template = (f"{self.source_version.full_cluster_type}-"
                                              f"{self.source_version.major_version}-"
                                              f"{self.source_version.minor_version}-single-node")
-        self.target_argo_cluster_template = (f"{self.target_version.full_cluster_type}-"
-                                             f"{self.target_version.major_version}-"
-                                             f"{self.target_version.minor_version}-single-node")
+        self.target_argo_cluster_template = None if self.is_aoss else (
+            f"{self.target_version.full_cluster_type}-"
+            f"{self.target_version.major_version}-"
+            f"{self.target_version.minor_version}-single-node"
+        )
 
         self.parameters = {}
+        self.image_registry_prefix = user_args.image_registry_prefix
         self.workflow_template = "full-migration-with-clusters"
         self.workflow_snapshot_and_migration_config = None
         self.source_operations = get_operations_library_by_version(self.source_version)
-        self.target_operations = get_operations_library_by_version(self.target_version)
+        self.target_operations = (
+            None if self.is_aoss
+            else get_operations_library_by_version(self.target_version)
+        )
         self.unique_id = user_args.unique_id
 
+    @property
+    def is_aoss(self):
+        return self.target_type == "AOSS"
+
     def __repr__(self):
-        return f"<{self.__class__.__name__}(source={self.source_version},target={self.target_version})>"
+        target_str = self.target_type if self.is_aoss else str(self.target_version)
+        return f"<{self.__class__.__name__}(source={self.source_version},target={target_str})>"
 
     def test_before(self):
         #check_ma_system_health()
@@ -152,8 +172,29 @@ class MATestBase:
             self.parameters["source-cluster-template"] = self.source_argo_cluster_template
             self.parameters["target-cluster-template"] = self.target_argo_cluster_template
             self.parameters["skip-cleanup"] = "true" if self.reuse_clusters else "false"
+            if self.image_registry_prefix:
+                self.parameters["image-registry-prefix"] = self.image_registry_prefix
+
+    def _ensure_approval_configmap(self):
+        """Ensure the approval configmap exists for Argo v4.0+ (requires configmap-type label).
+        In production, the config-processor creates this. In tests, we create a default."""
+        kubectl_cmd = [
+            "kubectl", "apply", "-n", self.argo_service.namespace, "-f", "-"
+        ]
+        configmap_yaml = (
+            'apiVersion: v1\n'
+            'kind: ConfigMap\n'
+            'metadata:\n'
+            '  name: approval-config\n'
+            '  labels:\n'
+            '    workflows.argoproj.io/configmap-type: Parameter\n'
+            'data:\n'
+            '  autoApprove: "{}"\n'
+        )
+        subprocess.run(kubectl_cmd, input=configmap_yaml, text=True, check=True)
 
     def workflow_start(self):
+        self._ensure_approval_configmap()
         start_result = self.argo_service.start_workflow(workflow_template_name=self.workflow_template,
                                                         parameters=self.parameters)
         assert start_result.success is True

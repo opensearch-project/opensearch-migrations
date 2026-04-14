@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
@@ -44,6 +45,37 @@ public class CaptureProxySetupTest {
             props.get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG)
         );
 
+    }
+
+    @Test
+    public void testBuildKafkaPropertiesWithNormalizedKafkaFlagNames() throws IOException {
+        CaptureProxy.Parameters parameters = CaptureProxy.parseArgs(
+            new String[] {
+                "--destinationUri",
+                "invalid:9200",
+                "--listenPort",
+                "80",
+                "--kafkaBrokers",
+                kafkaBrokerString,
+                "--kafkaPropertyFile",
+                "src/test/resources/simple-kafka.properties",
+                "--kafkaAuthType",
+                "msk-iam" }
+        );
+        Properties props = buildKafkaProperties(parameters.kafkaParameters);
+
+        Assertions.assertEquals(kafkaBrokerString, props.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
+        Assertions.assertEquals("SASL_SSL", props.get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
+        Assertions.assertEquals("212", props.get("reconnect.backoff.max.ms"));
+    }
+
+    @Test
+    public void testKafkaAuthFlagsRejectConflictingLegacyAndNormalizedValues() {
+        var parameters = new org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.KafkaParameters();
+        parameters.legacyEnableMSKAuth = true;
+        parameters.kafkaAuthType = "scram-sha-512";
+
+        Assertions.assertThrows(IllegalArgumentException.class, parameters::validateKafkaAuthFlags);
     }
 
     @Test
@@ -130,6 +162,33 @@ public class CaptureProxySetupTest {
         {
             testTlsParametersAreProperlyRead(TLS_PROTOCOLS_KEY + ": " + kvp.getKey(), kvp.getValue());
         }
+    }
+
+    @Test
+    public void testConvertStringToUriWithExplicitPort() {
+        URI uri = CaptureProxy.convertStringToUri("https://search-my-domain.us-east-1.es.amazonaws.com:9200");
+        Assertions.assertEquals(9200, uri.getPort());
+        Assertions.assertEquals("https", uri.getScheme());
+    }
+
+    @Test
+    public void testConvertStringToUriHttpsDefaultPort() {
+        URI uri = CaptureProxy.convertStringToUri("https://search-my-domain.us-east-1.es.amazonaws.com");
+        Assertions.assertEquals(443, uri.getPort());
+        Assertions.assertEquals("https", uri.getScheme());
+    }
+
+    @Test
+    public void testConvertStringToUriHttpDefaultPort() {
+        URI uri = CaptureProxy.convertStringToUri("http://search-my-domain.us-east-1.es.amazonaws.com");
+        Assertions.assertEquals(80, uri.getPort());
+        Assertions.assertEquals("http", uri.getScheme());
+    }
+
+    @Test
+    public void testConvertStringToUriExplicit443() {
+        URI uri = CaptureProxy.convertStringToUri("https://search-my-domain.us-east-1.es.amazonaws.com:443");
+        Assertions.assertEquals(443, uri.getPort());
     }
 
     @Test

@@ -16,6 +16,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
+import org.opensearch.migrations.transform.shim.tracing.ShimRequestContext;
+import org.opensearch.migrations.transform.shim.tracing.TargetDispatchContext;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.migrations.transform.shim.validation.TargetResponse;
 import org.opensearch.migrations.transform.shim.validation.ValidationResult;
@@ -65,6 +68,15 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     private static final int MAX_CONNECTIONS_PER_TARGET = 32;
     private static final String HANDLER_READ_TIMEOUT = "readTimeout";
     private static final String HANDLER_RESPONSE = "responseHandler";
+    private static final String RESPONSE_KEY = "response";
+    private static final String CURSOR_MARK_PARAM = "cursorMark";
+    private static final String OPENSEARCH_TARGET = "opensearch";
+
+
+
+
+
+
 
     /** Structured tuple logger — mirrors replayer's OutputTupleJsonLogger. */
     private static final Logger TUPLE_LOGGER = LoggerFactory.getLogger("OutputTupleJsonLogger");
@@ -78,6 +90,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     private final int maxContentLength;
     private final AtomicInteger activeRequests;
     private final AtomicLong requestCounter = new AtomicLong(0);
+    private final RootShimProxyContext rootContext;
 
     /** Connection pools keyed by target name. Lazily initialized on first use. */
     private volatile AbstractChannelPoolMap<String, FixedChannelPool> poolMap;
@@ -90,7 +103,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         Duration secondaryTimeout,
         SslContext backendSslContext,
         int maxContentLength,
-        AtomicInteger activeRequests
+        AtomicInteger activeRequests,
+        RootShimProxyContext rootContext
     ) {
         super(false);
         this.targets = targets;
@@ -101,6 +115,22 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         this.backendSslContext = backendSslContext;
         this.maxContentLength = maxContentLength;
         this.activeRequests = activeRequests;
+        this.rootContext = rootContext;
+    }
+
+    /** Backward-compatible constructor without RootShimProxyContext. */
+    public MultiTargetRoutingHandler(
+        Map<String, Target> targets,
+        String primaryTarget,
+        Set<String> activeTargets,
+        List<ValidationRule> validators,
+        Duration secondaryTimeout,
+        SslContext backendSslContext,
+        int maxContentLength,
+        AtomicInteger activeRequests
+    ) {
+        this(targets, primaryTarget, activeTargets, validators, secondaryTimeout,
+            backendSslContext, maxContentLength, activeRequests, null);
     }
 
     @Override
@@ -138,8 +168,13 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) {
-        // TODO: enable if latency headers matter
-        // long shimStartNanos = System.nanoTime();
+        String httpMethod = request.method().name();
+        String httpUri = request.uri();
+
+        ShimRequestContext requestCtx = rootContext != null
+            ? new ShimRequestContext(rootContext, httpMethod, httpUri)
+            : null;
+
         activeRequests.incrementAndGet();
         boolean keepAlive = Boolean.TRUE.equals(
             ctx.channel().attr(ShimChannelAttributes.KEEP_ALIVE).get());
@@ -148,21 +183,53 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         request.release();
 
         long requestId = requestCounter.getAndIncrement();
-        var futures = dispatchAll(requestMap);
-        handlePrimaryCompletion(ctx, futures, keepAlive, requestMap, requestId);
+        var dispatchResult = dispatchAll(requestMap, requestCtx);
+        handlePrimaryCompletion(ctx, dispatchResult.futures,
+            keepAlive, requestMap, requestId, requestCtx);
     }
 
-    private Map<String, CompletableFuture<TargetResponse>> dispatchAll(
-        Map<String, Object> requestMap
+    private static class DispatchResult {
+        final Map<String, CompletableFuture<TargetResponse>> futures;
+
+        DispatchResult(Map<String, CompletableFuture<TargetResponse>> futures) {
+            this.futures = futures;
+        }
+    }
+
+    private DispatchResult dispatchAll(
+        Map<String, Object> requestMap,
+        ShimRequestContext requestCtx
     ) {
         Map<String, CompletableFuture<TargetResponse>> futures = new LinkedHashMap<>();
+        boolean dualMode = activeTargets.size() > 1;
+        String uri = (String) requestMap.get("URI");
+        // Check for cursorMark in both URL params and JSON request body (P1)
+        boolean hasCursorMark = dualMode && (
+            (uri != null && uri.contains("cursorMark=")) ||
+            requestMap.containsKey(CURSOR_MARK_PARAM)
+        );
+
         for (String name : activeTargets) {
             Target target = targets.get(name);
-            Map<String, Object> targetRequestMap = target.requestTransform() != null
+            Map<String, Object> targetRequestMap = (dualMode || target.requestTransform() != null)
                 ? deepCopyMap(requestMap) : requestMap;
-            futures.put(name, dispatchToTarget(target, targetRequestMap, requestMap));
+            targetRequestMap.put("_targetName", name);
+            targetRequestMap.put("_mode", dualMode ? "dual" : "single");
+
+            // In dual mode with cursorMark, split the combined token per target
+            if (hasCursorMark) {
+                rewriteCursorMarkForTarget(targetRequestMap, name);
+            }
+
+            TargetDispatchContext dispatchCtx = requestCtx != null
+                ? (TargetDispatchContext) requestCtx.createTargetDispatchContext(name)
+                : null;
+
+            // Response transform needs per-target URI (with rewritten cursorMark)
+            Map<String, Object> responseRequestMap = hasCursorMark ? targetRequestMap : requestMap;
+            futures.put(name, dispatchToTarget(target, targetRequestMap, responseRequestMap, dispatchCtx));
         }
-        return futures;
+        return new DispatchResult(futures);
     }
 
     private void handlePrimaryCompletion(
@@ -170,7 +237,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         Map<String, CompletableFuture<TargetResponse>> futures,
         boolean keepAlive,
         Map<String, Object> requestMap,
-        long requestId
+        long requestId,
+        ShimRequestContext requestCtx
     ) {
         futures.get(primaryTarget).whenComplete((primaryResp, primaryEx) ->
             ctx.channel().eventLoop().execute(() -> {
@@ -179,20 +247,24 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                         ? TargetResponse.error(primaryTarget, Duration.ZERO, primaryEx)
                         : primaryResp;
                     Map<String, TargetResponse> allResponses = collectResponses(futures);
+
                     List<ValidationResult> results = runValidators(allResponses);
-                    FullHttpResponse response = buildFinalResponse(primary, allResponses, results);
-                    // TODO: enable if latency headers matter
-                    // response.headers().set("X-Shim-Latency",
-                    //     Duration.ofNanos(System.nanoTime() - shimStartNanos).toMillis());
+                    FullHttpResponse response = buildFinalResponse(primary, allResponses, results, requestMap);
                     HttpMessageUtil.writeResponse(ctx, response, keepAlive);
 
                     logTuple(requestId, requestMap, allResponses, results);
                 } catch (Exception e) {
                     log.error("Error building validation response", e);
+                    if (requestCtx != null) {
+                        requestCtx.addTraceException(e, true);
+                    }
                     HttpMessageUtil.writeResponse(ctx, HttpMessageUtil.errorResponse(
                         HttpResponseStatus.INTERNAL_SERVER_ERROR, "Validation shim error"), keepAlive);
                 } finally {
                     activeRequests.decrementAndGet();
+                    if (requestCtx != null) {
+                        requestCtx.close();
+                    }
                 }
             })
         );
@@ -252,14 +324,15 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     }
 
     private CompletableFuture<TargetResponse> dispatchToTarget(
-        Target target, Map<String, Object> requestMap, Map<String, Object> originalRequestMap
+        Target target, Map<String, Object> requestMap, Map<String, Object> originalRequestMap,
+        TargetDispatchContext dispatchCtx
     ) {
         CompletableFuture<TargetResponse> future = new CompletableFuture<>();
         long startNanos = System.nanoTime();
 
         try {
             long reqTransformStart = System.nanoTime();
-            Map<String, Object> targetMap = applyRequestTransform(target, requestMap);
+            Map<String, Object> targetMap = applyRequestTransformOrThrow(target, requestMap, dispatchCtx);
             Duration reqTransformDuration = Duration.ofNanos(System.nanoTime() - reqTransformStart);
 
             FullHttpRequest targetRequest = applyAuth(target, HttpMessageUtil.mapToRequest(targetMap));
@@ -267,9 +340,18 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
             targetRequest.headers().set(HttpHeaderNames.HOST,
                 uri.getHost() + (uri.getPort() != -1 ? ":" + uri.getPort() : ""));
 
-            sendViaPool(target, targetRequest, future, startNanos, originalRequestMap, reqTransformDuration);
+            if (dispatchCtx != null) {
+                dispatchCtx.addBytesSent(targetRequest.content().readableBytes());
+            }
+
+            sendViaPool(target, targetRequest, future, startNanos, originalRequestMap,
+                reqTransformDuration, dispatchCtx);
         } catch (Exception e) {
             log.error("Error dispatching to target {}", target.name(), e);
+            if (dispatchCtx != null) {
+                dispatchCtx.addTraceException(e, true);
+                dispatchCtx.close();
+            }
             future.complete(TargetResponse.error(target.name(), elapsed(startNanos), e));
         }
         return future;
@@ -277,7 +359,8 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
     private void sendViaPool(
         Target target, FullHttpRequest reqToSend, CompletableFuture<TargetResponse> future,
-        long startNanos, Map<String, Object> originalRequestMap, Duration reqTransformDuration
+        long startNanos, Map<String, Object> originalRequestMap, Duration reqTransformDuration,
+        TargetDispatchContext dispatchCtx
     ) {
         ChannelPool pool = poolMap.get(target.name());
         Future<Channel> acquireFuture = pool.acquire();
@@ -288,11 +371,11 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                 return;
             }
             Channel ch = f.getNow();
-            // Add per-request handlers (removed after response)
             ch.pipeline().addLast(HANDLER_READ_TIMEOUT, new ReadTimeoutHandler(
                 secondaryTimeout.toSeconds(), TimeUnit.SECONDS));
             ch.pipeline().addLast(HANDLER_RESPONSE, new PooledTargetResponseHandler(
-                target, future, startNanos, originalRequestMap, reqTransformDuration, pool, ch));
+                target, future, startNanos, originalRequestMap, reqTransformDuration, pool, ch,
+                dispatchCtx));
 
             ch.writeAndFlush(reqToSend).addListener((ChannelFutureListener) wf -> {
                 if (!wf.isSuccess()) {
@@ -308,9 +391,40 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         if (request.refCnt() > 0) request.release();
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> applyRequestTransform(Target target, Map<String, Object> requestMap) {
+    private Map<String, Object> applyRequestTransform(
+        Target target, Map<String, Object> requestMap, TargetDispatchContext dispatchCtx
+    ) {
         if (target.requestTransform() == null) return requestMap;
+        if (dispatchCtx != null) {
+            try (var transformCtx = dispatchCtx.createTransformContext("request")) {
+                try {
+                    return doRequestTransform(target, requestMap);
+                } catch (Exception e) {
+                    transformCtx.addTraceException(e, true);
+                    throw e;
+                }
+            }
+        }
+        return doRequestTransform(target, requestMap);
+    }
+
+    /**
+     * Apply the request transform, wrapping any failure in TransformException
+     * so callers can distinguish transform errors from upstream failures.
+     */
+    private Map<String, Object> applyRequestTransformOrThrow(
+        Target target, Map<String, Object> requestMap, TargetDispatchContext dispatchCtx
+    ) {
+        try {
+            return applyRequestTransform(target, requestMap, dispatchCtx);
+        } catch (Exception e) {
+            throw new TransformException(
+                String.format("Request transform failed for target '%s'", target.name()), e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> doRequestTransform(Target target, Map<String, Object> requestMap) {
         Object result = target.requestTransform().transformJson(requestMap);
         if (result instanceof String) {
             return parseJsonMap((String) result, target.name());
@@ -408,9 +522,17 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     private FullHttpResponse buildFinalResponse(
         TargetResponse primary,
         Map<String, TargetResponse> allResponses,
-        List<ValidationResult> validationResults
+        List<ValidationResult> validationResults,
+        Map<String, Object> requestMap
     ) {
         FullHttpResponse response = buildPrimaryResponse(primary);
+
+        if (allResponses.size() > 1) {
+            String sentCursorMark = extractQueryParam(
+                (String) requestMap.get("URI"), CURSOR_MARK_PARAM);
+            response = mergeCursorTokens(response, allResponses, sentCursorMark);
+        }
+
         addShimHeaders(response);
         addTargetHeaders(response, allResponses);
         addValidationHeaders(response, validationResults);
@@ -419,9 +541,18 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
     private FullHttpResponse buildPrimaryResponse(TargetResponse primary) {
         if (!primary.isSuccess()) {
+            final Throwable err = primary.error();
+            // Transform failures (wrapped in TransformException) return 500
+            // upstream communication failures return 502
+            final HttpResponseStatus status;
+            if (err instanceof TransformException) {
+                status = HttpResponseStatus.INTERNAL_SERVER_ERROR;
+            } else {
+                status = HttpResponseStatus.BAD_GATEWAY;
+            }
             return HttpMessageUtil.errorResponse(
-                HttpResponseStatus.BAD_GATEWAY,
-                "Primary target '" + primary.targetName() + "' failed: " + primary.error().getMessage());
+                status,
+                String.format("Primary target '%s' failed: %s", primary.targetName(), err.getMessage()));
         }
         byte[] body = primary.rawBody() != null ? primary.rawBody() : new byte[0];
         FullHttpResponse response = new DefaultFullHttpResponse(
@@ -432,6 +563,162 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
         return response;
     }
+
+    // --- Cursor pagination dual-mode support ---
+
+    /**
+     * In dual mode, rewrite the cursorMark query param for each target.
+     * Combined token format: base64({"solr":"<native>","os":"<os_token>"})
+     * For initial request (cursorMark=*), no rewrite needed.
+     * For Solr: extract the "solr" portion (native Solr cursorMark).
+     * For OpenSearch: extract the "os" portion (base64-encoded sort values).
+     */
+    static void rewriteCursorMarkForTarget(Map<String, Object> requestMap, String targetName) {
+        String uri = (String) requestMap.get("URI");
+        if (uri == null) return;
+
+        String cursorMark = extractQueryParam(uri, CURSOR_MARK_PARAM);
+        if (cursorMark == null || "*".equals(cursorMark)) return;
+
+        try {
+            String decoded = new String(java.util.Base64.getUrlDecoder().decode(cursorMark), StandardCharsets.UTF_8);
+            Map<String, Object> combined = MAPPER.readValue(decoded, MAP_TYPE_REF);
+
+            String targetToken;
+            if (OPENSEARCH_TARGET.equals(targetName) && combined.containsKey("os")) {
+                targetToken = (String) combined.get("os");
+            } else if (combined.containsKey("solr")) {
+                targetToken = (String) combined.get("solr");
+            } else {
+                return; // Not a combined token, pass through as-is
+            }
+
+            String newUri = replaceQueryParam(uri, CURSOR_MARK_PARAM, targetToken);
+            requestMap.put("URI", newUri);
+        } catch (Exception e) {
+            // Not a combined token — unexpected in dual mode, log for debugging
+            log.warn("cursorMark is not a combined token, passing through: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * After both targets respond, merge their nextCursorMark tokens into a combined token.
+     * Rewrites the primary response body with the combined nextCursorMark.
+     *
+     * Contract: each target's cursor token is treated as an opaque string. The TypeScript
+     * transform layer produces base64-encoded sort values for OpenSearch and Solr returns
+     * its native cursor token. This method combines them without interpreting the format.
+     *
+     * TODO: Consider extracting cursor merge/split into a CursorStrategy interface if
+     * additional pagination strategies are needed beyond the current solr+os dual mode.
+     */
+    @SuppressWarnings("unchecked")
+    FullHttpResponse mergeCursorTokens(
+        FullHttpResponse response, Map<String, TargetResponse> allResponses, String sentCursorMark
+    ) {
+        String solrToken = extractCursorToken(allResponses, "solr");
+        String osToken = extractCursorToken(allResponses, OPENSEARCH_TARGET);
+
+        if (solrToken == null || osToken == null) {
+            logPartialCursorWarning(solrToken, osToken);
+            return response;
+        }
+
+        if (isPaginationEnded(sentCursorMark, solrToken, osToken)) {
+            log.debug("Both targets returned same cursor as sent — end of results");
+            return response;
+        }
+
+        try {
+            String combinedToken = buildCombinedToken(solrToken, osToken);
+            return rewriteResponseWithToken(response, combinedToken);
+        } catch (Exception e) {
+            log.warn("Failed to merge cursor tokens: {}", e.getMessage());
+            return response;
+        }
+    }
+
+    private void logPartialCursorWarning(String solrToken, String osToken) {
+        if (solrToken != null || osToken != null) {
+            log.warn("Only one target returned a cursor token (solr={}, os={}), skipping merge",
+                solrToken != null ? "present" : "missing", osToken != null ? "present" : "missing");
+        }
+    }
+
+    private boolean isPaginationEnded(String sentCursorMark, String solrToken, String osToken) {
+        if (sentCursorMark == null || "*".equals(sentCursorMark)) {
+            return false;
+        }
+        try {
+            String decoded = new String(
+                java.util.Base64.getUrlDecoder().decode(sentCursorMark), StandardCharsets.UTF_8);
+            Map<String, Object> sentCombined = MAPPER.readValue(decoded, MAP_TYPE_REF);
+            String sentSolr = (String) sentCombined.get("solr");
+            String sentOs = (String) sentCombined.get("os");
+            return solrToken.equals(sentSolr) && osToken.equals(sentOs);
+        } catch (Exception e) {
+            log.warn("Sent cursorMark is not a combined token, proceeding with merge: {}",
+                e.getMessage());
+            return false;
+        }
+    }
+
+    private String extractCursorToken(Map<String, TargetResponse> allResponses, String targetKey) {
+        TargetResponse tr = allResponses.get(targetKey);
+        if (tr != null && tr.isSuccess() && tr.parsedBody() != null) {
+            Object nextCursor = tr.parsedBody().get("nextCursorMark");
+            if (nextCursor != null) return nextCursor.toString();
+        }
+        return null;
+    }
+
+    private String buildCombinedToken(String solrToken, String osToken) throws Exception {
+        Map<String, Object> combined = new LinkedHashMap<>();
+        combined.put("v", 1);
+        combined.put("solr", solrToken);
+        combined.put("os", osToken);
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(MAPPER.writeValueAsBytes(combined));
+    }
+
+    private FullHttpResponse rewriteResponseWithToken(
+        FullHttpResponse response, String combinedToken
+    ) throws Exception {
+        byte[] bodyBytes = new byte[response.content().readableBytes()];
+        response.content().getBytes(response.content().readerIndex(), bodyBytes);
+        Map<String, Object> body = MAPPER.readValue(bodyBytes, MAP_TYPE_REF);
+        body.put("nextCursorMark", combinedToken);
+        byte[] newBody = MAPPER.writeValueAsBytes(body);
+
+        HttpResponseStatus status = response.status();
+        response.release();
+        FullHttpResponse newResponse = new DefaultFullHttpResponse(
+            HttpVersion.HTTP_1_1, status, Unpooled.wrappedBuffer(newBody));
+        newResponse.headers().set(HttpHeaderNames.CONTENT_LENGTH, newBody.length);
+        newResponse.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
+        return newResponse;
+    }
+
+    static String extractQueryParam(String uri, String param) {
+        int qIdx = uri.indexOf('?');
+        if (qIdx < 0) return null;
+        String query = uri.substring(qIdx + 1);
+        for (String pair : query.split("&")) {
+            String[] kv = pair.split("=", 2);
+            if (kv.length == 2 && param.equals(kv[0])) {
+                return java.net.URLDecoder.decode(kv[1], StandardCharsets.UTF_8);
+            }
+        }
+        return null;
+    }
+
+    static String replaceQueryParam(String uri, String param, String newValue) {
+        String encoded = java.net.URLEncoder.encode(newValue, StandardCharsets.UTF_8);
+        return uri.replaceFirst(
+            "([?&])" + param + "=[^&]*",
+            "$1" + param + "=" + encoded);
+    }
+
+    // --- End cursor pagination support ---
 
     private void addShimHeaders(FullHttpResponse response) {
         response.headers().set("X-Shim-Primary", primaryTarget);
@@ -548,10 +835,11 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         private final Duration reqTransformDuration;
         private final ChannelPool pool;
         private final Channel channel;
+        private final TargetDispatchContext dispatchCtx;
 
         PooledTargetResponseHandler(Target target, CompletableFuture<TargetResponse> future, long startNanos,
                 Map<String, Object> originalRequestMap, Duration reqTransformDuration,
-                ChannelPool pool, Channel channel) {
+                ChannelPool pool, Channel channel, TargetDispatchContext dispatchCtx) {
             this.target = target;
             this.future = future;
             this.startNanos = startNanos;
@@ -559,6 +847,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
             this.reqTransformDuration = reqTransformDuration;
             this.pool = pool;
             this.channel = channel;
+            this.dispatchCtx = dispatchCtx;
         }
 
         @Override
@@ -570,12 +859,22 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                 int finalStatusCode = statusCode;
                 Duration respTransformDuration = Duration.ZERO;
 
+                if (dispatchCtx != null) {
+                    dispatchCtx.addBytesReceived(rawBody.length);
+                }
+
                 if (target.responseTransform() != null) {
                     long respTransformStart = System.nanoTime();
-                    Object[] transformed = applyResponseTransform(backendResponse, rawBody, statusCode);
+                    Object[] transformed = applyResponseTransformWithInstrumentation(
+                        backendResponse, rawBody, statusCode, dispatchCtx);
                     respTransformDuration = Duration.ofNanos(System.nanoTime() - respTransformStart);
                     finalBody = (byte[]) transformed[0];
                     finalStatusCode = (int) transformed[1];
+                }
+
+                if (dispatchCtx != null) {
+                    dispatchCtx.setStatusCode(finalStatusCode);
+                    dispatchCtx.close();
                 }
 
                 Map<String, Object> parsedBody = tryParseJson(finalBody);
@@ -584,6 +883,10 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                     elapsed(startNanos), reqTransformDuration, respTransformDuration, null));
             } catch (Exception e) {
                 log.error("Error processing response from target {}", target.name(), e);
+                if (dispatchCtx != null) {
+                    dispatchCtx.addTraceException(e, true);
+                    dispatchCtx.close();
+                }
                 future.complete(TargetResponse.error(target.name(), elapsed(startNanos), e));
             } finally {
                 pool.release(channel);
@@ -596,6 +899,23 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
             return body;
         }
 
+        private Object[] applyResponseTransformWithInstrumentation(
+            FullHttpResponse backendResponse, byte[] rawBody, int statusCode,
+            TargetDispatchContext dispatchCtx
+        ) {
+            if (dispatchCtx != null) {
+                try (var transformCtx = dispatchCtx.createTransformContext(RESPONSE_KEY)) {
+                    try {
+                        return applyResponseTransform(backendResponse, rawBody, statusCode);
+                    } catch (Exception e) {
+                        transformCtx.addTraceException(e, true);
+                        throw e;
+                    }
+                }
+            }
+            return applyResponseTransform(backendResponse, rawBody, statusCode);
+        }
+
         @SuppressWarnings("unchecked")
         private Object[] applyResponseTransform(
             FullHttpResponse backendResponse, byte[] rawBody, int statusCode
@@ -604,7 +924,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                 backendResponse.replace(Unpooled.wrappedBuffer(rawBody)));
             var bundled = new LinkedHashMap<String, Object>();
             bundled.put("request", originalRequestMap);
-            bundled.put("response", responseMap);
+            bundled.put(RESPONSE_KEY, responseMap);
             Object transformResult = target.responseTransform().transformJson(bundled);
 
             Map<String, Object> transformedMap = parseTransformResult(transformResult);
@@ -612,7 +932,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                 return new Object[]{rawBody, statusCode};
             }
 
-            Map<String, Object> responseResult = (Map<String, Object>) transformedMap.get("response");
+            Map<String, Object> responseResult = (Map<String, Object>) transformedMap.get(RESPONSE_KEY);
             if (responseResult == null) responseResult = transformedMap;
 
             byte[] body = extractBody(responseResult, rawBody);
@@ -657,6 +977,10 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         @Override
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
             log.error("Backend response error for target {}", target.name(), cause);
+            if (dispatchCtx != null) {
+                dispatchCtx.addTraceException(cause, true);
+                dispatchCtx.close();
+            }
             future.complete(TargetResponse.error(target.name(), elapsed(startNanos), cause));
             pool.release(channel);
         }

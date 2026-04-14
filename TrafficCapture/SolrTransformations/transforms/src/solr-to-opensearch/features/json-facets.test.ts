@@ -55,9 +55,19 @@ function histogramInner(aggs: JavaMap): JavaMap {
   return aggs.get(FACET_NAME).get('histogram');
 }
 
+/** Extract the inner "date_histogram" map from the aggs result for the default facet name. */
+function dateHistogramInner(aggs: JavaMap): JavaMap {
+  return aggs.get(FACET_NAME).get('date_histogram');
+}
+
 /** Extract the inner "range" map from the aggs result for the default facet name. */
 function rangeInner(aggs: JavaMap): JavaMap {
   return aggs.get(FACET_NAME).get('range');
+}
+
+/** Extract the inner "filter" map from the aggs result for the default facet name. */
+function filterInner(aggs: JavaMap): JavaMap {
+  return aggs.get(FACET_NAME).get('filter');
 }
 
 /** Build a terms facet context, apply the transform, and return the inner terms map. */
@@ -73,6 +83,16 @@ function applyBodyHistogram(obj: Record<string, any>): JavaMap {
 /** Build a range facet context (with ranges), apply the transform, and return the inner range map. */
 function applyBodyRange(obj: Record<string, any>): JavaMap {
   return rangeInner(applyAndGetAggs(ctxWithBodyFacet({ type: 'range', ...obj })));
+}
+
+/** Build a date range facet context, apply the transform, and return the inner date_histogram map. */
+function applyBodyDateHistogram(obj: Record<string, any>): JavaMap {
+  return dateHistogramInner(applyAndGetAggs(ctxWithBodyFacet({ type: 'range', ...obj })));
+}
+
+/** Build a query facet context, apply the transform, and return the inner filter map. */
+function applyBodyQuery(obj: Record<string, any>): JavaMap {
+  return filterInner(applyAndGetAggs(ctxWithBodyFacet({ type: 'query', ...obj })));
 }
 
 // endregion
@@ -527,6 +547,201 @@ describe('arbitrary range facet conversion (range)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Date uniform range facet (date gap) → OpenSearch date_histogram aggregation
+// ---------------------------------------------------------------------------
+
+describe('date uniform range facet conversion (date_histogram)', () => {
+  it('should produce a date_histogram with calendar_interval for +1MONTH gap', () => {
+    const inner = applyBodyDateHistogram({
+      field: 'created_at',
+      start: '2024-01-01T00:00:00Z',
+      end: '2024-12-31T00:00:00Z',
+      gap: '+1MONTH',
+    });
+    expect(inner.get('field')).toBe('created_at');
+    expect(inner.get('calendar_interval')).toBe('1M');
+    expect(inner.has('fixed_interval')).toBe(false);
+    expect(inner.has('interval')).toBe(false);
+  });
+
+  it('should produce a date_histogram with calendar_interval for +1DAY gap', () => {
+    const inner = applyBodyDateHistogram({
+      field: 'timestamp',
+      start: '2024-01-01T00:00:00Z',
+      end: '2024-01-31T00:00:00Z',
+      gap: '+1DAY',
+    });
+    expect(inner.get('calendar_interval')).toBe('1d');
+  });
+
+  it('should produce a date_histogram with calendar_interval for +1YEAR gap', () => {
+    const inner = applyBodyDateHistogram({
+      field: 'timestamp',
+      start: '2020-01-01T00:00:00Z',
+      end: '2025-01-01T00:00:00Z',
+      gap: '+1YEAR',
+    });
+    expect(inner.get('calendar_interval')).toBe('1y');
+  });
+
+  it('should produce a date_histogram with fixed_interval for +5MINUTES gap', () => {
+    const inner = applyBodyDateHistogram({
+      field: 'event_time',
+      start: '2024-01-01T00:00:00Z',
+      end: '2024-01-01T01:00:00Z',
+      gap: '+5MINUTES',
+    });
+    expect(inner.get('fixed_interval')).toBe('5m');
+    expect(inner.has('calendar_interval')).toBe(false);
+  });
+
+  it('should produce a date_histogram with fixed_interval for +3HOURS gap', () => {
+    const inner = applyBodyDateHistogram({
+      field: 'event_time',
+      start: '2024-01-01T00:00:00Z',
+      end: '2024-01-02T00:00:00Z',
+      gap: '+3HOURS',
+    });
+    expect(inner.get('fixed_interval')).toBe('3h');
+  });
+
+  it('should return a Map with exactly one top-level "date_histogram" key', () => {
+    const aggs = applyAndGetAggs(
+      ctxWithBodyFacet({
+        type: 'range',
+        field: 'created_at',
+        start: '2024-01-01T00:00:00Z',
+        end: '2024-12-31T00:00:00Z',
+        gap: '+1MONTH',
+      }),
+    );
+    const agg = aggs.get(FACET_NAME);
+    expect(agg.size).toBe(1);
+    expect(agg.has('date_histogram')).toBe(true);
+    expect(agg.has('histogram')).toBe(false);
+  });
+
+  it('should set extended_bounds with min and max (end - 1s) and hard_bounds with original start/end', () => {
+    const inner = applyBodyDateHistogram({
+      field: 'created_at',
+      start: '2024-01-01T00:00:00Z',
+      end: '2024-12-31T00:00:00Z',
+      gap: '+1MONTH',
+    });
+    const extBounds = inner.get('extended_bounds');
+    expect(extBounds).toBeDefined();
+    expect(extBounds.get('min')).toBe('2024-01-01T00:00:00Z');
+    // Solr's end is exclusive — max is set to end - 1s to avoid an extra bucket
+    expect(extBounds.get('max')).toBe('2024-12-30T23:59:59Z');
+
+    const hardBounds = inner.get('hard_bounds');
+    expect(hardBounds).toBeDefined();
+    expect(hardBounds.get('min')).toBe('2024-01-01T00:00:00Z');
+    expect(hardBounds.get('max')).toBe('2024-12-31T00:00:00Z');
+  });
+
+  it('should set format to strict_date_time_no_millis for ISO date output', () => {
+    const inner = applyBodyDateHistogram({
+      field: 'created_at',
+      start: '2024-01-01T00:00:00Z',
+      end: '2024-12-31T00:00:00Z',
+      gap: '+1MONTH',
+    });
+    expect(inner.get('format')).toBe('strict_date_time_no_millis');
+  });
+
+  it('should set only min on extended_bounds and hard_bounds when end is absent', () => {
+    const inner = applyBodyDateHistogram({
+      field: 'created_at',
+      start: '2024-01-01T00:00:00Z',
+      gap: '+1MONTH',
+    });
+    const extBounds = inner.get('extended_bounds');
+    expect(extBounds.get('min')).toBe('2024-01-01T00:00:00Z');
+    expect(extBounds.has('max')).toBe(false);
+
+    const hardBounds = inner.get('hard_bounds');
+    expect(hardBounds.get('min')).toBe('2024-01-01T00:00:00Z');
+    expect(hardBounds.has('max')).toBe(false);
+  });
+
+  it('should not set extended_bounds or hard_bounds when start and end are both absent', () => {
+    const inner = applyBodyDateHistogram({
+      field: 'created_at',
+      gap: '+1MONTH',
+    });
+    expect(inner.has('extended_bounds')).toBe(false);
+    expect(inner.has('hard_bounds')).toBe(false);
+  });
+
+  it('should map mincount to min_doc_count', () => {
+    const inner = applyBodyDateHistogram({
+      field: 'created_at',
+      start: '2024-01-01T00:00:00Z',
+      end: '2024-12-31T00:00:00Z',
+      gap: '+1MONTH',
+      mincount: 1,
+    });
+    expect(inner.get('min_doc_count')).toBe(1);
+  });
+
+  it('should still produce numeric histogram for a numeric gap (regression)', () => {
+    const inner = applyBodyHistogram({ field: 'price', start: 0, end: 100, gap: 10 });
+    expect(inner.get('field')).toBe('price');
+    expect(inner.get('interval')).toBe(10);
+    expect(inner.has('calendar_interval')).toBe(false);
+    expect(inner.has('fixed_interval')).toBe(false);
+  });
+
+  it('should work from a query-string param with date gap', () => {
+    const ctx = ctxWithParamFacet({
+      type: 'range',
+      field: 'created_at',
+      start: '2024-01-01T00:00:00Z',
+      end: '2024-06-01T00:00:00Z',
+      gap: '+1MONTH',
+    });
+    request.apply(ctx);
+    const inner = dateHistogramInner(ctx.body.get('aggs'));
+    expect(inner.get('field')).toBe('created_at');
+    expect(inner.get('calendar_interval')).toBe('1M');
+  });
+
+  it('should warn about unsupported range params on date_histogram too', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    applyBodyDateHistogram({
+      field: 'created_at',
+      start: '2024-01-01T00:00:00Z',
+      end: '2024-12-31T00:00:00Z',
+      gap: '+1MONTH',
+      hardend: true,
+      include: 'lower',
+      other: 'before',
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('no direct OpenSearch histogram equivalent'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('should produce date_histogram with fixed_interval for compound gap +1MONTH+2DAYS', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const inner = applyBodyDateHistogram({
+      field: 'created_at',
+      start: '2024-01-01T00:00:00Z',
+      end: '2024-12-31T00:00:00Z',
+      gap: '+1MONTH+2DAYS',
+    });
+    expect(inner.get('field')).toBe('created_at');
+    // 1 month (720h) + 2 days (48h) = 768h
+    expect(inner.get('fixed_interval')).toBe('768h');
+    expect(inner.has('calendar_interval')).toBe(false);
+    expect(inner.has('interval')).toBe(false);
+    warnSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // convertSort — Map input coverage (utils.ts lines 26-30)
 // ---------------------------------------------------------------------------
 
@@ -553,6 +768,66 @@ describe('convertSort with Map input', () => {
     const sortMap = new Map([['my_stat', 'ASC']]) as unknown as JavaMap;
     const order = convertSort(sortMap);
     expect(order.get('my_stat')).toBe('asc');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Query facet → OpenSearch filter aggregation
+// ---------------------------------------------------------------------------
+
+describe('query facet conversion (filter)', () => {
+  it('should produce a filter aggregation with a query_string for a free-text query', () => {
+    const inner = applyBodyQuery({ q: 'hello world' });
+    expect(inner.get('query_string')).toBeDefined();
+    expect(inner.get('query_string').get('query')).toBe('hello world');
+  });
+
+  it('should produce a filter aggregation with query_string for a Lucene range query', () => {
+    const inner = applyBodyQuery({ q: 'popularity:[100 TO *]' });
+    expect(inner.get('query_string')).toBeDefined();
+    expect(inner.get('query_string').get('query')).toBe('popularity:[100 TO *]');
+  });
+
+  it('should return a Map with exactly one top-level "filter" key', () => {
+    const aggs = applyAndGetAggs(
+      ctxWithBodyFacet({ type: 'query', q: 'status:active' }),
+    );
+    const agg = aggs.get(FACET_NAME);
+    expect(agg.size).toBe(1);
+    expect(agg.has('filter')).toBe(true);
+  });
+
+  it('should produce match_all for q: "*:*"', () => {
+    const inner = applyBodyQuery({ q: '*:*' });
+    expect(inner.get('match_all')).toBeDefined();
+  });
+
+  it('should produce a query_string for q: "field:value"', () => {
+    const inner = applyBodyQuery({ q: 'status:active' });
+    expect(inner.get('query_string')).toBeDefined();
+    expect(inner.get('query_string').get('query')).toBe('status:active');
+  });
+
+  it('should default to match_all when q is absent', () => {
+    const inner = applyBodyQuery({});
+    expect(inner.get('match_all')).toBeDefined();
+  });
+
+  it('should work from a query-string param', () => {
+    const ctx = ctxWithParamFacet({ type: 'query', q: 'hello world' });
+    request.apply(ctx);
+    const inner = filterInner(ctx.body.get('aggs'));
+    expect(inner.get('query_string')).toBeDefined();
+    expect(inner.get('query_string').get('query')).toBe('hello world');
+  });
+
+  it('should warn about unknown keys in a query facet definition', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    applyBodyQuery({ q: '*:*', unknownParam: 'bar' });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Unprocessed keys in query facet'),
+    );
+    warnSpy.mockRestore();
   });
 });
 
@@ -636,8 +911,8 @@ describe('edge cases and warning paths', () => {
 
   it('should throw for an unimplemented facet type', () => {
     expect(() => {
-      applyAndGetAggs(ctxWithBodyFacet({ type: 'query', field: 'x' }));
-    }).toThrow("Facet type 'query' is not implemented");
+      applyAndGetAggs(ctxWithBodyFacet({ type: 'heatmap', field: 'x' }));
+    }).toThrow("Facet type 'heatmap' is not implemented");
   });
 
   it('should return empty map for non-map facet definition', () => {
@@ -668,5 +943,286 @@ describe('edge cases and warning paths', () => {
     };
     request.apply(ctx);
     expect(ctx.body.has('aggs')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nested facets (sub-facets via `facet` key)
+// ---------------------------------------------------------------------------
+
+describe('nested facets (sub-facets)', () => {
+  describe('terms facet with nested sub-facets', () => {
+    it('should produce nested aggs for a terms facet with a nested terms sub-facet', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'terms',
+          field: 'category',
+          facet: new Map<string, any>([
+            ['brands', new Map<string, any>([
+              ['type', 'terms'],
+              ['field', 'brand'],
+              ['limit', 5],
+            ])],
+          ]),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('terms')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(true);
+
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('brands')).toBe(true);
+
+      const brandsAgg = subAggs.get('brands');
+      expect(brandsAgg.has('terms')).toBe(true);
+      expect(brandsAgg.get('terms').get('field')).toBe('brand');
+      expect(brandsAgg.get('terms').get('size')).toBe(5);
+    });
+
+    it('should not set aggs when facet sub-map is empty', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'terms',
+          field: 'category',
+          facet: new Map(),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('terms')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(false);
+    });
+
+    it('should not set aggs when facet key is absent', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({ type: 'terms', field: 'category' }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('aggs')).toBe(false);
+    });
+
+    it('should not warn about facet as an unknown key', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'terms',
+          field: 'category',
+          facet: new Map([
+            ['sub', new Map([['type', 'terms'], ['field', 'brand']])],
+          ]),
+        }),
+      );
+      for (const call of warnSpy.mock.calls) {
+        expect(call[0]).not.toContain('Unprocessed keys');
+      }
+      warnSpy.mockRestore();
+    });
+  });
+
+  describe('range facet (histogram) with nested sub-facets', () => {
+    it('should produce nested aggs for a histogram facet with a nested terms sub-facet', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'range',
+          field: 'price',
+          start: 0,
+          end: 100,
+          gap: 25,
+          facet: new Map([
+            ['top_brands', new Map([
+              ['type', 'terms'],
+              ['field', 'brand'],
+            ])],
+          ]),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('histogram')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(true);
+
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('top_brands')).toBe(true);
+      expect(subAggs.get('top_brands').get('terms').get('field')).toBe('brand');
+    });
+  });
+
+  describe('range facet (arbitrary ranges) with nested sub-facets', () => {
+    it('should produce nested aggs for an arbitrary range facet with a nested terms sub-facet', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'range',
+          field: 'price',
+          ranges: ['[0,50)', '[50,100)'],
+          facet: new Map([
+            ['sellers', new Map([
+              ['type', 'terms'],
+              ['field', 'seller'],
+            ])],
+          ]),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('range')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(true);
+
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('sellers')).toBe(true);
+      expect(subAggs.get('sellers').get('terms').get('field')).toBe('seller');
+    });
+  });
+
+  describe('range facet (date_histogram) with nested sub-facets', () => {
+    it('should produce nested aggs for a date_histogram facet with a nested terms sub-facet', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'range',
+          field: 'created_at',
+          start: '2024-01-01T00:00:00Z',
+          end: '2024-12-31T00:00:00Z',
+          gap: '+1MONTH',
+          facet: new Map([
+            ['authors', new Map([
+              ['type', 'terms'],
+              ['field', 'author'],
+            ])],
+          ]),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('date_histogram')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(true);
+
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('authors')).toBe(true);
+      expect(subAggs.get('authors').get('terms').get('field')).toBe('author');
+    });
+  });
+
+  describe('query facet with nested sub-facets', () => {
+    it('should produce nested aggs for a query facet with a nested terms sub-facet', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'query',
+          q: 'status:active',
+          facet: new Map([
+            ['categories', new Map([
+              ['type', 'terms'],
+              ['field', 'category'],
+            ])],
+          ]),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      expect(outerAgg.has('filter')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(true);
+
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('categories')).toBe(true);
+      expect(subAggs.get('categories').get('terms').get('field')).toBe('category');
+    });
+  });
+
+  describe('multi-level nesting', () => {
+    it('should handle three levels of nested facets', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'terms',
+          field: 'category',
+          facet: new Map([
+            ['brands', new Map<string, any>([
+              ['type', 'terms'],
+              ['field', 'brand'],
+              ['facet', new Map([
+                ['price_ranges', new Map<string, any>([
+                  ['type', 'range'],
+                  ['field', 'price'],
+                  ['start', 0],
+                  ['end', 100],
+                  ['gap', 25],
+                ])],
+              ])],
+            ])],
+          ]),
+        }),
+      );
+
+      // Level 1: category terms
+      const level1 = aggs.get(FACET_NAME);
+      expect(level1.has('terms')).toBe(true);
+      expect(level1.has('aggs')).toBe(true);
+
+      // Level 2: brand terms
+      const level2 = level1.get('aggs').get('brands');
+      expect(level2.has('terms')).toBe(true);
+      expect(level2.get('terms').get('field')).toBe('brand');
+      expect(level2.has('aggs')).toBe(true);
+
+      // Level 3: price histogram
+      const level3 = level2.get('aggs').get('price_ranges');
+      expect(level3.has('histogram')).toBe(true);
+      expect(level3.get('histogram').get('field')).toBe('price');
+      expect(level3.has('aggs')).toBe(false);
+    });
+
+    it('should handle multiple sibling sub-facets', () => {
+      const aggs = applyAndGetAggs(
+        ctxWithBodyFacet({
+          type: 'terms',
+          field: 'category',
+          facet: new Map([
+            ['brands', new Map([
+              ['type', 'terms'],
+              ['field', 'brand'],
+            ])],
+            ['price_ranges', new Map<string, any>([
+              ['type', 'range'],
+              ['field', 'price'],
+              ['start', 0],
+              ['end', 100],
+              ['gap', 25],
+            ])],
+          ]),
+        }),
+      );
+
+      const outerAgg = aggs.get(FACET_NAME);
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('brands')).toBe(true);
+      expect(subAggs.has('price_ranges')).toBe(true);
+      expect(subAggs.get('brands').get('terms').get('field')).toBe('brand');
+      expect(subAggs.get('price_ranges').get('histogram').get('field')).toBe('price');
+    });
+  });
+
+  describe('nested facets from query-string param', () => {
+    it('should handle nested facets parsed from a JSON query-string param', () => {
+      const ctx = ctxWithParamFacet({
+        type: 'terms',
+        field: 'category',
+        facet: {
+          brands: {
+            type: 'terms',
+            field: 'brand',
+            limit: 3,
+          },
+        },
+      });
+      request.apply(ctx);
+
+      const outerAgg = ctx.body.get('aggs').get(FACET_NAME);
+      expect(outerAgg.has('terms')).toBe(true);
+      expect(outerAgg.has('aggs')).toBe(true);
+
+      const subAggs = outerAgg.get('aggs');
+      expect(subAggs.has('brands')).toBe(true);
+      expect(subAggs.get('brands').get('terms').get('field')).toBe('brand');
+      expect(subAggs.get('brands').get('terms').get('size')).toBe(3);
+    });
   });
 });

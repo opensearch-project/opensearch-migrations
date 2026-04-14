@@ -41,8 +41,8 @@ export type WaitForNewResourceDefinition = {
 };
 
 export type WaitForConditions = {
-    successCondition?: string;
-    failureCondition?: string;
+    successCondition?: AllowLiteralOrExpression<string>;
+    failureCondition?: AllowLiteralOrExpression<string>;
 };
 
 type ExistingResourceSpecifier = {
@@ -120,7 +120,7 @@ export class WaitForNewResourceBuilder<
             (typeof waitOpts.maxDurationSeconds === "number" ? waitOpts.maxDurationSeconds : DEFAULT_WAIT_DURATION);
         const maxDurationSeconds = waitOpts.maxDurationSeconds ?? maxKubeWaitDuration;
         const resources = waitOpts.kubectlPodResources ?? {
-            limits: { cpu: "50m", memory: "32Mi" },
+            limits: { cpu: "50m", memory: "64Mi" },
             requests: { cpu: "50m", memory: "32Mi" }
         };
 

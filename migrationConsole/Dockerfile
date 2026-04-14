@@ -54,6 +54,7 @@ ENV WORKON_HOME=/
 ENV PIPENV_CUSTOM_VENV_NAME=.venv
 ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
+ENV PATH="/.venv/bin:${PATH}"
 
 # Copy tools from previous stage
 COPY --from=migration-console-tools /root/kafka-tools /root/kafka-tools
@@ -78,6 +79,16 @@ RUN dnf install -y  \
         bash-completion \
         && \
         dnf clean all
+
+# Install mount-s3 for direct S3 bucket mounting (requires SYS_ADMIN capability at runtime)
+RUN MOUNT_S3_VERSION="1.22.2" && \
+    ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi && \
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
+        "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNT_S3_VERSION}/${ARCH}/mount-s3-${MOUNT_S3_VERSION}-${ARCH}.rpm" \
+        -o /tmp/mount-s3.rpm && \
+    dnf install -y /tmp/mount-s3.rpm && \
+    rm -f /tmp/mount-s3.rpm
 
 COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
 RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
@@ -115,12 +126,8 @@ WORKDIR /root
 COPY nodeStaging/configProcessor /root/configProcessor
 
 RUN chmod +x /root/configProcessor/*.sh
-ENV WORKFLOW_SCHEMA_FILENAME=/root/.workflowUser.schema.json
 ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
 ENV NODEJS=node-22
-RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME" && \
-    echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFIG_PROCESSOR_DIR}/sample.yaml" && \
-    "$NODEJS" "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
 
 COPY nodeStaging/workflowTemplates /root/workflows
 COPY workflowConfigToServicesConfig.jq /root/
@@ -132,7 +139,6 @@ RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \
     echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
     echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc && \
     echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc && \
-    echo 'source /.venv/bin/activate' >> ~/.bashrc && \
     echo 'console completion bash 2> /dev/null > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\\t) \\[\\e[92m\\]migration-console \\[\\e[0m\\](\\w) -> "'>> ~/.bashrc

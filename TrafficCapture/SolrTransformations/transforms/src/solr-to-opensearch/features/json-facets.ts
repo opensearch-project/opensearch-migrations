@@ -9,7 +9,7 @@
  */
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext, JavaMap } from '../context';
-import { convertSort, isMapLike } from './utils';
+import { convertSort, isMapLike, isSolrDateMathGap, convertSolrDateGap } from './utils';
 
 const FEATURE_NAME = 'json-facets';
 
@@ -54,6 +54,7 @@ function convertTermsFacet(def: JavaMap): JavaMap {
     'prefix',
     'missing',
     'sort',
+    'facet',
   ]);
   warnUnknownKeys(def, knownKeys, 'terms');
 
@@ -204,16 +205,48 @@ function convertArbitraryRangeFacet(def: JavaMap, ranges: any): JavaMap {
 
   rangeInner.set('ranges', osRanges);
 
-  const knownKeys = new Set(['type', 'field', 'ranges', 'mincount', 'hardend', 'include', 'other']);
+  const knownKeys = new Set(['type', 'field', 'ranges', 'mincount', 'hardend', 'include', 'other', 'facet']);
   warnUnknownKeys(def, knownKeys, 'arbitrary range');
 
   return new Map<string, any>([['range', rangeInner]]);
 }
 
 /**
- * Convert Solr uniform range (start/end/gap) to an OpenSearch `histogram` aggregation.
+ * Determine whether a uniform range facet targets a date or numeric field.
+ *
+ * Current strategy: inspect the `gap` value for Solr date-math patterns
+ * (e.g. "+1MONTH", "+5MINUTES").
+ *
+ * Future: this function can be extended to accept explicit schema / field-type
+ * metadata when that support becomes available.
+ */
+type FieldTypeHint = 'numeric' | 'date';
+
+function detectFieldType(def: JavaMap): FieldTypeHint {
+  const gap = def.get('gap');
+  if (gap != null && typeof gap === 'string' && isSolrDateMathGap(gap)) {
+    return 'date';
+  }
+  return 'numeric';
+}
+
+/**
+ * Convert Solr uniform range (start/end/gap) to the appropriate OpenSearch
+ * aggregation — either `histogram` (numeric) or `date_histogram` (date).
  */
 function convertUniformRangeFacet(def: JavaMap): JavaMap {
+  const fieldType = detectFieldType(def);
+  if (fieldType === 'date') {
+    return convertDateHistogramFacet(def);
+  }
+  return convertNumericHistogramFacet(def);
+}
+
+/**
+ * Convert Solr uniform range (start/end/gap) to an OpenSearch `histogram` aggregation
+ * for numeric fields.
+ */
+function convertNumericHistogramFacet(def: JavaMap): JavaMap {
   const histogramInner = new Map<string, any>();
   histogramInner.set('field', def.get('field'));
 
@@ -222,24 +255,104 @@ function convertUniformRangeFacet(def: JavaMap): JavaMap {
 
   const start = def.get('start');
   const end = def.get('end');
+
+  // Solr's start/end define the bucket-generation window:
+  //   - No buckets are created outside [start, end)  → hard_bounds
+  //   - Empty buckets ARE created within [start, end) → extended_bounds
+  // In OpenSearch we need both to replicate this behaviour.
   if (start != null || end != null) {
-    const bounds = new Map<string, any>();
-    if (start != null) bounds.set('min', start);
+    const extBounds = new Map<string, any>();
+    const hardBounds = new Map<string, any>();
+    if (start != null) {
+      extBounds.set('min', start);
+      hardBounds.set('min', start);
+    }
     // Solr's end is exclusive — the last bucket starts at (end - gap).
     // extended_bounds.max means "ensure a bucket containing this value exists",
     // so we use (end - gap) to avoid creating an extra bucket at `end`.
     if (end != null && gap != null) {
-      bounds.set('max', end - gap);
+      extBounds.set('max', end - gap);
+      hardBounds.set('max', end);
     } else if (end != null) {
-      bounds.set('max', end);
+      extBounds.set('max', end);
+      hardBounds.set('max', end);
     }
-    histogramInner.set('extended_bounds', bounds);
+    histogramInner.set('extended_bounds', extBounds);
+    histogramInner.set('hard_bounds', hardBounds);
   }
 
   const mincount = def.get('mincount');
   if (mincount != null) histogramInner.set('min_doc_count', mincount);
 
-  // These Solr parameters have no direct OpenSearch histogram equivalent — warn if present.
+  warnUnsupportedRangeParams(def);
+  warnUnknownRangeKeys(def);
+
+  return new Map<string, any>([['histogram', histogramInner]]);
+}
+
+/**
+ * Convert Solr uniform range (start/end/gap) to an OpenSearch `date_histogram`
+ * aggregation for date fields.
+ *
+ * Unlike the numeric path, date extended_bounds pass through the raw start/end
+ * strings (no arithmetic), and the gap is translated via convertSolrDateGap().
+ */
+function convertDateHistogramFacet(def: JavaMap): JavaMap {
+  const dateHistInner = new Map<string, any>();
+  dateHistInner.set('field', def.get('field'));
+
+  const gap = def.get('gap');
+  if (gap != null) {
+    const interval = convertSolrDateGap(gap);
+    dateHistInner.set(interval.type, interval.value);
+  }
+
+  // Return ISO-8601 date strings (like Solr) instead of epoch millis
+  dateHistInner.set('format', 'strict_date_time_no_millis');
+
+  const start = def.get('start');
+  const end = def.get('end');
+
+  // Solr's start/end define the bucket-generation window:
+  //   - No buckets are created outside [start, end)  → hard_bounds
+  //   - Empty buckets ARE created within [start, end) → extended_bounds
+  // In OpenSearch we need both to replicate this behaviour.
+  //
+  // Solr's `end` is exclusive — no bucket starts AT `end`.
+  // For extended_bounds.max we subtract 1 s so the last *forced*
+  // bucket is the one just before `end`, matching Solr's semantics.
+  // hard_bounds.max keeps the original `end` to clip any overshoot.
+  if (start != null || end != null) {
+    const extBounds = new Map<string, any>();
+    const hardBounds = new Map<string, any>();
+    if (start != null) {
+      extBounds.set('min', start);
+      hardBounds.set('min', start);
+    }
+    if (end != null) {
+      // Subtract 1 second so the max falls in the last valid bucket
+      // (not at the exclusive `end` boundary).  Format must match
+      // strict_date_time_no_millis ("yyyy-MM-dd'T'HH:mm:ssZ").
+      const endMs = new Date(end as string).getTime();
+      const maxDate = new Date(endMs - 1000);
+      extBounds.set('max', maxDate.toISOString().replace(/\.\d{3}Z$/, 'Z'));
+      hardBounds.set('max', end);
+    }
+    dateHistInner.set('extended_bounds', extBounds);
+    dateHistInner.set('hard_bounds', hardBounds);
+  }
+
+  const mincount = def.get('mincount');
+  if (mincount != null) dateHistInner.set('min_doc_count', mincount);
+
+  warnUnsupportedRangeParams(def);
+  warnUnknownRangeKeys(def);
+
+  return new Map<string, any>([['date_histogram', dateHistInner]]);
+}
+
+/** Warn about Solr range parameters that have no direct OpenSearch histogram equivalent. */
+function warnUnsupportedRangeParams(def: JavaMap): void {
   const unsupportedParams: string[] = [];
   const hardend = def.get('hardend');
   if (hardend != null) unsupportedParams.push(`hardend=${hardend}`);
@@ -255,7 +368,10 @@ function convertUniformRangeFacet(def: JavaMap): JavaMap {
       `[${FEATURE_NAME}] Range facet parameters with no direct OpenSearch histogram equivalent: ${unsupportedParams.join(', ')}`,
     );
   }
+}
 
+/** Warn about unknown keys in a uniform range facet definition. */
+function warnUnknownRangeKeys(def: JavaMap): void {
   const knownKeys = new Set([
     'type',
     'field',
@@ -266,10 +382,39 @@ function convertUniformRangeFacet(def: JavaMap): JavaMap {
     'hardend',
     'include',
     'other',
+    'facet',
   ]);
   warnUnknownKeys(def, knownKeys, 'range');
+}
 
-  return new Map<string, any>([['histogram', histogramInner]]);
+// endregion
+
+// region Query facet
+
+/**
+ * Convert a Solr query facet to an OpenSearch `filter` aggregation.
+ *
+ * Solr query facet:
+ *   { "type": "query", "q": "popularity:[100 TO *]" }
+ *
+ * OpenSearch filter aggregation:
+ *   { "filter": { "query_string": { "query": "popularity:[100 TO *]" } } }
+ *
+ * The `q` parameter is converted as follows:
+ *   - `*:*` (or absent) → `match_all`
+ *   - Everything else → `query_string` passthrough, which lets OpenSearch
+ *     parse the full Lucene query syntax (ranges, booleans, wildcards, etc.)
+ */
+function convertQueryFacet(def: JavaMap): JavaMap {
+  const q = (def.get('q') || '*:*').toString();
+  const query: JavaMap = (!q || q === '*:*')
+    ? new Map([['match_all', new Map()]])
+    : new Map([['query_string', new Map([['query', q]])]]);
+
+  const knownKeys = new Set(['type', 'q', 'facet']);
+  warnUnknownKeys(def, knownKeys, 'query');
+
+  return new Map<string, any>([['filter', query]]);
 }
 
 // endregion
@@ -291,6 +436,10 @@ function warnUnknownKeys(def: JavaMap, knownKeys: Set<string>, facetType: string
 
 /**
  * Convert a single Solr facet definition to an OpenSearch agg Map.
+ *
+ * If the definition contains a `facet` key with nested sub-facets,
+ * they are recursively converted and attached as a sibling `aggs` key
+ * on the returned aggregation Map.
  */
 function convertSingleFacet(facetDef: any): JavaMap {
   if (!isMapLike(facetDef)) {
@@ -299,14 +448,28 @@ function convertSingleFacet(facetDef: any): JavaMap {
 
   const type = (facetDef.get('type') || '').toString().toLowerCase();
 
+  let result: JavaMap;
   switch (type) {
     case 'terms':
-      return convertTermsFacet(facetDef);
+      result = convertTermsFacet(facetDef);
+      break;
     case 'range':
-      return convertRangeFacet(facetDef);
+      result = convertRangeFacet(facetDef);
+      break;
+    case 'query':
+      result = convertQueryFacet(facetDef);
+      break;
     default:
       throw new Error(`Facet type '${type}' is not implemented`);
   }
+
+  // Handle nested sub-facets: Solr's `facet` key → OpenSearch's `aggs` key
+  const subFacets = facetDef.get('facet');
+  if (subFacets && isMapLike(subFacets) && subFacets.size > 0) {
+    result.set('aggs', convertJsonFacets(subFacets));
+  }
+
+  return result;
 }
 
 /**

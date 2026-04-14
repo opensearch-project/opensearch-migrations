@@ -8,7 +8,7 @@
  *
  * Example:
  *   Input: BoolNode { and: [FieldNode(title,java), RangeNode(price,10,100)], or: [], not: [] }
- *   Output: Map{"bool" → Map{"must" → [Map{"term"→...}, Map{"range"→...}]}}
+ *   Output: Map{"bool" → Map{"must" → [Map{"match"→...}, Map{"range"→...}]}}
  *
  * Empty clause arrays are omitted from the output Map — only clauses with
  * children are included. For example, `title:java AND author:smith` has
@@ -26,17 +26,21 @@ export const boolRule: TransformRuleFn = (
   node: ASTNode,
   transformChild: TransformChild,
 ): Map<string, any> => {
-  if (node.type !== 'bool') {
-    throw new Error(`boolRule called with wrong node type: ${node.type}`);
-  }
   const { and, or, not } = node;
   const boolMap = new Map<string, any>();
 
+  // TODO: Flattening will help in query optimizations
   if (and.length > 0) {
     boolMap.set('must', and.map(transformChild));
   }
   if (or.length > 0) {
     boolMap.set('should', or.map(transformChild));
+    // In OpenSearch, when `must` is present, `should` clauses become optional
+    // (only affect scoring). In Solr, `A AND (B OR C)` requires at least one
+    // of B or C to match. Add minimum_should_match to enforce this.
+    if (and.length > 0) {
+      boolMap.set('minimum_should_match', 1);
+    }
   }
   if (not.length > 0) {
     boolMap.set('must_not', not.map(transformChild));

@@ -32,14 +32,14 @@ query
 // Precedence is encoded by nesting: orExpr → andExpr → unaryExpr → primary.
 // Deeper rules bind tighter.
 
-// OR expression: one or more AND expressions separated by "OR" or by
+// OR expression: one or more AND expressions separated by "OR" / "||" or by
 // implicit adjacency (two terms next to each other without an operator).
 // `a OR b` produces BoolNode { or: [a, b], implicit: false }.
 // `a b` produces BoolNode { or: [a, b], implicit: true }.
 // The `implicit` flag lets parser.ts distinguish between explicit OR and
 // implicit adjacency when applying q.op=AND.
 orExpr
-  = head:andExpr tail:(_ ("OR" __)? andExpr)+ {
+  = head:andExpr tail:(_ (orOp __)? andExpr)+ {
       const hasExplicitOr = tail.some(t => t[1] !== null);
       const children = [head, ...tail.map(t => t[2])];
       if (children.length === 1) return children[0];
@@ -47,21 +47,44 @@ orExpr
     }
   / andExpr
 
-// AND expression: one or more unary expressions separated by "AND".
+// OR operator: "OR" or "||"
+orOp = "OR" / "||"
+
+// AND expression: one or more unary expressions separated by "AND" / "&&".
 // AND binds tighter than OR: `a OR b AND c` → `a OR (b AND c)`.
 andExpr
-  = head:unaryExpr tail:(__ "AND" __ unaryExpr)+ {
+  = head:unaryExpr tail:(__ andOp __ unaryExpr)+ {
       const children = [head, ...tail.map(t => t[3])];
       if (children.length === 1) return children[0];
       return { type: 'bool', and: children, or: [], not: [] };
     }
   / unaryExpr
 
+// AND operator: "AND" or "&&"
+andOp = "AND" / "&&"
+
 // NOT expression: unary prefix operator. Binds tightest of the boolean ops.
 // `NOT title:java` → BoolNode { not: [FieldNode] }
+// `!title:java` → BoolNode { not: [FieldNode] }
 // Recursive: `NOT NOT a` is valid (double negation).
 unaryExpr
-  = "NOT" __ expr:unaryExpr {
+  = notOp _ expr:unaryExpr {
+      return { type: 'bool', and: [], or: [], not: [expr] };
+    }
+  / prefixExpr
+
+// NOT operator: "NOT" (requires trailing whitespace) or "!" (no whitespace needed)
+notOp = "NOT" __ / "!"
+
+// Prefix expressions: +term (required) and -term (prohibited)
+// `+title:java` → BoolNode { and: [FieldNode] } (must match)
+// `-title:java` → BoolNode { not: [FieldNode] } (must not match)
+// These are unary prefix operators that bind to the immediately following term.
+prefixExpr
+  = "+" _ expr:primary {
+      return { type: 'bool', and: [expr], or: [], not: [] };
+    }
+  / "-" _ expr:primary {
       return { type: 'bool', and: [], or: [], not: [expr] };
     }
   / primary
@@ -90,8 +113,13 @@ group
 
 // MatchAllNode: `*:*` matches every document.
 // Must be checked before fieldExpr to prevent `*` being parsed as a field name.
+// Supports optional boost: `*:*^2` → BoostNode wrapping MatchAllNode.
 matchAll
-  = "*:*" { return { type: 'matchAll' }; }
+  = "*:*" boost:boost? {
+      const node = { type: 'matchAll' };
+      if (boost !== null) return { type: 'boost', child: node, value: boost };
+      return node;
+    }
 
 // ─── Field expressions ───────────────────────────────────────────────────────
 // Matches field:value, field:"phrase", and field:[range] / field:{range}.
@@ -141,28 +169,28 @@ fieldExpr
     }
 
 // ─── Bare expressions (no field prefix) ──────────────────────────────────────
-// These produce nodes with field=''. The parser.ts wrapper resolves the
-// empty field to the default field (df) from the params map after parsing.
+// These produce BareNode. The parser.ts wrapper sets the defaultField
+// property based on the df parameter.
 
-// PhraseNode (bare): "hello world" without a field prefix.
-// `"hello world"` → PhraseNode { text: "hello world", field: "" }
-// field is resolved to df by parser.ts after parsing.
+// BareNode (bare phrase): "hello world" without a field prefix.
+// `"hello world"` → BareNode { query: "hello world", isPhrase: true }
+// defaultField is set by parser.ts based on df parameter.
 barePhrase
   = "\"" text:$[^"]* "\"" boost:boost? {
-      const node = { type: 'phrase', text: text, field: '' };
+      const node = { type: 'bare', value: text, isPhrase: true };
       if (boost !== null) return { type: 'boost', child: node, value: boost };
       return node;
     }
 
-// FieldNode (bare): a search term without a field prefix.
-// `java` → FieldNode { field: "", value: "java" }
-// field is resolved to df by parser.ts after parsing.
+// BareNode (bare term): a search term without a field prefix.
+// `java` → BareNode { query: "java", isPhrase: false }
+// defaultField is set by parser.ts based on df parameter.
 // Keywords (AND, OR, NOT, TO) are excluded to prevent them from being
 // consumed as values — they return undefined so peggy backtracks.
 bareValue
   = val:valueChars boost:boost? {
       if (['AND','OR','NOT','TO'].includes(val)) return undefined;
-      const node = { type: 'field', field: '', value: val };
+      const node = { type: 'bare', value: val, isPhrase: false };
       if (boost !== null) return { type: 'boost', child: node, value: boost };
       return node;
     }
@@ -176,14 +204,19 @@ rangeVal
 
 // Unquoted value characters: letters, digits, and common special chars.
 // Determines what can appear in unquoted field values.
+// Includes ~ to parse fuzzy syntax (roam~, roam~1) so we can throw a clear error.
+// Note: + and - are special characters (prefix operators) and must be escaped
+// if used literally in values. They are NOT included here.
 valueChars
-  = $[a-zA-Z0-9._\-*#$@?+/]+
+  = $[a-zA-Z0-9._*#$@?/]+
 
 // Field name identifier: starts with a letter or underscore, followed by
-// value characters. More restrictive first character prevents numbers from
-// being parsed as field names (e.g., `123` is a value, not a field).
+// alphanumeric and common special chars. More restrictive first character
+// prevents numbers from being parsed as field names (e.g., `123` is a value).
+// Note: + and - are special characters (prefix operators) and must be escaped
+// if used literally in field names. They are NOT included here.
 identifier
-  = $([a-zA-Z_][a-zA-Z0-9._\-*#$@?+/]*)
+  = $([a-zA-Z_][a-zA-Z0-9._*#$@?/]*)
 
 // BoostNode modifier: ^N where N is a number (integer or decimal).
 // `title:java^2` → BoostNode { child: FieldNode, value: 2 }

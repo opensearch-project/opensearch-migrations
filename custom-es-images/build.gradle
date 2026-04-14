@@ -1,0 +1,193 @@
+import groovy.json.JsonSlurper
+import org.opensearch.migrations.image.RegistryImageBuildUtils.Registry
+import org.opensearch.migrations.image.ImageRegistryFormatterFactory
+import org.opensearch.migrations.image.PullThroughCacheHelper
+
+// Used by buildImage_es_* tasks to look up version info (url, full version tag) for a given esMinor
+def versionsFile = file('versions.json')
+def versions = new JsonSlurper().parse(versionsFile) as Map<String, Map>
+def imagePrefix = findProperty('esImagePrefix') ?: 'custom-elasticsearch'
+
+// ECR pull-through cache: auto-derived from ECR_PULL_THROUGH_ENDPOINT env var in root build.gradle.
+def ptcEndpoint = rootProject.findProperty('pullThroughCacheEndpoint')?.toString() ?: ''
+def ptc = new PullThroughCacheHelper(ptcEndpoint)
+def amazonlinuxImage = ptc.rewrite("docker.io/library/amazonlinux:2023")
+
+// Opt-in push: -PpushVersions=7.10,7.17
+def pushVersionsList = (findProperty('pushVersions') ?: '').toString()
+        .split(',').collect { it.trim() }.findAll { it }
+
+def correttoVersion = { String minor ->
+    def parts = minor.split('\\.')
+    int maj = parts[0] as int, min = parts[1] as int
+    if (maj <= 5 || (maj == 6 && min <= 4)) return '8'
+    if (maj == 6 || (maj == 7 && min <= 10)) return '11'
+    if (maj == 7) return '17'
+    return '21'
+}
+
+// Single source of truth for Corretto version, base image, and JAVA_HOME
+// Corretto 8: amazoncorretto:8-alpine (small, no JavaFX/GTK bloat)
+// Corretto 11+: amazoncorretto headless images on AL2023
+def baseImage = { String corretto -> corretto == '8' ? ptc.rewrite("docker.io/library/amazoncorretto:8-alpine") : ptc.rewrite("docker.io/library/amazoncorretto:${corretto}-al2023-headless") }
+def javaHomePath = { String corretto -> corretto == '8' ? '/usr/lib/jvm/java-8-amazon-corretto' : "/usr/lib/jvm/java-${corretto}-amazon-corretto" }
+
+versions.each { minor, info ->
+    def safeName = minor.replace('.', '_')
+    def version = info.version
+    def url = info.url
+
+    // Resolve all values at configuration time (required for Gradle configuration cache)
+    def corretto = correttoVersion(minor)
+    def base = baseImage(corretto)
+    def javaHome = javaHomePath(corretto)
+
+    // Local docker build with cross-process FileLock to prevent parallel builds.
+    // OS releases the lock automatically if the process dies; 4-minute timeout as safety net.
+    tasks.register("buildImage_es_${safeName}") {
+        group = 'docker'
+        description = "Build ${imagePrefix}:${version}"
+        inputs.file('dockerfiles/Dockerfile')
+        inputs.property('version', version)
+        def dockerfilePath = file('dockerfiles/Dockerfile').absolutePath
+        def contextPath = file('dockerfiles').absolutePath
+        def tag = "${imagePrefix}:${version}"
+        doLast {
+            def lockDir = new File(System.getProperty("java.io.tmpdir"), "custom-es-image-locks")
+            lockDir.mkdirs()
+            def lockFile = new File(lockDir, "es-${safeName}.lock")
+            def raf = new RandomAccessFile(lockFile, "rw")
+            try {
+                def deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(4)
+                def lock = raf.channel.tryLock()
+                while (lock == null) {
+                    if (System.nanoTime() >= deadline) {
+                        throw new GradleException("Timed out after 4 minutes waiting for lock on ${lockFile}")
+                    }
+                    logger.lifecycle("Waiting for another process to finish building {}...", tag)
+                    Thread.sleep(5000)
+                    lock = raf.channel.tryLock()
+                }
+                try {
+                    // Re-check if image was built by another process while we waited
+                    def check = ['docker', 'image', 'inspect', tag].execute()
+                    check.waitFor()
+                    if (check.exitValue() == 0) {
+                        logger.lifecycle("Image {} already exists (built by another process), skipping.", tag)
+                        return
+                    }
+                    def maxRetries = 3
+                    def lastException = null
+                    for (int attempt = 1; attempt <= maxRetries; attempt++) {
+                        try {
+                            exec {
+                                commandLine 'docker', 'build',
+                                        '--build-arg', "CORRETTO_VERSION=${corretto}",
+                                        '--build-arg', "BASE_IMAGE=${base}",
+                                        '--build-arg', "JAVA_HOME_PATH=${javaHome}",
+                                        '--build-arg', "ES_VERSION=${version}",
+                                        '--build-arg', "TARBALL_URL=${url}",
+                                        '--build-arg', "DOWNLOADER_IMAGE=${amazonlinuxImage}",
+                                        '--build-arg', "CONFIG_BUILDER_IMAGE=${amazonlinuxImage}",
+                                        '-f', dockerfilePath,
+                                        '-t', tag,
+                                        contextPath
+                            }
+                            lastException = null
+                            break
+                        } catch (Exception e) {
+                            lastException = e
+                            if (attempt < maxRetries) {
+                                logger.warn("Docker build attempt {}/{} failed for {}, retrying in 15s...", attempt, maxRetries, tag)
+                                Thread.sleep(15000)
+                            }
+                        }
+                    }
+                    if (lastException != null) {
+                        throw lastException
+                    }
+                } finally {
+                    lock.release()
+                }
+            } finally {
+                raf.close()
+            }
+        }
+    }
+}
+
+// Aggregate tasks
+tasks.register('buildAll') {
+    group = 'docker'
+    description = 'Build all ES images locally'
+    dependsOn tasks.matching { it.name.startsWith('buildImage_es_') }
+}
+
+// Per-major aggregate tasks
+[1, 2, 5, 6, 7, 8].each { major ->
+    def majorVersions = versions.keySet().findAll { it.startsWith("${major}.") }
+    if (!majorVersions.isEmpty()) {
+        tasks.register("buildMajor_${major}") {
+            group = 'docker'
+            description = "Build all ES ${major}.x images"
+            dependsOn majorVersions.collect { "buildImage_es_${it.replace('.', '_')}" }
+        }
+    }
+}
+
+// Registry push tasks — opt-in via -PpushVersions=7.10,7.17
+if (!pushVersionsList.isEmpty()) {
+    def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5001'
+    def registry = new Registry(publishedUrl.toString())
+    def formatter = ImageRegistryFormatterFactory.getFormatter(registry.containerUrl)
+    def builder = rootProject.findProperty('builder') ?: 'default'
+
+    pushVersionsList.each { minor ->
+        def info = versions[minor]
+        if (!info) {
+            throw new GradleException("Unknown ES version in pushVersions: ${minor}")
+        }
+        def safeName = minor.replace('.', '_')
+        def version = info.version
+        def url = info.url
+        def (dest, cacheDest) = formatter.getFullTargetImageIdentifier(
+                registry.containerUrl, "custom_elasticsearch", version, null)
+
+        tasks.register("pushImage_es_${safeName}", Exec) {
+            group = 'docker'
+            description = "Build and push ${imagePrefix}:${version} to ${registry.containerUrl}"
+            def corretto = correttoVersion(minor)
+            def base = baseImage(corretto)
+            def javaHome = javaHomePath(corretto)
+            def dockerfilePath = file('dockerfiles/Dockerfile').absolutePath
+            def contextPath = file('dockerfiles').absolutePath
+            doFirst {
+                def buildArgs = [
+                        "docker buildx build",
+                        "--platform linux/amd64",
+                        "--builder ${builder}",
+                        "-f ${dockerfilePath}",
+                        "--build-arg CORRETTO_VERSION=${corretto}",
+                        "--build-arg BASE_IMAGE=${base}",
+                        "--build-arg JAVA_HOME_PATH=${javaHome}",
+                        "--build-arg ES_VERSION=${version}",
+                        "--build-arg TARBALL_URL=${url}",
+                        "--build-arg DOWNLOADER_IMAGE=${amazonlinuxImage}",
+                        "--build-arg CONFIG_BUILDER_IMAGE=${amazonlinuxImage}",
+                        "-t ${dest}",
+                        "--push",
+                        "--cache-to=type=registry,ref=${cacheDest},mode=max",
+                        "--cache-from=type=registry,ref=${cacheDest}",
+                        contextPath
+                ]
+                commandLine 'sh', '-c', buildArgs.join(" ")
+            }
+        }
+    }
+
+    tasks.register('pushAll') {
+        group = 'docker'
+        description = 'Push all opt-in ES images to registry'
+        dependsOn tasks.matching { it.name.startsWith('pushImage_es_') }
+    }
+}

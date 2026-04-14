@@ -7,6 +7,7 @@ on:
       - jenkins-trigger-test-*
   pull_request_target:
     types: [opened, synchronize, reopened, labeled]
+  merge_group:
 
 env:
   python-version: '3.11'
@@ -31,7 +32,7 @@ jobs:
       group: ${{ github.workflow }}-full-es68-e2e-aws-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -41,6 +42,7 @@ jobs:
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
           jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
 
   elasticsearch-5x-k8s-local-test:
     needs: [get-require-approval, sanitize-input]
@@ -50,7 +52,7 @@ jobs:
       group: ${{ github.workflow }}-elasticsearch-5x-k8s-local-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -60,12 +62,34 @@ jobs:
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
           jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
+
+  solr-8x-k8s-local-test:
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'run-solr-tests')
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: ${{ github.workflow }}-solr-8x-k8s-local-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-solr-8x-k8s-local-test' || 'pr-solr-8x-k8s-local-test' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
 
   eks-integ-test:
     if: |
       github.event_name == 'push' ||
-      (github.event.action == 'labeled' && github.event.label.name == 'run-eks-tests') ||
-      (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
+      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -74,7 +98,7 @@ jobs:
       group: ${{ github.workflow }}-eks-integ-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
@@ -84,4 +108,193 @@ jobs:
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
           jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "180"
+
+  eks-aoss-search-integ-test:
+    if: |
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests')
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    concurrency:
+      group: ${{ github.workflow }}-eks-aoss-search-integ-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-eks-aoss-search-integ-test' || 'pr-eks-aoss-search-integ-test' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
           job_timeout_minutes: "120"
+
+  eks-aoss-timeseries-integ-test:
+    if: |
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests')
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    concurrency:
+      group: ${{ github.workflow }}-eks-aoss-timeseries-integ-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-eks-aoss-timeseries-integ-test' || 'pr-eks-aoss-timeseries-integ-test' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
+
+  eks-aoss-vector-integ-test:
+    if: |
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests')
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    concurrency:
+      group: ${{ github.workflow }}-eks-aoss-vector-integ-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-eks-aoss-vector-integ-test' || 'pr-eks-aoss-vector-integ-test' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
+
+  eks-byos-integ-test:
+    if: |
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'run-eks-byos-tests')
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 1080
+    concurrency:
+      group: ${{ github.workflow }}-eks-byos-integ-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-eks-byos-integ-test' || 'pr-eks-byos-integ-test' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "1080"
+
+  eks-cdc-only-integ-test:
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'run-cdc-tests')
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    concurrency:
+      group: ${{ github.workflow }}-eks-cdc-only-integ-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: "pr-eks-cdc-only-integ-test"
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "180"
+
+  eks-cfn-create-vpc-test:
+    if: |
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'run-cfn-tests')
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    concurrency:
+      group: ${{ github.workflow }}-eks-cfn-create-vpc-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-deploy-eks-cfn-create-vpc' || 'pr-deploy-eks-cfn-create-vpc' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
+
+  eks-cfn-import-vpc-test:
+    if: |
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'run-cfn-tests')
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    concurrency:
+      group: ${{ github.workflow }}-eks-cfn-import-vpc-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-deploy-eks-cfn-import-vpc' || 'pr-deploy-eks-cfn-import-vpc' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "120"
+
+  all-jenkins-checks-pass:
+    needs:
+      - full-es68-e2e-aws-test
+      - elasticsearch-5x-k8s-local-test
+      - solr-8x-k8s-local-test
+      - eks-integ-test
+      - eks-aoss-search-integ-test
+      - eks-aoss-timeseries-integ-test
+      - eks-aoss-vector-integ-test
+      - eks-byos-integ-test
+      - eks-cdc-only-integ-test
+      - eks-cfn-create-vpc-test
+      - eks-cfn-import-vpc-test
+    if: always()
+    runs-on: ubuntu-22.04
+    steps:
+      - if: ${{ contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'failure') }}
+        run: |
+          echo "One or more job cancelled or failed" && exit 1
+      - run: |
+          echo '## :heavy_check_mark: All Jenkins checks pass' >> $GITHUB_STEP_SUMMARY

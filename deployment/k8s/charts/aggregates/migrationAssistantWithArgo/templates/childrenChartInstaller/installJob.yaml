@@ -12,24 +12,33 @@ metadata:
     "helm.sh/hook-weight": "0"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  backoffLimit: 3
+  backoffLimit: 1
   ttlSecondsAfterFinished: 600
   template:
     metadata:
       labels:
         app.kubernetes.io/name: {{ .Chart.Name }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
       serviceAccountName: {{ .Values.installer.serviceAccount.name }}
       restartPolicy: Never
+{{- if and .Values.conditionalPackageInstalls.kyverno .Values.kyvernoPolicies.zeroResourceRequests }}
+      volumes:
+        - name: policy
+          configMap:
+            name: {{ .Release.Name }}-kyverno-zero-resources-policy
+{{- end }}
       containers:
         - name: helm-installer
           image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
-          {{- with .Values.installer.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+{{- if and .Values.conditionalPackageInstalls.kyverno .Values.kyvernoPolicies.zeroResourceRequests }}
+          volumeMounts:
+            - name: policy
+              mountPath: /policy
+{{- end }}
           command:
             - /bin/sh
             - -c
@@ -42,7 +51,7 @@ spec:
       {{- if .Values.ecrAuth.token }}
               echo "{{ .Values.ecrAuth.token }}" | helm registry login --username AWS --password-stdin {{ .Values.ecrAuth.registry }}
       {{- else }}
-              /.venv/bin/aws ecr get-login-password --region "${AWS_DEFAULT_REGION}" 2>/dev/null | \
+              aws ecr get-login-password --region "${AWS_DEFAULT_REGION}" 2>/dev/null | \
                 helm registry login --username AWS --password-stdin {{ .Values.ecrAuth.registry }} || \
                 echo "WARNING: Could not authenticate with ECR. OCI chart pulls may fail."
       {{- end }}
@@ -107,49 +116,7 @@ spec:
       {{- if $.Values.kyvernoPolicies.zeroResourceRequests }}
               echo "Applying zero-resource-requests ClusterPolicy before installing other charts..."
               kubectl wait --for=condition=Established crd/clusterpolicies.kyverno.io --timeout=60s
-              cat <<'POLICY_EOF' | kubectl apply -f -
-              apiVersion: kyverno.io/v1
-              kind: ClusterPolicy
-              metadata:
-                name: zero-resource-requests
-                annotations:
-                  policies.kyverno.io/title: Zero Resource Requests for Dev
-                  policies.kyverno.io/description: Zeros cpu/memory requests and limits for dev environments.
-              spec:
-                rules:
-                  - name: zero-resources
-                    match:
-                      any:
-                        - resources:
-                            kinds:
-                              - Pod
-                            operations:
-                              - CREATE
-                    mutate:
-                      patchStrategicMerge:
-                        metadata:
-                          annotations:
-                            kyverno.io/mutated-by: "zero-resource-requests"
-                        spec:
-                          containers:
-                            - (name): "*"
-                              resources:
-                                requests:
-                                  cpu: "0"
-                                  memory: "0"
-                                limits:
-                                  cpu: "0"
-                                  memory: "0"
-                          initContainers:
-                            - (name): "*"
-                              resources:
-                                requests:
-                                  cpu: "0"
-                                  memory: "0"
-                                limits:
-                                  cpu: "0"
-                                  memory: "0"
-              POLICY_EOF
+              kubectl apply -f /policy/policy.yaml
               echo "Waiting for zero-resource-requests policy to be ready..."
               kubectl wait --for=condition=Ready clusterpolicy/zero-resource-requests --timeout=60s
               echo "Verifying policy is actively enforcing via canary pod..."
@@ -226,6 +193,18 @@ spec:
           {{- end }}
                   --timeout {{ default "300" $chart.timeout }}s \
                   --set global.managedBy="{{ $.Release.Name }}" \
+          {{- if eq $name "argo-workflows" }}
+                  --set artifactRepository.s3.bucket="{{ printf "migrations-default-%s-%s-%s" (toString $.Values.aws.account) $.Values.stageName $.Values.aws.region }}" \
+                  --set artifactRepository.s3.region="{{ $.Values.aws.region }}" \
+            {{- if $.Values.defaultBucketConfiguration.useLocalStack }}
+                  --set artifactRepository.s3.endpoint="{{ $.Values.defaultBucketConfiguration.endpoint }}.{{ $.Release.Namespace }}.svc.cluster.local:4566" \
+            {{- else }}
+                  --set artifactRepository.s3.endpoint="s3.{{ $.Values.aws.region }}.amazonaws.com" \
+            {{- end }}
+          {{- end }}
+          {{- if eq $name "ack-cloudwatch-controller" }}
+                  --set aws.region="{{ $.Values.aws.region }}" \
+          {{- end }}
                   $VALUE_PARAM \
           {{- if $chart.waitForInstallation }}
                   --wait
@@ -241,6 +220,17 @@ spec:
 
               # Wait for all helm upgrades/installs to complete
               time wait
+
+      {{- if get .Values.conditionalPackageInstalls "ack-cloudwatch-controller" }}
+      {{- $region := required "Missing required value: .Values.aws.region" .Values.aws.region }}
+      {{- $account := required "Missing required value: .Values.aws.account" (toString .Values.aws.account) }}
+      {{- $stage := required "Missing required value: .Values.stageName" .Values.stageName }}
+              echo "Waiting for Dashboard CRD to be established..."
+              kubectl wait --for=condition=Established crd/dashboards.cloudwatch.services.k8s.aws --timeout=120s
+              echo "Applying CloudWatch Dashboard CRs..."
+              echo '{{ include "cloudwatch.dashboardCRs" (dict "region" $region "account" $account "stage" $stage "root" $) | b64enc }}' | base64 -d | kubectl apply -f -
+              echo "Dashboard CRs applied."
+      {{- end }}
 
               # Combine all notes and create a ConfigMap to store them
               echo "All charts installed successfully!"

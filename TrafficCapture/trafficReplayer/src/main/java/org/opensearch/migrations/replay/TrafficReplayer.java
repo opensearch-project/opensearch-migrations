@@ -7,6 +7,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -16,7 +17,10 @@ import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
+import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.kafka.KafkaTopicDumper;
+import org.opensearch.migrations.replay.sink.S3TupleSink;
+import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -34,6 +38,7 @@ import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.migrations.utils.TrackedFutureJsonFormatter;
+import org.opensearch.migrations.utils.URIHelper;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
@@ -44,6 +49,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
 
 @Slf4j
 public class TrafficReplayer {
@@ -53,6 +60,9 @@ public class TrafficReplayer {
     public static final String AUTH_HEADER_VALUE_ARG = "--auth-header-value";
     public static final String REMOVE_AUTH_HEADER_VALUE_ARG = "--remove-auth-header";
     public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
+    public static final String KAFKA_AUTH_TYPE_NONE = "none";
+    public static final String KAFKA_AUTH_TYPE_MSK_IAM = "msk-iam";
+    public static final String KAFKA_AUTH_TYPE_SCRAM_SHA_512 = "scram-sha-512";
 
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
     private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
@@ -251,20 +261,20 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-brokers", "--kafkaTrafficBrokers" },
+            names = { "--kafkaBrokers", "--kafka-traffic-brokers", "--kafkaTrafficBrokers" },
             arity = 1,
             description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers " +
                 "to bootstrap with i.e. 'kafka-1:9092,kafka-2:9092'")
         String kafkaTrafficBrokers;
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-topic", "--kafkaTrafficTopic" },
+            names = { "--kafkaTopic", "--kafka-traffic-topic", "--kafkaTrafficTopic" },
             arity = 1,
             description = "Topic name used to pull messages from Kafka")
         String kafkaTrafficTopic;
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-group-id", "--kafkaTrafficGroupId" },
+            names = { "--kafkaGroupId", "--kafka-traffic-group-id", "--kafkaTrafficGroupId" },
             arity = 1,
             description = "Consumer group id that is used when pulling messages from Kafka")
         String kafkaTrafficGroupId;
@@ -272,14 +282,44 @@ public class TrafficReplayer {
             required = false,
             names = { "--kafka-traffic-enable-msk-auth", "--kafkaTrafficEnabledMskAuth" },
             arity = 0,
-            description = "Enables SASL properties required for connecting to MSK with IAM auth")
-        boolean kafkaTrafficEnableMSKAuth;
+            description = "Legacy flag that enables MSK IAM auth. Prefer --kafkaAuthType=msk-iam")
+        Boolean kafkaTrafficEnableMSKAuth;
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-property-file", "--kafkaTrafficPropertyFile" },
+            names = { "--kafkaPropertyFile", "--kafka-traffic-property-file", "--kafkaTrafficPropertyFile" },
             arity = 1,
             description = "File path for Kafka properties file to use for additional or overriden Kafka properties")
         String kafkaTrafficPropertyFile;
+        @Parameter(
+            required = false,
+            names = { "--kafkaAuthType", "--kafka-traffic-auth-type", "--kafkaTrafficAuthType" },
+            arity = 1,
+            description = "Kafka client auth mode. Supported values: none, msk-iam, scram-sha-512")
+        String kafkaTrafficAuthType;
+        @Parameter(
+            required = false,
+            names = { "--kafkaListenerName", "--kafka-traffic-listener-name", "--kafkaTrafficListenerName" },
+            arity = 1,
+            description = "Kafka listener name selected by orchestration")
+        String kafkaTrafficListenerName;
+        @Parameter(
+            required = false,
+            names = { "--kafkaSecretName", "--kafka-traffic-secret-name", "--kafkaTrafficSecretName" },
+            arity = 1,
+            description = "Kubernetes Secret containing Kafka client auth material")
+        String kafkaTrafficSecretName;
+        @Parameter(
+            required = false,
+            names = { "--kafkaUserName", "--kafka-traffic-user-name", "--kafkaTrafficUserName" },
+            arity = 1,
+            description = "Kafka user/principal name selected by orchestration")
+        String kafkaTrafficUserName;
+        @Parameter(
+            required = false,
+            names = { "--kafkaPassword", "--kafka-traffic-password", "--kafkaTrafficPassword" },
+            arity = 1,
+            description = "Kafka password for SCRAM auth. Prefer setting via TRAFFIC_REPLAYER_KAFKA_TRAFFIC_PASSWORD env var.")
+        String kafkaTrafficPassword;
 
         @Parameter(
             required = false,
@@ -288,6 +328,95 @@ public class TrafficReplayer {
             description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-s3-bucket", "--tupleS3Bucket" },
+            arity = 1,
+            description = "S3 bucket for tuple output. When set, tuples are written directly to S3 via the CRT client.")
+        String tupleS3Bucket;
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-s3-region", "--tupleS3Region" },
+            arity = 1,
+            description = "AWS region for the tuple S3 bucket. Required when --tuple-s3-bucket is set.")
+        String tupleS3Region;
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-s3-prefix", "--tupleS3Prefix" },
+            arity = 1,
+            description = "S3 key prefix for tuple objects. Defaults to 'tuples/'.")
+        String tupleS3Prefix = "tuples/";
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-s3-endpoint", "--tupleS3Endpoint" },
+            arity = 1,
+            description = "Custom S3 endpoint URL (for LocalStack, MinIO, or non-standard S3-compatible services).")
+        String tupleS3Endpoint;
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-max-buffer-seconds", "--tupleMaxBufferSeconds" },
+            arity = 1,
+            description = "Maximum seconds before rotating/committing a tuple file")
+        int tupleMaxBufferSeconds = 60;
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-max-file-size-mb", "--tupleMaxFileSizeMb" },
+            arity = 1,
+            description = "Maximum uncompressed size in MB before rotating a tuple file")
+        int tupleMaxFileSizeMb = 256;
+
+        @Parameter(
+            required = false,
+            names = { "--tuple-max-per-file", "--tupleMaxPerFile" },
+            arity = 1,
+            description = "Maximum number of tuples per S3 object. Set to 1 for one-tuple-per-file mode. "
+                + "0 (default) means no count limit — rotation is controlled by size and age thresholds only.")
+        int tupleMaxPerFile = 0;
+
+        @Parameter(
+            required = false,
+            names = { "--non-retryable-doc-exception-types", "--nonRetryableDocExceptionTypes" },
+            description = "Optional. Comma-separated list of document-level exception types that should NOT be "
+                + "retried during bulk replay. These errors still count as failures but won't be retried since "
+                + "they are client/logic errors that will produce the same result on every attempt. "
+                + "Defaults to a built-in set including version_conflict_engine_exception, "
+                + "mapper_parsing_exception, etc. "
+                + "Example: --non-retryable-doc-exception-types version_conflict_engine_exception")
+        List<String> nonRetryableDocExceptionTypes;
+
+        void validateKafkaAuthFlags() {
+            if (kafkaTrafficAuthType != null && !kafkaTrafficAuthType.isBlank()) {
+                if (Boolean.TRUE.equals(kafkaTrafficEnableMSKAuth)
+                    && !KAFKA_AUTH_TYPE_MSK_IAM.equals(kafkaTrafficAuthType)) {
+                    throw new ParameterException(
+                        "--kafka-traffic-enable-msk-auth is only compatible with --kafkaAuthType=msk-iam"
+                    );
+                }
+                if (!KAFKA_AUTH_TYPE_NONE.equals(kafkaTrafficAuthType)
+                    && !KAFKA_AUTH_TYPE_MSK_IAM.equals(kafkaTrafficAuthType)
+                    && !KAFKA_AUTH_TYPE_SCRAM_SHA_512.equals(kafkaTrafficAuthType)) {
+                    throw new ParameterException("Unsupported --kafkaAuthType value: " + kafkaTrafficAuthType);
+                }
+            }
+        }
+
+        boolean isKafkaTrafficEnableMSKAuth() {
+            return KAFKA_AUTH_TYPE_MSK_IAM.equals(getEffectiveKafkaAuthType());
+        }
+
+        String getEffectiveKafkaAuthType() {
+            validateKafkaAuthFlags();
+            if (kafkaTrafficAuthType != null && !kafkaTrafficAuthType.isBlank()) {
+                return kafkaTrafficAuthType;
+            }
+            return Boolean.TRUE.equals(kafkaTrafficEnableMSKAuth) ? KAFKA_AUTH_TYPE_MSK_IAM : KAFKA_AUTH_TYPE_NONE;
+        }
     }
 
     @Getter
@@ -372,6 +501,7 @@ public class TrafficReplayer {
         var parser = JsonCommandLineParser.newBuilder().addObject(p).build();
         try {
             parser.parse(args);
+            p.validateKafkaAuthFlags();
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
             System.err.println("Got args: " + String.join("; ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
@@ -436,7 +566,8 @@ public class TrafficReplayer {
             }
         } else if (params.kafkaTrafficBrokers != null && params.kafkaTrafficTopic != null) {
             runner.runDumpFromKafka(params.mode, params.kafkaTrafficBrokers, params.kafkaTrafficTopic,
-                params.kafkaTrafficEnableMSKAuth, params.kafkaTrafficPropertyFile,
+                params.getEffectiveKafkaAuthType(), params.kafkaTrafficUserName, params.kafkaTrafficPassword,
+                params.kafkaTrafficPropertyFile,
                 params.startOffset, params.startTime, params.endOffset, params.endTime,
                 params.previewBytesRead, params.previewBytesWrite,
                 params.observedPacketConnectionTimeout, PACKET_TIMEOUT_SECONDS_PARAMETER_NAME,
@@ -451,7 +582,7 @@ public class TrafficReplayer {
         var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
         URI uri;
         try {
-            uri = new URI(params.targetUriString);
+            uri = URIHelper.parseUriWithDefaultPort(params.targetUriString);
         } catch (Exception e) {
             final var msg = "Exception parsing " + params.targetUriString;
             System.err.println(msg);
@@ -508,13 +639,17 @@ public class TrafficReplayer {
             }
 
             String tupleTransformerConfig = TransformerConfigUtils.getTransformerConfig(params.tupleTransformationParams);
-            if (requestTransformerConfig != null) {
+            if (tupleTransformerConfig != null) {
                 log.atInfo().setMessage("Tuple Transformations config string: {}")
                     .addArgument(tupleTransformerConfig).log();
             }
 
             final var orderedRequestTracker = new OrderedWorkerTracker<Void>();
             final var hostname = uri.getHost();
+
+            var errorClassifier = params.nonRetryableDocExceptionTypes != null
+                ? new BulkItemErrorClassifier(new java.util.HashSet<>(params.nonRetryableDocExceptionTypes))
+                : new BulkItemErrorClassifier();
 
             var transformationLoader = new TransformationLoader();
             var tr = new TrafficReplayerTopLevel(
@@ -528,7 +663,8 @@ public class TrafficReplayer {
                     params.numClientThreads
                 ),
                 trafficStreamLimiter,
-                orderedRequestTracker
+                orderedRequestTracker,
+                errorClassifier
             );
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
@@ -570,9 +706,7 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            var resultsToLogsConsumer = new ResultsToLogsConsumer(null, null,
-                    () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig));
-            var tupleWriter = new TupleParserChainConsumer(resultsToLogsConsumer);
+            var tupleWriter = createS3TupleWriterIfConfigured(params);
             tr.setupRunAndWaitForReplayWithShutdownChecks(
                 Duration.ofSeconds(params.observedPacketConnectionTimeout),
                 serverTimeout,
@@ -593,6 +727,37 @@ public class TrafficReplayer {
                 activeContextLogger.atLevel(acmLevel).setMessage("[end of run]]").log();
             }
         }
+    }
+
+    private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(Parameters params) {
+        if (params.tupleS3Bucket == null || params.tupleS3Bucket.isEmpty()) {
+            return null;
+        }
+        log.info("S3 tuple writing enabled — bucket={}, region={}, prefix={}",
+            params.tupleS3Bucket, params.tupleS3Region, params.tupleS3Prefix);
+        var s3ClientBuilder = S3AsyncClient.crtBuilder()
+            .region(Region.of(params.tupleS3Region))
+            .credentialsProvider(DefaultCredentialsProvider.builder().build())
+            .targetThroughputInGbps(2.0)
+            .minimumPartSizeInBytes(8L * 1024 * 1024);
+        if (params.tupleS3Endpoint != null && !params.tupleS3Endpoint.isEmpty()) {
+            s3ClientBuilder.endpointOverride(URI.create(params.tupleS3Endpoint));
+            s3ClientBuilder.forcePathStyle(true);
+        }
+        var s3Client = s3ClientBuilder.build();
+        var replayerId = ProcessHelpers.getNodeInstanceName();
+        return new ThreadLocalTupleWriter(
+            sinkIndex -> new S3TupleSink(
+                s3Client,
+                params.tupleS3Bucket,
+                params.tupleS3Prefix,
+                replayerId,
+                sinkIndex,
+                params.tupleMaxFileSizeMb * 1024L * 1024L,
+                Duration.ofSeconds(params.tupleMaxBufferSeconds),
+                params.tupleMaxPerFile
+            )
+        );
     }
 
     private static void setupShutdownHookForReplayer(TrafficReplayerTopLevel tr) {

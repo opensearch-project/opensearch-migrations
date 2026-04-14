@@ -2,16 +2,21 @@ import re
 
 
 class ClusterVersion:
-    pattern = re.compile(r"^(ES|OS)_([0-9]+)\.([0-9]+|x|X)$")
+    pattern = re.compile(r"^(ES|OS|SOLR)_([0-9]+)\.([0-9]+|x|X)$")
 
     def __init__(self, version_str: str):
         match = self.pattern.match(version_str)
         if not match:
-            raise ValueError(f"Invalid version format: {version_str}. Cluster versions must be in format ES_x.y or "
-                             f"OS_x.y, where y is a number or 'x' for any minor version.")
+            raise ValueError(f"Invalid version format: {version_str}. Cluster versions must be in format ES_x.y, "
+                             f"OS_x.y, or SOLR_x.y, where y is a number or 'x' for any minor version.")
 
         self.cluster_type = match.group(1)
-        self.full_cluster_type = "elasticsearch" if self.cluster_type == "ES" else "opensearch"
+        if self.cluster_type == "ES":
+            self.full_cluster_type = "elasticsearch"
+        elif self.cluster_type == "OS":
+            self.full_cluster_type = "opensearch"
+        else:
+            self.full_cluster_type = "solr"
         self.major_version = int(match.group(2))
 
         minor_version = match.group(3)
@@ -33,6 +38,7 @@ ElasticsearchV8_X = ClusterVersion("ES_8.x")
 OpensearchV1_X = ClusterVersion("OS_1.x")
 OpensearchV2_X = ClusterVersion("OS_2.x")
 OpensearchV3_X = ClusterVersion("OS_3.x")
+SolrV8_X = ClusterVersion("SOLR_8.x")
 
 
 def is_incoming_version_supported(limiting_version: ClusterVersion, incoming_version: ClusterVersion):

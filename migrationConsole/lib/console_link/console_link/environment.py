@@ -178,6 +178,18 @@ class Environment:
         instance.source_cluster = source_cluster
         instance.proxy = getattr(source_cluster, "proxy", None)
         instance.kafka = cls._get_kafka_from_workflow_config(config)
+
+        # Wire up Solr-specific metadata and backfill when source is Solr
+        instance.metadata = None
+        instance.backfill = None
+        instance.snapshot = None
+        if (source_cluster and isinstance(source_cluster.version, str) and
+                source_cluster.version.upper().startswith("SOLR") and target_cluster):
+            from console_link.models.solr_metadata import SolrMetadata
+            from console_link.models.solr_backfill import SolrBackfill
+            instance.metadata = SolrMetadata(source_cluster, target_cluster)
+            instance.backfill = SolrBackfill(source_cluster, target_cluster)
+
         return instance
 
     @classmethod
@@ -274,6 +286,24 @@ class Environment:
                 "broker_endpoints": existing_config["kafkaConnection"],
                 "msk" if existing_config.get("enableMSKAuth") else "standard": None
             }
+        elif "autoCreate" in cluster_config:
+            auto_config = cluster_config["autoCreate"]
+            auth_config = auto_config.get("auth") or {}
+            auth_type = auth_config.get("type", "")
+            if auth_type == "scram-sha-512":
+                kafka_config = {
+                    "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9093",
+                    "scram": {
+                        "username": f"{cluster_name}-migration-app",
+                        "password_env": "KAFKA_SCRAM_PASSWORD",
+                        "ca_cert_path": "/config/kafka-ca/ca.crt",
+                    }
+                }
+            else:
+                kafka_config = {
+                    "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9092",
+                    "standard": None
+                }
         else:
             kafka_config = {
                 "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9092",

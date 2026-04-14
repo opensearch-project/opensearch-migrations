@@ -1,0 +1,10 @@
+# Generated data (re-create with: python3 data/generate_dataset.py)
+data/dataset.json
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/

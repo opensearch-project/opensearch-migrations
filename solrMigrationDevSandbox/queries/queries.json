@@ -1,0 +1,1523 @@
+[
+  {
+    "id": "term_query-001",
+    "category": "term_query",
+    "description": "Term query on product_title for 'wireless'",
+    "path": "/solr/testharness/select?q=product_title:wireless&wt=json",
+    "params": {
+      "q": "product_title:wireless",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "term_query-002",
+    "category": "term_query",
+    "description": "Term query on review_body for 'excellent'",
+    "path": "/solr/testharness/select?q=review_body:excellent&wt=json",
+    "params": {
+      "q": "review_body:excellent",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "term_query-003",
+    "category": "term_query",
+    "description": "Term query on product_title for 'bluetooth'",
+    "path": "/solr/testharness/select?q=product_title:bluetooth&wt=json",
+    "params": {
+      "q": "product_title:bluetooth",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "phrase_query-001",
+    "category": "phrase_query",
+    "description": "Phrase query on product_title for 'wireless headphones'",
+    "path": "/solr/testharness/select?q=product_title:%22wireless+headphones%22&wt=json",
+    "params": {
+      "q": "product_title:\"wireless headphones\"",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "phrase_query-002",
+    "category": "phrase_query",
+    "description": "Phrase query on review_body for 'highly recommend'",
+    "path": "/solr/testharness/select?q=review_body:%22highly+recommend%22&wt=json",
+    "params": {
+      "q": "review_body:\"highly recommend\"",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "phrase_query-003",
+    "category": "phrase_query",
+    "description": "Phrase query on review_headline for 'great value'",
+    "path": "/solr/testharness/select?q=review_headline:%22great+value%22&wt=json",
+    "params": {
+      "q": "review_headline:\"great value\"",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "range_query-001",
+    "category": "range_query",
+    "description": "Numeric range query on star_rating 4 to 5",
+    "path": "/solr/testharness/select?q=star_rating:[4+TO+5]&wt=json",
+    "params": {
+      "q": "star_rating:[4 TO 5]",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "range_query-002",
+    "category": "range_query",
+    "description": "Numeric range query on helpful_votes 10 to 100",
+    "path": "/solr/testharness/select?q=helpful_votes:[10+TO+100]&wt=json",
+    "params": {
+      "q": "helpful_votes:[10 TO 100]",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "range_query-003",
+    "category": "range_query",
+    "description": "Date range query on review_date",
+    "path": "/solr/testharness/select?q=review_date:[2020-01-01T00:00:00Z+TO+2022-12-31T23:59:59Z]&wt=json",
+    "params": {
+      "q": "review_date:[2020-01-01T00:00:00Z TO 2022-12-31T23:59:59Z]",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "boolean_query-001",
+    "category": "boolean_query",
+    "description": "Boolean AND query on product_title",
+    "path": "/solr/testharness/select?q=product_title:wireless+AND+product_title:portable&wt=json",
+    "params": {
+      "q": "product_title:wireless AND product_title:portable",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "boolean_query-002",
+    "category": "boolean_query",
+    "description": "Boolean OR query on review_body",
+    "path": "/solr/testharness/select?q=review_body:excellent+OR+review_body:amazing&wt=json",
+    "params": {
+      "q": "review_body:excellent OR review_body:amazing",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "boolean_query-003",
+    "category": "boolean_query",
+    "description": "Boolean NOT query",
+    "path": "/solr/testharness/select?q=product_title:wireless+NOT+product_title:cheap&wt=json",
+    "params": {
+      "q": "product_title:wireless NOT product_title:cheap",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "filter_query-001",
+    "category": "filter_query",
+    "description": "Filter query on product_category",
+    "path": "/solr/testharness/select?q=*:*&fq=product_category:Electronics&wt=json",
+    "params": {
+      "q": "*:*",
+      "fq": "product_category:Electronics",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "filter_query-002",
+    "category": "filter_query",
+    "description": "Filter query on verified_purchase",
+    "path": "/solr/testharness/select?q=*:*&fq=verified_purchase:true&wt=json",
+    "params": {
+      "q": "*:*",
+      "fq": "verified_purchase:true",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "filter_query-003",
+    "category": "filter_query",
+    "description": "Filter query on star_rating range",
+    "path": "/solr/testharness/select?q=*:*&fq=star_rating:[4+TO+5]&wt=json",
+    "params": {
+      "q": "*:*",
+      "fq": "star_rating:[4 TO 5]",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "sort-001",
+    "category": "sort",
+    "description": "Sort by star_rating descending",
+    "path": "/solr/testharness/select?q=*:*&sort=star_rating+desc&rows=10&wt=json",
+    "params": {
+      "q": "*:*",
+      "sort": "star_rating desc",
+      "rows": "10",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "sort-002",
+    "category": "sort",
+    "description": "Sort by review_date ascending",
+    "path": "/solr/testharness/select?q=*:*&sort=review_date+asc&rows=10&wt=json",
+    "params": {
+      "q": "*:*",
+      "sort": "review_date asc",
+      "rows": "10",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "sort-003",
+    "category": "sort",
+    "description": "Sort by helpful_votes descending",
+    "path": "/solr/testharness/select?q=*:*&sort=helpful_votes+desc&rows=10&wt=json",
+    "params": {
+      "q": "*:*",
+      "sort": "helpful_votes desc",
+      "rows": "10",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "field_list-001",
+    "category": "field_list",
+    "description": "Return only id and product_title",
+    "path": "/solr/testharness/select?q=*:*&fl=id,product_title&rows=5&wt=json",
+    "params": {
+      "q": "*:*",
+      "fl": "id,product_title",
+      "rows": "5",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "field_list-002",
+    "category": "field_list",
+    "description": "Return id, star_rating, review_date",
+    "path": "/solr/testharness/select?q=*:*&fl=id,star_rating,review_date&rows=5&wt=json",
+    "params": {
+      "q": "*:*",
+      "fl": "id,star_rating,review_date",
+      "rows": "5",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "field_list-003",
+    "category": "field_list",
+    "description": "Return all text fields",
+    "path": "/solr/testharness/select?q=*:*&fl=id,product_title,review_body,review_headline&rows=5&wt=json",
+    "params": {
+      "q": "*:*",
+      "fl": "id,product_title,review_body,review_headline",
+      "rows": "5",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "offset_pagination-001",
+    "category": "offset_pagination",
+    "description": "First page, 10 rows",
+    "path": "/solr/testharness/select?q=*:*&rows=10&start=0&wt=json",
+    "params": {
+      "q": "*:*",
+      "rows": "10",
+      "start": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "offset_pagination-002",
+    "category": "offset_pagination",
+    "description": "Second page, 10 rows",
+    "path": "/solr/testharness/select?q=*:*&rows=10&start=10&wt=json",
+    "params": {
+      "q": "*:*",
+      "rows": "10",
+      "start": "10",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "offset_pagination-003",
+    "category": "offset_pagination",
+    "description": "Deep pagination, start at 100",
+    "path": "/solr/testharness/select?q=*:*&rows=10&start=100&wt=json",
+    "params": {
+      "q": "*:*",
+      "rows": "10",
+      "start": "100",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "highlighting-001",
+    "category": "highlighting",
+    "description": "Highlight review_body for 'excellent'",
+    "path": "/solr/testharness/select?q=review_body:excellent&hl=true&hl.fl=review_body&wt=json",
+    "params": {
+      "q": "review_body:excellent",
+      "hl": "true",
+      "hl.fl": "review_body",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "highlighting-002",
+    "category": "highlighting",
+    "description": "Highlight product_title for 'wireless'",
+    "path": "/solr/testharness/select?q=product_title:wireless&hl=true&hl.fl=product_title&wt=json",
+    "params": {
+      "q": "product_title:wireless",
+      "hl": "true",
+      "hl.fl": "product_title",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "highlighting-003",
+    "category": "highlighting",
+    "description": "Highlight multiple fields",
+    "path": "/solr/testharness/select?q=review_body:great&hl=true&hl.fl=review_body,review_headline&wt=json",
+    "params": {
+      "q": "review_body:great",
+      "hl": "true",
+      "hl.fl": "review_body,review_headline",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "terms_facet-001",
+    "category": "terms_facet",
+    "description": "Facet on product_category",
+    "path": "/solr/testharness/select?q=*:*&facet=true&facet.field=product_category&wt=json&rows=0",
+    "params": {
+      "q": "*:*",
+      "facet": "true",
+      "facet.field": "product_category",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "terms_facet-002",
+    "category": "terms_facet",
+    "description": "Facet on marketplace",
+    "path": "/solr/testharness/select?q=*:*&facet=true&facet.field=marketplace&wt=json&rows=0",
+    "params": {
+      "q": "*:*",
+      "facet": "true",
+      "facet.field": "marketplace",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "terms_facet-003",
+    "category": "terms_facet",
+    "description": "Facet on verified_purchase",
+    "path": "/solr/testharness/select?q=*:*&facet=true&facet.field=verified_purchase&wt=json&rows=0",
+    "params": {
+      "q": "*:*",
+      "facet": "true",
+      "facet.field": "verified_purchase",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "range_facet-001",
+    "category": "range_facet",
+    "description": "Range facet on star_rating 1-5 gap 1",
+    "path": "/solr/testharness/select?q=*:*&facet=true&facet.range=star_rating&facet.range.start=1&facet.range.end=6&facet.range.gap=1&wt=json&rows=0",
+    "params": {
+      "q": "*:*",
+      "facet": "true",
+      "facet.range": "star_rating",
+      "facet.range.start": "1",
+      "facet.range.end": "6",
+      "facet.range.gap": "1",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "range_facet-002",
+    "category": "range_facet",
+    "description": "Range facet on helpful_votes 0-500 gap 100",
+    "path": "/solr/testharness/select?q=*:*&facet=true&facet.range=helpful_votes&facet.range.start=0&facet.range.end=500&facet.range.gap=100&wt=json&rows=0",
+    "params": {
+      "q": "*:*",
+      "facet": "true",
+      "facet.range": "helpful_votes",
+      "facet.range.start": "0",
+      "facet.range.end": "500",
+      "facet.range.gap": "100",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "range_facet-003",
+    "category": "range_facet",
+    "description": "Range facet on total_votes 0-600 gap 100",
+    "path": "/solr/testharness/select?q=*:*&facet=true&facet.range=total_votes&facet.range.start=0&facet.range.end=600&facet.range.gap=100&wt=json&rows=0",
+    "params": {
+      "q": "*:*",
+      "facet": "true",
+      "facet.range": "total_votes",
+      "facet.range.start": "0",
+      "facet.range.end": "600",
+      "facet.range.gap": "100",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "datetime_range_facet-001",
+    "category": "datetime_range_facet",
+    "description": "Date range facet on review_date by year",
+    "path": "/solr/testharness/select?q=*:*&facet=true&facet.range=review_date&facet.range.start=2015-01-01T00:00:00Z&facet.range.end=2025-01-01T00:00:00Z&facet.range.gap=%2B1YEAR&wt=json&rows=0",
+    "params": {
+      "q": "*:*",
+      "facet": "true",
+      "facet.range": "review_date",
+      "facet.range.start": "2015-01-01T00:00:00Z",
+      "facet.range.end": "2025-01-01T00:00:00Z",
+      "facet.range.gap": "+1YEAR",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "datetime_range_facet-002",
+    "category": "datetime_range_facet",
+    "description": "Date range facet on review_date by month for 2020",
+    "path": "/solr/testharness/select?q=*:*&facet=true&facet.range=review_date&facet.range.start=2020-01-01T00:00:00Z&facet.range.end=2021-01-01T00:00:00Z&facet.range.gap=%2B1MONTH&wt=json&rows=0",
+    "params": {
+      "q": "*:*",
+      "facet": "true",
+      "facet.range": "review_date",
+      "facet.range.start": "2020-01-01T00:00:00Z",
+      "facet.range.end": "2021-01-01T00:00:00Z",
+      "facet.range.gap": "+1MONTH",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "datetime_range_facet-003",
+    "category": "datetime_range_facet",
+    "description": "Date range facet on review_date by quarter",
+    "path": "/solr/testharness/select?q=*:*&facet=true&facet.range=review_date&facet.range.start=2019-01-01T00:00:00Z&facet.range.end=2023-01-01T00:00:00Z&facet.range.gap=%2B3MONTHS&wt=json&rows=0",
+    "params": {
+      "q": "*:*",
+      "facet": "true",
+      "facet.range": "review_date",
+      "facet.range.start": "2019-01-01T00:00:00Z",
+      "facet.range.end": "2023-01-01T00:00:00Z",
+      "facet.range.gap": "+3MONTHS",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "boosting-001",
+    "category": "boosting",
+    "description": "Boost product_title over review_body",
+    "path": "/solr/testharness/select?q=product_title:wireless^2+review_body:wireless&wt=json",
+    "params": {
+      "q": "product_title:wireless^2 review_body:wireless",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "boosting-002",
+    "category": "boosting",
+    "description": "Boost review_headline heavily",
+    "path": "/solr/testharness/select?q=review_headline:excellent^5+review_body:excellent&wt=json",
+    "params": {
+      "q": "review_headline:excellent^5 review_body:excellent",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "boosting-003",
+    "category": "boosting",
+    "description": "Boost with different weights",
+    "path": "/solr/testharness/select?q=product_title:portable^3+review_body:portable^1&wt=json",
+    "params": {
+      "q": "product_title:portable^3 review_body:portable^1",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "edge_case-001",
+    "category": "edge_case",
+    "description": "Query returning zero results",
+    "path": "/solr/testharness/select?q=product_title:xyznonexistent99999&wt=json",
+    "params": {
+      "q": "product_title:xyznonexistent99999",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "edge_case-002",
+    "category": "edge_case",
+    "description": "Wildcard query on all docs",
+    "path": "/solr/testharness/select?q=*:*&rows=5&wt=json",
+    "params": {
+      "q": "*:*",
+      "rows": "5",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "edge_case-003",
+    "category": "edge_case",
+    "description": "Large result set with high rows",
+    "path": "/solr/testharness/select?q=*:*&rows=100&wt=json",
+    "params": {
+      "q": "*:*",
+      "rows": "100",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "default_field-001",
+    "category": "default_field",
+    "description": "Query without field prefix using df parameter",
+    "path": "/solr/testharness/select?q=wireless+headphones&df=product_title&wt=json",
+    "params": {
+      "q": "wireless headphones",
+      "df": "product_title",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "default_field-002",
+    "category": "default_field",
+    "description": "Default field with df parameter",
+    "path": "/solr/testharness/select?q=excellent+quality&df=review_body&wt=json",
+    "params": {
+      "q": "excellent quality",
+      "df": "review_body",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "default_field-003",
+    "category": "default_field",
+    "description": "Default field query with rows",
+    "path": "/solr/testharness/select?q=recommend&df=review_body&rows=20&wt=json",
+    "params": {
+      "q": "recommend",
+      "df": "review_body",
+      "rows": "20",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "multi_filter-001",
+    "category": "multi_filter",
+    "description": "Two filter queries combined",
+    "path": "/solr/testharness/select?q=*:*&fq=product_category:Electronics&fq=verified_purchase:true&wt=json",
+    "params": {
+      "q": "*:*",
+      "fq": [
+        "product_category:Electronics",
+        "verified_purchase:true"
+      ],
+      "wt": "json"
+    }
+  },
+  {
+    "id": "multi_filter-002",
+    "category": "multi_filter",
+    "description": "Three filter queries combined",
+    "path": "/solr/testharness/select?q=*:*&fq=product_category:Books&fq=star_rating:[4+TO+5]&fq=marketplace:US&wt=json",
+    "params": {
+      "q": "*:*",
+      "fq": [
+        "product_category:Books",
+        "star_rating:[4 TO 5]",
+        "marketplace:US"
+      ],
+      "wt": "json"
+    }
+  },
+  {
+    "id": "multi_filter-003",
+    "category": "multi_filter",
+    "description": "Filter with boolean inside fq",
+    "path": "/solr/testharness/select?q=*:*&fq=product_category:Electronics+OR+product_category:Books&wt=json",
+    "params": {
+      "q": "*:*",
+      "fq": "product_category:Electronics OR product_category:Books",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "wildcard-001",
+    "category": "wildcard",
+    "description": "Prefix wildcard on product_title",
+    "path": "/solr/testharness/select?q=product_title:wire*&wt=json",
+    "params": {
+      "q": "product_title:wire*",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "wildcard-002",
+    "category": "wildcard",
+    "description": "Prefix wildcard on review_body",
+    "path": "/solr/testharness/select?q=review_body:excell*&wt=json",
+    "params": {
+      "q": "review_body:excell*",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "wildcard-003",
+    "category": "wildcard",
+    "description": "Single char wildcard",
+    "path": "/solr/testharness/select?q=product_title:portabl?&wt=json",
+    "params": {
+      "q": "product_title:portabl?",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "deep_pagination-001",
+    "category": "deep_pagination",
+    "description": "Deep offset pagination start=500",
+    "path": "/solr/testharness/select?q=*:*&rows=10&start=500&wt=json",
+    "params": {
+      "q": "*:*",
+      "rows": "10",
+      "start": "500",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "deep_pagination-002",
+    "category": "deep_pagination",
+    "description": "Deep offset pagination start=1000",
+    "path": "/solr/testharness/select?q=*:*&rows=10&start=1000&wt=json",
+    "params": {
+      "q": "*:*",
+      "rows": "10",
+      "start": "1000",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "deep_pagination-003",
+    "category": "deep_pagination",
+    "description": "Deep offset pagination start=5000",
+    "path": "/solr/testharness/select?q=*:*&rows=10&start=5000&wt=json",
+    "params": {
+      "q": "*:*",
+      "rows": "10",
+      "start": "5000",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "rows_variations-001",
+    "category": "rows_variations",
+    "description": "Single row result",
+    "path": "/solr/testharness/select?q=*:*&rows=1&wt=json",
+    "params": {
+      "q": "*:*",
+      "rows": "1",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "rows_variations-002",
+    "category": "rows_variations",
+    "description": "Zero rows (count only)",
+    "path": "/solr/testharness/select?q=*:*&rows=0&wt=json",
+    "params": {
+      "q": "*:*",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "rows_variations-003",
+    "category": "rows_variations",
+    "description": "Large rows=500",
+    "path": "/solr/testharness/select?q=*:*&rows=500&wt=json",
+    "params": {
+      "q": "*:*",
+      "rows": "500",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "multi_facet-001",
+    "category": "multi_facet",
+    "description": "Multiple facet fields in one query",
+    "path": "/solr/testharness/select?q=*:*&facet=true&facet.field=product_category&facet.field=marketplace&rows=0&wt=json",
+    "params": {
+      "q": "*:*",
+      "facet": "true",
+      "facet.field": [
+        "product_category",
+        "marketplace"
+      ],
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "multi_facet-002",
+    "category": "multi_facet",
+    "description": "Facet field + range facet combined",
+    "path": "/solr/testharness/select?q=*:*&facet=true&facet.field=product_category&facet.range=star_rating&facet.range.start=1&facet.range.end=6&facet.range.gap=1&rows=0&wt=json",
+    "params": {
+      "q": "*:*",
+      "facet": "true",
+      "facet.field": "product_category",
+      "facet.range": "star_rating",
+      "facet.range.start": "1",
+      "facet.range.end": "6",
+      "facet.range.gap": "1",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "multi_facet-003",
+    "category": "multi_facet",
+    "description": "Three facet fields",
+    "path": "/solr/testharness/select?q=*:*&facet=true&facet.field=product_category&facet.field=marketplace&facet.field=verified_purchase&rows=0&wt=json",
+    "params": {
+      "q": "*:*",
+      "facet": "true",
+      "facet.field": [
+        "product_category",
+        "marketplace",
+        "verified_purchase"
+      ],
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "highlight_advanced-001",
+    "category": "highlight_advanced",
+    "description": "Highlight with custom snippets count",
+    "path": "/solr/testharness/select?q=review_body:quality&hl=true&hl.fl=review_body&hl.snippets=3&wt=json",
+    "params": {
+      "q": "review_body:quality",
+      "hl": "true",
+      "hl.fl": "review_body",
+      "hl.snippets": "3",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "highlight_advanced-002",
+    "category": "highlight_advanced",
+    "description": "Highlight with custom fragment size",
+    "path": "/solr/testharness/select?q=review_body:recommend&hl=true&hl.fl=review_body&hl.fragsize=200&wt=json",
+    "params": {
+      "q": "review_body:recommend",
+      "hl": "true",
+      "hl.fl": "review_body",
+      "hl.fragsize": "200",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "highlight_advanced-003",
+    "category": "highlight_advanced",
+    "description": "Highlight with custom pre/post tags",
+    "path": "/solr/testharness/select?q=review_body:excellent&hl=true&hl.fl=review_body&hl.simple.pre=%3Cb%3E&hl.simple.post=%3C/b%3E&wt=json",
+    "params": {
+      "q": "review_body:excellent",
+      "hl": "true",
+      "hl.fl": "review_body",
+      "hl.simple.pre": "<b>",
+      "hl.simple.post": "</b>",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "facet_with_filter-001",
+    "category": "facet_with_filter",
+    "description": "Facet with filter query narrowing results",
+    "path": "/solr/testharness/select?q=*:*&fq=star_rating:[4+TO+5]&facet=true&facet.field=product_category&rows=0&wt=json",
+    "params": {
+      "q": "*:*",
+      "fq": "star_rating:[4 TO 5]",
+      "facet": "true",
+      "facet.field": "product_category",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "facet_with_filter-002",
+    "category": "facet_with_filter",
+    "description": "Facet with text search and filter",
+    "path": "/solr/testharness/select?q=review_body:excellent&fq=marketplace:US&facet=true&facet.field=product_category&rows=0&wt=json",
+    "params": {
+      "q": "review_body:excellent",
+      "fq": "marketplace:US",
+      "facet": "true",
+      "facet.field": "product_category",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "facet_with_filter-003",
+    "category": "facet_with_filter",
+    "description": "Range facet with category filter",
+    "path": "/solr/testharness/select?q=*:*&fq=product_category:Electronics&facet=true&facet.range=star_rating&facet.range.start=1&facet.range.end=6&facet.range.gap=1&rows=0&wt=json",
+    "params": {
+      "q": "*:*",
+      "fq": "product_category:Electronics",
+      "facet": "true",
+      "facet.range": "star_rating",
+      "facet.range.start": "1",
+      "facet.range.end": "6",
+      "facet.range.gap": "1",
+      "rows": "0",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "edge_case-004",
+    "category": "edge_case",
+    "description": "Query with special characters in value",
+    "path": "/solr/testharness/select?q=product_title:%22USB-C%22&wt=json",
+    "params": {
+      "q": "product_title:\"USB-C\"",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "edge_case-005",
+    "category": "edge_case",
+    "description": "Empty query string",
+    "path": "/solr/testharness/select?q=&wt=json",
+    "params": {
+      "q": "",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "edge_case-006",
+    "category": "edge_case",
+    "description": "Query on boolean field directly",
+    "path": "/solr/testharness/select?q=vine:true&wt=json",
+    "params": {
+      "q": "vine:true",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "edge_case-007",
+    "category": "edge_case",
+    "description": "Query with rows=0 and facet (count-only with facets)",
+    "path": "/solr/testharness/select?q=*:*&rows=0&facet=true&facet.field=product_category&facet.field=marketplace&wt=json",
+    "params": {
+      "q": "*:*",
+      "rows": "0",
+      "facet": "true",
+      "facet.field": [
+        "product_category",
+        "marketplace"
+      ],
+      "wt": "json"
+    }
+  },
+  {
+    "id": "term_query-004",
+    "category": "term_query",
+    "description": "Term query on review_headline",
+    "path": "/solr/testharness/select?q=review_headline:disappointed&wt=json",
+    "params": {
+      "q": "review_headline:disappointed",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "term_query-005",
+    "category": "term_query",
+    "description": "Term query on keyword field product_category",
+    "path": "/solr/testharness/select?q=product_category:Electronics&wt=json",
+    "params": {
+      "q": "product_category:Electronics",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "boolean_query-004",
+    "category": "boolean_query",
+    "description": "Complex boolean with parentheses",
+    "path": "/solr/testharness/select?q=(product_title:wireless+OR+product_title:bluetooth)+AND+review_body:recommend&wt=json",
+    "params": {
+      "q": "(product_title:wireless OR product_title:bluetooth) AND review_body:recommend",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "boolean_query-005",
+    "category": "boolean_query",
+    "description": "Boolean with plus/minus operators",
+    "path": "/solr/testharness/select?q=%2Bproduct_title:wireless+-product_title:cheap&wt=json",
+    "params": {
+      "q": "+product_title:wireless -product_title:cheap",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "sort-004",
+    "category": "sort",
+    "description": "Sort by keyword field product_category",
+    "path": "/solr/testharness/select?q=*:*&sort=product_category+asc&rows=10&wt=json",
+    "params": {
+      "q": "*:*",
+      "sort": "product_category asc",
+      "rows": "10",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "sort-005",
+    "category": "sort",
+    "description": "Sort with search query (relevance + sort)",
+    "path": "/solr/testharness/select?q=review_body:excellent&sort=star_rating+desc&rows=10&wt=json",
+    "params": {
+      "q": "review_body:excellent",
+      "sort": "star_rating desc",
+      "rows": "10",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "cursor_pagination-001",
+    "category": "cursor_pagination",
+    "description": "Cursor initial page with sort",
+    "path": "/solr/testharness/select?q=*:*&rows=3&sort=id+asc&cursorMark=*&wt=json"
+  },
+  {
+    "id": "cursor_pagination-002",
+    "category": "cursor_pagination",
+    "description": "Cursor with descending sort",
+    "path": "/solr/testharness/select?q=*:*&rows=3&sort=star_rating+desc,id+asc&cursorMark=*&wt=json"
+  },
+  {
+    "id": "cursor_pagination-003",
+    "category": "cursor_pagination",
+    "description": "Cursor with default sort (id asc)",
+    "path": "/solr/testharness/select?q=*:*&rows=3&sort=id+asc&cursorMark=*&wt=json"
+  },
+  {
+    "id": "cursor_pagination-seq-001",
+    "category": "cursor_pagination",
+    "description": "Sequential cursor walk \u2014 5 pages of 10 docs sorted by star_rating desc with id tiebreaker",
+    "path": "/solr/testharness/select?q=*:*&rows=10&sort=star_rating%20desc,id%20asc&cursorMark=*&wt=json",
+    "sequence": {
+      "maxPages": 5
+    }
+  },
+  {
+    "id": "cursor_pagination-seq-002",
+    "category": "cursor_pagination",
+    "description": "Sequential cursor walk with fq filter \u2014 walk Books category up to 5 pages",
+    "path": "/solr/testharness/select?q=product_category:Books&rows=20&sort=review_date%20desc,id%20asc&cursorMark=*&wt=json",
+    "sequence": {
+      "maxPages": 5
+    }
+  },
+  {
+    "id": "cursor_pagination-seq-003",
+    "category": "cursor_pagination",
+    "description": "Sequential cursor walk with small page size \u2014 3 docs per page, 4 pages",
+    "path": "/solr/testharness/select?q=*:*&rows=3&sort=helpful_votes%20desc,id%20asc&cursorMark=*&wt=json",
+    "sequence": {
+      "maxPages": 4
+    }
+  },
+  {
+    "id": "cursor_pagination-seq-004",
+    "category": "cursor_pagination",
+    "description": "Sequential cursor walk to end \u2014 narrow fq filter to force end detection within few pages",
+    "path": "/solr/testharness/select?q=*:*&fq=star_rating:1&rows=50&sort=review_date%20asc,id%20asc&cursorMark=*&wt=json",
+    "sequence": {
+      "maxPages": 20
+    }
+  },
+  {
+    "id": "cursor_pagination-004",
+    "category": "cursor_pagination",
+    "description": "Cursor with multi-field sort (3 sort fields + id tiebreaker)",
+    "path": "/solr/testharness/select?q=*:*&rows=5&sort=star_rating%20desc,helpful_votes%20desc,review_date%20asc,id%20asc&cursorMark=*&wt=json"
+  },
+  {
+    "id": "cursor_pagination-005",
+    "category": "cursor_pagination",
+    "description": "Cursor with highlighting \u2014 combined feature test",
+    "path": "/solr/testharness/select?q=review_body:excellent&rows=5&sort=star_rating%20desc,id%20asc&cursorMark=*&hl=true&hl.fl=review_body&wt=json"
+  },
+  {
+    "id": "cursor_pagination-006",
+    "category": "cursor_pagination",
+    "description": "Cursor with facets \u2014 combined feature test",
+    "path": "/solr/testharness/select?q=*:*&rows=5&sort=id%20asc&cursorMark=*&facet=true&facet.field=product_category&wt=json"
+  },
+  {
+    "id": "cursor_pagination-seq-005",
+    "category": "cursor_pagination",
+    "description": "Sequential cursor walk with large page size (100 docs per page)",
+    "path": "/solr/testharness/select?q=product_category:Electronics&rows=100&sort=star_rating%20desc,id%20asc&cursorMark=*&wt=json",
+    "sequence": {
+      "maxPages": 3
+    }
+  },
+  {
+    "id": "cursor_pagination-seq-006",
+    "category": "cursor_pagination",
+    "description": "Sequential cursor walk \u2014 query matching very few docs, should end quickly",
+    "path": "/solr/testharness/select?q=product_title:xyznonexistent&rows=10&sort=id%20asc&cursorMark=*&wt=json",
+    "sequence": {
+      "maxPages": 3
+    }
+  },
+  {
+    "id": "advanced_sort-001",
+    "category": "advanced_sort",
+    "description": "Multi-field sort with tiebreaker",
+    "path": "/solr/testharness/select?q=*:*&rows=3&sort=star_rating+desc,id+asc&wt=json"
+  },
+  {
+    "id": "advanced_sort-002",
+    "category": "advanced_sort",
+    "description": "Sort on keyword field",
+    "path": "/solr/testharness/select?q=*:*&rows=3&sort=product_category+asc&wt=json"
+  },
+  {
+    "id": "advanced_sort-003",
+    "category": "advanced_sort",
+    "description": "Sort on date field",
+    "path": "/solr/testharness/select?q=*:*&rows=3&sort=review_date+desc&wt=json"
+  },
+  {
+    "id": "advanced_facet-001",
+    "category": "advanced_facet",
+    "description": "Nested sub-facets with avg",
+    "path": "/solr/testharness/select?q=*:*&rows=0&json.facet=%7B%22cat%22%3A%20%7B%22type%22%3A%20%22terms%22%2C%20%22field%22%3A%20%22product_category%22%2C%20%22limit%22%3A%205%2C%20%22facet%22%3A%20%7B%22avg_rating%22%3A%20%22avg%28star_rating%29%22%7D%7D%7D&wt=json"
+  },
+  {
+    "id": "advanced_highlight-001",
+    "category": "advanced_highlight",
+    "description": "Custom snippet count",
+    "path": "/solr/testharness/select?q=product_title:wireless&rows=3&hl=true&hl.fl=product_title&hl.snippets=3&wt=json"
+  },
+  {
+    "id": "advanced_highlight-002",
+    "category": "advanced_highlight",
+    "description": "Custom fragment size",
+    "path": "/solr/testharness/select?q=product_title:wireless&rows=3&hl=true&hl.fl=product_title&hl.fragsize=200&wt=json"
+  },
+  {
+    "id": "advanced_highlight-003",
+    "category": "advanced_highlight",
+    "description": "Highlighting with filter query",
+    "path": "/solr/testharness/select?q=product_title:wireless&fq=product_category:Electronics&rows=3&hl=true&hl.fl=product_title&wt=json"
+  },
+  {
+    "id": "advanced_facet-002",
+    "category": "advanced_facet",
+    "description": "Facet with mincount",
+    "path": "/solr/testharness/select?q=*:*&rows=0&json.facet=%7B%22cat%22%3A%20%7B%22type%22%3A%20%22terms%22%2C%20%22field%22%3A%20%22product_category%22%2C%20%22mincount%22%3A%20100%7D%7D&wt=json"
+  },
+  {
+    "id": "advanced_facet-003",
+    "category": "advanced_facet",
+    "description": "Facet with offset/limit",
+    "path": "/solr/testharness/select?q=*:*&rows=0&json.facet=%7B%22cat%22%3A%20%7B%22type%22%3A%20%22terms%22%2C%20%22field%22%3A%20%22product_category%22%2C%20%22offset%22%3A%205%2C%20%22limit%22%3A%203%7D%7D&wt=json"
+  },
+  {
+    "id": "advanced_field_list-001",
+    "category": "advanced_field_list",
+    "description": "Glob pattern fl=*",
+    "path": "/solr/testharness/select?q=*:*&rows=2&fl=*&wt=json"
+  },
+  {
+    "id": "combined-001",
+    "category": "combined",
+    "description": "Filter + sort + highlighting + pagination",
+    "path": "/solr/testharness/select?q=product_title:wireless&fq=product_category:Electronics&rows=3&start=0&sort=star_rating+desc&hl=true&hl.fl=product_title&wt=json"
+  },
+  {
+    "id": "combined-002",
+    "category": "combined",
+    "description": "Facet + filter + rows=0",
+    "path": "/solr/testharness/select?q=*:*&fq=product_category:Electronics&rows=0&json.facet=%7B%22ratings%22%3A%20%7B%22type%22%3A%20%22terms%22%2C%20%22field%22%3A%20%22star_rating%22%7D%7D&wt=json"
+  },
+  {
+    "id": "range_in_q-001",
+    "category": "range_in_q",
+    "description": "Numeric range in q",
+    "path": "/solr/testharness/select?q=star_rating:%5B4+TO+5%5D&wt=json"
+  },
+  {
+    "id": "range_in_q-002",
+    "category": "range_in_q",
+    "description": "Date range in q",
+    "path": "/solr/testharness/select?q=review_date:%5B2020-01-01T00:00:00Z+TO+2023-12-31T23:59:59Z%5D&wt=json"
+  },
+  {
+    "id": "range_in_q-003",
+    "category": "range_in_q",
+    "description": "Open-ended range in q",
+    "path": "/solr/testharness/select?q=helpful_votes:%5B100+TO+*%5D&wt=json"
+  },
+  {
+    "id": "range_in_q-004",
+    "category": "range_in_q",
+    "description": "Exclusive range in q",
+    "path": "/solr/testharness/select?q=star_rating:%7B1+TO+5%7D&wt=json"
+  },
+  {
+    "id": "boolean_in_q-001",
+    "category": "boolean_in_q",
+    "description": "AND operator",
+    "path": "/solr/testharness/select?q=product_title:wireless+AND+product_category:Electronics&wt=json"
+  },
+  {
+    "id": "boolean_in_q-002",
+    "category": "boolean_in_q",
+    "description": "OR operator",
+    "path": "/solr/testharness/select?q=review_body:excellent+OR+review_body:amazing&wt=json"
+  },
+  {
+    "id": "boolean_in_q-003",
+    "category": "boolean_in_q",
+    "description": "NOT operator",
+    "path": "/solr/testharness/select?q=product_title:wireless+NOT+product_title:cheap&wt=json"
+  },
+  {
+    "id": "boolean_in_q-004",
+    "category": "boolean_in_q",
+    "description": "Grouped boolean",
+    "path": "/solr/testharness/select?q=(product_title:wireless+OR+product_title:bluetooth)+AND+star_rating:%5B4+TO+5%5D&wt=json"
+  },
+  {
+    "id": "boolean_in_q-005",
+    "category": "boolean_in_q",
+    "description": "Prefix operators +/-",
+    "path": "/solr/testharness/select?q=%2Bproduct_title:wireless+-product_title:cheap&wt=json"
+  },
+  {
+    "id": "fuzzy-001",
+    "category": "fuzzy",
+    "description": "Single term fuzzy",
+    "path": "/solr/testharness/select?q=product_title:wireles~&rows=5&wt=json"
+  },
+  {
+    "id": "fuzzy-002",
+    "category": "fuzzy",
+    "description": "Fuzzy with edit distance",
+    "path": "/solr/testharness/select?q=product_title:wireles~2&rows=5&wt=json"
+  },
+  {
+    "id": "proximity-001",
+    "category": "proximity",
+    "description": "Phrase proximity",
+    "path": "/solr/testharness/select?q=product_title:%22wireless+mouse%22~3&rows=5&wt=json"
+  },
+  {
+    "id": "function_query-001",
+    "category": "function_query",
+    "description": "Sort by function",
+    "path": "/solr/testharness/select?q=*:*&rows=3&sort=div(helpful_votes,total_votes)+desc&wt=json"
+  },
+  {
+    "id": "function_query-002",
+    "category": "function_query",
+    "description": "Field list function",
+    "path": "/solr/testharness/select?q=*:*&rows=3&fl=id,product_title,sum(helpful_votes,total_votes)&wt=json"
+  },
+  {
+    "id": "dismax-001",
+    "category": "dismax",
+    "description": "Basic dismax",
+    "path": "/solr/testharness/select?defType=dismax&qf=product_title%5E2+review_body&q=wireless+mouse&rows=5&wt=json"
+  },
+  {
+    "id": "dismax-002",
+    "category": "dismax",
+    "description": "eDisMax with boost",
+    "path": "/solr/testharness/select?defType=edismax&qf=product_title%5E2+review_body&bq=star_rating:%5B4+TO+5%5D%5E10&q=wireless&rows=5&wt=json"
+  },
+  {
+    "id": "dismax-003",
+    "category": "dismax",
+    "description": "eDisMax with min match",
+    "path": "/solr/testharness/select?defType=edismax&qf=product_title+review_body&mm=75%25&q=wireless+bluetooth+portable&rows=5&wt=json"
+  },
+  {
+    "id": "stats-001",
+    "category": "stats",
+    "description": "Basic stats",
+    "path": "/solr/testharness/select?q=*:*&rows=0&stats=true&stats.field=star_rating&wt=json"
+  },
+  {
+    "id": "stats-002",
+    "category": "stats",
+    "description": "Multi-field stats",
+    "path": "/solr/testharness/select?q=*:*&rows=0&stats=true&stats.field=star_rating&stats.field=helpful_votes&wt=json"
+  },
+  {
+    "id": "grouping-001",
+    "category": "grouping",
+    "description": "Group by field",
+    "path": "/solr/testharness/select?q=*:*&group=true&group.field=product_category&group.limit=3&rows=5&wt=json"
+  },
+  {
+    "id": "grouping-002",
+    "category": "grouping",
+    "description": "Group with sort",
+    "path": "/solr/testharness/select?q=*:*&group=true&group.field=product_category&group.sort=star_rating+desc&rows=5&wt=json"
+  },
+  {
+    "id": "spellcheck-001",
+    "category": "spellcheck",
+    "description": "Basic spell check",
+    "path": "/solr/testharness/select?q=product_title:wireles&rows=0&spellcheck=true&spellcheck.q=wireles&spellcheck.count=3&wt=json"
+  },
+  {
+    "id": "mlt-001",
+    "category": "mlt",
+    "description": "More Like This",
+    "path": "/solr/testharness/select?q=product_title:wireless&rows=3&mlt=true&mlt.fl=review_body&mlt.mindf=1&mlt.mintf=1&wt=json"
+  },
+  {
+    "id": "function_query-003",
+    "category": "function_query",
+    "description": "Boost function bf=recip",
+    "path": "/solr/testharness/select?q=product_title:wireless&bf=recip(helpful_votes,1,100,100)&rows=5&wt=json"
+  },
+  {
+    "id": "stats-003",
+    "category": "stats",
+    "description": "Stats with facet",
+    "path": "/solr/testharness/select?q=*:*&rows=0&stats=true&stats.field=star_rating&stats.facet=product_category&wt=json"
+  },
+  {
+    "id": "dismax-004",
+    "category": "dismax",
+    "description": "eDisMax with phrase fields (pf)",
+    "path": "/solr/testharness/select?defType=edismax&qf=product_title%5E2+review_body&pf=product_title%5E3+review_body&q=wireless+mouse&rows=5&wt=json"
+  },
+  {
+    "id": "dismax-005",
+    "category": "dismax",
+    "description": "eDisMax with pf + fq filter",
+    "path": "/solr/testharness/select?defType=edismax&qf=product_title+review_body&pf=product_title%5E2&q=excellent+quality&fq=product_category:Electronics&rows=5&wt=json"
+  },
+  {
+    "id": "fq_range-001",
+    "category": "fq_range",
+    "description": "fq numeric range",
+    "path": "/solr/testharness/select?q=*:*&fq=star_rating:%5B4+TO+5%5D&rows=5&wt=json"
+  },
+  {
+    "id": "fq_range-002",
+    "category": "fq_range",
+    "description": "fq date range",
+    "path": "/solr/testharness/select?q=*:*&fq=review_date:%5B2023-01-01T00:00:00Z+TO+2024-12-31T23:59:59Z%5D&rows=5&wt=json"
+  },
+  {
+    "id": "fq_range-003",
+    "category": "fq_range",
+    "description": "fq open-ended range",
+    "path": "/solr/testharness/select?q=*:*&fq=helpful_votes:%5B100+TO+*%5D&rows=5&wt=json"
+  },
+  {
+    "id": "date_math-001",
+    "category": "date_math",
+    "description": "fq with NOW date math",
+    "path": "/solr/testharness/select?q=*:*&fq=review_date:%5BNOW-365DAYS+TO+NOW%5D&rows=5&wt=json"
+  },
+  {
+    "id": "date_math-002",
+    "category": "date_math",
+    "description": "fq with NOW/DAY rounding",
+    "path": "/solr/testharness/select?q=*:*&fq=review_date:%5BNOW/MONTH-6MONTHS+TO+NOW/MONTH%5D&rows=5&wt=json"
+  },
+  {
+    "id": "exists-001",
+    "category": "exists",
+    "description": "Field exists (field:*)",
+    "path": "/solr/testharness/select?q=*:*&fq=vine:*&rows=5&wt=json"
+  },
+  {
+    "id": "exists-002",
+    "category": "exists",
+    "description": "Field not exists (-field:*)",
+    "path": "/solr/testharness/select?q=*:*&fq=-vine:*&rows=5&wt=json"
+  },
+  {
+    "id": "export_pattern-001",
+    "category": "export_pattern",
+    "description": "fl=id only for export",
+    "path": "/solr/testharness/select?q=*:*&rows=1000&fl=id&wt=json"
+  },
+  {
+    "id": "export_pattern-002",
+    "category": "export_pattern",
+    "description": "fl=id,product_id for export with filter",
+    "path": "/solr/testharness/select?q=*:*&fq=product_category:Electronics&rows=1000&fl=id,product_id&wt=json"
+  },
+  {
+    "id": "legacy_facet-001",
+    "category": "legacy_facet",
+    "description": "facet.field basic",
+    "path": "/solr/testharness/select?q=*:*&rows=0&facet=true&facet.field=product_category&wt=json"
+  },
+  {
+    "id": "legacy_facet-002",
+    "category": "legacy_facet",
+    "description": "facet.field with limit",
+    "path": "/solr/testharness/select?q=*:*&rows=0&facet=true&facet.field=product_category&facet.limit=5&wt=json"
+  },
+  {
+    "id": "legacy_facet-003",
+    "category": "legacy_facet",
+    "description": "facet.query with range",
+    "path": "/solr/testharness/select?q=*:*&rows=0&facet=true&facet.query=star_rating:%5B1+TO+2%5D&facet.query=star_rating:%5B3+TO+3%5D&facet.query=star_rating:%5B4+TO+5%5D&wt=json"
+  },
+  {
+    "id": "collapse-001",
+    "category": "collapse",
+    "description": "Collapse by category",
+    "path": "/solr/testharness/select?q=*:*&fq=%7B!collapse+field%3Dproduct_category%7D&rows=10&wt=json"
+  },
+  {
+    "id": "multi_value-001",
+    "category": "multi_value",
+    "description": "OR filter on keyword field",
+    "path": "/solr/testharness/select?q=*:*&fq=marketplace:(US+OR+UK)&rows=5&wt=json"
+  },
+  {
+    "id": "multi_value-002",
+    "category": "multi_value",
+    "description": "Multiple values in fq",
+    "path": "/solr/testharness/select?q=*:*&fq=product_category:(Electronics+OR+Books+OR+Software)&rows=5&wt=json"
+  },
+  {
+    "id": "streaming-001",
+    "category": "streaming",
+    "description": "Basic search stream",
+    "path": "/solr/testharness/stream?expr=search(testharness,q=%22*:*%22,fl=%22id,product_title%22,sort=%22id+asc%22,rows=5)&wt=json"
+  },
+  {
+    "id": "realtime_get-001",
+    "category": "realtime_get",
+    "description": "Get by ID",
+    "path": "/solr/testharness/get?id=R00000001&wt=json"
+  },
+  {
+    "id": "realtime_get-002",
+    "category": "realtime_get",
+    "description": "Get multiple IDs",
+    "path": "/solr/testharness/get?ids=R00000001,R00000002,R00000003&wt=json"
+  },
+  {
+    "id": "local_params-001",
+    "category": "local_params",
+    "description": "Local params type query",
+    "path": "/solr/testharness/select?q=%7B!term+f%3Dproduct_category%7DElectronics&rows=5&wt=json"
+  },
+  {
+    "id": "local_params-002",
+    "category": "local_params",
+    "description": "Local params lucene query",
+    "path": "/solr/testharness/select?q=%7B!lucene%7Dproduct_title:wireless&rows=5&wt=json"
+  },
+  {
+    "id": "facet_pivot-001",
+    "category": "facet_pivot",
+    "description": "Basic pivot facet",
+    "path": "/solr/testharness/select?q=*:*&rows=0&facet=true&facet.pivot=product_category,marketplace&facet.pivot.mincount=100&wt=json"
+  },
+  {
+    "id": "update-001",
+    "category": "update",
+    "description": "Schema API get fields",
+    "path": "/solr/testharness/schema/fields?wt=json"
+  },
+  {
+    "id": "admin-001",
+    "category": "admin",
+    "description": "Core status",
+    "path": "/solr/admin/cores?action=STATUS&core=testharness&wt=json"
+  },
+  {
+    "id": "admin-002",
+    "category": "admin",
+    "description": "System info",
+    "path": "/solr/admin/info/system?wt=json"
+  },
+  {
+    "id": "real_world-001",
+    "category": "real_world",
+    "description": "E-commerce search: term + filter + facet + sort + hl",
+    "path": "/solr/testharness/select?q=product_title:wireless&fq=product_category:Electronics&fq=star_rating:%5B3+TO+5%5D&rows=10&sort=star_rating+desc&hl=true&hl.fl=product_title&json.facet=%7B%22brands%22%3A%20%7B%22type%22%3A%20%22terms%22%2C%20%22field%22%3A%20%22marketplace%22%2C%20%22limit%22%3A%205%7D%7D&wt=json"
+  },
+  {
+    "id": "real_world-002",
+    "category": "real_world",
+    "description": "Analytics: facets + stats + filter + rows=0",
+    "path": "/solr/testharness/select?q=*:*&fq=product_category:Electronics&rows=0&stats=true&stats.field=star_rating&stats.field=helpful_votes&json.facet=%7B%22ratings%22%3A%20%7B%22type%22%3A%20%22terms%22%2C%20%22field%22%3A%20%22star_rating%22%7D%7D&wt=json"
+  },
+  {
+    "id": "real_world-003",
+    "category": "real_world",
+    "description": "Autocomplete: edismax + prefix + small rows",
+    "path": "/solr/testharness/select?defType=edismax&qf=product_title%5E3+review_headline&q=wire*&rows=5&fl=id,product_title&wt=json"
+  },
+  {
+    "id": "real_world-004",
+    "category": "real_world",
+    "description": "Browse: filter + facet + pagination",
+    "path": "/solr/testharness/select?q=*:*&fq=product_category:Electronics&rows=10&start=20&json.facet=%7B%22ratings%22%3A%20%7B%22type%22%3A%20%22range%22%2C%20%22field%22%3A%20%22star_rating%22%2C%20%22start%22%3A%201%2C%20%22end%22%3A%206%2C%20%22gap%22%3A%201%7D%2C%20%22marketplace%22%3A%20%7B%22type%22%3A%20%22terms%22%2C%20%22field%22%3A%20%22marketplace%22%7D%7D&wt=json"
+  },
+  {
+    "id": "real_world-005",
+    "category": "real_world",
+    "description": "Review search: phrase + hl + sort by votes",
+    "path": "/solr/testharness/select?q=review_body:%22great+product%22&rows=10&sort=helpful_votes+desc&hl=true&hl.fl=review_body&hl.fragsize=150&wt=json"
+  },
+  {
+    "id": "negative-001",
+    "category": "negative",
+    "description": "Exclude category with -fq",
+    "path": "/solr/testharness/select?q=*:*&fq=-product_category:Electronics&rows=5&wt=json"
+  },
+  {
+    "id": "negative-002",
+    "category": "negative",
+    "description": "NOT in fq",
+    "path": "/solr/testharness/select?q=*:*&fq=NOT+product_category:Electronics&rows=5&wt=json"
+  },
+  {
+    "id": "pagination_edge-001",
+    "category": "pagination_edge",
+    "description": "start beyond results",
+    "path": "/solr/testharness/select?q=product_title:xyznonexistent&rows=10&start=100&wt=json"
+  },
+  {
+    "id": "pagination_edge-002",
+    "category": "pagination_edge",
+    "description": "rows=1 single doc",
+    "path": "/solr/testharness/select?q=product_title:wireless&rows=1&sort=id+asc&wt=json"
+  },
+  {
+    "id": "solrconfig_default-001",
+    "category": "solrconfig_default",
+    "description": "Bare term query relying on df=product_title from solrconfig defaults",
+    "path": "/solr/testharness/select?q=headphones&rows=5&fl=id,product_title&wt=json",
+    "params": {
+      "q": "headphones",
+      "rows": "5",
+      "fl": "id,product_title",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "solrconfig_default-002",
+    "category": "solrconfig_default",
+    "description": "Multi-term bare query relying on df from solrconfig defaults",
+    "path": "/solr/testharness/select?q=portable+speaker&rows=5&fl=id,product_title&wt=json",
+    "params": {
+      "q": "portable speaker",
+      "rows": "5",
+      "fl": "id,product_title",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "solrconfig_default-003",
+    "category": "solrconfig_default",
+    "description": "Bare phrase query relying on df from solrconfig defaults",
+    "path": "/solr/testharness/select?q=%22wireless+headphones%22&rows=5&fl=id,product_title&wt=json",
+    "params": {
+      "q": "\"wireless headphones\"",
+      "rows": "5",
+      "fl": "id,product_title",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "solrconfig_default-004",
+    "category": "solrconfig_default",
+    "description": "Explicit df overrides solrconfig default df",
+    "path": "/solr/testharness/select?q=laptop&df=review_body&rows=5&fl=id,product_title&wt=json",
+    "params": {
+      "q": "laptop",
+      "df": "review_body",
+      "rows": "5",
+      "fl": "id,product_title",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "solrconfig_default-005",
+    "category": "solrconfig_default",
+    "description": "Bare term with no results verifies df is applied correctly",
+    "path": "/solr/testharness/select?q=nonexistentword&fl=id&wt=json",
+    "params": {
+      "q": "nonexistentword",
+      "fl": "id",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "solrconfig_default-006",
+    "category": "solrconfig_default",
+    "description": "Bare term with pagination using df from solrconfig defaults",
+    "path": "/solr/testharness/select?q=Cable&start=10&rows=2&fl=id,product_title&wt=json",
+    "params": {
+      "q": "Cable",
+      "start": "10",
+      "rows": "2",
+      "fl": "id,product_title",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "solrconfig_default-007",
+    "category": "solrconfig_default",
+    "description": "Bare term with highlighting using df from solrconfig defaults",
+    "path": "/solr/testharness/select?q=Cable&hl=true&hl.fl=product_title&rows=2&fl=id,product_title&wt=json",
+    "params": {
+      "q": "Cable",
+      "hl": "true",
+      "hl.fl": "product_title",
+      "rows": "2",
+      "fl": "id,product_title",
+      "wt": "json"
+    }
+  }
+]

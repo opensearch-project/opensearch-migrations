@@ -11,8 +11,10 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [ sh, -c ]
         args:
           - |
@@ -82,7 +84,7 @@ spec:
                     fsGroup: 1000
                   initContainers:
                     - name: install-s3-plugin
-                      image: mirror.gcr.io/library/elasticsearch:1.5.2
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:1.5.2
                       command: ["sh","-c"]
                       args:
                         - |
@@ -113,7 +115,7 @@ spec:
                         runAsNonRoot: true
                   containers:
                     - name: elasticsearch
-                      image: mirror.gcr.io/library/elasticsearch:1.5.2
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:1.5.2
                       imagePullPolicy: IfNotPresent
                       env:
                         - name: ES_HEAP_SIZE
@@ -228,8 +230,10 @@ spec:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |
@@ -298,7 +302,7 @@ spec:
                     fsGroup: 1000
                   initContainers:
                     - name: install-s3-plugin
-                      image: mirror.gcr.io/library/elasticsearch:2.4.6
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:2.4.6
                       command: ["sh","-c"]
                       args:
                         - /usr/share/elasticsearch/bin/plugin install cloud-aws
@@ -311,7 +315,7 @@ spec:
                         runAsNonRoot: true
                   containers:
                     - name: elasticsearch
-                      image: mirror.gcr.io/library/elasticsearch:2.4.6
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:2.4.6
                       imagePullPolicy: IfNotPresent
                       env:
                         - name: ES_HEAP_SIZE
@@ -417,98 +421,157 @@ spec:
             valueFrom:
               path: /tmp/cluster-config.json
 
-    # Elasticsearch 5.6 Single Node Template
+    # Elasticsearch 5.6 Single Node Template - Inline Manifests
     - name: elasticsearch-5-6-single-node
       inputs:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |
-            # Add Elasticsearch Helm repository
-            helm repo add elastic https://helm.elastic.co
-            helm repo update
-            
-            # Create Elasticsearch configuration for ES 5.6.16
-            cat > /tmp/elasticsearch.yml << EOF
-            bootstrap.system_call_filter: false
+            set -euo pipefail
+            CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
+            NAMESPACE='{{inputs.parameters.namespace}}'
+
+            cat > /tmp/elasticsearch.yml <<'ESCFG'
+            cluster.name: __CLUSTER_NAME__
             network.host: 0.0.0.0
+            bootstrap.system_call_filter: false
+            discovery.type: single-node
             cloud.aws.access_key: test
             cloud.aws.secret_key: test
             cloud.aws.region: us-east-2
-            discovery.zen.minimum_master_nodes: 1
+            ESCFG
+            sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
+
+            kubectl create configmap "${CLUSTER_NAME}-config" \
+              --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+
+            cat <<EOF | kubectl apply -f -
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: ${CLUSTER_NAME}
+              template:
+                metadata:
+                  labels:
+                    app: ${CLUSTER_NAME}
+                    migration-test: "true"
+                    cluster-name: ${CLUSTER_NAME}
+                spec:
+                  serviceAccountName: migration-console-access-role
+                  securityContext:
+                    runAsUser: 1000
+                    runAsGroup: 1000
+                    fsGroup: 1000
+                  initContainers:
+                    - name: install-s3-plugin
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:5.6.16
+                      command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
+                      volumeMounts:
+                        - name: plugins
+                          mountPath: /usr/share/elasticsearch/plugins
+                  containers:
+                    - name: elasticsearch
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:5.6.16
+                      imagePullPolicy: IfNotPresent
+                      env:
+                        - name: ES_JAVA_OPTS
+                          value: "-Xms2g -Xmx2g"
+                      ports:
+                        - containerPort: 9200
+                          name: http
+                        - containerPort: 9300
+                          name: transport
+                      readinessProbe:
+                        httpGet:
+                          path: /
+                          port: 9200
+                        initialDelaySeconds: 5
+                        periodSeconds: 3
+                        failureThreshold: 20
+                      resources:
+                        requests:
+                          cpu: "2"
+                          memory: "4Gi"
+                        limits:
+                          cpu: "2"
+                          memory: "4Gi"
+                      volumeMounts:
+                        - name: elasticsearch-config
+                          mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+                          subPath: elasticsearch.yml
+                        - name: elasticsearch-data
+                          mountPath: /usr/share/elasticsearch/data
+                        - name: elasticsearch-logs
+                          mountPath: /usr/share/elasticsearch/logs
+                        - name: plugins
+                          mountPath: /usr/share/elasticsearch/plugins
+                  volumes:
+                    - name: elasticsearch-config
+                      configMap:
+                        name: ${CLUSTER_NAME}-config
+                    - name: elasticsearch-data
+                      emptyDir: {}
+                    - name: elasticsearch-logs
+                      emptyDir: {}
+                    - name: plugins
+                      emptyDir: {}
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              selector:
+                app: ${CLUSTER_NAME}
+              ports:
+                - name: http
+                  port: 9200
+                  targetPort: 9200
+                - name: transport
+                  port: 9300
+                  targetPort: 9300
             EOF
-            
-            # Create Helm values file for ES 5.6.16
-            cat > /tmp/es-values.yaml << 'EOF'
-            fullnameOverride: {{inputs.parameters.cluster-name}}
-            image: "docker.elastic.co/elasticsearch/elasticsearch"
-            imageTag: "5.6.16"
-            antiAffinity: "soft"
-            esJavaOpts: "-Xms2g -Xmx2g"
-            protocol: "http"
-            replicas: 1
-            createCert: false
-            clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
-            resources:
-              requests:
-                cpu: "2"
-                memory: "4Gi"
-              limits:
-                cpu: "2"
-                memory: "4Gi"
-            readinessProbe:
-              failureThreshold: 5
-              successThreshold: 2
-            extraEnvs:
-              - name: "cluster.initial_master_nodes"
-                value: ""
-              - name: "node.roles"
-                value: ""
-            persistence:
-              enabled: false
-            
-            extraInitContainers:
-              - name: install-s3-plugin
-                image: docker.elastic.co/elasticsearch/elasticsearch:5.6.16
-                command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
-                volumeMounts:
-                  - name: plugins
-                    mountPath: /usr/share/elasticsearch/plugins
-            
-            extraVolumes:
-              - name: plugins
-                emptyDir: {}
-            
-            extraVolumeMounts:
-              - name: plugins
-                mountPath: /usr/share/elasticsearch/plugins
-            EOF
-            
-            # Install Elasticsearch 5.6.16
-            helm install {{inputs.parameters.cluster-name}} elastic/elasticsearch --set rbac.serviceAccountName=migration-console-access-role \
-              --version 8.5.1 \
-              --namespace {{inputs.parameters.namespace}} \
-              --values /tmp/es-values.yaml \
-              --set-file esConfig."elasticsearch\.yml"=/tmp/elasticsearch.yml
-            
-            # Generate cluster configuration output
-            cat > /tmp/cluster-config.json << EOF
+
+            cat > /tmp/cluster-config.json <<EOF
             {
-              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "endpoint": "http://${CLUSTER_NAME}:9200",
               "allowInsecure": true,
               "version": "ES 5.6"
             }
             EOF
 
-            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
               --from-file=cluster-config=/tmp/cluster-config.json \
-              --namespace {{inputs.parameters.namespace}}
-            
-            echo "Elasticsearch 5.6.16 cluster"
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            echo "Elasticsearch 5.6 cluster created successfully."
             echo "Cluster config:"
             cat /tmp/cluster-config.json
       outputs:
@@ -517,136 +580,175 @@ spec:
             valueFrom:
               path: /tmp/cluster-config.json
 
-    # Elasticsearch 6.8 Single Node Template
+    # Elasticsearch 6.8 Single Node Template - Inline Manifests
     - name: elasticsearch-6-8-single-node
       inputs:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |
-            # Add Elasticsearch Helm repository
-            helm repo add elastic https://helm.elastic.co
-            helm repo update
-            
-            # Create Elasticsearch configuration for ES 6.8.23 OSS (minimal config)
-            cat > /tmp/elasticsearch.yml << EOF
-            bootstrap.system_call_filter: false
+            set -euo pipefail
+            CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
+            NAMESPACE='{{inputs.parameters.namespace}}'
+
+            cat > /tmp/elasticsearch.yml <<'ESCFG'
+            cluster.name: __CLUSTER_NAME__
             network.host: 0.0.0.0
             discovery.type: single-node
-            transport.port: 9300
-            http.port: 9200
+            xpack.security.enabled: false
+            xpack.ml.enabled: false
+            ESCFG
+            sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
+
+            kubectl create configmap "${CLUSTER_NAME}-config" \
+              --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+
+            cat <<EOF | kubectl apply -f -
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: ${CLUSTER_NAME}
+              template:
+                metadata:
+                  labels:
+                    app: ${CLUSTER_NAME}
+                    migration-test: "true"
+                    cluster-name: ${CLUSTER_NAME}
+                spec:
+                  serviceAccountName: migration-console-access-role
+                  securityContext:
+                    runAsUser: 1000
+                    runAsGroup: 1000
+                    fsGroup: 1000
+                  initContainers:
+                    - name: install-s3-plugin
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:6.8.23
+                      command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
+                      volumeMounts:
+                        - name: plugins
+                          mountPath: /usr/share/elasticsearch/plugins
+                    - name: inject-aws-creds
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:6.8.23
+                      command:
+                        - sh
+                        - -c
+                        - |
+                          set -e
+                          echo 'y' | bin/elasticsearch-keystore create
+                          echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
+                          echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
+                          echo "http://localstack.ma.svc.cluster.local:4566" | bin/elasticsearch-keystore add --stdin s3.client.default.endpoint --force
+                          cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
+                      volumeMounts:
+                        - name: elasticsearch-keystore
+                          mountPath: /shared
+                  containers:
+                    - name: elasticsearch
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:6.8.23
+                      imagePullPolicy: IfNotPresent
+                      env:
+                        - name: ES_JAVA_OPTS
+                          value: "-Xms2g -Xmx2g"
+                      ports:
+                        - containerPort: 9200
+                          name: http
+                        - containerPort: 9300
+                          name: transport
+                      readinessProbe:
+                        httpGet:
+                          path: /
+                          port: 9200
+                        initialDelaySeconds: 5
+                        periodSeconds: 3
+                        failureThreshold: 20
+                      resources:
+                        requests:
+                          cpu: "2"
+                          memory: "4Gi"
+                        limits:
+                          cpu: "2"
+                          memory: "4Gi"
+                      volumeMounts:
+                        - name: elasticsearch-config
+                          mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+                          subPath: elasticsearch.yml
+                        - name: elasticsearch-data
+                          mountPath: /usr/share/elasticsearch/data
+                        - name: elasticsearch-logs
+                          mountPath: /usr/share/elasticsearch/logs
+                        - name: plugins
+                          mountPath: /usr/share/elasticsearch/plugins
+                        - name: elasticsearch-keystore
+                          mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
+                          subPath: elasticsearch.keystore
+                  volumes:
+                    - name: elasticsearch-config
+                      configMap:
+                        name: ${CLUSTER_NAME}-config
+                    - name: elasticsearch-data
+                      emptyDir: {}
+                    - name: elasticsearch-logs
+                      emptyDir: {}
+                    - name: plugins
+                      emptyDir: {}
+                    - name: elasticsearch-keystore
+                      emptyDir: {}
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              selector:
+                app: ${CLUSTER_NAME}
+              ports:
+                - name: http
+                  port: 9200
+                  targetPort: 9200
+                - name: transport
+                  port: 9300
+                  targetPort: 9300
             EOF
-            
-            # Create Helm values file for ES 6.8.23 with OSS image and disabled readiness probe
-            cat > /tmp/es-values.yaml << 'EOF'
-            fullnameOverride: {{inputs.parameters.cluster-name}}
-            image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
-            imageTag: "6.8.23"
-            antiAffinity: "soft"
-            esJavaOpts: "-Xms2g -Xmx2g -XX:UseAVX=0 -Dcom.amazonaws.sdk.disableMBeans=true"
-            protocol: "http"
-            replicas: 1
-            createCert: false
-            
-            clusterHealthCheckParams: "wait_for_status=yellow&timeout=1s"
-            
-            masterService: ""
-            
-            resources:
-              requests:
-                cpu: "2"
-                memory: "4Gi"
-              limits:
-                cpu: "2"
-                memory: "4Gi"
-            
-            # Disable probes to avoid transient warnings
-            readinessProbe: {}
-            livenessProbe: {}
-            
-            extraEnvs:
-              - name: "cluster.initial_master_nodes"
-                value: ""
-              - name: "node.roles"
-                value: ""
-            
-            sysctlInitContainer:
-              enabled: true
-            
-            persistence:
-              enabled: false
-            
-            podDisruptionBudget:
-              create: false
-              enabled: false
-            
-            extraInitContainers:
-              - name: install-s3-plugin
-                image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23
-                command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
-                volumeMounts:
-                  - name: plugins
-                    mountPath: /usr/share/elasticsearch/plugins
-              - name: inject-aws-creds
-                image: docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23
-                command:
-                  - sh
-                  - -c
-                  - |
-                    set -e
-                    echo "Creating Elasticsearch keystore and adding AWS credentials"
-                    echo 'y' | bin/elasticsearch-keystore create
-                    echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
-                    echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
-                    echo "http://localstack.ma.svc.cluster.local:4566" | bin/elasticsearch-keystore add --stdin s3.client.default.endpoint --force
-                    # Copy keystore to shared volume location
-                    cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
-                    chown 1000:0 /shared/elasticsearch.keystore
-                    chmod 660 /shared/elasticsearch.keystore
-                    echo "Keystore created and saved to shared volume"
-                volumeMounts:
-                  - name: elasticsearch-keystore
-                    mountPath: /shared
-            
-            extraVolumes:
-              - name: plugins
-                emptyDir: {}
-              - name: elasticsearch-keystore
-                emptyDir: {}
-            
-            extraVolumeMounts:
-              - name: plugins
-                mountPath: /usr/share/elasticsearch/plugins
-              - name: elasticsearch-keystore
-                mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
-                subPath: elasticsearch.keystore
-            EOF
-            
-            # Install Elasticsearch 6.8.23
-            helm install {{inputs.parameters.cluster-name}} elastic/elasticsearch --set rbac.serviceAccountName=migration-console-access-role \
-              --version 8.5.1 \
-              --namespace {{inputs.parameters.namespace}} \
-              --values /tmp/es-values.yaml \
-              --set-file esConfig."elasticsearch\.yml"=/tmp/elasticsearch.yml
-            
-            # Generate cluster configuration output
-            cat > /tmp/cluster-config.json << EOF
+
+            cat > /tmp/cluster-config.json <<EOF
             {
-              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "endpoint": "http://${CLUSTER_NAME}:9200",
               "allowInsecure": true,
               "version": "ES 6.8"
             }
             EOF
 
-            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
               --from-file=cluster-config=/tmp/cluster-config.json \
-              --namespace {{inputs.parameters.namespace}}
-            
-            echo "Elasticsearch 6.8.23 cluster created successfully"
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            echo "Elasticsearch 6.8 cluster created successfully."
             echo "Cluster config:"
             cat /tmp/cluster-config.json
       outputs:
@@ -655,118 +757,174 @@ spec:
             valueFrom:
               path: /tmp/cluster-config.json
 
-    # Elasticsearch 7.10 Single Node Template
+    # Elasticsearch 7.10 Single Node Template - Inline Manifests
     - name: elasticsearch-7-10-single-node
       inputs:
         parameters:
           - name: cluster-name
           - name: namespace
+          - name: image-registry-prefix
+            default: ""
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |
-            # Add Elasticsearch Helm repository
-            helm repo add elastic https://helm.elastic.co
-            helm repo update
-            
-            cat > /tmp/elasticsearch.yml << EOF
+            set -euo pipefail
+            CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
+            NAMESPACE='{{inputs.parameters.namespace}}'
+
+            cat > /tmp/elasticsearch.yml <<'ESCFG'
+            cluster.name: __CLUSTER_NAME__
             network.host: 0.0.0.0
             discovery.type: single-node
+            xpack.security.enabled: false
+            xpack.ml.enabled: false
+            ESCFG
+            sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
+
+            kubectl create configmap "${CLUSTER_NAME}-config" \
+              --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+
+            cat <<EOF | kubectl apply -f -
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: ${CLUSTER_NAME}
+              template:
+                metadata:
+                  labels:
+                    app: ${CLUSTER_NAME}
+                    migration-test: "true"
+                    cluster-name: ${CLUSTER_NAME}
+                spec:
+                  serviceAccountName: migration-console-access-role
+                  securityContext:
+                    runAsUser: 1000
+                    runAsGroup: 1000
+                    fsGroup: 1000
+                  initContainers:
+                    - name: install-s3-plugin
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:7.10.2
+                      command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
+                      volumeMounts:
+                        - name: plugins
+                          mountPath: /usr/share/elasticsearch/plugins
+                    - name: inject-aws-creds
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:7.10.2
+                      command:
+                        - sh
+                        - -c
+                        - |
+                          set -e
+                          echo 'y' | bin/elasticsearch-keystore create
+                          echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
+                          echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
+                          cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
+                      volumeMounts:
+                        - name: elasticsearch-keystore
+                          mountPath: /shared
+                  containers:
+                    - name: elasticsearch
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:7.10.2
+                      imagePullPolicy: IfNotPresent
+                      env:
+                        - name: ES_JAVA_OPTS
+                          value: "-Xms2g -Xmx2g"
+                      ports:
+                        - containerPort: 9200
+                          name: http
+                        - containerPort: 9300
+                          name: transport
+                      readinessProbe:
+                        httpGet:
+                          path: /
+                          port: 9200
+                        initialDelaySeconds: 5
+                        periodSeconds: 3
+                        failureThreshold: 20
+                      resources:
+                        requests:
+                          cpu: "2"
+                          memory: "4Gi"
+                        limits:
+                          cpu: "2"
+                          memory: "4Gi"
+                      volumeMounts:
+                        - name: elasticsearch-config
+                          mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+                          subPath: elasticsearch.yml
+                        - name: elasticsearch-data
+                          mountPath: /usr/share/elasticsearch/data
+                        - name: elasticsearch-logs
+                          mountPath: /usr/share/elasticsearch/logs
+                        - name: plugins
+                          mountPath: /usr/share/elasticsearch/plugins
+                        - name: elasticsearch-keystore
+                          mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
+                          subPath: elasticsearch.keystore
+                  volumes:
+                    - name: elasticsearch-config
+                      configMap:
+                        name: ${CLUSTER_NAME}-config
+                    - name: elasticsearch-data
+                      emptyDir: {}
+                    - name: elasticsearch-logs
+                      emptyDir: {}
+                    - name: plugins
+                      emptyDir: {}
+                    - name: elasticsearch-keystore
+                      emptyDir: {}
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              selector:
+                app: ${CLUSTER_NAME}
+              ports:
+                - name: http
+                  port: 9200
+                  targetPort: 9200
+                - name: transport
+                  port: 9300
+                  targetPort: 9300
             EOF
-            
-            cat > /tmp/es-values.yaml << 'EOF'
-            fullnameOverride: {{inputs.parameters.cluster-name}}
-            image: "docker.elastic.co/elasticsearch/elasticsearch-oss"
-            imageTag: "7.10.2"
-            antiAffinity: "soft"
-            esJavaOpts: "-Xms2g -Xmx2g"
-            protocol: "http"
-            replicas: 1
-            createCert: false
-            clusterHealthCheckParams: "wait_for_status=yellow&timeout=3s"
-            resources:
-              requests:
-                cpu: "2"
-                memory: "4Gi"
-              limits:
-                cpu: "2"
-                memory: "4Gi"
-            readinessProbe:
-              failureThreshold: 5
-              successThreshold: 2
-            extraEnvs:
-              - name: node.roles
-                value: "master,data,ingest"
-              - name: "cluster.initial_master_nodes"
-                value: ""
-              - name: "AWS_REGION"
-                value: "us-east-2"
-            
-              
-            persistence:
-              enabled: false
-            
-            extraInitContainers:
-              - name: install-s3-plugin
-                image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
-                command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
-                volumeMounts:
-                  - name: plugins
-                    mountPath: /usr/share/elasticsearch/plugins
-              - name: inject-aws-creds
-                image: docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2
-                command:
-                  - sh
-                  - -c
-                  - |
-                    set -e
-                    echo "Creating Elasticsearch keystore and adding AWS credentials"
-                    echo 'y' | bin/elasticsearch-keystore create
-                    echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
-                    echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
-                    # Copy keystore to shared volume location
-                    cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
-                    echo "Keystore created and saved to shared volume"
-                volumeMounts:
-                  - name: elasticsearch-keystore
-                    mountPath: /shared
-                    
-            
-            extraVolumes:
-              - name: plugins
-                emptyDir: {}
-              - name: elasticsearch-keystore
-                emptyDir: {}
-            
-            extraVolumeMounts:
-              - name: plugins
-                mountPath: /usr/share/elasticsearch/plugins
-              - name: elasticsearch-keystore
-                mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
-                subPath: elasticsearch.keystore
-            EOF
-            
-            helm install {{inputs.parameters.cluster-name}} elastic/elasticsearch --set rbac.serviceAccountName=migration-console-access-role \
-              --version 8.5.1 \
-              --namespace {{inputs.parameters.namespace}} \
-              --values /tmp/es-values.yaml \
-              --set-file esConfig."elasticsearch\.yml"=/tmp/elasticsearch.yml
-            
-            # Generate cluster configuration output
-            cat > /tmp/cluster-config.json << EOF
+
+            cat > /tmp/cluster-config.json <<EOF
             {
-              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "endpoint": "http://${CLUSTER_NAME}:9200",
               "allowInsecure": true,
               "version": "ES 7.10"
             }
             EOF
 
-            kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
               --from-file=cluster-config=/tmp/cluster-config.json \
-              --namespace {{inputs.parameters.namespace}}
-            
-            echo "Elasticsearch 7.10 cluster"
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            echo "Elasticsearch 7.10 cluster created successfully."
             echo "Cluster config:"
             cat /tmp/cluster-config.json
       outputs:
@@ -782,7 +940,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |
@@ -870,7 +1028,7 @@ spec:
           - name: cluster-name
           - name: namespace
       container:
-        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        image: dtzar/helm-kubectl:3.18.6
         command: [sh, -c]
         args:
           - |
@@ -1089,7 +1247,7 @@ spec:
                 serviceAccountName: migration-console-access-role
                 initContainers:
                   - name: install-plugins
-                    image: mirror.gcr.io/opensearchproject/opensearch:3.1.0
+                    image: opensearchproject/opensearch:3.1.0
                     command:
                       - sh
                       - -c
@@ -1104,7 +1262,7 @@ spec:
                         mountPath: /plugins
                 containers:
                   - name: opensearch
-                    image: mirror.gcr.io/opensearchproject/opensearch:3.1.0
+                    image: opensearchproject/opensearch:3.1.0
                     ports:
                       - name: https
                         containerPort: 9200

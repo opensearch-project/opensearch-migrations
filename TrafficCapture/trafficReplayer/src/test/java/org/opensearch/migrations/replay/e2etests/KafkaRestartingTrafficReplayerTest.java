@@ -193,7 +193,9 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
         var kafkaConsumerProps = KafkaTrafficCaptureSource.buildKafkaProperties(
             embeddedKafkaBroker.getBootstrapServers(),
             TEST_GROUP_CONSUMER_ID,
-            false,
+            "none",
+            null,
+            null,
             null
         );
         kafkaConsumerProps.setProperty("max.poll.interval.ms", DEFAULT_POLL_INTERVAL_MS + "");

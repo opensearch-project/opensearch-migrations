@@ -11,6 +11,14 @@ This chart deploys the Migration Assistant along with its supporting infrastruct
 - Prometheus stack for metrics
 - Fluent Bit for log aggregation
 
+During pod startup, the migration console runs a `workflow-schema-generator`
+init container. It waits for the Strimzi OpenAPI endpoint to become available,
+builds the unified migration workflow schema from the live Strimzi CRDs, and
+writes both `workflowMigration.schema.json` and `sample.yaml` into a shared
+volume mounted by the main console container. The console validates user
+workflow configs against that live-cluster-derived schema instead of relying on
+a schema baked into the container image.
+
 ## Prerequisites
 
 - Kubernetes 1.19+

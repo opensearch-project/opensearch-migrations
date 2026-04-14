@@ -9,6 +9,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.commands.JsonOutput;
 import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -132,6 +133,20 @@ public class Items implements JsonOutput {
                 ? result.getException().getMessage()
                 : result.getException().toString();
             sb.append(": " + exceptionDetail);
+        }
+
+        if (result.getFailureType() == CreationFailureType.INDEX_ALREADY_EXISTS) {
+            sb.append(System.lineSeparator())
+              .append(Format.indentToLevel(3))
+              .append("To resolve, you can either:")
+              .append(System.lineSeparator())
+              .append(Format.indentToLevel(3))
+              .append("  1. Remove conflicting indices on the target cluster with: ")
+              .append("console clusters clear-indices --cluster target")
+              .append(System.lineSeparator())
+              .append(Format.indentToLevel(3))
+              .append("  2. Migrate only specific indices with: ")
+              .append("--index-allowlist <index1,index2,...>");
         }
 
         return sb.toString();

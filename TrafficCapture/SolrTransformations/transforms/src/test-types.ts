@@ -131,6 +131,14 @@ export interface SolrSchema {
 /** HTTP methods supported by the test framework. */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'HEAD';
 
+/** A step in a multi-request test sequence. */
+export interface RequestStep {
+  /** Request path — supports {{nextCursorMark}} placeholder from previous response. */
+  requestPath: string;
+  /** Per-path assertion rules for this step. Defaults to parent test's rules. */
+  assertionRules?: AssertionRule[];
+}
+
 /** Assertion rule types for controlling how diffs are handled per JSON path. */
 export type AssertionRuleType =
   | 'ignore' // Skip this path entirely
@@ -174,6 +182,12 @@ export interface TestCase {
   /** Request body (for POST/PUT/DELETE). JSON-serializable. */
   requestBody?: string;
   requestPath: string;
+  /**
+   * Optional sequence of follow-up requests for multi-step tests (e.g. cursor pagination).
+   * Each step's requestPath can use {{nextCursorMark}} which is replaced with the value
+   * from the previous response's nextCursorMark field.
+   */
+  requestSequence?: RequestStep[];
   /** Per-path assertion rules controlling how diffs are handled. */
   assertionRules?: AssertionRule[];
   /**
@@ -186,6 +200,8 @@ export interface TestCase {
   opensearchMapping?: OpenSearchMapping;
   solrVersions?: string[];
   plugins?: string[];
+  /** Optional bindings passed to transforms at init (e.g., solrConfig defaults from solrconfig.xml). */
+  transformBindings?: Record<string, unknown>;
 }
 
 /** Solr-internal fields that OpenSearch doesn't have — always safe to ignore. */

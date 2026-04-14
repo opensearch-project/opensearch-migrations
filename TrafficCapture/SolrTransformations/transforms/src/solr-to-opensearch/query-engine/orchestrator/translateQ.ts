@@ -7,21 +7,25 @@
  *   2. Parse the query string into an AST
  *   3. Transform the AST into OpenSearch DSL Maps
  *
- * Error handling: fail-safe with passthrough.
- * In both modes, the result always contains a `dsl` value and never throws.
- * Issues are reported via the `warnings` array, where each warning includes
- * a machine-readable construct name (e.g., "parse_error", "function_query"),
- * the position in the original query, and a human-readable message. On parse
- * failure or when passthrough-on-error mode encounters an unsupported
- * construct, `dsl` is a query_string passthrough. In partial mode, `dsl`
- * is the partially translated query with unsupported parts skipped.
+ * Error handling depends on the translation mode:
+ *   - fail-fast (default): throws on any error. The caller must handle the exception.
+ *   - passthrough-on-error: the result always contains a `dsl` value and never
+ *     throws. Issues are reported via the `warnings` array, where each warning
+ *     includes a machine-readable construct name (e.g., "parse_error",
+ *     "transform_error"), the position in the original query, and a human-readable
+ *     message. On parse failure or unsupported construct, `dsl` is a query_string
+ *     passthrough.
  *
  * Two modes:
- *   - passthrough-on-error (default): the first unsupported construct stops the
+ *   - fail-fast (default): throws on any error (parse failure or transform failure).
+ *     Use for validation or testing where errors should not be silently
+ *     swallowed. The caller is responsible for catching the thrown error.
+ *   - passthrough-on-error: the first unsupported construct stops the
  *     pipeline and falls back to query_string passthrough immediately.
- *   - partial: translates all supported parts of the query
- *     and attaches warnings for unsupported parts.
  */
+
+import { parseSolrQuery } from '../parser/parser';
+import { transformNode } from '../transformer/astToOpenSearch';
 
 export interface TranslateResult {
   /**
@@ -37,14 +41,14 @@ export interface TranslateResult {
 }
 
 /**
- * A warning about an unsupported or partially translated construct.
+ * A warning about an unsupported construct or translation issue.
  *
  * Examples:
  *   Parse error:
- *     { construct: "parse_error", position: 5, message: "Unexpected ')' at position 5" }
+ *     { construct: "parse_error", position: 16, message: "Expected expression" }
  *
- *   Unsupported function query:
- *     { construct: "function_query", position: 12, message: "Function queries not yet supported" }
+ *   Transform error (unsupported node type):
+ *     { construct: "transform_error", message: "No transform rule registered for node type: field" }
  */
 export interface TranslationWarning {
   /** Machine-readable identifier for the issue. */
@@ -56,7 +60,17 @@ export interface TranslationWarning {
 }
 
 /** Controls how the orchestrator handles unsupported constructs. */
-export type TranslationMode = 'partial' | 'passthrough-on-error';
+export type TranslationMode = 'passthrough-on-error' | 'fail-fast';
+
+/**
+ * Build a query_string passthrough DSL Map.
+ * Wraps the raw Solr query so OpenSearch can attempt to execute it as-is.
+ */
+function passthroughDsl(query: string): Map<string, any> {
+  return new Map([
+    ['query_string', new Map([['query', query]])],
+  ]);
+}
 
 /**
  * Translate a Solr query into OpenSearch Query DSL.
@@ -64,24 +78,55 @@ export type TranslationMode = 'partial' | 'passthrough-on-error';
  * @param params - All Solr request parameters. The orchestrator reads `q`
  *                 from this map and passes the full map to the parser
  *                 for configuration (e.g., `df`, `qf`, `pf`).
- * @param mode - 'passthrough-on-error' (default) or 'partial'.
+ * @param mode - 'fail-fast' (default) or 'passthrough-on-error'.
  *
  * Example:
  *   translateQ(new Map([['q', 'title:java'], ['df', 'content']]))
- *   → { dsl: Map{"term" → Map{"title" → "java"}}, warnings: [] }
+ *   → { dsl: Map{"match" → Map{"title" → "java"}}, warnings: [] }
  */
 export function translateQ(
   params: ReadonlyMap<string, string>,
-  mode?: TranslationMode,
+  mode: TranslationMode = 'fail-fast',
 ): TranslateResult {
-  // TODO: implement
-  // 1. Read q from params (default to '*:*')
-  // 2. Call parseSolrQuery(q, params) from ../parser/parser
-  // 3. If ast is null (parse failure): return query_string passthrough
-  //    + warnings (same behavior for both modes — no AST to work with)
-  // 4. Call transformNode(ast) from ../transformer/astToOpenSearch
-  //    - In passthrough-on-error mode: abort on first unsupported construct, return passthrough
-  //    - In partial mode: translate supported parts, collect warnings
-  // 5. Return { dsl, warnings }
-  throw new Error('Not implemented');
+  const query = params.get('q') || '*:*';
+
+  // Stage 1: Parse
+  const { ast, errors } = parseSolrQuery(query, params);
+
+  // Parse failure — no AST to work with
+  if (ast === null) {
+    console.error(`[translateQ] Parse failure for query: ${query}`, errors);
+
+    if (mode === 'fail-fast') {
+      throw new Error(`Failed to parse Solr query: ${query}`);
+    }
+
+    const warnings: TranslationWarning[] = errors.map((e) => ({
+      construct: 'parse_error',
+      position: e.position,
+      message: e.message,
+    }));
+    return { dsl: passthroughDsl(query), warnings };
+  }
+
+  // Stage 2: Transform
+  try {
+    const dsl = transformNode(ast);
+    return { dsl, warnings: [] };
+  } catch (err: unknown) {
+    // Transform failure — unsupported node type or unexpected error
+    console.error(`[translateQ] Transform failure for query: ${query}`, err);
+
+    if (mode === 'fail-fast') {
+      throw new Error(`Failed to transform Solr query: ${query}`);
+    }
+
+    const message = (err as Error).message;
+    const warning: TranslationWarning = {
+      construct: 'transform_error',
+      message,
+    };
+
+    return { dsl: passthroughDsl(query), warnings: [warning] };
+  }
 }
