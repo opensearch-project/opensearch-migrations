@@ -17,7 +17,7 @@ from typing import List, Optional, Tuple
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "OS_1.3"]
+VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "OS_1.3", "SOLR_8.11"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_2.x", "OS_3.1"]
 MA_RELEASE_NAME = "ma"
 

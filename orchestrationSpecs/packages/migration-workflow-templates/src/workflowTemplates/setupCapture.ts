@@ -20,6 +20,7 @@ import {
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {z} from "zod";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {CONTAINER_NAMES} from "../containerNames";
 import {ResourceManagement} from "./resourceManagement";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
@@ -206,7 +207,7 @@ function makeProxyDeploymentManifest(args: {
 }) {
     const isScramAuth = expr.equals(args.kafkaAuthType, expr.literal("scram-sha-512"));
     const container: Record<string, any> = {
-        name: "proxy",
+        name: CONTAINER_NAMES.PROXY,
         image: args.image,
         imagePullPolicy: args.imagePullPolicy,
         args: [
