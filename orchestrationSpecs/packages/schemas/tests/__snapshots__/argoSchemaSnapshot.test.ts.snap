@@ -1512,6 +1512,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                       "changeRestriction": "gated"
                     },
+                    "tupleMaxBufferSeconds": {
+                      "type": "number",
+                      "default": 60
+                    },
+                    "tupleMaxFileSizeMb": {
+                      "type": "number",
+                      "default": 256
+                    },
                     "userAgent": {
                       "type": "string",
                       "description": "String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."
@@ -3040,6 +3048,18 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "tupleTransformerConfigFile": {
                     "type": "string",
                     "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                    "changeRestriction": "gated"
+                  },
+                  "tupleMaxBufferSeconds": {
+                    "type": "number",
+                    "default": 60,
+                    "description": "Maximum seconds before rotating/uploading a tuple file to S3.",
+                    "changeRestriction": "gated"
+                  },
+                  "tupleMaxFileSizeMb": {
+                    "type": "number",
+                    "default": 256,
+                    "description": "Maximum uncompressed size in MB before rotating a tuple file to S3.",
                     "changeRestriction": "gated"
                   },
                   "userAgent": {

@@ -24,6 +24,7 @@ grafana|8.15.0|https://grafana.github.io/helm-charts
 jaeger|3.2.0|https://jaegertracing.github.io/helm-charts
 kyverno|3.7.1|https://kyverno.github.io/kyverno/
 aws-privateca-issuer|v1.4.0|https://cert-manager.github.io/aws-privateca-issuer
+aws-mountpoint-s3-csi-driver|2.5.0|https://awslabs.github.io/mountpoint-s3-csi-driver
 acmpca-chart|1.2.2|oci://public.ecr.aws/aws-controllers-k8s
 cloudwatch-chart|1.4.2|oci://public.ecr.aws/aws-controllers-k8s
 "
@@ -116,6 +117,11 @@ mirror.gcr.io/amazon/aws-cli:2.25.11
 
 # --- coordinator cluster (used by RFS workflow) ---
 mirror.gcr.io/opensearchproject/opensearch:3.1.0
+
+# --- mountpoint-s3 CSI driver ---
+public.ecr.aws/mountpoint-s3/aws-mountpoint-s3-csi-driver:v2.5.0
+public.ecr.aws/csi-components/csi-node-driver-registrar:v2.16.0-eksbuild.3
+public.ecr.aws/csi-components/livenessprobe:v2.18.0-eksbuild.3
 
 # --- jib base images (used when building from source with --build-images) ---
 mirror.gcr.io/library/amazoncorretto:17-al2023-headless

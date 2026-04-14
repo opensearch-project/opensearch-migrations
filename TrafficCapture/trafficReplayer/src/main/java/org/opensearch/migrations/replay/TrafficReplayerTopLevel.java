@@ -22,6 +22,7 @@ import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
+import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
@@ -177,7 +178,47 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
+        ThreadLocalTupleWriter tupleWriter,
+        Duration quiescentDuration
+    ) throws InterruptedException, ExecutionException {
+        setupRunAndWaitForReplayToFinish(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, tupleWriter, null, quiescentDuration);
+    }
+
+    /** Legacy overload: uses the old synchronous Consumer-based tuple path (Log4J). */
+    public void setupRunAndWaitForReplayToFinish(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
         Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        Duration quiescentDuration
+    ) throws InterruptedException, ExecutionException {
+        doSetupRunAndWaitForReplayToFinish(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, null, resultTupleConsumer, null, quiescentDuration);
+    }
+
+    public void setupRunAndWaitForReplayToFinish(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
+        ThreadLocalTupleWriter tupleWriter,
+        Consumer<SourceTargetCaptureTuple> tupleObserver,
+        Duration quiescentDuration
+    ) throws InterruptedException, ExecutionException {
+        doSetupRunAndWaitForReplayToFinish(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, tupleWriter, null, tupleObserver, quiescentDuration);
+    }
+
+    private void doSetupRunAndWaitForReplayToFinish(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
+        ThreadLocalTupleWriter tupleWriter,
+        Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        Consumer<SourceTargetCaptureTuple> tupleObserver,
         Duration quiescentDuration
     ) throws InterruptedException, ExecutionException {
         var senderOrchestrator = new RequestSenderOrchestrator(
@@ -200,8 +241,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             new CapturedTrafficToHttpTransactionAccumulator(
                 observedPacketConnectionTimeout,
                 "(see command line option " + TrafficReplayer.PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
-                new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer, trafficSource,
-                    quiescentDuration)
+                new TrafficReplayerAccumulationCallbacks(replayEngine, tupleWriter, resultTupleConsumer,
+                    tupleObserver, trafficSource, quiescentDuration)
             );
         this.currentAccumulator.set(trafficToHttpTransactionAccumulator);
         try {
@@ -278,16 +319,58 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
+        ThreadLocalTupleWriter tupleWriter,
+        Duration quiescentDuration
+    ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
+        setupRunAndWaitForReplayWithShutdownChecks(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, tupleWriter, null, quiescentDuration);
+    }
+
+    /** Legacy overload: uses the old synchronous Consumer-based tuple path (Log4J). */
+    public void setupRunAndWaitForReplayWithShutdownChecks(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
         Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
         Duration quiescentDuration
     ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
+        doSetupRunAndWaitForReplayWithShutdownChecks(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, null, resultTupleConsumer, null, quiescentDuration);
+    }
+
+    public void setupRunAndWaitForReplayWithShutdownChecks(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
+        ThreadLocalTupleWriter tupleWriter,
+        Consumer<SourceTargetCaptureTuple> tupleObserver,
+        Duration quiescentDuration
+    ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
+        doSetupRunAndWaitForReplayWithShutdownChecks(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, tupleWriter, null, tupleObserver, quiescentDuration);
+    }
+
+    private void doSetupRunAndWaitForReplayWithShutdownChecks(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
+        ThreadLocalTupleWriter tupleWriter,
+        Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        Consumer<SourceTargetCaptureTuple> tupleObserver,
+        Duration quiescentDuration
+    ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
         try {
-            setupRunAndWaitForReplayToFinish(
+            doSetupRunAndWaitForReplayToFinish(
                 observedPacketConnectionTimeout,
                 targetServerResponseTimeout,
                 trafficSource,
                 timeShifter,
+                tupleWriter,
                 resultTupleConsumer,
+                tupleObserver,
                 quiescentDuration
             );
         } catch (InterruptedException e) {
