@@ -908,7 +908,7 @@
         }
       },
       {
-        "name": "migrateandselfteardown",
+        "name": "migrateandpatchready",
         "inputs": {
           "parameters": [
             {
@@ -1091,27 +1091,6 @@
               },
               "name": "patchSnapshotMigration"
             }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "deletecrd",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.resourceName}}"
-                  },
-                  {
-                    "name": "resourceKind",
-                    "value": "SnapshotMigration"
-                  }
-                ]
-              },
-              "name": "selfTeardown"
-            }
           ]
         ],
         "outputs": {
@@ -1273,7 +1252,7 @@
           ],
           [
             {
-              "template": "migrateandselfteardown",
+              "template": "migrateandpatchready",
               "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Completed' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
@@ -1343,7 +1322,7 @@
                   }
                 ]
               },
-              "name": "migrateAndTeardown"
+              "name": "migrateAndPatchReady"
             }
           ]
         ],

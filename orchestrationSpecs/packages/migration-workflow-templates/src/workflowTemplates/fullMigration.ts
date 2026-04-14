@@ -354,9 +354,8 @@ export const FullMigration = WorkflowBuilder.create({
     )
 
 
-    // Wrapper: run migration then self-teardown (used inside parallel group)
-    // This ensures selfTeardown happens inside the parallel group, satisfying teardownWatcher.
-    .addTemplate("migrateAndSelfTeardown", t => t
+    // Wrapper: run migration then patch ready status (used inside parallel group)
+    .addTemplate("migrateAndPatchReady", t => t
         .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("resolvedSnapshotName", typeToken<string>())
@@ -402,12 +401,6 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
                         ["checksumForReplayer"], ""
                     ),
-                })
-            )
-            .addStep("selfTeardown", ResourceManagement, "deleteCrd", c =>
-                c.register({
-                    resourceName: b.inputs.resourceName,
-                    resourceKind: expr.literal("SnapshotMigration"),
                 })
             )
         )
@@ -488,10 +481,9 @@ export const FullMigration = WorkflowBuilder.create({
                     )})
                 }
             )
-            // Sequential: migrate → patchReady → self-delete CRD
-            // Natural completion: migration finishes, patches Ready, deletes CRD
+            // Sequential: migrate → patchReady
             // External reset: CLI deletes CRD → k8s cascades to coordinator/RFS → argo stop
-            .addStep("migrateAndTeardown", INTERNAL, "migrateAndSelfTeardown", c => {
+            .addStep("migrateAndPatchReady", INTERNAL, "migrateAndPatchReady", c => {
                     const snapshotMigrationConfig = expr.deserializeRecord(b.inputs.snapshotMigrationConfig);
                     const snapshotNameResolution = expr.get(snapshotMigrationConfig, "snapshotNameResolution");
                     return c.register({
