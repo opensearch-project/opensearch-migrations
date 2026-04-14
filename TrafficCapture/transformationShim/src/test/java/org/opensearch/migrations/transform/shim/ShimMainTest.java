@@ -452,6 +452,23 @@ class ShimMainTest {
     }
 
     @Test
+    void parseReportingConfig_nonObjectEntry_throws() {
+        assertThrows(Exception.class, () -> ShimMain.parseReportingConfig("[123]"));
+    }
+
+    @Test
+    void parseReportingConfig_multipleProviderKeys_throws() {
+        assertThrows(Exception.class, () -> ShimMain.parseReportingConfig(
+            "[{\"A\":{\"outputDir\":\"/tmp\"},\"B\":{\"outputDir\":\"/tmp\"}}]"));
+    }
+
+    @Test
+    void parseReportingConfig_nonObjectProviderValue_throws() {
+        assertThrows(Exception.class, () -> ShimMain.parseReportingConfig(
+            "[{\"FileSystemReportingSink\":\"not an object\"}]"));
+    }
+
+    @Test
     void createReportingSink_createsWithDefaults(@TempDir java.nio.file.Path tmpDir) {
         var sink = ShimMain.createReportingSink(
             "[{\"FileSystemReportingSink\":{\"outputDir\":\"" + tmpDir.toAbsolutePath() + "\"}}]");
