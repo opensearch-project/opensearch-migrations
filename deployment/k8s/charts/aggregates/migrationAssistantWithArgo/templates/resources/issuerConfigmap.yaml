@@ -6,4 +6,5 @@ metadata:
 data:
   PROXY_DEFAULT_ISSUER_NAME: "{{ .Values.issuerConfig.issuerName }}"
   PROXY_DEFAULT_ISSUER_KIND: "{{ .Values.issuerConfig.issuerKind }}"
+  PROXY_DEFAULT_AWS_REGION: "{{ .Values.aws.region }}"
 {{- end }}

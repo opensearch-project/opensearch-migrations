@@ -240,6 +240,11 @@ spec:
                 configMapKeyRef:
                   name: migration-issuer-config
                   key: PROXY_DEFAULT_ISSUER_KIND
+            - name: PROXY_DEFAULT_AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: migration-issuer-config
+                  key: PROXY_DEFAULT_AWS_REGION
             {{- end }}
           {{- if .Values.defaultBucketConfiguration.create }}
           securityContext:

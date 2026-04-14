@@ -198,17 +198,22 @@ function normalizeKafkaClusterConfig(
 }
 
 function defaultProxyTlsConfig(proxyName: string) {
+    const awsRegion = process.env.PROXY_DEFAULT_AWS_REGION;
+    const dnsNames = [
+        proxyName,
+        `${proxyName}.ma`,
+        `${proxyName}.ma.svc.cluster.local`,
+    ];
+    if (awsRegion) {
+        dnsNames.push(`*.elb.${awsRegion}.amazonaws.com`);
+    }
     return {
         mode: "certManager" as const,
         issuerRef: {
             name: process.env.PROXY_DEFAULT_ISSUER_NAME || "migrations-ca",
             kind: (process.env.PROXY_DEFAULT_ISSUER_KIND || "ClusterIssuer") as "ClusterIssuer" | "Issuer",
         },
-        dnsNames: [
-            proxyName,
-            `${proxyName}.ma`,
-            `${proxyName}.ma.svc.cluster.local`,
-        ],
+        dnsNames,
         duration: "2160h",
         renewBefore: "360h",
     };
