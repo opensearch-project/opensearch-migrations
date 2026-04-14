@@ -38,3 +38,8 @@ class TestSolr0001SingleDocumentBackfill(MATestBase):
         self.source_operations.get_document(
             cluster=self.source_cluster, index_name=self.index_name,
             doc_id=self.doc_id)
+
+    def verify_clusters(self):
+        self.target_operations.get_document(
+            cluster=self.target_cluster, index_name=self.index_name,
+            doc_id=self.doc_id, max_attempts=10, delay=3.0)
