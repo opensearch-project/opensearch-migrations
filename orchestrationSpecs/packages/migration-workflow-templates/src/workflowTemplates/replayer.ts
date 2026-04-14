@@ -257,7 +257,6 @@ export const Replayer = WorkflowBuilder.create({
 
   .addParams(CommonWorkflowParameters)
 
-
     .addTemplate("createDeployment", t => t
         .addRequiredInput("name", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
@@ -326,9 +325,7 @@ export const Replayer = WorkflowBuilder.create({
         .addOptionalInput("resolvedKafkaListenerName", (c) => "")
         .addOptionalInput("resolvedKafkaAuthType", (c) => "")
 
-      .addInputsFromRecord(
-        makeRequiredImageParametersForKeys(["TrafficReplayer"]),
-      )
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["TrafficReplayer"]))
 
       .addSteps((b) => {
         const kafkaConfig = expr.deserializeRecord(b.inputs.kafkaConfig);

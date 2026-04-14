@@ -324,60 +324,6 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
 
-    // ── Config checksum annotation patch (for resources we don't own) ────
-
-    .addTemplate("patchConfigChecksumAnnotation", t => t
-        .addRequiredInput("resourceApiVersion", typeToken<string>())
-        .addRequiredInput("resourceKind", typeToken<string>())
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("configChecksum", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "patch",
-                flags: ["--type", "merge"],
-                manifest: {
-                    apiVersion: makeStringTypeProxy(b.inputs.resourceApiVersion),
-                    kind: makeStringTypeProxy(b.inputs.resourceKind),
-                    metadata: {
-                        name: b.inputs.resourceName,
-                        annotations: {
-                            "migration-configChecksum": makeStringTypeProxy(b.inputs.configChecksum)
-                        }
-                    }
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
-    // ── Workflow UID approval annotation patch ───────────────────────────
-
-    .addTemplate("patchApprovalAnnotation", t => t
-        .addRequiredInput("resourceApiVersion", typeToken<string>())
-        .addRequiredInput("resourceKind", typeToken<string>())
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "patch",
-                flags: ["--type", "merge"],
-                manifest: {
-                    apiVersion: makeStringTypeProxy(b.inputs.resourceApiVersion),
-                    kind: makeStringTypeProxy(b.inputs.resourceKind),
-                    metadata: {
-                        name: b.inputs.resourceName,
-                        annotations: {
-                            "migrations.opensearch.org/approved-by-run":
-                                makeStringTypeProxy(expr.getWorkflowValue("uid"))
-                        }
-                    }
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
-
-
     // ── Approval gate templates ─────────────────────────────────────────
 
     .addTemplate("createApprovalGate", t => t
@@ -448,6 +394,32 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
 
+    // ── Config checksum annotation patch (for resources we don't own) ────
+
+    .addTemplate("patchConfigChecksumAnnotation", t => t
+        .addRequiredInput("resourceApiVersion", typeToken<string>())
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge"],
+                manifest: {
+                    apiVersion: makeStringTypeProxy(b.inputs.resourceApiVersion),
+                    kind: makeStringTypeProxy(b.inputs.resourceKind),
+                    metadata: {
+                        name: b.inputs.resourceName,
+                        annotations: {
+                            "migration-configChecksum": makeStringTypeProxy(b.inputs.configChecksum)
+                        }
+                    }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
     .addTemplate("deleteDeployment", t => t
         .addRequiredInput("deploymentName", typeToken<string>())
         .addResourceTask(b => b
@@ -492,6 +464,32 @@ export const ResourceManagement = WorkflowBuilder.create({
                     kind: "TrafficReplay",
                     metadata: {name: b.inputs.resourceName},
                     status: {phase: "Ready"}
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    // ── Workflow UID approval annotation patch ───────────────────────────
+
+    .addTemplate("patchApprovalAnnotation", t => t
+        .addRequiredInput("resourceApiVersion", typeToken<string>())
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge"],
+                manifest: {
+                    apiVersion: makeStringTypeProxy(b.inputs.resourceApiVersion),
+                    kind: makeStringTypeProxy(b.inputs.resourceKind),
+                    metadata: {
+                        name: b.inputs.resourceName,
+                        annotations: {
+                            "migrations.opensearch.org/approved-by-run":
+                                makeStringTypeProxy(expr.getWorkflowValue("uid"))
+                        }
+                    }
                 }
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)

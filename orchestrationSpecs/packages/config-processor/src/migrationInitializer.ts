@@ -171,8 +171,7 @@ export class MigrationInitializer {
 
         // CapturedTraffic resources from proxies
         for (const proxy of workflows.proxies ?? []) {
-            const noCapture = (proxy as any).proxyConfig?.noCapture === true;
-            const kafkaDep = (!noCapture && proxy.kafkaConfig?.label) ? [proxy.kafkaConfig.label] : [];
+            const kafkaDep = proxy.kafkaConfig?.label ? [proxy.kafkaConfig.label] : [];
             items.push({
                 apiVersion: CRD_API_VERSION,
                 kind: 'CapturedTraffic',
@@ -212,10 +211,11 @@ export class MigrationInitializer {
 
         // TrafficReplay resources from replayers
         for (const replay of workflows.trafficReplays ?? []) {
+            const replayerName = `${replay.fromProxy}-${replay.toTarget.label}-replayer`;
             items.push({
                 apiVersion: CRD_API_VERSION,
                 kind: 'TrafficReplay',
-                metadata: { name: replay.name },
+                metadata: { name: replayerName },
                 spec: { dependsOn: [replay.fromProxy] },
                 status: { phase: 'Initialized', configChecksum: replay.configChecksum }
             });

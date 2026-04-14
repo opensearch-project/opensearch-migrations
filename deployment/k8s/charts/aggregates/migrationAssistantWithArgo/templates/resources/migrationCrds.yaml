@@ -25,6 +25,10 @@ spec:
             spec:
               type: object
               properties:
+                dependsOn:
+                  type: array
+                  items:
+                    type: string
                 # Deployment-level fields
                 loggingConfigurationOverrideConfigMap:
                   type: string
@@ -122,6 +126,10 @@ spec:
             spec:
               type: object
               properties:
+                dependsOn:
+                  type: array
+                  items:
+                    type: string
                 snapshotPrefix:
                   type: string
                 indexAllowlist:
