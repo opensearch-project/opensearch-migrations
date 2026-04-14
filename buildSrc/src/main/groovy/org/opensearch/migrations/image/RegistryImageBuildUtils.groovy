@@ -189,6 +189,10 @@ class RegistryImageBuildUtils {
                                 if (dockerDir.exists()) {
                                     path { from = dockerDir; into = '/' }
                                 }
+                                def buildDockerDir = project.file("build/docker")
+                                if (buildDockerDir.exists()) {
+                                    path { from = buildDockerDir; into = '/' }
+                                }
                                 path { from = project.file("build/versionDir"); into = '/' }
                             }
                             def extraPerms = (Map<String, String>) config.get("extraPermissions", [:])
