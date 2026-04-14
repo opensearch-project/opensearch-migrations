@@ -88,11 +88,10 @@ public class TestCreateSnapshotSolr {
         var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
         creator.run();
 
-        var result = STANDALONE_SOLR.execInContainer("curl", "-s",
-            "http://localhost:8983/solr/dummy/replication?command=details&wt=json");
-        log.atInfo().setMessage("Replication details after backup: {}").addArgument(result.getStdout()).log();
-        Assertions.assertTrue(result.getStdout().contains("backup"),
-            "Replication details should show backup info");
+        var result = STANDALONE_SOLR.execInContainer("ls", "/var/solr/data");
+        log.atInfo().setMessage("Backup directory contents: {}").addArgument(result.getStdout()).log();
+        Assertions.assertTrue(result.getStdout().contains("snapshot.test_standalone_backup"),
+            "Backup directory should contain the snapshot");
     }
 
     @Test
