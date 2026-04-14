@@ -205,8 +205,9 @@ function defaultProxyTlsConfig(proxyName: string) {
             kind: (process.env.PROXY_DEFAULT_ISSUER_KIND || "ClusterIssuer") as "ClusterIssuer" | "Issuer",
         },
         dnsNames: [
-            "*.svc.cluster.local",
             proxyName,
+            `${proxyName}.ma`,
+            `${proxyName}.ma.svc.cluster.local`,
         ],
         duration: "2160h",
         renewBefore: "360h",
