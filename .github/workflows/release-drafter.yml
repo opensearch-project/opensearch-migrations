@@ -191,7 +191,7 @@ jobs:
           ./deployment/k8s/generateWorkflowSchemaArtifact.sh
       - name: Upload unified schema artifact
         if: ${{ !github.event.act }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: workflowMigration-schema-${{ steps.get_data.outputs.version }}
           path: workflowMigration.schema.json
@@ -238,7 +238,7 @@ jobs:
           deployment/k8s/aws/assemble-bootstrap.sh
       - name: Draft a release
         if: ${{ !github.event.act }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           generate_release_notes: true
