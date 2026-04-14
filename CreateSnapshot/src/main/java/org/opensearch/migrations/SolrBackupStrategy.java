@@ -51,6 +51,11 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             }
         }
 
+        if (args.solrCollections.isEmpty()) {
+            throw new ParameterException(
+                "No Solr collections or cores found. Specify --solr-collections explicitly.");
+        }
+
         if (isSolrCloud(solrUrl, httpClient)) {
             runCloudBackup(solrUrl, backupLocation);
         } else {
