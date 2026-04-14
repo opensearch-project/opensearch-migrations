@@ -12,7 +12,10 @@ defaultTest:
       id: bedrock:us.anthropic.claude-sonnet-4-5-20250929-v1:0
       config:
         region: us-east-1
-        max_tokens: 256
+        max_tokens: 512
+        # Prohibit error messages 'Could not extract JSON from llm-rubric response':
+        # https://github.com/promptfoo/promptfoo/issues/2084
+        response_format: json_object
 
 prompts:
   - id: migration-advisor-prompt
@@ -31,7 +34,7 @@ tests:
     assert:
       - type: llm-rubric
         value: >-
-          Response clarifies the actual role of the user. Provides 2 explicit role examples to choose from: 
+          Response clarifies the actual role of the user. Provides 2 explicit role examples to choose from:
           search relevance engineer and devops / platform engineer.
         metric: clarify-role
 
@@ -100,7 +103,7 @@ tests:
           (0) '_version_' is not included in the OpenSearch mapping.
           (1) 'id' is mapped to type 'keyword';
           (2) 'product_name' is mapped to type 'text' with a standard or equivalent analyzer;
-          (3) The response should note that the TrieLongField type has no direct OpenSearch equivalent, 
+          (3) The response should note that the TrieLongField type has no direct OpenSearch equivalent,
             recommending and using the `long` field type instead;
           (4) 'price' (solr.CurrencyField) is flagged as unsupported in OpenSearch.
           (5) 'priority' (solr.EnumField) is flagged as unsupported in OpenSearch.
@@ -153,11 +156,11 @@ tests:
     vars:
       query: |
         I am a Search Engineer and for a solr to opensearch migration I need to migrate the following requestHandler
-        to its opensearch equivalent. Give an example json that can directly be used in 
+        to its opensearch equivalent. Give an example json that can directly be used in
         PUT requests against opensearch PUT _scripts/[template-name] endpoints.
         Assume the template will be available as search template with name `my-search-template`.
         Give examples how to invoke it against an existing index of name `my-index`.
-        
+
         <requestHandler name="/custom-search" class="solr.SearchHandler">
           <lst name="defaults">
             <str name="defType">edismax</str>
@@ -167,13 +170,13 @@ tests:
             <int name="rows">10</int>
             <str name="fl">id,title,author,score</str>
             <str name="wt">json</str>
-    
+
             <!-- Highlighting -->
             <str name="hl">true</str>
             <str name="hl.fl">title,content</str>
             <str name="hl.snippets">3</str>
             <str name="hl.fragsize">150</str>
-    
+
             <!-- Faceting -->
             <str name="facet">true</str>
             <str name="facet.field">category</str>
@@ -184,85 +187,93 @@ tests:
     assert:
       - type: llm-rubric
         value: >-
+          Give your evaluation response in json format (!!), and properly escape chars where this is needed.
           The response contains a search template json payload equivalent to the following:
-          ```json                                                                                                                                                                                     
-          {                                                                                                                                                                                                                                        
+          ```json
+          {
             "script": {
-              "lang": "mustache",                                                                                                                                                                                                                  
-              "source": { 
+              "lang": "mustache",
+              "source": {
                 "size": {{ "{{size}}{{^size}}10{{/size}}" }},
-                "_source": ["id", "title", "author"],                                                                                                                                                                                              
-                "query": {                                                                                                                                                                                                                         
-                  "bool": {                                                                                                                                                                                                                        
-                    "must": [                                                                                                                                                                                                                      
-                      {   
+                "_source": ["id", "title", "author"],
+                "query": {
+                  "bool": {
+                    "must": [
+                      {
                         "multi_match": {
                           "query": "{{query_string}}",
                           "type": "best_fields",
-                          "fields": ["title^2.0", "content^1.0", "author^1.5"],                                                                                                                                                                    
+                          "fields": ["title^2.0", "content^1.0", "author^1.5"],
                           "minimum_should_match": "75%"
-                        }                                                                                                                                                                                                                          
-                      }   
-                    ],                                                                                                                                                                                                                             
+                        }
+                      }
+                    ],
                     "should": [
                       {
                         "match_phrase": {
                           "title": {
                             "query": "{{query_string}}",
                             "boost": 3.0
-                          }                                                                                                                                                                                                                        
+                          }
                         }
-                      },                                                                                                                                                                                                                           
-                      {   
+                      },
+                      {
                         "match_phrase": {
                           "content": {
                             "query": "{{query_string}}",
-                            "boost": 1.5                                                                                                                                                                                                           
+                            "boost": 1.5
                           }
-                        }                                                                                                                                                                                                                          
-                      }   
+                        }
+                      }
                     ]
                   }
                 },
                 "highlight": {
                   "fields": {
                     "title": { "number_of_fragments": 3, "fragment_size": 150 },
-                    "content": { "number_of_fragments": 3, "fragment_size": 150 }                                                                                                                                                                  
+                    "content": { "number_of_fragments": 3, "fragment_size": 150 }
                   }
-                },                                                                                                                                                                                                                                 
-                "aggs": { 
-                  "category": {                                                                                                                                                                                                                    
+                },
+                "aggs": {
+                  "category": {
                     "terms": { "field": "category", "min_doc_count": 1 }
-                  },                                                                                                                                                                                                                               
+                  },
                   "author": {
                     "terms": { "field": "author", "min_doc_count": 1 }
-                  }                                                                                                                                                                                                                                
-                }                                                                                                                                                                                                                                  
-              }           
+                  }
+                }
+              }
             }
           }
           ```
-          
-          Further, the response shall contain an example search request formulated as POST request 
-          to the endpoint `my-index/_search/template` with json payload parameters 
+
+          Be lenient on the following deviations:
+          - It is ok if the should block condenses the multiple match_phrase blocks to a single multi_match block
+          of type 'phrase' and a 'fields' attribute containing title and content field with the respective boosts.
+          - For the naming of facet aggregations, both the field names as well as field names with some facet-indicating
+          pre- or suffix are valid.
+          - If 'from' attribute is contained and contains a 0 as default value, that is fine, too.
+
+          Further, the response shall contain an example search request formulated as POST request
+          to the endpoint `my-index/_search/template` with json payload parameters
           id: "my-search-template" and a params section with query_string parameter and
           optionally size, as in the following example, where parameter values are solely
           examples and can be different in the response, with `size` as optional parameter:
 
           POST my-index/_search/template
           ```json
-          {                                                                                                                                                                                                                                        
+          {
             "id": "my-search-template",
-            "params": {                                                                                                                                                                                                                            
+            "params": {
               "query_string": "my query",
-              "size": 10                                                                                                                                                                                                                           
+              "size": 10
             }
-          }      
+          }
           ```
 
           The response should also explicitly summarize the mappings utilized to reflect the example solr edismax
           query in opensearch. Basic facts highlighted should match the ones given below:
-          
+
            ┌──────────────────────────────────────────┬─────────────────────────────────────────────────────────────────────────┐
            │           Solr (SearchHandler)           │                          OpenSearch Equivalent                          │
            ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────┤
@@ -282,21 +293,21 @@ tests:
            ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────┤
            │ facet.field=category,author              │ "aggs" with terms aggregation                                           │
            ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────┤
-           │ spellcheck component                     │ "suggest" with term suggester                                           │
-           └──────────────────────────────────────────┴─────────────────────────────────────────────────────────────────────────┘
         metric: assess-customizations-search-handler
   - description: "Migrate Kerberos auth"
     metadata:
       continue: false
     vars:
       query: |
-        I am a Search Engineer and want to migrate solr to opensearch. 
+        I am a Search Engineer and want to migrate solr to opensearch.
         In our current solr setup we use kerberos auth. Help me migrate this to opensearch.
     assert:
       - type: llm-rubric
         value: >-
+          Give your evaluation response in json format, and properly escape chars where this is needed.
+
           The answer mentions a range of steps to configure kerberos in opensearch, representing the following steps:
-          
+
           ### Opensearch Node Configuration Steps:
           1) Create a service principal and keytab for your OpenSearch nodes.
           2) Within opensearch.yml:
@@ -304,7 +315,7 @@ tests:
           - `plugins.security.kerberos.krb5_filepath`: The path to your Kerberos configuration file.
           - `plugins.security.kerberos.acceptor_keytab_filepath`: The path to the keytab file, which contains the principal that the Security plugin uses to issue requests through Kerberos.
           - `plugins.security.kerberos.acceptor_principal`: The principal that the Security plugin uses to issue requests through Kerberos. This value must be present in the keytab file.
-          
+
           The response should highlight that both keytab and krb5 config file must be placed in the `config` directory of opensearch or a subdirectory.
           Further the response should mention that their paths in opensearch.yml must be relative, not absolute.
 
@@ -324,4 +335,54 @@ tests:
             authentication_backend:
               type: noop
           ```
-        metric: assess-customizations-kerberos-auth
+        metric: assess-customizations-kerberos-auth-auth
+  - description: "Ask nonexistent feature"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        I am a Search Engineer and want to migrate solr to opensearch. 
+        Id like to migrate the solr feature of wormhole vectors to opensearch, help me with that.
+    assert:
+      - type: llm-rubric
+        value: >-
+          The response should clearly state that no such feature exists and might ask for clarification.
+        metric: accuracy-no-hallucination
+  - description: "Maps libraries correctly"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        I am a Search Engineer and want to migrate solr to opensearch. 
+        We are using the libraries SolrJ and pysolr. Help me migrating those.
+    assert:
+      - type: llm-rubric
+        value: >-
+          The response should mention the following replacements:
+          - opensearch-java as solrJ replacement
+          - opensearch-py as pysolr replacement
+        metric: map-client-integrations
+      - type: icontains-all
+        value:
+          - opensearch-java
+          - opensearch-py
+        metric: map-client-integrations
+  - description: "Translate cluster sizing"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        I am a DevOps engineer. We are currently running a solr setup consisting of the following:
+        3-node SolrCloud with 8gb ram and 4 cores each, 2 shards, 50M docs, 10GB index. Help me migrate this to respective infra needed to run this
+        migrated to OpenSearch.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response shall be close to the following recommendations:
+          - 2 - 4 OpenSearch shards
+          - replicas: 1
+          - 3 OpenSearch nodes with 8gb ram and 4 cores each
+          - 4gb jvm heap per node
+          - SolrCloud setup needs migration to OpenSearch ClusterManager
+          - if ZooKeeper was mentioned as SolrCloud dependency, that is not valid for OpenSearch, this dependency is not needed anymore
+        metric: sizing-recommendation

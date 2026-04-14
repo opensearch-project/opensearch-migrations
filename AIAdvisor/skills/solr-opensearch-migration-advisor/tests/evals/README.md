@@ -22,3 +22,24 @@
 - `source .venv/bin/activate`
 - copy the `.env.example` file to `.env` file and fill in properties
 - run evals: `./scripts/run_evals.sh`
+
+
+### PROMPTFOO LLM JUDGE PARSING ERRORS
+- sometimes you might see the error message "Could not extract JSON from llm-rubric response". This means that
+  the judge does not return valid json. To alleviate this two steps:
+  - prefix `Give your evaluation response in json format, and properly escape chars where this is needed.` to the rubric
+  - add response_format in llm judge config, such as:
+  ```yaml
+  defaultTest:
+    options:
+      provider:
+        id: bedrock:us.anthropic.claude-sonnet-4-5-20250929-v1:0
+        config:
+          region: us-east-1
+          max_tokens: 256
+          # Prohibit error messages 'Could not extract JSON from llm-rubric response':
+          # https://github.com/promptfoo/promptfoo/issues/2084
+          response_format: json_object
+  ```
+
+
