@@ -16,15 +16,13 @@ from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode, load_k8s_config
+from .argo_utils import stop_and_delete_all
 from .crd_utils import (
     CRD_GROUP, CRD_VERSION, DISPLAY_NAMES, RESETTABLE_PLURALS,
     cached_crd_completions, has_glob, list_migration_resources, match_names,
 )
 
 logger = logging.getLogger(__name__)
-
-ARGO_GROUP = 'argoproj.io'
-ARGO_VERSION = 'v1alpha1'
 
 
 def _resettable_names(namespace):
@@ -95,39 +93,7 @@ def _wait_until_gone(namespace, plural, names, timeout=120):
 
 def _stop_and_delete_workflows(namespace):
     """Stop and delete all Argo workflows in the namespace via k8s API."""
-    custom = client.CustomObjectsApi()
-    try:
-        items = custom.list_namespaced_custom_object(
-            group=ARGO_GROUP, version=ARGO_VERSION,
-            namespace=namespace, plural='workflows'
-        ).get('items', [])
-    except ApiException:
-        return
-
-    for wf in items:
-        name = wf['metadata']['name']
-        try:
-            custom.patch_namespaced_custom_object(
-                group=ARGO_GROUP, version=ARGO_VERSION,
-                namespace=namespace, plural='workflows', name=name,
-                body={'spec': {'shutdown': 'Stop'}},
-            )
-            click.echo(f"  ✓ Stopped workflow '{name}'")
-        except ApiException as e:
-            if e.status != 404:
-                click.echo(f"  ⚠ Could not stop workflow '{name}'", err=True)
-
-        try:
-            custom.delete_namespaced_custom_object(
-                group=ARGO_GROUP, version=ARGO_VERSION,
-                namespace=namespace, plural='workflows', name=name,
-            )
-            click.echo(f"  ✓ Deleted workflow '{name}'")
-        except ApiException as e:
-            if e.status != 404:
-                click.echo(
-                    f"  ✗ Failed to delete workflow '{name}'", err=True
-                )
+    stop_and_delete_all(namespace)
 
 
 def _find_resource_by_name(namespace, name):

@@ -15,37 +15,21 @@ import tempfile
 import time
 
 import click
-from kubernetes import client
-from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode, load_k8s_config
+from .argo_utils import get_workflow, list_workflows, stop_and_delete
 
 logger = logging.getLogger(__name__)
 
-ARGO_GROUP = 'argoproj.io'
-ARGO_VERSION = 'v1alpha1'
 DEFAULT_WORKFLOW_NAME = 'migration-workflow'
 
 
 def _get_workflow_config(namespace):
     """Read the denormalized config from the running Argo workflow's parameters."""
-    custom = client.CustomObjectsApi()
-    wf = None
-    try:
-        wf = custom.get_namespaced_custom_object(
-            group=ARGO_GROUP, version=ARGO_VERSION,
-            namespace=namespace, plural='workflows', name=DEFAULT_WORKFLOW_NAME
-        )
-    except ApiException as e:
-        if e.status == 404:
-            items = custom.list_namespaced_custom_object(
-                group=ARGO_GROUP, version=ARGO_VERSION,
-                namespace=namespace, plural='workflows'
-            ).get('items', [])
-            if items:
-                wf = items[0]
-        else:
-            raise
+    wf = get_workflow(namespace, DEFAULT_WORKFLOW_NAME)
+    if not wf:
+        items = list_workflows(namespace)
+        wf = items[0] if items else None
 
     if not wf:
         return None, None
@@ -59,22 +43,7 @@ def _get_workflow_config(namespace):
 
 def _stop_and_delete_workflow(namespace, wf_name):
     """Stop and delete a specific Argo workflow."""
-    custom = client.CustomObjectsApi()
-    try:
-        custom.patch_namespaced_custom_object(
-            group=ARGO_GROUP, version=ARGO_VERSION,
-            namespace=namespace, plural='workflows', name=wf_name,
-            body={'spec': {'shutdown': 'Stop'}},
-        )
-    except ApiException:
-        pass
-    try:
-        custom.delete_namespaced_custom_object(
-            group=ARGO_GROUP, version=ARGO_VERSION,
-            namespace=namespace, plural='workflows', name=wf_name,
-        )
-    except ApiException:
-        pass
+    stop_and_delete(namespace, wf_name)
 
 
 def _submit_via_config_processor(namespace, config):

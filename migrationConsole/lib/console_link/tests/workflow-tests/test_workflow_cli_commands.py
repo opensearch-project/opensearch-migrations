@@ -10,9 +10,10 @@ from console_link.workflow.models.config import WorkflowConfig
 class TestWorkflowCLICommands:
     """Test suite for workflow CLI command integration."""
 
+    @patch('console_link.workflow.commands.submit._remove_existing_workflow')
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
-    def test_submit_command_basic(self, mock_store_class, mock_subprocess):
+    def test_submit_command_basic(self, mock_store_class, mock_subprocess, mock_remove):
         """Test basic submit command execution."""
         # Mock subprocess to avoid actual Kubernetes submission
         mock_subprocess.return_value = Mock(
@@ -41,10 +42,11 @@ class TestWorkflowCLICommands:
         # Check for workflow name pattern from test scripts (test-workflow-<timestamp>)
         assert 'test-workflow-' in result.output
 
+    @patch('console_link.workflow.commands.submit._remove_existing_workflow')
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowService')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
-    def test_submit_command_with_wait(self, mock_store_class, mock_service_class, mock_subprocess):
+    def test_submit_command_with_wait(self, mock_store_class, mock_service_class, mock_subprocess, mock_remove):
         """Test submit command with --wait flag."""
         # Mock subprocess to avoid actual Kubernetes submission
         mock_subprocess.return_value = Mock(
@@ -311,9 +313,10 @@ class TestWorkflowCLICommands:
         assert result.exit_code != 0
         assert "Missing argument 'TASK_NAMES...'" in result.output
 
+    @patch('console_link.workflow.commands.submit._remove_existing_workflow')
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
-    def test_submit_command_with_config_injection(self, mock_store_class, mock_subprocess):
+    def test_submit_command_with_config_injection(self, mock_store_class, mock_subprocess, mock_remove):
         """Test submit command with parameter injection from config."""
         # Mock subprocess to avoid actual Kubernetes submission
         mock_subprocess.return_value = Mock(

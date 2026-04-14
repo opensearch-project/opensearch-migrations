@@ -5,7 +5,6 @@ resubmitted — preserving existing CRD-owned resources (proxy, Kafka, etc.).
 """
 
 import logging
-import os
 import subprocess
 import click
 
@@ -13,7 +12,7 @@ from ..models.utils import ExitCode
 from ..models.workflow_config_store import WorkflowConfigStore
 from ..services.workflow_service import WorkflowService
 from ..services.script_runner import ScriptRunner
-from .suspend_steps import argo_stop, delete_workflow, workflow_exists
+from .argo_utils import workflow_exists, stop_workflow, delete_workflow
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME
 
 logger = logging.getLogger(__name__)
@@ -48,17 +47,17 @@ def _handle_workflow_wait(
         click.echo(f"\nError monitoring workflow: {str(e)}", err=True)
 
 
-def _remove_existing_workflow(workflow_name, namespace, argo_server, token, insecure):
+def _remove_existing_workflow(workflow_name, namespace):
     """Stop and delete an existing workflow if one is found. Returns True if removed."""
-    if not workflow_exists(workflow_name, namespace, argo_server, token, insecure):
+    if not workflow_exists(namespace, workflow_name):
         return False
 
     click.echo(f"Existing workflow '{workflow_name}' found — replacing...")
-    if argo_stop(workflow_name, namespace, argo_server, token, insecure):
+    if stop_workflow(namespace, workflow_name):
         click.echo("  ✓ Stopped")
     else:
         click.echo("  ⚠ Could not stop (may already be finished)")
-    if delete_workflow(workflow_name, namespace, argo_server, token, insecure):
+    if delete_workflow(namespace, workflow_name):
         click.echo("  ✓ Deleted")
     else:
         click.echo("  ⚠ Could not delete")
@@ -99,20 +98,9 @@ def _remove_existing_workflow(workflow_name, namespace, argo_server, token, inse
     default=DEFAULT_WORKFLOW_NAME,
     help='Name of the workflow to replace if it already exists'
 )
-@click.option(
-    '--argo-server',
-    default=lambda: os.environ.get(
-        'ARGO_SERVER',
-        f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}:"
-        f"{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}"
-    ),
-    help='Argo Server URL'
-)
-@click.option('--insecure', is_flag=True, default=False, help='Skip TLS verification for Argo server')
-@click.option('--token', default=None, help='Bearer token for Argo authentication')
 @click.pass_context
 def submit_command(ctx, namespace, wait, timeout, wait_interval, session,
-                   workflow_name, argo_server, insecure, token):
+                   workflow_name):
     """Submit a migration workflow using the config processor.
 
     If a workflow already exists, it is automatically stopped, deleted, and
@@ -137,13 +125,16 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session,
     click.echo("NOT checking if all secrets have been created.  Run `workflow configure edit` to confirm")
 
     try:
+        from ..models.utils import load_k8s_config
+        load_k8s_config()
+
         runner = ScriptRunner()
         config_yaml = config.raw_yaml
 
         click.echo(f"Initializing workflow from session: {session}")
 
         # Remove existing workflow if present
-        _remove_existing_workflow(workflow_name, namespace, argo_server, token, insecure)
+        _remove_existing_workflow(workflow_name, namespace)
 
         # Submit workflow
         click.echo(f"Submitting workflow to namespace: {namespace}")

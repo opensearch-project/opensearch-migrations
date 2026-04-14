@@ -185,7 +185,9 @@ class TestResetCommandDelete:
     @patch('console_link.workflow.commands.reset._delete_crd')
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset.list_migration_resources')
-    def test_reset_all_default_disables_proxy_capture(self, mock_list, mock_k8s, mock_delete, mock_wait, mock_headless, mock_wf):
+    def test_reset_all_default_disables_proxy_capture(
+        self, mock_list, mock_k8s, mock_delete, mock_wait, mock_headless, mock_wf
+    ):
         mock_list.return_value = [
             ('capturedtraffics', 'source-proxy', 'Ready', []),
             ('trafficreplays', 'src-tgt-replayer', 'Ready', ['source-proxy']),
