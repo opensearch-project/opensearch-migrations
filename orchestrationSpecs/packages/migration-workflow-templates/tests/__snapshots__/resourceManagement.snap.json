@@ -679,61 +679,6 @@
         }
       },
       {
-        "name": "waitforteardown",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            },
-            {
-              "name": "resourceKind"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
-          "action": "get",
-          "successCondition": "status.phase == Teardown"
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "patchteardown",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            },
-            {
-              "name": "resourceKind"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Teardown\n",
-          "action": "patch",
-          "flags": [
-            "--type",
-            "merge",
-            "--subresource=status"
-          ]
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
         "name": "patchconfigchecksumannotation",
         "inputs": {
           "parameters": [
@@ -939,64 +884,6 @@
               }
             }
           ]
-        }
-      },
-      {
-        "name": "waitforcrddeletion",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            },
-            {
-              "name": "resourceKind"
-            },
-            {
-              "name": "imageMigrationConsoleLocation"
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy"
-            }
-          ]
-        },
-        "container": {
-          "env": [],
-          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
-          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
-          "command": [
-            "kubectl"
-          ],
-          "args": [
-            "wait",
-            "--for=delete",
-            "{{=inputs.parameters.resourceKind+'.migrations.opensearch.org/'+inputs.parameters.resourceName}}",
-            "--timeout=31536000s"
-          ],
-          "resources": {
-            "limits": {
-              "cpu": "50m",
-              "memory": "64Mi"
-            },
-            "requests": {
-              "cpu": "50m",
-              "memory": "64Mi"
-            }
-          }
-        },
-        "metadata": {
-          "annotations": {
-            "karpenter.sh/do-not-disrupt": "true"
-          }
-        },
-        "retryStrategy": {
-          "retryPolicy": "Always",
-          "backoff": {
-            "duration": "5",
-            "factor": "1"
-          }
-        },
-        "outputs": {
-          "parameters": []
         }
       },
       {

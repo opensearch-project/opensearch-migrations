@@ -358,42 +358,6 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
 
-    // ── Teardown signal templates ───────────────────────────────────────
-
-    .addTemplate("waitForTeardown", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("resourceKind", typeToken<string>())
-        .addWaitForExistingResource(b => b
-            .setDefinition({
-                resource: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: b.inputs.resourceKind,
-                    name: b.inputs.resourceName
-                },
-                conditions: {successCondition: "status.phase == Teardown"}
-            })
-        )
-    )
-
-
-    .addTemplate("patchTeardown", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("resourceKind", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "patch",
-                flags: ["--type", "merge", "--subresource=status"],
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: b.inputs.resourceKind,
-                    metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Teardown"}
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
     // ── Config checksum annotation patch (for resources we don't own) ────
 
     .addTemplate("patchConfigChecksumAnnotation", t => t
@@ -517,31 +481,6 @@ export const ResourceManagement = WorkflowBuilder.create({
 
 
     // ── CRD deletion templates ──────────────────────────────────────────
-
-    .addTemplate("waitForCrdDeletion", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("resourceKind", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addContainer(b => b
-            .addImageInfo(
-                b.inputs.imageMigrationConsoleLocation,
-                b.inputs.imageMigrationConsolePullPolicy
-            )
-            .addCommand(["kubectl"])
-            .addArgs([
-                "wait", "--for=delete",
-                expr.concat(
-                    b.inputs.resourceKind,
-                    expr.literal(".migrations.opensearch.org/"),
-                    b.inputs.resourceName
-                ),
-                "--timeout=31536000s"
-            ])
-            .addResources({limits: {cpu: "50m", memory: "64Mi"}, requests: {cpu: "50m", memory: "64Mi"}})
-        )
-        .addRetryParameters({retryPolicy: "Always", backoff: {duration: "5", factor: "1"}})
-    )
-
 
     .addTemplate("deleteCrd", t => t
         .addRequiredInput("resourceName", typeToken<string>())

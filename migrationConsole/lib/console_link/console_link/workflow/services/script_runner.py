@@ -168,7 +168,8 @@ class ScriptRunner:
             IOError: If sample.yaml exists but cannot be read
         """
         logger.info("Getting sample configuration")
-        sample_path = self.script_dir / "sample.yaml"
+        override = os.environ.get("MIGRATION_SAMPLE_CONFIG_PATH")
+        sample_path = Path(override) if override else self.script_dir / "sample.yaml"
 
         if not sample_path.exists():
             logger.info(f"Sample configuration not found at {sample_path}, using blank starter config")

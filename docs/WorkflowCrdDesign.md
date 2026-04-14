@@ -39,7 +39,6 @@ Argo Workflow
 3. k8s deletes RFS Deployment → RFS pods drain and terminate
 4. RFS fully gone → Coordinator pods drain and terminate
 5. Coordinator fully gone → CRD deleted
-6. Workflow's `waitForCrdDeletion` resolves
 
 **Cross-CRD ordering (CLI-managed):**
 1. Delete TrafficReplay CRDs → replayer pods die (no more traffic to proxy)
@@ -78,11 +77,11 @@ The `setupSingleProxy` template races two teardown signals:
 ```
 [parallel — first signal wins]:
   a. kafkaGonePath:
-     → waitForCrdDeletion(KafkaCluster)
+     → deleteCrd(KafkaCluster)
      → redeployProxyNoCapture (rolling update)
-     → waitForCrdDeletion(CapturedTraffic)
+     → deleteCrd(CapturedTraffic)
   b. directTeardown:
-     → waitForCrdDeletion(CapturedTraffic)
+     → deleteCrd(CapturedTraffic)
 ```
 
 - **Path (a) wins** when Kafka is deleted first → proxy transitions to non-capture, then waits for full teardown
