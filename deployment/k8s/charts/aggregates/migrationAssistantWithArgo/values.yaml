@@ -296,7 +296,7 @@ charts:
 
 
   strimzi-kafka-operator:
-    version: 0.50.0
+    version: 0.50.1
     repository: "https://strimzi.io/charts/"
     values:
       storageType: ephemeral # strimzi is stateless
@@ -411,6 +411,8 @@ charts:
     version: "0.49.0"
     repository: "https://fluent.github.io/helm-charts"
     values:
+      image:
+        tag: "4.0.4"
       resources:
         requests: { cpu: 50m, memory: 32Mi }
         limits:   { cpu: 200m, memory: 64Mi }
@@ -607,6 +609,8 @@ charts:
           requests: { cpu: 100m, memory: 128Mi }
           limits:   { cpu: 500m, memory: 256Mi }
         sidecar:
+          image:
+            tag: 1.30.5
           dashboards:
             resources:
               requests: { cpu: 50m, memory: 100Mi }
