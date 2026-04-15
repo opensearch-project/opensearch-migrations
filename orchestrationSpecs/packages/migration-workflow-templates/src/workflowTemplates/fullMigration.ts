@@ -24,6 +24,7 @@ import {
     expr,
     IMAGE_PULL_POLICY,
     InputParamDef,
+    INLINE,
     INTERNAL,
     makeParameterLoop,
     selectInputsFieldsAsExpressionRecord,
@@ -34,7 +35,7 @@ import {
 import {DocumentBulkLoad} from "./documentBulkLoad";
 import {MetadataMigration} from "./metadataMigration";
 import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
-import {ResourceManagement} from "./resourceManagement";
+import {inlinePatchResourceStatus, ResourceManagement} from "./resourceManagement";
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
@@ -138,7 +139,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "CaptureProxy"]))
 
         .addSteps(b => b
-            .addStep("setupProxy", SetupCapture, "setupProxyWithLifecycle", c =>
+            .addStep("setupProxy", SetupCapture, "reconcileCapturedTraffic", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     proxyConfig: b.inputs.proxyConfig,
@@ -331,7 +332,21 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
-        .addSteps(b => b
+        .addSteps(b => {
+            const patchSnapshotMigration = inlinePatchResourceStatus({
+                resourceKind: expr.literal("SnapshotMigration"),
+                resourceName: b.inputs.resourceName,
+                phase: expr.literal("Completed"),
+                extraStatusFields: {
+                    configChecksum: b.inputs.configChecksum,
+                    checksumForReplayer: expr.dig(
+                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                        ["checksumForReplayer"], ""
+                    ),
+                }
+            });
+
+            return b
             .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
                 c.register({
                     resourceKind: expr.literal("SnapshotMigration"),
@@ -427,21 +442,14 @@ export const FullMigration = WorkflowBuilder.create({
                     ))}),
                 }
             )
-            .addStep("patchSnapshotMigration", ResourceManagement, "patchSnapshotMigrationReady", c =>
-                c.register({
-                    resourceName: b.inputs.resourceName,
-                    configChecksum: b.inputs.configChecksum,
-                    checksumForReplayer: expr.dig(
-                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
-                        ["checksumForReplayer"], ""
-                    ),
-                }),
+            .addStep("patchSnapshotMigrationCompleted", INLINE, patchSnapshotMigration.inlineTemplate,
+                c => c.register(patchSnapshotMigration.registerValues),
                 {when: c => ({templateExp: expr.not(expr.and(
                     expr.equals(c.checkPhase.outputs.phase, "Completed"),
                     expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
                 ))})}
             )
-        )
+        })
     )
 
 
@@ -463,7 +471,17 @@ export const FullMigration = WorkflowBuilder.create({
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "TrafficReplayer"]))
 
-        .addSteps(b => b
+        .addSteps(b => {
+            const markReplayReady = inlinePatchResourceStatus({
+                resourceKind: expr.literal("TrafficReplay"),
+                resourceName: b.inputs.name,
+                phase: expr.literal("Ready"),
+                extraStatusFields: {
+                    configChecksum: b.inputs.configChecksum,
+                }
+            });
+
+            return b
             .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
                 c.register({
                     resourceKind: expr.literal("TrafficReplay"),
@@ -475,6 +493,12 @@ export const FullMigration = WorkflowBuilder.create({
                         ...selectInputsForRegister(b, c),
                         resourceName: expr.concat(
                             expr.asString(expr.get(c.item, "source")),
+                            expr.literal("-"),
+                            expr.dig(
+                                expr.deserializeRecord(b.inputs.targetConfig),
+                                ["label"],
+                                ""
+                            ),
                             expr.literal("-"),
                             expr.asString(expr.get(c.item, "snapshot"))
                         ),
@@ -562,19 +586,14 @@ export const FullMigration = WorkflowBuilder.create({
                     expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
                 ))})}
             )
-            .addStep("markReady", ResourceManagement, "patchResourcePhase", c =>
-                c.register({
-                    resourceKind: expr.literal("TrafficReplay"),
-                    resourceName: b.inputs.name,
-                    phase: expr.literal("Ready"),
-                    configChecksum: b.inputs.configChecksum,
-                }),
+            .addStep("patchTrafficReplayReady", INLINE, markReplayReady.inlineTemplate,
+                c => c.register(markReplayReady.registerValues),
                 {when: c => ({templateExp: expr.not(expr.and(
                     expr.equals(c.checkPhase.outputs.phase, "Ready"),
                     expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
                 ))})}
             )
-        )
+        })
     )
 
 
@@ -680,14 +699,11 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: expr.concat(
                         expr.get(c.item, "sourceLabel"),
                         expr.literal("-"),
-                        // TODO/BUG - need to fix this in the type system.
-                        // The following line is required, but won't type check w/out the any cast!
                         expr.dig(
                             expr.deserializeRecord(expr.get(c.item, "targetConfig")),
                             ["label"],
                             ""
                         ),
-                        // expr.get(expr.get(c.item, "targetConfig"), "label"),
                         expr.literal("-"),
                         expr.get(c.item, "label")
                     ),

@@ -402,7 +402,7 @@ export const Replayer = WorkflowBuilder.create({
                     b.inputs.resolvedKafkaConnection,
                     b.inputs.resolvedKafkaListenerName,
                     b.inputs.resolvedKafkaAuthType,
-                  ) as any,
+                  ),
                 ),
               ),
               resources: expr.serialize(

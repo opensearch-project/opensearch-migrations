@@ -9,10 +9,11 @@ import {
     NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
-import {ResourceManagement} from "./resourceManagement";
+import {inlinePatchResourceStatus, ResourceManagement} from "./resourceManagement";
 import {
     BaseExpression,
     expr,
+    INLINE,
     INTERNAL,
     selectInputsForRegister, Serialized,
     typeToken,
@@ -206,7 +207,23 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("configChecksum", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
-        .addSteps(b => b
+        .addSteps(b => {
+            const patchDataSnapshot = inlinePatchResourceStatus({
+                resourceKind: expr.literal("DataSnapshot"),
+                resourceName: expr.concat(
+                    expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
+                    expr.literal("-"),
+                    expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
+                ),
+                phase: expr.literal("Completed"),
+                extraStatusFields: {
+                    snapshotName: expr.jsonPathStrict(b.inputs.snapshotConfig, "snapshotName"),
+                    configChecksum: b.inputs.configChecksum,
+                    checksumForSnapshotMigration: b.inputs.configChecksum,
+                }
+            });
+
+            return b
             .addStep("createSnapshot", INTERNAL, "runCreateSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
@@ -228,18 +245,11 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     targetK8sLabel: b.inputs.targetLabel,
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
                 }))
-
-            .addStep("patchDataSnapshot", ResourceManagement, "patchDataSnapshotReady", c =>
-                c.register({
-                    resourceName: expr.concat(
-                        expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
-                        expr.literal("-"),
-                        expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
-                    ),
-                    snapshotName: expr.jsonPathStrict(b.inputs.snapshotConfig, "snapshotName"),
-                    configChecksum: b.inputs.configChecksum,
-                }))
-        )
+            .addStep("patchDataSnapshotCompleted",
+                INLINE,
+                patchDataSnapshot.inlineTemplate,
+                c => c.register(patchDataSnapshot.registerValues))
+        })
         .addSynchronization(c => ({
             semaphores: [{
                 configMapKeyRef: {

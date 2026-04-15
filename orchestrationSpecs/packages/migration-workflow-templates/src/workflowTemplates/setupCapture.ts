@@ -1,6 +1,7 @@
 import {
     BaseExpression,
     expr,
+    INLINE,
     INTERNAL,
     makeDirectTypeProxy,
     makeStringTypeProxy,
@@ -20,7 +21,7 @@ import {
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {z} from "zod";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
-import {ResourceManagement} from "./resourceManagement";
+import {inlinePatchResourceStatus, ResourceManagement} from "./resourceManagement";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -711,7 +712,7 @@ export const SetupCapture = WorkflowBuilder.create({
         })
     )
 
-    .addTemplate("setupProxyWithLifecycle", t => t
+    .addTemplate("reconcileCapturedTraffic", t => t
         .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("kafkaTopicName", typeToken<string>())
@@ -724,7 +725,29 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("podReplicas", typeToken<number>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "CaptureProxy"]))
 
-        .addSteps(b => b
+        .addSteps(b => {
+            const markRunning = inlinePatchResourceStatus({
+                resourceKind: expr.literal("CapturedTraffic"),
+                resourceName: b.inputs.proxyName,
+                phase: expr.literal("Running"),
+            });
+            const markReady = inlinePatchResourceStatus({
+                resourceKind: expr.literal("CapturedTraffic"),
+                resourceName: b.inputs.proxyName,
+                phase: expr.literal("Ready"),
+                extraStatusFields: {
+                    configChecksum: b.inputs.configChecksum,
+                    checksumForSnapshot: b.inputs.checksumForSnapshot,
+                    checksumForReplayer: b.inputs.checksumForReplayer,
+                }
+            });
+            const markError = inlinePatchResourceStatus({
+                resourceKind: expr.literal("CapturedTraffic"),
+                resourceName: b.inputs.proxyName,
+                phase: expr.literal("Error"),
+            });
+
+            return b
             .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
                 c.register({
                     resourceKind: expr.literal("CapturedTraffic"),
@@ -785,12 +808,8 @@ export const SetupCapture = WorkflowBuilder.create({
                     expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
                 ))})}
             )
-            .addStep("markRunning", ResourceManagement, "patchResourcePhase", c =>
-                c.register({
-                    resourceKind: expr.literal("CapturedTraffic"),
-                    resourceName: b.inputs.proxyName,
-                    phase: expr.literal("Running"),
-                }),
+            .addStep("patchCapturedTrafficRunning", INLINE, markRunning.inlineTemplate,
+                c => c.register(markRunning.registerValues),
                 {when: c => ({templateExp: expr.not(expr.and(
                     expr.equals(c.checkPhase.outputs.phase, "Ready"),
                     expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
@@ -849,32 +868,21 @@ export const SetupCapture = WorkflowBuilder.create({
                     continueOn: {failed: true}
                 }
             )
-            .addStep("markReady", ResourceManagement, "patchResourcePhase", c =>
-                c.register({
-                    resourceKind: expr.literal("CapturedTraffic"),
-                    resourceName: b.inputs.proxyName,
-                    phase: expr.literal("Ready"),
-                    configChecksum: b.inputs.configChecksum,
-                    checksumForSnapshot: b.inputs.checksumForSnapshot,
-                    checksumForReplayer: b.inputs.checksumForReplayer,
-                }),
+            .addStep("patchCapturedTrafficReady", INLINE, markReady.inlineTemplate,
+                c => c.register(markReady.registerValues),
                 {when: c => ({templateExp: expr.or(
                     expr.equals(c.setupProxy.status, "Succeeded"),
                     expr.equals(c.setupProxyWithConfiguredKafka.status, "Succeeded")
                 )})}
             )
-            .addStep("markError", ResourceManagement, "patchResourcePhase", c =>
-                c.register({
-                    resourceKind: expr.literal("CapturedTraffic"),
-                    resourceName: b.inputs.proxyName,
-                    phase: expr.literal("Error"),
-                }),
+            .addStep("patchCapturedTrafficError", INLINE, markError.inlineTemplate,
+                c => c.register(markError.registerValues),
                 {when: c => ({templateExp: expr.or(
                     expr.equals(c.setupProxy.status, "Failed"),
                     expr.equals(c.setupProxyWithConfiguredKafka.status, "Failed")
                 )})}
             )
-        )
+        })
     )
 
 

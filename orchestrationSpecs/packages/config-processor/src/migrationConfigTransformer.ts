@@ -407,7 +407,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             [[m.sourceLabel, m.label].join('-'), m.configChecksum]
         ));
         const migrationChecksumForReplayer = new Map(migrationsWithChecksums.map(m =>
-            [[m.sourceLabel, m.label].join('-'), m.checksumForReplayer]
+            [[m.sourceLabel, m.targetConfig.label, m.label].join('-'), m.checksumForReplayer]
         ));
 
         const replaysWithChecksums = trafficReplays.map(r => ({
@@ -417,7 +417,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             configChecksum: cs(r.replayerConfig, r.toTarget, proxyChecksumForReplayer.get(r.fromProxy)),
             dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).map(dep => ({
                 ...dep,
-                configChecksum: migrationChecksumForReplayer.get([dep.source, dep.snapshot].join('-')) ?? '',
+                configChecksum: migrationChecksumForReplayer.get([dep.source, r.toTarget.label, dep.snapshot].join('-')) ?? '',
             })),
         }));
 

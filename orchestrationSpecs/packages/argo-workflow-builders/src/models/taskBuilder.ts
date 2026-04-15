@@ -72,6 +72,10 @@ function reduceLoopWith<
     return typeof loopWith === 'function' ? loopWith(tasks) : loopWith;
 }
 
+function hasNonEmptyFields(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && Object.keys(value).length > 0;
+}
+
 // Sentinel to guarantee that the parameters have been pushed back to the callback
 const PARAMS_PUSHED = Symbol("params_pushed");
 type ParamsPushedSymbol = typeof PARAMS_PUSHED;
@@ -429,9 +433,6 @@ export abstract class TaskBuilder<
             const args = restArgs;
             const {paramsFn, opts} = unpackParams<any, S, Label, any>(args);
             const loopWith = reduceLoopWith(opts?.loopWith, this.getTaskOutputsByTaskName());
-            
-            // Import TemplateBuilder dynamically to avoid circular dependency
-            const {TemplateBuilder} = require("./templateBuilder");
             const templateBuilder = new TemplateBuilder(this.parentWorkflowScope, {}, {}, {});
             const bodyBuilder = inlineFn(templateBuilder);
             const inputs = bodyBuilder.inputsScope || {};
@@ -589,7 +590,7 @@ export abstract class TaskBuilder<
             inline: {
                 ...(bodyBuilder.inputsScope ? {inputsScope: bodyBuilder.inputsScope} : {}),
                 ...body,
-                ...(bodyBuilder.retryParameters ? {retryStrategy: bodyBuilder.retryParameters} : {})
+                ...(hasNonEmptyFields(bodyBuilder.retryParameters) ? {retryStrategy: bodyBuilder.retryParameters} : {})
             },
             ...(loopWith ? {withLoop: loopWith} : {}),
             args: params
