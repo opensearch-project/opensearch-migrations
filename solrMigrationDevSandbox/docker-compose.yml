@@ -97,6 +97,7 @@ services:
     volumes:
       - transform-dist:/transforms:ro
       - ./config/solr/solrconfig.xml:/solr-config/solrconfig.xml:ro
+      - shim-reports-solr:/var/shim/reports
     depends_on:
       solr:
         condition: service_healthy
@@ -129,6 +130,8 @@ services:
       - "5000"
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
+      - --reportingConfig
+      - '[{"FileSystemReportingSink":{"outputDir":"/var/shim/reports","includeRequestBody":true,"includeResponseBody":true}}]'
 
   # Dual-target shim (OpenSearch primary): sends to both, returns OpenSearch
   # response, validates against Solr. Port 18084.
@@ -141,6 +144,7 @@ services:
     volumes:
       - transform-dist:/transforms:ro
       - ./config/solr/solrconfig.xml:/solr-config/solrconfig.xml:ro
+      - shim-reports-os:/var/shim/reports
     depends_on:
       solr:
         condition: service_healthy
@@ -173,6 +177,10 @@ services:
       - "5000"
       - --otelCollectorEndpoint
       - http://otel-lgtm:4317
+      - --reportingConfig
+      - '[{"FileSystemReportingSink":{"outputDir":"/var/shim/reports","includeRequestBody":true,"includeResponseBody":true}}]'
 
 volumes:
   transform-dist:
+  shim-reports-solr:
+  shim-reports-os:
