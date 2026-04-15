@@ -65,8 +65,6 @@ jobs:
           job_timeout_minutes: "120"
 
   solr-8x-k8s-local-test:
-    if: |
-      contains(github.event.pull_request.labels.*.name, 'run-solr-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -215,14 +213,37 @@ jobs:
     timeout-minutes: 180
     concurrency:
       group: ${{ github.workflow }}-eks-cdc-only-integ-test-${{ github.event.pull_request.number || github.run_id }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
       - uses: actions/checkout@v6
       - name: Jenkins Job Trigger and Monitor
         uses: ./.github/actions/jenkins-trigger
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
-          job_name: "pr-eks-cdc-only-integ-test"
+          job_name: ${{ github.event_name == 'push' && 'main-eks-cdc-only-integ-test' || 'pr-eks-cdc-only-integ-test' }}
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
+          jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
+          jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
+          job_timeout_minutes: "180"
+
+  eks-cdc-full-e2e-generate-test:
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'run-cdc-tests')
+    needs: [get-require-approval, sanitize-input]
+    environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    concurrency:
+      group: ${{ github.workflow }}-eks-cdc-full-e2e-generate-test-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: ${{ github.event_name != 'push' }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Jenkins Job Trigger and Monitor
+        uses: ./.github/actions/jenkins-trigger
+        with:
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: ${{ github.event_name == 'push' && 'main-eks-cdc-full-e2e-generate-test' || 'pr-eks-cdc-full-e2e-generate-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
@@ -288,6 +309,7 @@ jobs:
       - eks-aoss-vector-integ-test
       - eks-byos-integ-test
       - eks-cdc-only-integ-test
+      - eks-cdc-full-e2e-generate-test
       - eks-cfn-create-vpc-test
       - eks-cfn-import-vpc-test
     if: always()

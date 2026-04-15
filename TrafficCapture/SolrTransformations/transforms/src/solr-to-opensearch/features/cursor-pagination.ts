@@ -11,6 +11,9 @@
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext, ResponseContext, JavaMap } from '../context';
 
+/** Solr query params this feature handles. */
+export const params = ['cursorMark'];
+
 const CURSOR_MARK_START = '*';
 
 /** Solr uniqueKey field name — maps to OpenSearch's _id. */
@@ -99,9 +102,9 @@ function decodeCursorMark(token: string): any[] {
  * Maps Solr's uniqueKey field "id" to OpenSearch's "_id".
  */
 function parseSolrSort(sortStr: string): JavaMap[] {
-  // Handle + as space — URL-encoded sort params (e.g. "price+asc") use + for spaces.
-  // Solr field names cannot contain spaces, so this is safe.
-  return sortStr.replaceAll('+', ' ').split(',').map((clause) => {
+  // parseParams() in context.ts already decodes + as space, so no manual
+  // replacement needed here.
+  return sortStr.split(',').map((clause) => {
     const [field, dir] = clause.trim().split(/\s+/);
     const osField = field === SOLR_UNIQUE_KEY ? OS_UNIQUE_KEY : field;
     return new Map([[osField, (dir || 'asc').toLowerCase()]]);

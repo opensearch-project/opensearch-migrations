@@ -19,6 +19,7 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {CONTAINER_NAMES} from "../containerNames";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
@@ -160,7 +161,7 @@ function getReplayerDeploymentManifest
 }): Deployment {
     const isScramAuth = expr.equals(args.kafkaAuthType, expr.literal("scram-sha-512"));
     const baseContainerDefinition = {
-        name: "replayer",
+        name: CONTAINER_NAMES.REPLAYER,
         image: makeStringTypeProxy(args.replayerImageName),
         imagePullPolicy: makeStringTypeProxy(args.replayerImagePullPolicy),
         args: [

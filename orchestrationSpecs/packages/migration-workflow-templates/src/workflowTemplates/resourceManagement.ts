@@ -142,8 +142,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     successCondition: expr.concat(
                         expr.literal("status.listeners, metadata.annotations.migration-configChecksum == "),
                         b.inputs.configChecksum
-                    ),
-                    failureCondition: "status.conditions.0.type == NotReady"
+                    )
                 }
             })
             .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)

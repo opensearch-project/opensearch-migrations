@@ -68,7 +68,8 @@ public class SolrSnapshotToOpenSearchTest {
 
     static Stream<Arguments> solr8ToOpenSearch3() {
         return Stream.of(
-            Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V3_5_0)
+            Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V3_5_0, false),
+            Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V3_5_0, true)
         );
     }
 
@@ -76,30 +77,27 @@ public class SolrSnapshotToOpenSearchTest {
      * Tests the full RfsMigrateDocuments CLI path: detects Solr version,
      * reads backup from local dir, fetches schema from source, migrates docs.
      */
-    @ParameterizedTest(name = "{0} → {1}")
+    @ParameterizedTest(name = "{0} → {1} (cloud={2})")
     @MethodSource("solr8ToOpenSearch3")
     void snapshotBasedDocumentMigration(
         SolrClusterContainer.SolrVersion solrVersion,
-        SearchClusterContainer.ContainerVersion targetVersion
+        SearchClusterContainer.ContainerVersion targetVersion,
+        boolean cloudMode
     ) throws Exception {
         try (
-            var solr = new SolrClusterContainer(solrVersion);
+            var solr = createSolr(solrVersion, cloudMode);
             var target = new SearchClusterContainer(targetVersion)
         ) {
             solr.start();
             target.start();
 
-            // Create collection and index documents
-            createSolrCore(solr, COLLECTION_NAME);
+            createCollection(solr, COLLECTION_NAME);
             indexMovieDocuments(solr, COLLECTION_NAME);
 
-            // Create backup (Lucene snapshot)
             var backupDir = createBackup(solr, COLLECTION_NAME);
 
-            // Run RfsMigrateDocuments with Solr source version and coordinator
             int exitCode = SourceTestBase.runProcessAgainstTarget(new String[]{
-                "--source-version", "SOLR 8.11.4",
-                "--source-host", solr.getSolrUrl(),
+                "--source-version", "SOLR_8.11.4",
                 "--snapshot-local-dir", backupDir.toString(),
                 "--snapshot-name", "solr-migration",
                 "--target-host", target.getUrl(),
@@ -108,10 +106,8 @@ public class SolrSnapshotToOpenSearchTest {
             });
             assertEquals(0, exitCode, "RfsMigrateDocuments should exit successfully");
 
-            // Verify documents migrated
             verifyDocCount(target, COLLECTION_NAME, 5);
 
-            // Verify a specific document
             var restClient = new RestClient(
                 ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext()
             );
@@ -130,20 +126,21 @@ public class SolrSnapshotToOpenSearchTest {
     /**
      * Tests the pipeline-level integration directly (no CLI).
      */
-    @ParameterizedTest(name = "pipeline: {0} → {1}")
+    @ParameterizedTest(name = "pipeline: {0} → {1} (cloud={2})")
     @MethodSource("solr8ToOpenSearch3")
     void pipelineLevelMigration(
         SolrClusterContainer.SolrVersion solrVersion,
-        SearchClusterContainer.ContainerVersion targetVersion
+        SearchClusterContainer.ContainerVersion targetVersion,
+        boolean cloudMode
     ) throws Exception {
         try (
-            var solr = new SolrClusterContainer(solrVersion);
+            var solr = createSolr(solrVersion, cloudMode);
             var target = new SearchClusterContainer(targetVersion)
         ) {
             solr.start();
             target.start();
 
-            createSolrCore(solr, COLLECTION_NAME);
+            createCollection(solr, COLLECTION_NAME);
             indexMovieDocuments(solr, COLLECTION_NAME);
 
             var schema = fetchSchema(solr, COLLECTION_NAME);
@@ -168,20 +165,21 @@ public class SolrSnapshotToOpenSearchTest {
      * Tests the full coordinator-based flow: work items are created per shard,
      * acquired via lease, and processed one at a time — matching the ES backfill path.
      */
-    @ParameterizedTest(name = "coordinator: {0} → {1}")
+    @ParameterizedTest(name = "coordinator: {0} → {1} (cloud={2})")
     @MethodSource("solr8ToOpenSearch3")
     void coordinatorBasedMigration(
         SolrClusterContainer.SolrVersion solrVersion,
-        SearchClusterContainer.ContainerVersion targetVersion
+        SearchClusterContainer.ContainerVersion targetVersion,
+        boolean cloudMode
     ) throws Exception {
         try (
-            var solr = new SolrClusterContainer(solrVersion);
+            var solr = createSolr(solrVersion, cloudMode);
             var target = new SearchClusterContainer(targetVersion)
         ) {
             solr.start();
             target.start();
 
-            createSolrCore(solr, COLLECTION_NAME);
+            createCollection(solr, COLLECTION_NAME);
             indexMovieDocuments(solr, COLLECTION_NAME);
 
             var schema = fetchSchema(solr, COLLECTION_NAME);
@@ -208,7 +206,7 @@ public class SolrSnapshotToOpenSearchTest {
                      Clock.systemUTC(),
                      workItemRef::set);
                  var processManager = new LeaseExpireTrigger(w -> {
-                     log.debug("Lease expired for {} (test)", w);
+                     log.atDebug().setMessage("Lease expired for {} (test)").addArgument(w).log();
                  })) {
 
                 var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);
@@ -259,12 +257,126 @@ public class SolrSnapshotToOpenSearchTest {
         }
     }
 
+    /**
+     * Tests migrating multiple Solr collections through the work coordinator.
+     * Each collection is a single shard, so migrateOneShard() should be called
+     * exactly once per collection (2 total), then return NOTHING_DONE.
+     */
+    @ParameterizedTest(name = "multi-collection: {0} → {1} (cloud={2})")
+    @MethodSource("solr8ToOpenSearch3")
+    void multiCollectionMigration(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion,
+        boolean cloudMode
+    ) throws Exception {
+        try (
+            var solr = createSolr(solrVersion, cloudMode);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            createCollection(solr, "movies");
+            createCollection(solr, "books");
+
+            // Index documents
+            indexMovieDocuments(solr, "movies");
+            indexBookDocuments(solr, "books");
+
+            // Fetch schemas
+            var moviesSchema = fetchSchema(solr, "movies");
+            var booksSchema = fetchSchema(solr, "books");
+
+            // Create backups into the same backupRoot directory
+            var backupRoot = createBackup(solr, "movies", "backup_movies");
+            createBackup(solr, "books", "backup_books");
+
+            // Build multi-collection source and metadata factory
+            var schemas = Map.<String, JsonNode>of(
+                "movies", MAPPER.createObjectNode().set("schema", moviesSchema),
+                "books", MAPPER.createObjectNode().set("schema", booksSchema)
+            );
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupRoot, schemas);
+            var documentSource = new SolrMultiCollectionSource(backupRoot, schemas);
+
+            var connectionContext = ConnectionContextTestParams.builder()
+                .host(target.getUrl()).build().toConnectionContext();
+            var targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
+            var targetVersion_ = targetClient.getClusterVersion();
+
+            var coordinatorFactory = new WorkCoordinatorFactory(targetVersion_);
+            var progressCursor = new AtomicReference<WorkItemCursor>();
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+            var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            try (var workCoordinator = coordinatorFactory.get(
+                     new CoordinateWorkHttpClient(connectionContext),
+                     SourceTestBase.TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                     UUID.randomUUID().toString(),
+                     Clock.systemUTC(),
+                     workItemRef::set);
+                 var processManager = new LeaseExpireTrigger(w -> {
+                     log.atDebug().setMessage("Lease expired for {} (test)").addArgument(w).log();
+                 })) {
+
+                var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);
+
+                // Register work items for both collections
+                new ShardWorkPreparer().run(
+                    scopedWorkCoordinator, indexMetadataFactory,
+                    "solr-multi", List.of("movies", "books"), testContext
+                );
+
+                // Process one shard at a time — each call should migrate exactly one shard
+                int shardsProcessed = 0;
+                for (int attempt = 0; attempt < 10; attempt++) {
+                    var runner = DocumentMigrationBootstrap.builder()
+                        .targetClient(targetClient)
+                        .snapshotName("solr-multi")
+                        .maxDocsPerBatch(1000)
+                        .maxBytesPerBatch(Long.MAX_VALUE)
+                        .batchConcurrency(10)
+                        .allowlist(DocumentExceptionAllowlist.empty())
+                        .externalDocumentSource(documentSource)
+                        .workCoordinator(scopedWorkCoordinator)
+                        .maxInitialLeaseDuration(Duration.ofMinutes(5))
+                        .cursorConsumer(progressCursor::set)
+                        .cancellationTriggerConsumer(r -> {})
+                        .build();
+
+                    var status = runner.migrateOneShard(testContext::createReindexContext);
+                    if (status == CompletionStatus.NOTHING_DONE) break;
+                    shardsProcessed++;
+                }
+
+                // 2 collections × 1 shard each = exactly 2 migrateOneShard calls
+                assertThat("Should process exactly 2 shards (one per collection)", shardsProcessed, equalTo(2));
+            }
+
+            verifyDocCount(target, "movies", 5);
+            verifyDocCount(target, "books", 3);
+        }
+    }
+
     // --- Helpers ---
 
-    private static void createSolrCore(SolrClusterContainer solr, String name) throws Exception {
-        var result = solr.execInContainer("solr", "create_core", "-c", name);
-        if (result.getExitCode() != 0) {
-            throw new RuntimeException("Failed to create Solr core: " + result.getStderr());
+    private static SolrClusterContainer createSolr(SolrClusterContainer.SolrVersion version, boolean cloudMode) {
+        return cloudMode ? SolrClusterContainer.cloud(version) : new SolrClusterContainer(version);
+    }
+
+    private static void createCollection(SolrClusterContainer solr, String name) throws Exception {
+        if (solr.isCloudMode()) {
+            var result = solr.execInContainer("curl", "-sf",
+                "http://localhost:8983/solr/admin/collections?action=CREATE"
+                    + "&name=" + name + "&numShards=1&replicationFactor=1&wt=json");
+            if (result.getExitCode() != 0) {
+                throw new RuntimeException("Failed to create SolrCloud collection: " + result.getStderr());
+            }
+        } else {
+            var result = solr.execInContainer("solr", "create_core", "-c", name);
+            if (result.getExitCode() != 0) {
+                throw new RuntimeException("Failed to create Solr core: " + result.getStderr());
+            }
         }
     }
 
@@ -289,6 +401,25 @@ public class SolrSnapshotToOpenSearchTest {
         }
     }
 
+    private static void indexBookDocuments(SolrClusterContainer solr, String collection) throws Exception {
+        String[][] books = {
+            {"1", "Dune", "Frank Herbert"},
+            {"2", "Neuromancer", "William Gibson"},
+            {"3", "Foundation", "Isaac Asimov"},
+        };
+        for (String[] b : books) {
+            String doc = String.format(
+                "[{\"id\":\"%s\",\"title\":\"%s\",\"author\":\"%s\"}]",
+                b[0], b[1], b[2]
+            );
+            solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/" + collection + "/update?commit=true",
+                "-H", "Content-Type: application/json",
+                "-d", doc
+            );
+        }
+    }
+
     private static JsonNode fetchSchema(SolrClusterContainer solr, String collection) throws Exception {
         var result = solr.execInContainer(
             "curl", "-s", "http://localhost:8983/solr/" + collection + "/schema?wt=json"
@@ -297,15 +428,26 @@ public class SolrSnapshotToOpenSearchTest {
     }
 
     private Path createBackup(SolrClusterContainer solr, String collection) throws Exception {
+        return createBackup(solr, collection, "migration_backup");
+    }
+
+    private Path createBackup(SolrClusterContainer solr, String collection, String backupName) throws Exception {
+        var backupRoot = tempDir.toPath().resolve("solr_backup");
+        if (solr.isCloudMode()) {
+            return createCloudBackup(solr, collection, backupName, backupRoot);
+        }
+        return createStandaloneBackup(solr, collection, backupName, backupRoot);
+    }
+
+    private Path createStandaloneBackup(
+        SolrClusterContainer solr, String collection, String backupName, Path backupRoot
+    ) throws Exception {
         solr.execInContainer("curl", "-s",
             "http://localhost:8983/solr/" + collection
-                + "/replication?command=backup&location=/var/solr/data&name=migration_backup"
-        );
-        Thread.sleep(3000);
+                + "/replication?command=backup&location=/var/solr/data&name=" + backupName);
+        waitForStandaloneBackup(solr, collection, 30);
 
-        var snapshotDir = "/var/solr/data/snapshot.migration_backup";
-        // Create backup with collection subdirectory structure expected by SolrMultiCollectionSource
-        var backupRoot = tempDir.toPath().resolve("solr_backup");
+        var snapshotDir = "/var/solr/data/snapshot." + backupName;
         var collectionDir = backupRoot.resolve(collection);
         Files.createDirectories(collectionDir);
 
@@ -318,6 +460,52 @@ public class SolrSnapshotToOpenSearchTest {
             );
         }
         return backupRoot;
+    }
+
+    private Path createCloudBackup(
+        SolrClusterContainer solr, String collection, String backupName, Path backupRoot
+    ) throws Exception {
+        var backupLocation = "/var/solr/data/backups";
+        solr.execInContainer("mkdir", "-p", backupLocation);
+
+        solr.execInContainer("curl", "-s",
+            "http://localhost:8983/solr/admin/collections?action=BACKUP"
+                + "&name=" + backupName + "&collection=" + collection
+                + "&location=" + backupLocation + "&wt=json");
+
+        // Collections API BACKUP is synchronous (no async ID used here), but wait for files
+        Thread.sleep(2000);
+
+        var containerBackupDir = backupLocation + "/" + backupName + "/" + collection;
+        var collectionDir = backupRoot.resolve(collection);
+        copyDirectoryFromContainer(solr, containerBackupDir, collectionDir);
+        return backupRoot;
+    }
+
+    private static void copyDirectoryFromContainer(
+        SolrClusterContainer solr, String containerDir, Path localDir
+    ) throws Exception {
+        Files.createDirectories(localDir);
+        var findResult = solr.execInContainer("find", containerDir, "-type", "f");
+        for (var line : findResult.getStdout().trim().split("\n")) {
+            if (line.isEmpty()) continue;
+            var relativePath = line.substring(containerDir.length());
+            if (relativePath.startsWith("/")) relativePath = relativePath.substring(1);
+            var localFile = localDir.resolve(relativePath);
+            Files.createDirectories(localFile.getParent());
+            solr.copyFileFromContainer(line, localFile.toString());
+        }
+    }
+
+    private void waitForStandaloneBackup(SolrClusterContainer solr, String collection, int maxSeconds)
+        throws Exception {
+        for (int i = 0; i < maxSeconds; i++) {
+            var result = solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/" + collection + "/replication?command=details&wt=json");
+            if (result.getStdout().contains("success")) return;
+            Thread.sleep(1000);
+        }
+        throw new RuntimeException("Backup did not complete within " + maxSeconds + "s");
     }
 
     private static void verifyDocCount(SearchClusterContainer cluster, String indexName, int expected) {

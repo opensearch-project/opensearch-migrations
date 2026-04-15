@@ -1,5 +1,9 @@
 # Workflow CLI Reference
 
+This file is a command reference and safety checklist. The default end-to-end workflow is defined in:
+
+- `.kiro/steering/opensearch-migration-assistant-eks.sop.md`
+
 ## ⛔ NEVER Modify Without User Confirmation
 **STOP and ASK the user before running ANY of these operations:**
 
@@ -28,7 +32,6 @@ Should I proceed with this change? (yes/no)
 
 ## Run Commands in Migration Console
 ```bash
-# For workflow/console commands
 kubectl exec migration-console-0 -n ma -- <command>
 
 # For simple file reads
@@ -243,8 +246,7 @@ aws opensearch describe-domain --domain-name <domain> --region <region> \
   --query 'DomainStatus.AccessPolicies' --output text | jq .
 
 # Migration role must be allowed (for SigV4 auth):
-# - migration-eks-cluster-<STAGE>-<REGION>-migrations-role (for API access)
-# - migration-eks-cluster-<STAGE>-<REGION>-snapshot-role (for snapshots)
+# - MIGRATIONS_EKS_CLUSTER_NAME + exported role ARNs (preferred)
 ```
 
 ### 3. List migration roles
@@ -284,7 +286,7 @@ for r in $(aws ec2 describe-regions --query 'Regions[].RegionName' --output text
 ## Authentication Requirements
 
 ### Source Cluster
-- **AWS Managed (OpenSearch Service)**: Use SigV4 auth. Must allow the migration snapshot role (`migration-eks-cluster-<STAGE>-<REGION>-snapshot-role`) access to the domain.
+- **AWS Managed (OpenSearch Service)**: Use SigV4 auth. Must allow the exported migration snapshot role ARN access to the domain (obtain from CloudFormation exports / bootstrap output; do not guess role names).
 - **Self-managed**: Use basic auth. Provide endpoint URL and create K8s secret with credentials.
 
 ### Target Cluster  
@@ -297,54 +299,28 @@ kubectl create secret generic <secret-name> -n ma \
   --from-literal=password=<pass>
 ```
 
-## Sample Config - AWS SigV4 (Cross-Region)
-```json
-{
-  "sourceClusters": {
-    "source": {
-      "endpoint": "https://search-<domain>.<region>.es.amazonaws.com",
-      "version": "ES 7.10",
-      "authConfig": {
-        "sigv4": { "region": "us-east-1", "service": "es" }
-      }
-    }
-  },
-  "targetClusters": {
-    "target": {
-      "endpoint": "https://search-<domain>.<region>.es.amazonaws.com",
-      "authConfig": {
-        "sigv4": { "region": "us-east-2", "service": "es" }
-      }
-    }
-  },
-  "migrationConfigs": [
-    { "fromSource": "source", "toTarget": "target" }
-  ]
-}
+## Workflow Configuration
+
+**NEVER hardcode config from memory or documentation.** Always get the schema from the installed version:
+
+```bash
+# Get the version-accurate sample config with inline comments
+kubectl exec migration-console-0 -n ma -- workflow configure sample
+
+# Load it as a starting point
+kubectl exec migration-console-0 -n ma -- workflow configure sample --load
+
+# View the JSON Schema
+kubectl exec migration-console-0 -n ma -- cat /root/.workflowUser.schema.json
 ```
 
-## Workflow Config Schema
+The config schema changes between versions. The sample output is always accurate for the installed version.
 
-### Structure Overview
-```
-skipApprovals                    # Global: skip all approval steps
-sourceClusters.<name>            # Source cluster with snapshotRepo config
-targetClusters.<name>            # Target cluster config
-migrationConfigs[]               # Array of migration definitions
-  └─ snapshotExtractAndLoadConfigs[]  # Snapshot-based migration
-       ├─ createSnapshotConfig        # Create new snapshots (needs s3RoleArn)
-       ├─ snapshotConfig              # Snapshot naming
-       └─ migrations[]                # Migration steps
-            ├─ metadataMigrationConfig   # Index templates, mappings
-            └─ documentBackfillConfig    # Reindex from snapshot
-```
-
-### Key Points
-- **snapshotRepo** goes inside source cluster (not top-level)
-- **s3RepoPathUri** must be `s3://bucket-name` only - NO path suffix (schema validation fails)
-- **Empty `{}` enables a feature with defaults** - without it, feature is disabled
-- **replayerConfig** is for live traffic replay - NOT supported for AWS managed domains
-- Version format: `"ES 7.10"` or `"OS 2.11"` (major.minor only)
+### Key Config Concepts
+- **Empty `{}` enables a feature with defaults** — without it, the feature is disabled
+- Version format: `"ES 7.10"` or `"OS 2.11"` (prefix + major.minor)
+- Auth types: `basic` (K8s secret), `sigv4` (AWS IAM), `mtls` (certificates)
+- For AWS managed sources, `s3RoleArn` is required in the snapshot repo config
 
 ### podReplicas Sizing (RFS Workers)
 Calculate based on target cluster data node "xlarge equivalents":
@@ -400,98 +376,6 @@ Example calculation:
 ```bash
 kubectl get configmap migrations-default-s3-config -n ma -o yaml
 # Returns: BUCKET_NAME, AWS_REGION, SNAPSHOT_ROLE_ARN
-```
-
-## Sample Config - Full Snapshot Migration (AWS SigV4)
-```json
-{
-  "skipApprovals": false,
-  "sourceClusters": {
-    "source": {
-      "endpoint": "https://search-<domain>.<region>.es.amazonaws.com",
-      "version": "ES 7.10",
-      "authConfig": {"sigv4": {"region": "us-east-1", "service": "es"}},
-      "snapshotRepo": {
-        "awsRegion": "us-east-1",
-        "s3RepoPathUri": "s3://<bucket-name>",
-        "repoName": "migration_assistant_repo"
-      }
-    }
-  },
-  "targetClusters": {
-    "target": {
-      "endpoint": "https://search-<domain>.<region>.es.amazonaws.com",
-      "authConfig": {"sigv4": {"region": "us-east-2", "service": "es"}}
-    }
-  },
-  "migrationConfigs": [
-    {
-      "fromSource": "source",
-      "toTarget": "target",
-      "skipApprovals": false,
-      "snapshotExtractAndLoadConfigs": [
-        {
-          "name": "default-snapshot-migration",
-          "createSnapshotConfig": {
-            "s3RoleArn": "arn:aws:iam::<account>:role/migration-eks-cluster-<stage>-<region>-snapshot-role"
-          },
-          "snapshotConfig": {
-            "snapshotNameConfig": {"snapshotNamePrefix": "migration-snapshot"}
-          },
-          "migrations": [
-            {
-              "name": "full-migration",
-              "metadataMigrationConfig": {},
-              "documentBackfillConfig": {"podReplicas": 1}
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
-```
-
-## Sample Config - Basic Auth (Self-Managed)
-```json
-{
-  "sourceClusters": {
-    "source": {
-      "endpoint": "https://source:9200",
-      "version": "ES 7.10",
-      "allowInsecure": false,
-      "authConfig": {"basic": {"secretName": "source-creds"}},
-      "snapshotRepo": {
-        "awsRegion": "us-east-1",
-        "s3RepoPathUri": "s3://bucket-name"
-      }
-    }
-  },
-  "targetClusters": {
-    "target": {
-      "endpoint": "https://target:9200",
-      "authConfig": {"basic": {"secretName": "target-creds"}}
-    }
-  },
-  "migrationConfigs": [
-    {
-      "fromSource": "source",
-      "toTarget": "target",
-      "snapshotExtractAndLoadConfigs": [
-        {
-          "createSnapshotConfig": {},
-          "snapshotConfig": {"snapshotNameConfig": {"snapshotNamePrefix": "migration"}},
-          "migrations": [
-            {
-              "metadataMigrationConfig": {"indexAllowlist": ["*"]},
-              "documentBackfillConfig": {"indexAllowlist": ["*"], "podReplicas": 2}
-            }
-          ]
-        }
-      ]
-    }
-  ]
-}
 ```
 
 ## Troubleshooting Failed Migrations
@@ -575,7 +459,9 @@ Real-world example (1M docs, 4.2 GB, 1 × m6g.large target):
 4. **Template conflicts** → metadata migration fails on indices
 5. **Not verifying doc counts** after migration → silent data loss
 
-## Full Documentation
+## Wiki References
+The wiki now covers error recovery and retry procedures in detail. Use `workflow configure sample` as the canonical way to discover the config schema.
+
 ```bash
 cat opensearch-migrations.wiki/Workflow-CLI-Overview.md
 cat opensearch-migrations.wiki/Workflow-CLI-Getting-Started.md

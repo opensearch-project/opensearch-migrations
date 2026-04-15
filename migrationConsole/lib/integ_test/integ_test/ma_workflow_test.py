@@ -31,6 +31,7 @@ def setup_and_teardown(request, keep_workflows, test_case: MATestBase):
             test_case.argo_service.save_namespace_diagnostics("./logs")
         if not keep_workflows:
             test_case.argo_service.delete_workflow(workflow_name=test_case.workflow_name)
+    test_case.cleanup()
     # Clean up migration CRDs via workflow reset to test the reset command
     if not keep_workflows:
         try:
@@ -52,6 +53,13 @@ def test_migration_assistant_workflow(record_data, keep_workflows, test_case: MA
     # Enable for stepping through workflows with Python debugger
     #breakpoint()
 
+    # Test lifecycle:
+    #   prepare_clusters        → seed test data on source cluster
+    #   workflow_start           → submit Argo workflow
+    #   workflow_perform_migrations → wait for migrations to complete (or replayer ready for CDC)
+    #   post_migration_actions   → hook for CDC: enable capture, send traffic through proxy
+    #   verify_clusters          → assert expected docs on target
+    #   test_after               → assert workflow phase (overridden by CDC to skip)
     test_case.test_before()
     test_case.import_existing_clusters()
     test_case.prepare_workflow_snapshot_and_migration_config()
@@ -65,6 +73,7 @@ def test_migration_assistant_workflow(record_data, keep_workflows, test_case: MA
     if not test_case.imported_clusters:
         test_case.prepare_clusters()
     test_case.workflow_perform_migrations()
+    test_case.post_migration_actions()
     test_case.display_final_cluster_state()
     test_case.verify_clusters()
     test_case.workflow_finish()
