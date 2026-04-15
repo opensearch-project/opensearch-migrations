@@ -230,7 +230,7 @@ def _handle_stdin_edit(wf_config_store, secret_store, session_name: str):
     config_to_store = _serialize_normalized_config(result) or raw_yaml
     if config_to_store != raw_yaml:
         click.echo("Configuration normalized (secure defaults applied, e.g. proxy TLS). "
-                    "Use `workflow configure view` to see the effective config.")
+                   "Use `workflow configure view` to see the effective config.")
     _save_config(wf_config_store, WorkflowConfig(raw_yaml=config_to_store), session_name)
     _process_secrets(secret_store, result, interactive=False)
 
