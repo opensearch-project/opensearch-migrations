@@ -135,7 +135,7 @@ Supported modifiers: `set`, `add`, `add-distinct`, `remove`, `removeregex`, `inc
 
 OpenSearch has no equivalent modifiers. Use a Painless script via the `_update` API:
 
-```json
+```
 POST /products/_update/product-1
 {
   "script": {
