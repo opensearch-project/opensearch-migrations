@@ -77,6 +77,10 @@ tests:
             <field name="price" type="currency" indexed="true" stored="true"/>
             <field name="priority" type="priority_enum" indexed="true" stored="true"/>
             <field name="_version_" type="long" indexed="true" stored="true"/>
+            <field name="copy_source" type="text_general" indexed="true"  stored="true"/>
+            <field name="copy_target" type="text_general" indexed="true"  stored="false"/>
+            <copyField source="copy_source" dest="copy_target"/>
+            <field name="collation_field" type="coll_de" indexed="true"  stored="false"/>
           </fields>
           <uniqueKey>id</uniqueKey>
           <types>
@@ -95,6 +99,11 @@ tests:
             <fieldType name="priority_enum" class="solr.EnumField"
                        enumsConfig="enumsConfig.xml"
                        enumName="priority" />
+            <fieldType name="coll_de"
+               class="solr.ICUCollationField"
+               locale="de@collation=phonebook"
+               strength="primary"
+               caseLevel="false"/>
           </types>
         </schema>
     assert:
@@ -108,7 +117,9 @@ tests:
             recommending and using the `long` field type instead;
           (4) 'price' (solr.CurrencyField) is flagged as unsupported in OpenSearch.
           (5) 'priority' (solr.EnumField) is flagged as unsupported in OpenSearch.
-          (6) the response notes the TF-IDF to BM25 similarity change as a behavioral incompatibility
+          (6) 'collationField' (solr.ICUCollationField) is flagged as unsupported in OpenSearch.
+          (7) 'copyField' conversion via `copy_to`.
+          (8) the response notes the TF-IDF to BM25 similarity change as a behavioral incompatibility
               given the source is Solr 6.x.
         metric: solr6-schema-mapping-correct
 
@@ -172,6 +183,10 @@ tests:
               <field name="price" type="currency" indexed="true" stored="true"/>
               <field name="priority" type="priority_enum" indexed="true" stored="true"/>
               <field name="_version_" type="long" indexed="true" stored="true"/>
+              <field name="copy_source" type="text_general" indexed="true"  stored="true"/>
+              <field name="copy_target" type="text_general" indexed="true"  stored="false"/>
+              <copyField source="copy_source" dest="copy_target"/>
+              <field name="collation_field" type="coll_de" indexed="true"  stored="false"/>
             </fields>
             <uniqueKey>id</uniqueKey>
             <types>
@@ -190,6 +205,11 @@ tests:
               <fieldType name="priority_enum" class="solr.EnumField"
                          enumsConfig="enumsConfig.xml"
                          enumName="priority" />
+              <fieldType name="coll_de"
+                 class="solr.ICUCollationField"
+                 locale="de@collation=phonebook"
+                 strength="primary"
+                 caseLevel="false"/>
             </types>
           </schema>
           
@@ -203,6 +223,7 @@ tests:
           - Relevance scores will differ between Solr (TF-IDF) and OpenSearch (BM25) without additional changes
           - Do not migrate the ` _version_` field to the OpenSearch index mapping
           - `solr.EnumField` unsupported
+          - `solr.ICUCollationField` unsupported
           - Fields marked `stored="true"` but `indexed="false"` in Solr may behave differently under `_source` filtering
             in OpenSearch
           - eDismax `pf` phrase boost field with no direct equivalent; approximate with `multi_match` type `phrase` in a `should` clause
