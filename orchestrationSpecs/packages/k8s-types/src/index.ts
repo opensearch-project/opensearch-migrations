@@ -8570,3 +8570,4 @@ export type PersistentVolumeClaim = IoK8SApiCoreV1145;
 export type ResourceRequirements = IoK8SApiCoreV156;
 export type PodSpec = IoK8SApiCoreV1150;
 export type ObjectMeta = IoK8SApimachineryPkgApisMetaV1;
+export type OwnerReference = IoK8SApimachineryPkgApisMetaV13;

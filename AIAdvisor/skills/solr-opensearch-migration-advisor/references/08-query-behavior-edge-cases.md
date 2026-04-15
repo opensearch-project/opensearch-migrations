@@ -1,85 +1,45 @@
 # Query Behavior and Parser Edge-Case Guide
 
-This document covers known behavioral differences and edge cases between Solr query parsers and OpenSearch query DSL, helping teams identify and resolve subtle result-set discrepancies during migration.
+This document covers behavioral differences and edge cases between Solr query parsers and OpenSearch query DSL that cause subtle result-set discrepancies during migration.
 
 ## 1. Default Field and Default Operator
 
-### 1.1 Solr Behavior
-
-Solr's standard and eDisMax parsers use `df` (default field) and `q.op` (default operator):
-
-```
-q=hello world&df=text&q.op=AND
-```
-
-- `df` sets the field searched when no field is specified in the query string.
-- `q.op=OR` (default) means terms are combined with OR.
-- `q.op=AND` means all terms must match.
-
-### 1.2 OpenSearch Behavior
-
-In `query_string` and `simple_query_string`:
+Solr uses `df` and `q.op` to set the default field and operator. OpenSearch equivalents in `query_string`:
 
 ```json
-{
-  "query": {
-    "query_string": {
-      "query": "hello world",
-      "default_field": "text",
-      "default_operator": "AND"
-    }
-  }
-}
+{ "query_string": { "query": "hello world", "default_field": "text", "default_operator": "AND" } }
 ```
 
 **Edge cases:**
-- OpenSearch `query_string` defaults to `OR`; forgetting `default_operator: AND` is a common source of result-set divergence.
-- If `default_field` is omitted, OpenSearch searches `index.query.default_field` (default: `*`, all fields). Solr searches only `df`.
-- Wildcard expansion of `*` in OpenSearch can be expensive and produce different scoring than Solr's single-field default.
+- OpenSearch defaults to `OR`; omitting `default_operator: AND` is the most common source of result divergence.
+- If `default_field` is omitted, OpenSearch searches all fields (`*`). Solr searches only `df` — scoring and recall will differ.
+- Wildcard expansion of `*` across all fields is expensive and produces different scoring than Solr's single-field default.
 
 ## 2. Boolean Query Syntax
 
-### 2.1 Solr Syntax
-
-Solr supports both Lucene boolean syntax (`+`, `-`, `AND`, `OR`, `NOT`) and field-qualified terms:
-
-```
-+title:opensearch -status:deprecated body:(migration guide)
-```
-
-### 2.2 OpenSearch `query_string` Syntax
-
-OpenSearch `query_string` accepts the same Lucene syntax. However:
+OpenSearch `query_string` accepts Lucene syntax, but with differences:
 
 | Behavior | Solr | OpenSearch |
 | :--- | :--- | :--- |
-| `NOT` without preceding term | Allowed (treated as `*:* NOT ...`) | May throw parse error or return unexpected results |
-| Leading wildcard (`*term`) | Disabled by default (`allowLeadingWildcard=false`) | Disabled by default (`allow_leading_wildcard: false`) |
-| Fuzzy on phrases (`"hello world"~2`) | Proximity (slop) | Proximity (slop) — same behavior |
-| Fuzzy on terms (`hello~0.8`) | Similarity 0–1 scale | Edit distance 0–2 scale — **different semantics** |
+| `NOT` without preceding term | Allowed (`*:* NOT ...`) | May throw parse error |
+| Leading wildcard (`*term`) | Disabled by default | Disabled by default |
+| Fuzzy on terms (`hello~0.8`) | Similarity 0–1 scale | Edit distance 0–2 — **different semantics** |
+| Fuzzy on phrases (`"hello world"~2`) | Proximity slop | Proximity slop — same |
 
-**Fuzzy similarity scale difference:**
-- Solr: `hello~0.8` means 80% similarity (Jaro-Winkler or Levenshtein ratio).
-- OpenSearch: `hello~2` means edit distance ≤ 2. Use `fuzziness: AUTO` for automatic distance selection.
+Solr `hello~0.8` = 80% similarity; OpenSearch `hello~2` = edit distance ≤ 2. Use `fuzziness: AUTO` in OpenSearch.
 
 ## 3. eDisMax vs. `multi_match` Behavioral Differences
 
 ### 3.1 Phrase Boost Fields (`pf`, `pf2`, `pf3`)
 
-Solr eDisMax supports phrase boost fields that reward documents where query terms appear as a phrase:
-
-```
-q=quick brown fox&qf=title^2 body^1&pf=title^10 body^5&pf2=title^3&pf3=title^2
-```
-
-OpenSearch has no direct equivalent. Workaround:
+No direct OpenSearch equivalent. Approximate `pf` with a `should` phrase clause; `pf2`/`pf3` (bigram/trigram boosts) cannot be replicated:
 
 ```json
 {
   "query": {
     "bool": {
       "should": [
-        { "multi_match": { "query": "quick brown fox", "fields": ["title^2", "body^1"], "type": "best_fields" } },
+        { "multi_match": { "query": "quick brown fox", "fields": ["title^2", "body"], "type": "best_fields" } },
         { "multi_match": { "query": "quick brown fox", "fields": ["title^10", "body^5"], "type": "phrase" } }
       ]
     }
@@ -87,226 +47,94 @@ OpenSearch has no direct equivalent. Workaround:
 }
 ```
 
-This approximates `pf` but does not replicate `pf2`/`pf3` (bigram/trigram phrase boosts).
+### 3.2 Minimum Should Match (`mm`) Complex Expressions
 
-### 3.2 Minimum Should Match (`mm`)
-
-Solr eDisMax `mm` parameter controls the minimum number of optional clauses that must match:
-
-```
-q=a b c d&mm=75%
-```
-
-OpenSearch equivalent:
-
-```json
-{
-  "query": {
-    "multi_match": {
-      "query": "a b c d",
-      "fields": ["title", "body"],
-      "minimum_should_match": "75%"
-    }
-  }
-}
-```
-
-**Edge cases:**
-- Solr `mm` supports complex expressions like `2<75%` (if more than 2 terms, require 75%). OpenSearch `minimum_should_match` supports a subset of these expressions — verify complex `mm` values individually.
-- When `mm` is applied to a `bool` query with explicit `must`/`should` clauses, the semantics differ from eDisMax's unified handling.
+Solr `mm` supports expressions like `2<75%` (if >2 terms, require 75%). OpenSearch `minimum_should_match` supports a subset — verify complex `mm` values individually.
 
 ### 3.3 Tie-Breaker (`tie`)
 
-Solr eDisMax `tie` parameter controls how scores from multiple fields are combined:
+`tie` in Solr eDisMax maps directly to `tie_breaker` in OpenSearch `multi_match` with `type: best_fields`.
 
-```
-q=hello&qf=title body&tie=0.1
-```
+## 4. Range Queries — Date Math Differences
 
-OpenSearch `multi_match` with `type: best_fields` uses `tie_breaker`:
-
-```json
-{
-  "query": {
-    "multi_match": {
-      "query": "hello",
-      "fields": ["title", "body"],
-      "type": "best_fields",
-      "tie_breaker": 0.1
-    }
-  }
-}
-```
-
-This is a direct equivalent.
-
-## 4. Range Queries
-
-### 4.1 Date Math
-
-Solr date math:
-```
-date:[NOW-7DAYS TO NOW]
-date:[2024-01-01T00:00:00Z TO 2024-12-31T23:59:59Z]
-```
-
-OpenSearch date math:
-```json
-{ "range": { "date": { "gte": "now-7d/d", "lte": "now/d" } } }
-```
-
-**Differences:**
 | Aspect | Solr | OpenSearch |
 | :--- | :--- | :--- |
 | Keyword | `NOW` | `now` (lowercase) |
 | Unit syntax | `NOW-7DAYS` | `now-7d` |
 | Rounding | `NOW/DAY` | `now/d` |
-| Timezone | `TZ=America/New_York` param | `time_zone: "America/New_York"` in range |
+| Timezone | `TZ=America/New_York` param | `time_zone: "America/New_York"` in range query |
 
-### 4.2 Exclusive vs. Inclusive Bounds
+## 5. Wildcard Queries
 
-Both Solr and OpenSearch support `[` (inclusive) and `{` (exclusive) in range syntax, but the query DSL uses `gt`/`gte`/`lt`/`lte` — ensure range boundary semantics are preserved when translating.
-
-## 5. Wildcard and Prefix Queries
-
-### 5.1 Wildcard Behavior
-
-| Behavior | Solr | OpenSearch |
-| :--- | :--- | :--- |
-| `*` matches zero or more chars | ✅ | ✅ |
-| `?` matches exactly one char | ✅ | ✅ |
-| Leading wildcard (`*term`) | Disabled by default | Disabled by default |
-| Wildcard on analyzed fields | Operates on indexed tokens | Operates on indexed tokens |
-| Case sensitivity | Depends on analyzer | Depends on analyzer |
-
-**Edge case:** Wildcard queries bypass analysis. If a field uses a lowercasing analyzer, `Title:Hello*` in Solr will not match because the indexed token is `hello`. The same applies in OpenSearch. Always use `keyword` sub-fields for wildcard queries on analyzed text.
-
-### 5.2 Prefix Queries
-
-Solr `title:open*` and OpenSearch `prefix` query behave identically on `keyword` fields. On `text` fields, both operate on analyzed tokens — ensure the analyzer produces the expected tokens.
+Wildcard queries bypass analysis in both systems. `Title:Hello*` won't match if the indexed token is `hello`. Always use `keyword` sub-fields for wildcard queries on analyzed text.
 
 ## 6. Scoring and Relevance Differences
 
-### 6.1 TF-IDF vs. BM25
-
-- Solr prior to version 6 used **TF-IDF** (Classic Similarity) by default.
-- Solr 6+ and OpenSearch both default to **BM25**.
-- If migrating from a Solr instance using Classic Similarity, scores will differ. Configure OpenSearch to use `classic` similarity if score parity is required during transition.
-
-### 6.2 Field Norms
-
-Solr allows disabling norms per field:
-```xml
-<field name="title" type="text_general" omitNorms="true"/>
-```
-
-OpenSearch equivalent:
-```json
-{ "title": { "type": "text", "norms": false } }
-```
-
-Disabling norms affects scoring — documents in fields with `norms: false` are scored purely on TF and IDF without length normalization.
-
-### 6.3 Coord Factor
-
-Solr's Classic Similarity includes a **coord factor** (rewards documents matching more query terms). BM25 does not use a coord factor. This can cause ranking differences when migrating from Solr TF-IDF to OpenSearch BM25.
+- **TF-IDF vs. BM25**: Solr < 6 defaulted to TF-IDF (Classic Similarity); Solr 6+ and OpenSearch default to BM25. Set `"similarity": { "type": "classic" }` in OpenSearch index settings if score parity is required during transition.
+- **Coord factor**: Solr Classic Similarity rewards documents matching more query terms via a coord factor. BM25 has no coord factor — ranking will differ when migrating from Solr TF-IDF.
+- **Field norms**: Solr `omitNorms="true"` → OpenSearch `"norms": false`. Affects length normalization in scoring.
 
 ## 7. Filter Queries and Caching
 
-### 7.1 Solr `fq` (Filter Query)
+Solr `fq` → OpenSearch `filter` context in a `bool` query. Queries in `filter` context are cached; queries in `must` context are scored and not cached. Placing scoring queries in `filter` (or vice versa) is a common migration mistake that changes both performance and results.
 
-Solr filter queries are cached separately from the main query and do not affect scoring:
+## 8. Highlighting Edge Cases
 
-```
-q=opensearch&fq=status:active&fq=category:tech
-```
+| Solr `hl.method` | OpenSearch `type` | Notes |
+| :--- | :--- | :--- |
+| `unified` | `unified` | Default |
+| `fastVector` | `fvh` | Requires `term_vector: with_positions_offsets` on the field — must re-index if missing |
+| `original` | `plain` | Re-analyzes at query time |
 
-### 7.2 OpenSearch `filter` Context
+Solr `hl.bs.type=SENTENCE` → OpenSearch `boundary_scanner: sentence`.
+
+## 9. Sorting Edge Cases
+
+- **Multi-valued fields**: Solr errors on sort; OpenSearch uses first/last value by default. Specify `mode: min/max/avg/sum` explicitly.
+- **Sort missing**: Solr `sortMissingLast=true` → OpenSearch `"missing": "_last"` per sort clause.
+- **Case-insensitive sort**: Solr `ICUCollationField` → OpenSearch `icu_collation_keyword` (requires analysis-icu plugin). Without it, `keyword` sort is byte-order (case-sensitive).
+
+## 10. Cursor / Deep Pagination
+
+Solr `cursorMark` → OpenSearch Point-in-Time (PIT) + `search_after`. Both require a sort including a unique field as tiebreaker. OpenSearch PIT IDs expire; set `keep_alive` appropriately.
+
+## 11. Solr-Only Query Parsers With No OpenSearch Equivalent
+
+### 11.1 `{!complexphrase}` — Wildcards Inside Phrases
+
+Allows wildcards and fuzzy terms inside phrase queries: `{!complexphrase}title:"uni* search~1"`. No OpenSearch equivalent. Use `span_near` + `span_multi` for ordered proximity with wildcards:
 
 ```json
 {
   "query": {
-    "bool": {
-      "must": { "match": { "body": "opensearch" } },
-      "filter": [
-        { "term": { "status": "active" } },
-        { "term": { "category": "tech" } }
-      ]
+    "span_near": {
+      "clauses": [
+        { "span_multi": { "match": { "wildcard": { "title": "uni*" } } } },
+        { "span_multi": { "match": { "fuzzy": { "title": { "value": "search", "fuzziness": 1 } } } } }
+      ],
+      "slop": 0, "in_order": true
     }
   }
 }
 ```
 
-**Edge cases:**
-- Queries in `filter` context are cached by OpenSearch automatically (equivalent to Solr's `fq` cache).
-- Queries in `must` context are scored and not cached.
-- Placing scoring queries in `filter` context (or vice versa) is a common migration mistake that changes both performance and results.
+### 11.2 `{!surround}` — Proximity Operator Syntax
 
-## 8. Highlighting Edge Cases
+`3W(a, b)` (within 3 words, ordered), `5N(a, b)` (within 5, any order). Use OpenSearch `span_near` with `slop` and `in_order`.
 
-### 8.1 Offset Source
+### 11.3 `{!graph}` — Graph Traversal
 
-Solr supports `hl.method=unified` (postings), `hl.method=fastVector` (term vectors), and `hl.method=original` (re-analysis).
+Traverses document relationships across fields to find connected subgraphs. **No OpenSearch equivalent.** Options:
+- Pre-compute reachable node IDs at index time and store as a multi-valued field.
+- Iterative application-side traversal (multiple queries expanding the frontier).
+- Dedicated graph database for traversal; feed result IDs as a `terms` filter into OpenSearch.
 
-OpenSearch highlighter types:
+### 11.4 `{!switch}` — Conditional Query Routing
 
-| Solr `hl.method` | OpenSearch `type` | Notes |
-| :--- | :--- | :--- |
-| `unified` | `unified` | Default; uses postings or term vectors |
-| `fastVector` | `fvh` (Fast Vector Highlighter) | Requires `term_vector: with_positions_offsets` |
-| `original` | `plain` | Re-analyzes at query time; slowest |
+Routes to different sub-queries based on the query string value. No OpenSearch equivalent — implement in the application layer.
 
-**Edge case:** If Solr used `fastVector` highlighting, the migrated OpenSearch index must have `term_vector: with_positions_offsets` set on the field mapping. Existing indices without this setting cannot use `fvh` without re-indexing.
+### 11.5 `{!rerank}` — Query-Based Two-Phase Reranking
 
-### 8.2 Fragmentation
+Rescores top-N results with a secondary Lucene query. OpenSearch 2.12+ `rerank` uses ML models, not a secondary query. Approximate with `function_score` + `filter`/`weight` functions, accepting that all documents are scored (not just top-N).
 
-Solr `hl.fragsize` controls fragment size in characters. OpenSearch `fragment_size` is equivalent. However, Solr's `hl.bs.type=SENTENCE` (sentence boundary) maps to OpenSearch `boundary_scanner: sentence` — verify boundary behavior matches expectations.
-
-## 9. Sorting Edge Cases
-
-### 9.1 Sorting on Multi-Valued Fields
-
-Solr raises an error when sorting on a multi-valued field unless a sort missing value is configured. OpenSearch sorts on multi-valued fields using the first (or last) value by default — specify `mode: min/max/avg/sum` explicitly:
-
-```json
-{ "sort": [{ "tags": { "order": "asc", "mode": "min" } }] }
-```
-
-### 9.2 Sort Missing Values
-
-Solr `sortMissingLast=true` / `sortMissingFirst=true` on field type:
-
-OpenSearch equivalent per sort clause:
-```json
-{ "sort": [{ "price": { "order": "asc", "missing": "_last" } }] }
-```
-
-### 9.3 Case-Insensitive Sorting
-
-Solr uses `ICUCollationField` for locale-aware, case-insensitive sorting. OpenSearch uses `icu_collation_keyword` (requires the analysis-icu plugin). Without this, sorting on `keyword` fields is byte-order (case-sensitive). Verify sort order matches expectations after migration.
-
-## 10. Cursor / Deep Pagination
-
-### 10.1 Solr Cursor Mark
-
-Solr uses `cursorMark` for efficient deep pagination:
-```
-q=*:*&sort=id asc&rows=100&cursorMark=*
-```
-
-### 10.2 OpenSearch Point-in-Time (PIT) + `search_after`
-
-```json
-POST /my-index/_pit?keep_alive=1m
-```
-```json
-{
-  "size": 100,
-  "query": { "match_all": {} },
-  "sort": [{ "id": "asc" }],
-  "pit": { "id": "<pit_id>", "keep_alive": "1m" },
-  "search_after": ["last-seen-id"]
-}
-```
-
-**Edge case:** Solr's `cursorMark` requires a sort that includes the `uniqueKey` field. OpenSearch's `search_after` requires a tiebreaker sort (typically `_id` or a unique field). Ensure the sort includes a unique field to guarantee stable pagination.
+> For atomic update modifiers, `_version_` concurrency, `QueryElevationComponent`, `ExternalFileField`, and `PreAnalyzedField` gaps, see `05b-legacy-features-continued.md`.

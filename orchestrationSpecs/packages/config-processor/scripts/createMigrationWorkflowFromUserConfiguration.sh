@@ -27,17 +27,50 @@ trap "rm -rf $TEMP_DIR" EXIT
 
 UUID="$(date +%s)"
 echo "Generated unique uniqueRunNonce: $UUID"
+
+# Set the name field based on environment variable
+if [ -n "$USE_GENERATE_NAME" ] && [ "$USE_GENERATE_NAME" != "false" ] && [ "$USE_GENERATE_NAME" != "0" ]; then
+  # Keeping this as 'full-migration' so that it's intentionally different than the
+  # one-single default migration that we will normally be using
+  NAME_FIELD="generateName: m-${UUID}-"
+  WORKFLOW_NAME="m-${UUID}"
+else
+  NAME_FIELD="name: migration-workflow"
+  WORKFLOW_NAME="migration-workflow"
+fi
+
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR $@
+$INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR --workflow-name "$WORKFLOW_NAME" $@
 
 echo "Applying Kubernetes resources..."
 
-# Create CRD resources and initialize status for new ones.
-# patchCrdStatus.sh handles both creation and status initialization atomically:
-# each resource is created individually, and status is only patched for newly created ones.
-if [ -f "$TEMP_DIR/patchCrdStatus.sh" ]; then
-    echo "Creating/initializing CRD resources..."
-    sh "$TEMP_DIR/patchCrdStatus.sh"
+# Clean up stale approval gates before creating new ones
+if [ -x "$TEMP_DIR/cleanupApprovalGates.sh" ]; then
+    echo "Cleaning up stale approval gates..."
+    "$TEMP_DIR/cleanupApprovalGates.sh"
+fi
+
+# Apply CRD resources
+if [ -f "$TEMP_DIR/crdResources.yaml" ]; then
+    echo "Applying CRD resources..."
+    if kubectl create -f "$TEMP_DIR/crdResources.yaml" 2>/dev/null; then
+        # Patch status subresource (kubectl create ignores status)
+        if [ -f "$TEMP_DIR/patchCrdStatus.sh" ]; then
+            echo "Patching CRD status subresources..."
+            sh "$TEMP_DIR/patchCrdStatus.sh"
+        fi
+    else
+        echo "CRD resources already exist, skipping."
+    fi
+fi
+
+# Create approval gates (these are always cleaned up and recreated)
+if [ -f "$TEMP_DIR/approvalGates.yaml" ]; then
+    echo "Creating approval gates..."
+    kubectl create -f "$TEMP_DIR/approvalGates.yaml"
+    if [ -f "$TEMP_DIR/patchApprovalGateStatus.sh" ]; then
+        sh "$TEMP_DIR/patchApprovalGateStatus.sh"
+    fi
 fi
 
 # Apply approval config maps
@@ -52,13 +85,9 @@ if [ -f "$TEMP_DIR/concurrencyConfigMaps.yaml" ]; then
     kubectl apply -f "$TEMP_DIR/concurrencyConfigMaps.yaml"
 fi
 
-# Set the name field based on environment variable
-if [ -n "$USE_GENERATE_NAME" ] && [ "$USE_GENERATE_NAME" != "false" ] && [ "$USE_GENERATE_NAME" != "0" ]; then
-  # Keeping this as 'full-migration' so that it's intentionally different than the
-  # one-single default migration that we will normally be using
-  NAME_FIELD="generateName: m-${UUID}-"
-else
-  NAME_FIELD="name: migration-workflow"
+if [ -x "$TEMP_DIR/enrichWorkflowConfigWithUids.sh" ]; then
+    echo "Enriching workflow config with CR UIDs..."
+    "$TEMP_DIR/enrichWorkflowConfigWithUids.sh" "$TEMP_DIR/workflowMigration.config.yaml"
 fi
 
 echo "Applying workflow to Kubernetes..."

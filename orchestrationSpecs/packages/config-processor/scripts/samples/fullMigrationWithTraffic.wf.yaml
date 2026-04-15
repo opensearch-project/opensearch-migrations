@@ -1,5 +1,5 @@
 # Full migration: snapshot + auto-created kafka + capture proxy + replayer
-skipApprovals: true
+skipApprovals: false
 kafkaClusterConfiguration:
   default:
     autoCreate: {}

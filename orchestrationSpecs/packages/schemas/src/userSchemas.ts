@@ -479,6 +479,12 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     tupleTransformerConfigFile: z.string().optional()
         .describe("Path to a JSON file containing tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
         .changeRestriction('gated'),
+    tupleMaxBufferSeconds: z.number().default(60).optional()
+        .describe("Maximum seconds before rotating/uploading a tuple file to S3.")
+        .changeRestriction('gated'),
+    tupleMaxFileSizeMb: z.number().default(256).optional()
+        .describe("Maximum uncompressed size in MB before rotating a tuple file to S3.")
+        .changeRestriction('gated'),
     userAgent: z.string().optional()
         .describe("String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."),
 }).describe("Process-level configuration options for the traffic replayer application. These control how captured traffic is read from Kafka and replayed to the target cluster.");

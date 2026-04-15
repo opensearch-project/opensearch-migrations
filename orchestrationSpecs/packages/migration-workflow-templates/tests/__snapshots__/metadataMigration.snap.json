@@ -164,7 +164,25 @@
             }
           ]
         },
-        "suspend": {},
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "waitforapproval",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.name}}"
+                  }
+                ]
+              },
+              "name": "waitForApproval"
+            }
+          ]
+        ],
         "outputs": {
           "parameters": []
         }
@@ -178,7 +196,25 @@
             }
           ]
         },
-        "suspend": {},
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "waitforapproval",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.name}}"
+                  }
+                ]
+              },
+              "name": "waitForApproval"
+            }
+          ]
+        ],
         "outputs": {
           "parameters": []
         }
@@ -209,6 +245,12 @@
             },
             {
               "name": "migrationLabel"
+            },
+            {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
             },
             {
               "name": "imageMigrationConsoleLocation"
@@ -308,7 +350,7 @@
                 "parameters": [
                   {
                     "name": "name",
-                    "value": "{{=inputs.parameters.approvalNamePrefix+'evaluateMetadata'}}"
+                    "value": "{{=inputs.parameters.approvalNamePrefix+'evaluatemetadata'}}"
                   }
                 ]
               },
@@ -381,7 +423,7 @@
                 "parameters": [
                   {
                     "name": "name",
-                    "value": "{{=inputs.parameters.approvalNamePrefix+'migrateMetadata'}}"
+                    "value": "{{=inputs.parameters.approvalNamePrefix+'migratemetadata'}}"
                   }
                 ]
               },

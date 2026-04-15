@@ -95,6 +95,7 @@ export const NAMED_KAFKA_CLUSTER_CONFIG = z.object({
     config: makeOptionalDefaultedFieldsRequired(KAFKA_CLUSTER_CREATION_CONFIG),
     topics: z.array(z.string()).readonly(),
     configChecksum: z.string(),
+    resourceUid: z.string(),
 });
 
 export const NAMED_SOURCE_CLUSTER_CONFIG =
@@ -166,6 +167,7 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pic
     internetFacing: true,
     podReplicas: true,
     resources: true,
+    tls: true,
 }));
 
 export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
@@ -214,6 +216,7 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     sourceAuth: z.any().optional(),
     configChecksum: z.string(),
     checksumForReplayer: z.string(),
+    resourceUid: z.string(),
 });
 
 export const NAMED_KAFKA_CLIENT_CONFIG =
@@ -236,6 +239,7 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
     configChecksum: z.string(),
     checksumForSnapshot: z.string(),
     checksumForReplayer: z.string(),
+    resourceUid: z.string(),
 });
 
 export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
@@ -271,7 +275,16 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
     replayerConfig: ARGO_REPLAYER_OPTIONS,
     toTarget: NAMED_TARGET_CLUSTER_CONFIG,
     configChecksum: z.string(),
+    resourceUid: z.string(),
 });
+
+function makeResourceUidOptional<
+    T extends z.ZodRawShape & { resourceUid: z.ZodString }
+>(schema: z.ZodObject<T>) {
+    return schema.extend({
+        resourceUid: z.string().optional(),
+    });
+}
 
 export const ARGO_MIGRATION_CONFIG = z.object({
     kafkaClusters: z.array(NAMED_KAFKA_CLUSTER_CONFIG).min(1).optional(),
@@ -280,5 +293,24 @@ export const ARGO_MIGRATION_CONFIG = z.object({
     snapshotMigrations: z.array(SNAPSHOT_MIGRATION_CONFIG).default([]),
     trafficReplays: z.array(DENORMALIZED_REPLAY_CONFIG).default([]),
 });
+
+function makePreEnrichMigrationConfigSchema() {
+    return ARGO_MIGRATION_CONFIG.extend({
+        kafkaClusters: z.array(
+            makeResourceUidOptional(NAMED_KAFKA_CLUSTER_CONFIG)
+        ).min(1).optional(),
+        proxies: z.array(
+            makeResourceUidOptional(DENORMALIZED_PROXY_CONFIG)
+        ).default([]),
+        snapshotMigrations: z.array(
+            makeResourceUidOptional(SNAPSHOT_MIGRATION_CONFIG)
+        ).default([]),
+        trafficReplays: z.array(
+            makeResourceUidOptional(DENORMALIZED_REPLAY_CONFIG)
+        ).default([]),
+    });
+}
+
+export const ARGO_MIGRATION_CONFIG_PRE_ENRICH = makePreEnrichMigrationConfigSchema();
 
 export type ARGO_WORKFLOW_SCHEMA = z.infer<typeof ARGO_MIGRATION_CONFIG>;

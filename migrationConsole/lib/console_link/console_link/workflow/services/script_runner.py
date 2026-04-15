@@ -94,9 +94,9 @@ class ScriptRunner:
                 if e.stderr:
                     print(f"stderr: {e.stderr}", file=sys.stderr)
             else:
-                logger.error(f"Script failed with exit code {e.returncode}")
+                logger.debug(f"Script failed with exit code {e.returncode}")
                 if e.stderr:
-                    logger.error(f"stderr: {e.stderr}")
+                    logger.debug(f"stderr: {e.stderr}")
             raise subprocess.CalledProcessError(
                 e.returncode, e.cmd, e.stdout, e.stderr
             ) from None
@@ -164,10 +164,10 @@ class ScriptRunner:
         template instead.
 
         Returns:
-            YAML content as string (either from sample.yaml or blank starter)
+            YAML content as string (either from override, sample.yaml, or blank starter)
 
         Raises:
-            IOError: If sample.yaml exists but cannot be read
+            IOError: If the sample file exists but cannot be read
         """
         logger.info("Getting sample configuration")
         sample_path_override = os.environ.get(SAMPLE_CONFIG_PATH_ENV)
@@ -219,7 +219,7 @@ class ScriptRunner:
         try:
             logger.debug(f"Config file: {temp_file_path}")
             output = self.run_script("createMigrationWorkflowFromUserConfiguration.sh", None,
-                                     *([temp_file_path] + args), direct_output=True)
+                                     *([temp_file_path] + args), direct_output=False)
 
             # Parse kubectl output to extract workflow information
             # The script should output workflow creation details

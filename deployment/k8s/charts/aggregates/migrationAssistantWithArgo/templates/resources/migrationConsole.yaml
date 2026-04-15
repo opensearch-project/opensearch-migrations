@@ -23,8 +23,9 @@ rules:
     resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: ["migrations.opensearch.org"]
-    resources: ["capturedtraffics", "datasnapshots", "snapshotmigrations",
-                "capturedtraffics/status", "datasnapshots/status", "snapshotmigrations/status"]
+    resources: ["approvalgates", "capturedtraffics", "datasnapshots", "snapshotmigrations", "trafficreplays",
+                "approvalgates/status", "capturedtraffics/status", "datasnapshots/status", "snapshotmigrations/status",
+                "trafficreplays/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
 ---
@@ -211,6 +212,31 @@ spec:
               value: "/root/schema/workflowMigration.schema.json"
             - name: MIGRATION_SAMPLE_CONFIG_PATH
               value: "/root/schema/sample.yaml"
+            {{- if .Values.defaultBucketConfiguration.create }}
+            - name: S3_ARTIFACTS_BUCKET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: BUCKET_NAME
+            - name: S3_ARTIFACTS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: AWS_REGION
+            - name: S3_ARTIFACTS_ENDPOINT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: ENDPOINT_HTTP
+                  optional: true
+            {{- end }}
+          {{- if .Values.defaultBucketConfiguration.create }}
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - SYS_ADMIN
+          {{- end }}
           command:
             - "/bin/sh"
             - "-c"

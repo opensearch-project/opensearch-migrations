@@ -266,6 +266,12 @@
               "name": "resources"
             },
             {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
               "name": "sourceK8sLabel"
             },
             {
@@ -290,9 +296,9 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceK8sLabel}}\"\n    migrations.opensearch.org/target: \"{{inputs.parameters.targetK8sLabel}}\"\n    migrations.opensearch.org/snapshot: \"{{inputs.parameters.snapshotK8sLabel}}\"\n    migrations.opensearch.org/from-snapshot-migration: \"{{inputs.parameters.fromSnapshotMigrationK8sLabel}}\"\n    migrations.opensearch.org/task: \"{{inputs.parameters.taskK8sLabel}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  strategy:\n    type: RollingUpdate\n    rollingUpdate:\n      maxUnavailable: 1\n      maxSurge: 1\n  selector:\n    matchLabels:\n      app: bulk-loader\n      deployment-name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n  template:\n    metadata:\n      labels:\n        app: bulk-loader\n        deployment-name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n        workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n        migrations.opensearch.org/source: \"{{inputs.parameters.sourceK8sLabel}}\"\n        migrations.opensearch.org/target: \"{{inputs.parameters.targetK8sLabel}}\"\n        migrations.opensearch.org/snapshot: \"{{inputs.parameters.snapshotK8sLabel}}\"\n        migrations.opensearch.org/from-snapshot-migration: \"{{inputs.parameters.fromSnapshotMigrationK8sLabel}}\"\n        migrations.opensearch.org/task: \"{{inputs.parameters.taskK8sLabel}}\"\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: bulk-loader\n          image: \"{{inputs.parameters.imageReindexFromSnapshotLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}\"\n          command:\n            - /rfs-app/runJavaWithClasspathWithRepeat.sh\n          args:\n            - org.opensearch.migrations.RfsMigrateDocuments\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.rfsJsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: TARGET_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}\"\n                  key: username\n                  optional: true\n            - name: TARGET_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}\"\n                  key: password\n                  optional: true\n            - name: COORDINATOR_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}\"\n                  key: username\n                  optional: true\n            - name: COORDINATOR_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}\"\n                  key: password\n                  optional: true\n            - name: FAILED_REQUESTS_LOGGER_LEVEL\n              value: \"OFF\"\n            - name: CONSOLE_LOG_FORMAT\n              value: json\n            - name: JDK_JAVA_OPTIONS\n              value: \"{{=inputs.parameters.jvmArgs + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration/configuration') : (''))}}\"\n            - name: AWS_SHARED_CREDENTIALS_FILE\n              value: \"{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials/configuration') : (''))}}\"\n          volumeMounts:\n            - name: log4j-configuration\n              mountPath: /config/logConfiguration\n              readOnly: true\n            - name: localstack-test-creds\n              mountPath: /config/credentials\n              readOnly: true\n      volumes:\n        - name: log4j-configuration\n          configMap:\n            name: \"{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}\"\n            optional: {{=!(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)))}}\n        - name: localstack-test-creds\n          configMap:\n            name: localstack-test-creds\n            optional: {{=!(fromJSON(inputs.parameters.useLocalStack))}}\n",
+          "manifest": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: SnapshotMigration\n      name: {{inputs.parameters.crdName}}\n      uid: {{inputs.parameters.crdUid}}\n      controller: false\n      blockOwnerDeletion: true\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceK8sLabel}}\"\n    migrations.opensearch.org/target: \"{{inputs.parameters.targetK8sLabel}}\"\n    migrations.opensearch.org/snapshot: \"{{inputs.parameters.snapshotK8sLabel}}\"\n    migrations.opensearch.org/from-snapshot-migration: \"{{inputs.parameters.fromSnapshotMigrationK8sLabel}}\"\n    migrations.opensearch.org/task: \"{{inputs.parameters.taskK8sLabel}}\"\nspec:\n  replicas: {{=fromJSON(inputs.parameters.podReplicas)}}\n  strategy:\n    type: RollingUpdate\n    rollingUpdate:\n      maxUnavailable: 1\n      maxSurge: 1\n  selector:\n    matchLabels:\n      app: bulk-loader\n      deployment-name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n  template:\n    metadata:\n      labels:\n        app: bulk-loader\n        deployment-name: \"{{=inputs.parameters.sessionName+'-rfs'}}\"\n        workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n        migrations.opensearch.org/source: \"{{inputs.parameters.sourceK8sLabel}}\"\n        migrations.opensearch.org/target: \"{{inputs.parameters.targetK8sLabel}}\"\n        migrations.opensearch.org/snapshot: \"{{inputs.parameters.snapshotK8sLabel}}\"\n        migrations.opensearch.org/from-snapshot-migration: \"{{inputs.parameters.fromSnapshotMigrationK8sLabel}}\"\n        migrations.opensearch.org/task: \"{{inputs.parameters.taskK8sLabel}}\"\n    spec:\n      serviceAccountName: argo-workflow-executor\n      containers:\n        - name: bulk-loader\n          image: \"{{inputs.parameters.imageReindexFromSnapshotLocation}}\"\n          imagePullPolicy: \"{{inputs.parameters.imageReindexFromSnapshotPullPolicy}}\"\n          command:\n            - /rfs-app/runJavaWithClasspathWithRepeat.sh\n          args:\n            - org.opensearch.migrations.RfsMigrateDocuments\n            - ---INLINE-JSON\n            - \"{{=toBase64(inputs.parameters.rfsJsonConfig)}}\"\n          resources: {{=fromJSON(inputs.parameters.resources)}}\n          env:\n            - name: TARGET_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}\"\n                  key: username\n                  optional: true\n            - name: TARGET_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.targetBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.targetBasicCredsSecretNameOrEmpty))}}\"\n                  key: password\n                  optional: true\n            - name: COORDINATOR_USERNAME\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}\"\n                  key: username\n                  optional: true\n            - name: COORDINATOR_PASSWORD\n              valueFrom:\n                secretKeyRef:\n                  name: \"{{=((0 == len(inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty)) ? ('empty') : (inputs.parameters.coordinatorBasicCredsSecretNameOrEmpty))}}\"\n                  key: password\n                  optional: true\n            - name: FAILED_REQUESTS_LOGGER_LEVEL\n              value: \"OFF\"\n            - name: CONSOLE_LOG_FORMAT\n              value: json\n            - name: JDK_JAVA_OPTIONS\n              value: \"{{=inputs.parameters.jvmArgs + ' ' + ((!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap))) ? ('-Dlog4j2.configurationFile=/config/logConfiguration/configuration') : (''))}}\"\n            - name: AWS_SHARED_CREDENTIALS_FILE\n              value: \"{{=((fromJSON(inputs.parameters.useLocalStack)) ? ('/config/credentials/configuration') : (''))}}\"\n          volumeMounts:\n            - name: log4j-configuration\n              mountPath: /config/logConfiguration\n              readOnly: true\n            - name: localstack-test-creds\n              mountPath: /config/credentials\n              readOnly: true\n      volumes:\n        - name: log4j-configuration\n          configMap:\n            name: \"{{=((0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)) ? ('default-log4j-config') : (inputs.parameters.loggingConfigurationOverrideConfigMap))}}\"\n            optional: {{=!(!(0 == len(inputs.parameters.loggingConfigurationOverrideConfigMap)))}}\n        - name: localstack-test-creds\n          configMap:\n            name: localstack-test-creds\n            optional: {{=!(fromJSON(inputs.parameters.useLocalStack))}}\n",
           "action": "create",
-          "setOwnerReference": true
+          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
@@ -336,6 +342,12 @@
               "name": "migrationLabel"
             },
             {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
               "name": "sourceEndpoint",
               "value": ""
             },
@@ -356,6 +368,14 @@
                   {
                     "name": "sessionName",
                     "value": "{{inputs.parameters.sessionName}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
                   },
                   {
                     "name": "imageReindexFromSnapshotLocation",
@@ -452,6 +472,12 @@
               "name": "migrationLabel"
             },
             {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
               "name": "sourceEndpoint",
               "value": ""
             },
@@ -506,6 +532,14 @@
                   {
                     "name": "migrationLabel",
                     "value": "{{inputs.parameters.migrationLabel}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
                   },
                   {
                     "name": "sourceEndpoint",
@@ -648,6 +682,12 @@
               "name": "migrationLabel"
             },
             {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
               "name": "sourceEndpoint",
               "value": ""
             },
@@ -688,6 +728,14 @@
                   {
                     "name": "coordinatorImage",
                     "value": "{{inputs.parameters.imageCoordinatorClusterLocation}}"
+                  },
+                  {
+                    "name": "ownerName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.crdUid}}"
                   }
                 ]
               },
@@ -726,6 +774,14 @@
                   {
                     "name": "migrationLabel",
                     "value": "{{inputs.parameters.migrationLabel}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
                   },
                   {
                     "name": "sourceEndpoint",
