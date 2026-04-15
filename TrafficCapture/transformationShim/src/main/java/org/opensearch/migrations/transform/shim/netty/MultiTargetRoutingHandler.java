@@ -240,13 +240,22 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         long requestId,
         ShimRequestContext requestCtx
     ) {
+        // When the primary completes, collect all responses (including blocking on
+        // secondary futures with timeout) on a worker thread — NOT the Netty event loop.
+        // The secondary FixedChannelPools share the same NioEventLoopGroup, so calling
+        // join() on the event loop thread can deadlock when a pooled channel's response
+        // handler needs that same thread to fire channelRead0.
         futures.get(primaryTarget).whenComplete((primaryResp, primaryEx) ->
-            ctx.channel().eventLoop().execute(() -> {
+            CompletableFuture.supplyAsync(() -> {
+                TargetResponse primary = primaryEx != null
+                    ? TargetResponse.error(primaryTarget, Duration.ZERO, primaryEx)
+                    : primaryResp;
+                Map<String, TargetResponse> allResponses = collectResponses(futures);
+                return Map.entry(primary, allResponses);
+            }).thenAcceptAsync(result -> {
                 try {
-                    TargetResponse primary = primaryEx != null
-                        ? TargetResponse.error(primaryTarget, Duration.ZERO, primaryEx)
-                        : primaryResp;
-                    Map<String, TargetResponse> allResponses = collectResponses(futures);
+                    var primary = result.getKey();
+                    var allResponses = result.getValue();
 
                     List<ValidationResult> results = runValidators(allResponses);
                     FullHttpResponse response = buildFinalResponse(primary, allResponses, results, requestMap);
@@ -266,7 +275,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                         requestCtx.close();
                     }
                 }
-            })
+            }, ctx.channel().eventLoop())
         );
     }
 
