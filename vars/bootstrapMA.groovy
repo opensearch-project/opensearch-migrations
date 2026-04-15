@@ -40,6 +40,9 @@ def call(Map config = [:]) {
     env.MA_STACK_NAME = stackName
     env.eksKubeContext = kubectlContext
 
+    def tlsMode = config.tlsMode
+    def tlsFlag = tlsMode ? "--tls-mode ${tlsMode}" : ''
+
     sh """
         ${bootstrap.script} \
           --deploy-create-vpc-cfn \
@@ -47,6 +50,7 @@ def call(Map config = [:]) {
           --stage "${stage}" \
           --eks-access-principal-arn "${eksAccessPrincipalArn}" \
           ${bootstrap.flags} \
+          ${tlsFlag} \
           --skip-console-exec \
           --skip-setting-k8s-context \
           --kubectl-context "${kubectlContext}" \

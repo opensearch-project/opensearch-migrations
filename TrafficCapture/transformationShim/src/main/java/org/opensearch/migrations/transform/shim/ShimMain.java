@@ -25,6 +25,10 @@ import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.transform.shim.netty.BasicAuthSigningHandler;
 import org.opensearch.migrations.transform.shim.netty.SigV4SigningHandler;
+import org.opensearch.migrations.transform.shim.reporting.FileSystemReportingSink;
+import org.opensearch.migrations.transform.shim.reporting.MetricsReceiver;
+import org.opensearch.migrations.transform.shim.reporting.ReportingSink;
+import org.opensearch.migrations.transform.shim.reporting.SolrMetricsExtractor;
 import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
 import org.opensearch.migrations.transform.shim.validation.DocCountValidator;
 import org.opensearch.migrations.transform.shim.validation.DocIdValidator;
@@ -177,6 +181,26 @@ public class ShimMain {
 
         public RequestTransformationParams requestTransformationParams = new RequestTransformationParams();
         public ResponseTransformationParams responseTransformationParams = new ResponseTransformationParams();
+        public ReportingParams reportingParams = new ReportingParams();
+    }
+
+    /**
+     * CLI parameters for the validation reporting framework.
+     * Uses a JSON config string, consistent with {@code --transformerConfig}.
+     *
+     * <p>Example:
+     * <pre>{@code
+     * --reportingConfig '[{"FileSystemReportingSink":{"outputDir":"/var/shim/reports","bufferSize":2048,"includeRequestBody":true}}]'
+     * }</pre>
+     *
+     * <p>Currently supports {@code FileSystemReportingSink} as the only provider.
+     * When {@code --reportingConfig} is omitted, reporting is disabled entirely.
+     */
+    public static class ReportingParams {
+        @Parameter(names = {"--reportingConfig", "--reporting-config"},
+            description = "Reporting config JSON array (same format as --transformerConfig). "
+                + "Example: '[{\"FileSystemReportingSink\":{\"outputDir\":\"/var/shim/reports\"}}]'")
+        public String reportingConfig;
     }
 
     public static void main(String[] args) throws Exception {
@@ -185,6 +209,7 @@ public class ShimMain {
             .addObject(params)
             .addObject(params.requestTransformationParams)
             .addObject(params.responseTransformationParams)
+            .addObject(params.reportingParams)
             .build();
         jCommander.setProgramName("Shim");
         try {
@@ -209,10 +234,13 @@ public class ShimMain {
         var rootContext = new RootShimProxyContext(otelSdk,
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 
+        // Build reporting components if configured
+        var reporting = buildReporting(params.reportingParams.reportingConfig);
+
         var proxy = new ShimProxy(
             params.listenPort, targets, params.primary, activeTargets, validators,
             null, params.insecureBackend, Duration.ofMillis(params.timeoutMs), params.maxContentLength,
-            rootContext);
+            rootContext, reporting.metricsReceiver, reporting.reportingSink);
 
         TransformFileWatcher watcher = null;
         if (params.watchTransforms && !watchedTransforms.isEmpty()) {
@@ -239,6 +267,77 @@ public class ShimMain {
         }
         log.info("Shim running on port {}", params.listenPort);
         proxy.waitForClose();
+    }
+
+    /** Holds the reporting components built from config. Both fields are null when reporting is disabled. */
+    record ReportingComponents(ReportingSink reportingSink, MetricsReceiver metricsReceiver) {
+        static final ReportingComponents DISABLED = new ReportingComponents(null, null);
+    }
+
+    /** Build reporting components from the config string, or return disabled if null. */
+    static ReportingComponents buildReporting(String reportingConfigJson) {
+        if (reportingConfigJson == null) {
+            return ReportingComponents.DISABLED;
+        }
+        var parsed = parseReportingConfig(reportingConfigJson);
+        var sink = createReportingSink(parsed.getKey(), parsed.getValue());
+        var receiver = createMetricsReceiver(parsed.getValue(), sink);
+        log.info("Reporting enabled: {}", reportingConfigJson);
+        return new ReportingComponents(sink, receiver);
+    }
+
+    /**
+     * Parse the {@code --reportingConfig} JSON array into a provider name and config map.
+     * Expects format: {@code [{"ProviderName": {...}}]}
+     */
+    @SuppressWarnings("unchecked")
+    static Map.Entry<String, Map<String, Object>> parseReportingConfig(String json) {
+        try {
+            var entries = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readValue(json, List.class);
+            if (entries.isEmpty()) {
+                throw new ParameterException("--reportingConfig array must not be empty");
+            }
+            var first = entries.get(0);
+            if (!(first instanceof Map)) {
+                throw new ParameterException("--reportingConfig entries must be JSON objects");
+            }
+            var providerMap = (Map<String, Object>) first;
+            if (providerMap.size() != 1) {
+                throw new ParameterException(
+                    "--reportingConfig entry must have exactly one provider key");
+            }
+            var providerEntry = providerMap.entrySet().iterator().next();
+            if (!(providerEntry.getValue() instanceof Map)) {
+                throw new ParameterException(
+                    "--reportingConfig provider value must be a JSON object");
+            }
+            return Map.entry(providerEntry.getKey(), (Map<String, Object>) providerEntry.getValue());
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new ParameterException("Invalid --reportingConfig JSON: " + e.getMessage());
+        }
+    }
+
+    /** Create a {@link ReportingSink} for the given provider name and config. */
+    static ReportingSink createReportingSink(String providerName, Map<String, Object> config) {
+        if (!"FileSystemReportingSink".equals(providerName)) {
+            throw new ParameterException("Unknown reporting provider: " + providerName
+                + ". Supported: FileSystemReportingSink");
+        }
+        if (!config.containsKey("outputDir") || !(config.get("outputDir") instanceof String)) {
+            throw new ParameterException(
+                "--reportingConfig requires \"outputDir\" key with a string value");
+        }
+        return new FileSystemReportingSink(
+            Path.of((String) config.get("outputDir")),
+            config.containsKey("bufferSize") ? ((Number) config.get("bufferSize")).intValue() : 1024);
+    }
+
+    /** Create a {@link MetricsReceiver} from a parsed config map and a sink. */
+    static MetricsReceiver createMetricsReceiver(Map<String, Object> config, ReportingSink sink) {
+        return new MetricsReceiver(sink, new SolrMetricsExtractor(),
+            Boolean.TRUE.equals(config.get("includeRequestBody")),
+            Boolean.TRUE.equals(config.get("includeResponseBody")));
     }
 
     /**
@@ -471,5 +570,4 @@ public class ShimMain {
         }
         throw new ParameterException("Unknown auth type: " + authSpec);
     }
-
 }

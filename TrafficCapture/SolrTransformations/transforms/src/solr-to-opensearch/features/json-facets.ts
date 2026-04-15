@@ -9,7 +9,15 @@
  */
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext, JavaMap } from '../context';
+import type { ParamRule } from './validation';
 import { convertSort, isMapLike, isSolrDateMathGap, convertSolrDateGap } from './utils';
+
+/** Solr query params this feature handles. */
+export const params = ['json.facet'];
+export const paramPrefixes = ['json.facet.'];
+export const paramRules: ParamRule[] = [
+  { name: 'json.facet', type: 'json' },
+];
 
 const FEATURE_NAME = 'json-facets';
 
