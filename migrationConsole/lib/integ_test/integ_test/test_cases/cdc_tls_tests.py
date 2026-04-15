@@ -1,24 +1,15 @@
 import logging
 
-from console_link.models.cluster import Cluster
-
 from .cdc_base import (
     MATestBase, MigrationType, MATestUserArguments,
     CDC_SOURCE_TARGET_COMBINATIONS, REPLAYER_LABEL_SELECTOR, PROXY_LABEL_SELECTOR,
     wait_for_pod_ready, wait_for_replayer_consuming,
-    cleanup_cdc_resources,
+    cleanup_cdc_resources, make_proxy_cluster,
 )
 
 logger = logging.getLogger(__name__)
 
-TLS_PROXY_ENDPOINT = "https://capture-proxy:9201"
 CDC_NUM_DOCS = 10
-
-
-def make_tls_proxy_cluster(source_cluster):
-    """Create a Cluster pointing at the TLS capture-proxy endpoint."""
-    return Cluster(config={**source_cluster.config, "endpoint": TLS_PROXY_ENDPOINT,
-                           "allow_insecure": True})
 
 
 class Test0031CdcOnlyLiveTrafficTls(MATestBase):
@@ -60,7 +51,7 @@ class Test0031CdcOnlyLiveTrafficTls(MATestBase):
         logger.info("Waiting for replayer to join Kafka consumer group...")
         wait_for_replayer_consuming(namespace=self.argo_service.namespace)
 
-        proxy_cluster = make_tls_proxy_cluster(self.source_cluster)
+        proxy_cluster = make_proxy_cluster(self.source_cluster)
         logger.info("Creating %d CDC documents through TLS proxy...", CDC_NUM_DOCS)
         for i in range(CDC_NUM_DOCS):
             self.source_operations.create_document(
