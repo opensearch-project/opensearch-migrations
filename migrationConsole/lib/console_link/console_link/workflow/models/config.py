@@ -1,6 +1,5 @@
 """Configuration models for the workflow library."""
 
-from io import StringIO
 from typing import Dict, Any, Optional
 from ruamel.yaml import YAML
 

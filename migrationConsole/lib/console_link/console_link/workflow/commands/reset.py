@@ -280,6 +280,20 @@ def _prune_ancestors_of_protected_proxies(resources, include_proxies):
     return filtered, protected_ancestor_names
 
 
+def _reset_by_path(ctx, path, namespace, cascade, include_proxies):
+    """Handle reset for a specific resource path/pattern."""
+    targets = _resolve_targets(namespace, path)
+    if not targets:
+        click.echo(f"No resources matching '{path}'.")
+        return
+    targets = _resolve_cascade_targets(targets, namespace, cascade, include_proxies)
+    if targets is None:
+        ctx.exit(ExitCode.FAILURE.value)
+        return
+    if not _delete_targets(targets, namespace):
+        ctx.exit(ExitCode.FAILURE.value)
+
+
 @click.command(name="reset")
 @click.argument('path', required=False, default=None, shell_complete=_get_resource_completions)
 @click.option('--all', 'reset_all', is_flag=True, default=False, help='Delete all migration resources')
@@ -299,16 +313,7 @@ def reset_command(ctx, path, reset_all, cascade, include_proxies, namespace):
         load_k8s_config()
 
         if path is not None:
-            targets = _resolve_targets(namespace, path)
-            if not targets:
-                click.echo(f"No resources matching '{path}'.")
-                return
-            targets = _resolve_cascade_targets(targets, namespace, cascade, include_proxies)
-            if targets is None:
-                ctx.exit(ExitCode.FAILURE.value)
-                return
-            if not _delete_targets(targets, namespace):
-                ctx.exit(ExitCode.FAILURE.value)
+            _reset_by_path(ctx, path, namespace, cascade, include_proxies)
             return
 
         resources = list_migration_resources(namespace)
