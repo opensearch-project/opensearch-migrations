@@ -170,6 +170,14 @@ public class ShimTestFixture implements AutoCloseable {
         ).body();
     }
 
+    /** Returns the full HTTP response (status code + body) for error-path testing. */
+    public HttpResponse<String> httpGetRaw(String url) throws Exception {
+        return HTTP.send(
+            HttpRequest.newBuilder().uri(URI.create(url)).GET().build(),
+            HttpResponse.BodyHandlers.ofString()
+        );
+    }
+
     public String httpPost(String url, String body) throws Exception {
         var resp = HTTP.send(
             HttpRequest.newBuilder().uri(URI.create(url))

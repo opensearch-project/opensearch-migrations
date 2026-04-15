@@ -92,8 +92,8 @@ describe('parseSolrSort', () => {
     expect(result[0].has(SOLR_UNIQUE_KEY)).toBe(false);
   });
 
-  it('handles + as space', () => {
-    const result = parseSolrSort('price+asc,id+desc');
+  it('handles space-separated sort (+ decoded by parseParams)', () => {
+    const result = parseSolrSort('price asc,id desc');
     expect(result[0].get('price')).toBe('asc');
     expect(result[1].get('_id')).toBe('desc');
   });

@@ -166,6 +166,7 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pic
     internetFacing: true,
     podReplicas: true,
     resources: true,
+    tls: true,
 }));
 
 export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
