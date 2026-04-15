@@ -256,8 +256,10 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                 ? (TargetDispatchContext) requestCtx.createTargetDispatchContext(name)
                 : null;
 
-            // Response transform needs per-target URI (with rewritten cursorMark)
-            Map<String, Object> responseRequestMap = hasCursorMark ? targetRequestMap : requestMap;
+            // Snapshot the request before the request transform rewrites the URI (e.g., to /_search).
+            // The response transform needs the original Solr URI to detect params like cursorMark, sort, etc.
+            Map<String, Object> responseRequestMap = target.requestTransform() != null
+                ? deepCopyMap(targetRequestMap) : targetRequestMap;
             futures.put(name, dispatchToTarget(target, targetRequestMap, responseRequestMap, dispatchCtx));
 
             collectTransformData(target, name, targetRequestMap,
