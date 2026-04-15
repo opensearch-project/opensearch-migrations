@@ -79,65 +79,134 @@ export class MigrationInitializer {
         const workflowPath = path.join(outputDir, 'workflowMigration.config.yaml');
         await fs.writeFile(workflowPath, JSON.stringify(bundle.workflows, null, 2));
 
-        // 2. Write approval config maps
-        const approvalPath = path.join(outputDir, 'approvalConfigMaps.yaml');
-        await fs.writeFile(approvalPath, stringify(bundle.approvalConfigMaps));
+        // 2. Write individual resource files and the handler script
+        const resourcesDir = path.join(outputDir, 'resources');
+        await fs.mkdir(resourcesDir, { recursive: true });
 
-        // 3. Write concurrency config maps
-        const concurrencyPath = path.join(outputDir, 'concurrencyConfigMaps.yaml');
-        await fs.writeFile(concurrencyPath, stringify(bundle.concurrencyConfigMaps));
+        const allItems = bundle.crdResources.items || [];
+        const configMapItems = [
+            ...(bundle.approvalConfigMaps.items || []),
+            ...(bundle.concurrencyConfigMaps.items || []),
+        ];
 
-        // 4. Write CRD resources (excluding approval gates)
-        const nonGateItems = (bundle.crdResources.items || []).filter((item: any) => item.kind !== 'ApprovalGate');
-        const gateItems = (bundle.crdResources.items || []).filter((item: any) => item.kind === 'ApprovalGate');
+        type ResourceEntry = {
+            file: string;
+            kind: string;
+            name: string;
+            category: 'approvalgate' | 'rootcr' | 'configmap';
+            hasStatus: boolean;
+        };
+        const entries: ResourceEntry[] = [];
 
-        const crdPath = path.join(outputDir, 'crdResources.yaml');
-        await fs.writeFile(crdPath, stringify({ ...bundle.crdResources, items: nonGateItems }));
-
-        // 4a. Write approval gates as a separate file (cleaned up and recreated each submission)
-        if (gateItems.length > 0) {
-            const gatesPath = path.join(outputDir, 'approvalGates.yaml');
-            await fs.writeFile(gatesPath, stringify({ ...bundle.crdResources, items: gateItems }));
+        let idx = 0;
+        for (const item of allItems) {
+            const name = item.metadata.name;
+            const kind = item.kind;
+            const category = kind === 'ApprovalGate' ? 'approvalgate' as const : 'rootcr' as const;
+            const filename = `${String(idx).padStart(3, '0')}-${kind.toLowerCase()}-${name}.yaml`;
+            // Write resource without status (status must be patched separately via subresource)
+            const { status, ...resourceWithoutStatus } = item;
+            await fs.writeFile(path.join(resourcesDir, filename), stringify(resourceWithoutStatus));
+            entries.push({ file: filename, kind, name, category, hasStatus: status !== undefined });
+            idx++;
+        }
+        for (const item of configMapItems) {
+            const name = item.metadata.name;
+            const kind = item.kind;
+            const filename = `${String(idx).padStart(3, '0')}-${kind.toLowerCase()}-${name}.yaml`;
+            await fs.writeFile(path.join(resourcesDir, filename), stringify(item));
+            entries.push({ file: filename, kind, name, category: 'configmap', hasStatus: false });
+            idx++;
         }
 
-        // 4b. Write approval-gate cleanup script
-        const cleanupScript = this.generateApprovalGateCleanupScript(bundle.crdResources);
-        if (cleanupScript !== null) {
-            const cleanupPath = path.join(outputDir, 'cleanupApprovalGates.sh');
-            await fs.writeFile(cleanupPath, cleanupScript, { mode: 0o755 });
-        }
+        // Write the handler script
+        const handlerScript = this.generateHandleK8sResourcesScript(entries, allItems);
+        await fs.writeFile(path.join(outputDir, 'handleK8sResources.sh'), handlerScript, { mode: 0o755 });
 
-        // 5. Write CRD status patches (status subresource must be patched separately)
-        const makeStatusPatchScript = (items: StatusPatchableResource[]) =>
-            items
-                .filter((item: StatusPatchableResource) => item.status !== undefined)
-                .map((item: StatusPatchableResource) => {
-                    const group = item.apiVersion.split('/')[0];
-                    const kind = item.kind.toLowerCase() + 's.' + group;
-                    const patch = JSON.stringify({ status: item.status });
-                    return `kubectl patch ${kind}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
-                });
-
-        const statusPatches = makeStatusPatchScript(nonGateItems);
-        if (statusPatches.length > 0) {
-            const patchScript = '#!/bin/sh\nset -e\n' + statusPatches.join('\n') + '\n';
-            const patchPath = path.join(outputDir, 'patchCrdStatus.sh');
-            await fs.writeFile(patchPath, patchScript, { mode: 0o755 });
-        }
-
-        const gateStatusPatches = makeStatusPatchScript(gateItems);
-        if (gateStatusPatches.length > 0) {
-            const patchScript = '#!/bin/sh\nset -e\n' + gateStatusPatches.join('\n') + '\n';
-            const patchPath = path.join(outputDir, 'patchApprovalGateStatus.sh');
-            await fs.writeFile(patchPath, patchScript, { mode: 0o755 });
-        }
-
-        // 6. Write workflow config enrichment script for server-assigned CR UIDs
+        // 3. Write workflow config enrichment script for server-assigned CR UIDs
         const enrichScript = this.generateWorkflowUidEnrichmentScript(bundle.workflows);
         if (enrichScript !== null) {
             const enrichPath = path.join(outputDir, 'enrichWorkflowConfigWithUids.sh');
             await fs.writeFile(enrichPath, enrichScript, { mode: 0o755 });
         }
+    }
+
+    private generateHandleK8sResourcesScript(
+        entries: { file: string; kind: string; name: string; category: string; hasStatus: boolean }[],
+        allItems: any[]
+    ): string {
+        const lines: string[] = [
+            '#!/bin/sh',
+            'set -e',
+            '',
+            'SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"',
+            'RESOURCES_DIR="$SCRIPT_DIR/resources"',
+            '',
+        ];
+
+        // Approval gate label cleanup (delete by label before individual creates)
+        const gateEntries = entries.filter(e => e.category === 'approvalgate');
+        if (gateEntries.length > 0) {
+            const firstGate = allItems.find((item: any) => item.kind === 'ApprovalGate');
+            const labelKey = MigrationInitializer.APPROVAL_GATE_LABEL_KEY;
+            const labelValue = firstGate?.metadata?.labels?.[labelKey];
+            if (labelValue) {
+                lines.push(`# Clean up stale approval gates by label`);
+                lines.push(`kubectl delete approvalgates.${MigrationInitializer.CRD_GROUP} -l '${labelKey}=${labelValue}' --ignore-not-found`);
+                lines.push('');
+            }
+            // Fallback: delete each known gate by name
+            lines.push('# Fallback: delete known gates by name');
+            for (const entry of gateEntries) {
+                lines.push(`kubectl delete approvalgates.${MigrationInitializer.CRD_GROUP}/${entry.name} --ignore-not-found`);
+            }
+            lines.push('');
+        }
+
+        for (const entry of entries) {
+            const statusItem = allItems.find((item: any) =>
+                item.kind === entry.kind && item.metadata.name === entry.name);
+            const statusPatchCmd = entry.hasStatus && statusItem?.status
+                ? this.makeStatusPatchCommand(statusItem)
+                : null;
+
+            if (entry.category === 'approvalgate') {
+                lines.push(`# ApprovalGate: ${entry.name}`);
+                lines.push(`kubectl create -f "$RESOURCES_DIR/${entry.file}"`);
+                if (statusPatchCmd) lines.push(statusPatchCmd);
+                lines.push(`echo "RESULT ApprovalGate ${entry.name} CREATED"`);
+
+            } else if (entry.category === 'rootcr') {
+                lines.push(`# Root CR: ${entry.kind} ${entry.name}`);
+                lines.push(`if kubectl create -f "$RESOURCES_DIR/${entry.file}" 2>/tmp/k8s-handler-err.$$; then`);
+                if (statusPatchCmd) lines.push(`  ${statusPatchCmd}`);
+                lines.push(`  echo "RESULT ${entry.kind} ${entry.name} CREATED"`);
+                lines.push(`elif grep -q 'AlreadyExists' /tmp/k8s-handler-err.$$; then`);
+                lines.push(`  echo "RESULT ${entry.kind} ${entry.name} ALREADY_EXISTS"`);
+                lines.push(`else`);
+                lines.push(`  cat /tmp/k8s-handler-err.$$ >&2`);
+                lines.push(`  echo "RESULT ${entry.kind} ${entry.name} FAILED" >&2`);
+                lines.push(`  rm -f /tmp/k8s-handler-err.$$`);
+                lines.push(`  exit 1`);
+                lines.push(`fi`);
+                lines.push(`rm -f /tmp/k8s-handler-err.$$`);
+
+            } else if (entry.category === 'configmap') {
+                lines.push(`# ConfigMap: ${entry.name}`);
+                lines.push(`kubectl apply -f "$RESOURCES_DIR/${entry.file}"`);
+                lines.push(`echo "RESULT ${entry.kind} ${entry.name} APPLIED"`);
+            }
+            lines.push('');
+        }
+
+        return lines.join('\n');
+    }
+
+    private makeStatusPatchCommand(item: StatusPatchableResource): string {
+        const group = item.apiVersion.split('/')[0];
+        const plural = item.kind.toLowerCase() + 's.' + group;
+        const patch = JSON.stringify({ status: item.status });
+        return `kubectl patch ${plural}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
     }
 
     private generateApprovalConfigMaps(userConfig: any) {

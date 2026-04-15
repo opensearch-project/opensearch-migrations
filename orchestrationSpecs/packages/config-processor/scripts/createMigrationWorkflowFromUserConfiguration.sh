@@ -30,8 +30,6 @@ echo "Generated unique uniqueRunNonce: $UUID"
 
 # Set the name field based on environment variable
 if [ -n "$USE_GENERATE_NAME" ] && [ "$USE_GENERATE_NAME" != "false" ] && [ "$USE_GENERATE_NAME" != "0" ]; then
-  # Keeping this as 'full-migration' so that it's intentionally different than the
-  # one-single default migration that we will normally be using
   NAME_FIELD="generateName: m-${UUID}-"
   WORKFLOW_NAME="m-${UUID}"
 else
@@ -43,46 +41,8 @@ echo "Running configuration conversion..."
 $INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR --workflow-name "$WORKFLOW_NAME" $@
 
 echo "Applying Kubernetes resources..."
-
-# Clean up stale approval gates before creating new ones
-if [ -x "$TEMP_DIR/cleanupApprovalGates.sh" ]; then
-    echo "Cleaning up stale approval gates..."
-    "$TEMP_DIR/cleanupApprovalGates.sh"
-fi
-
-# Apply CRD resources
-if [ -f "$TEMP_DIR/crdResources.yaml" ]; then
-    echo "Applying CRD resources..."
-    if kubectl create -f "$TEMP_DIR/crdResources.yaml" 2>/dev/null; then
-        # Patch status subresource (kubectl create ignores status)
-        if [ -f "$TEMP_DIR/patchCrdStatus.sh" ]; then
-            echo "Patching CRD status subresources..."
-            sh "$TEMP_DIR/patchCrdStatus.sh"
-        fi
-    else
-        echo "CRD resources already exist, skipping."
-    fi
-fi
-
-# Create approval gates (these are always cleaned up and recreated)
-if [ -f "$TEMP_DIR/approvalGates.yaml" ]; then
-    echo "Creating approval gates..."
-    kubectl create -f "$TEMP_DIR/approvalGates.yaml"
-    if [ -f "$TEMP_DIR/patchApprovalGateStatus.sh" ]; then
-        sh "$TEMP_DIR/patchApprovalGateStatus.sh"
-    fi
-fi
-
-# Apply approval config maps
-if [ -f "$TEMP_DIR/approvalConfigMaps.yaml" ]; then
-    echo "Applying approval config maps..."
-    kubectl apply -f "$TEMP_DIR/approvalConfigMaps.yaml"
-fi
-
-# Apply concurrency config maps  
-if [ -f "$TEMP_DIR/concurrencyConfigMaps.yaml" ]; then
-    echo "Applying concurrency config maps..."
-    kubectl apply -f "$TEMP_DIR/concurrencyConfigMaps.yaml"
+if [ -x "$TEMP_DIR/handleK8sResources.sh" ]; then
+    "$TEMP_DIR/handleK8sResources.sh"
 fi
 
 if [ -x "$TEMP_DIR/enrichWorkflowConfigWithUids.sh" ]; then
