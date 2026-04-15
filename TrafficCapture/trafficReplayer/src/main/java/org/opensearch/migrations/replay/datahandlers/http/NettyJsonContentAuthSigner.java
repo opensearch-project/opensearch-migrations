@@ -9,6 +9,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -16,6 +17,8 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
     IAuthTransformer.StreamingFullMessageTransformer signer;
     HttpJsonRequestWithFaultingPayload httpMessage;
     List<HttpContent> httpContentsBuffer;
+    @Getter
+    IAuthTransformer.SignatureProducer signatureProducer;
 
     public NettyJsonContentAuthSigner(IAuthTransformer.StreamingFullMessageTransformer signer) {
         this.signer = signer;
@@ -32,7 +35,8 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
             httpContentsBuffer.add(httpContent);
             signer.consumeNextPayloadPart(httpContent.content().nioBuffer());
             if (msg instanceof LastHttpContent) {
-                signer.finalizeSignature(httpMessage);
+                signatureProducer = signer.finalizeContentHash();
+                // Flush unsigned headers + body downstream
                 flushDownstream(ctx);
             }
         } else {

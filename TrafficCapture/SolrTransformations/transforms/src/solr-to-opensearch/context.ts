@@ -32,6 +32,16 @@ export interface RequestContext {
   params: URLSearchParams;
   /** The request body as a Java Map — use .get()/.set() for access. */
   body: JavaMap;
+  /** Target name — 'opensearch', 'solr', etc. Set by the shim proxy. */
+  targetName?: string;
+  /** Routing mode — 'single' or 'dual'. Set by the shim proxy. */
+  mode?: string;
+  /**
+   * Solr requestHandler config (defaults/invariants/appends) from solrconfig.xml.
+   * Injected from bindings at init, set per-context so transforms access it via ctx.
+   * Uses Record (plain object) because GraalVM exposes Java Maps as JS objects via allowMapAccess.
+   */
+  solrConfig?: Record<string, { defaults?: Record<string, string>; invariants?: Record<string, string>; appends?: Record<string, string> }>;
 }
 
 /** Parsed once from the bundled {request, response}. Shared across all response micro-transforms. */
@@ -43,6 +53,10 @@ export interface ResponseContext {
   requestParams: URLSearchParams;
   /** The response body as a Java Map — use .get()/.set() for access. */
   responseBody: JavaMap;
+  /** Target name — 'opensearch', 'solr', etc. Set by the shim proxy. */
+  targetName?: string;
+  /** Routing mode — 'single' or 'dual'. Set by the shim proxy. */
+  mode?: string;
 }
 
 const ENDPOINT_PATTERNS: [RegExp, SolrEndpoint][] = [
@@ -82,6 +96,8 @@ export function buildRequestContext(msg: JavaMap): RequestContext {
     collection: /\/solr\/([^/]+)\//.exec(uri)?.[1],
     params: parseParams(uri),
     body: getBodyMap(msg.get('payload')),
+    targetName: msg.get('_targetName') || 'opensearch',
+    mode: msg.get('_mode') || 'single',
   };
 }
 
@@ -94,5 +110,7 @@ export function buildResponseContext(request: JavaMap, response: JavaMap): Respo
     collection: /\/solr\/([^/]+)\//.exec(uri)?.[1],
     requestParams: parseParams(uri),
     responseBody: getBodyMap(response.get('payload')),
+    targetName: request.get('_targetName') || 'opensearch',
+    mode: request.get('_mode') || 'single',
   };
 }

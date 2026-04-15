@@ -12,8 +12,7 @@
 #
 # By default, all artifacts are downloaded from the latest GitHub release:
 #   - CFN templates from GitHub releases
-#   - Helm chart from GitHub releases
-#   - Dashboard JSON files from GitHub releases
+#   - Helm chart from GitHub releases (dashboard JSONs are bundled inside the chart)
 #   - Container images are mirrored from public registries to private ECR
 #     (use --use-public-images to opt out and pull directly from public.ecr.aws)
 #
@@ -66,6 +65,7 @@ ma_images_source=""
 skip_setting_k8s_context=false
 skip_test_images=false
 image_tag="latest"
+kubectl_context=""
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -102,6 +102,7 @@ while [[ $# -gt 0 ]]; do
     --use-public-images) push_images_to_ecr=false; shift 1 ;;
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
+    --kubectl-context) kubectl_context="$2"; shift 2 ;;
     --skip-test-images) skip_test_images=true; shift 1 ;;
     --image-tag) image_tag="$2"; shift 2 ;;
     --tls-mode) tls_mode="$2"; shift 2 ;;
@@ -159,6 +160,8 @@ while [[ $# -gt 0 ]]; do
       echo "                                            is left unchanged. Use this on hosts that manage multiple K8s"
       echo "                                            deployments. You will need to pass --context=<context-name>"
       echo "                                            to every kubectl/helm command, or set the context yourself."
+      echo "  --kubectl-context <name>                  Custom alias for the kubectl context (default: EKS cluster name)."
+      echo "                                            Useful for CI systems that need a predictable context name."
       echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
       echo "  --image-tag <tag>                         Override the image tag (default: git short SHA)"
       echo ""
@@ -480,86 +483,6 @@ get_cfn_export() {
   fi
 }
 
-render_dashboard_json() {
-  local in_file="$1"
-  jq \
-    --arg region   "${AWS_CFN_REGION}" \
-    --arg account  "${AWS_ACCOUNT}" \
-    --arg stage    "${STAGE}" \
-    --arg qual     "${MA_QUALIFIER}" \
-    '
-    # walk() method to traverse and replace tokens (only in strings)
-    def walk(f):
-      . as $in
-      | if type == "object" then
-          reduce keys[] as $k (.; .[$k] = ( .[$k] | walk(f) ))
-          | f
-        elif type == "array" then
-          map( walk(f) )
-          | f
-        else
-          f
-        end;
-
-    def s:
-      if type=="string" then
-        .
-        | gsub("REGION";        $region)
-        | gsub("ACCOUNT_ID";    $account)
-        | gsub("MA_STAGE";      $stage)
-        | gsub("MA_QUALIFIER";  $qual)
-        | gsub("placeholder-region";     $region)
-        | gsub("placeholder-account-id"; $account)
-        | gsub("placeholder-stage";      $stage)
-        | gsub("placeholder-qualifier";  $qual)
-      else .
-      end;
-    walk(s)
-    ' "$in_file"
-}
-
-deploy_dashboard() {
-  local dashboard_name="$1"
-  local dashboard_file="$2"
-
-  : "${AWS_CFN_REGION:?AWS_CFN_REGION required}"
-  : "${AWS_ACCOUNT:?AWS_ACCOUNT required}"
-  : "${STAGE:?STAGE required}"
-  : "${MA_QUALIFIER:?MA_QUALIFIER required}"
-
-  echo "Deploying dashboard: ${dashboard_name}"
-  [[ -f "$dashboard_file" ]] || { echo "ERROR: dashboard file not found: $dashboard_file"; exit 1; }
-
-  # Render tokens, validate and minify
-  local processed_json
-  processed_json="$(render_dashboard_json "$dashboard_file")" || { echo "ERROR: failed to render JSON"; exit 1; }
-
-  echo "$processed_json" | jq -e . >/dev/null || {
-      echo "ERROR: Invalid JSON for ${dashboard_name} (${dashboard_file})"
-      exit 1
-  }
-
-  local tmp_json
-  tmp_json="$(mktemp)"
-  echo "$processed_json" | jq -c . > "$tmp_json"
-
-  # Deterministic dashboard name
-  local full_name="MA-${STAGE}-${AWS_CFN_REGION}-${dashboard_name}"
-  aws cloudwatch put-dashboard \
-    --dashboard-name "$full_name" \
-    --dashboard-body "file://${tmp_json}" \
-    --region "${AWS_CFN_REGION}" >/dev/null
-
-  # Validate dashboards on CloudWatch
-  if aws cloudwatch get-dashboard --dashboard-name "$full_name" --region "${AWS_CFN_REGION}" >/dev/null 2>&1; then
-    echo "OK: Dashboard available: ${full_name}"
-  else
-    echo "WARN: Could not read back dashboard: ${full_name}"
-  fi
-
-  rm -f "$tmp_json"
-}
-
 check_existing_ma_release() {
   local release_name="$1"
   local release_namespace="$2"
@@ -608,7 +531,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
     # intact — they affect template content (AppRegistry names, S3 paths) and
     # the CDK has safe defaults when they're unset.
     STACK_NAME_SUFFIX="" \
-      "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified
+      "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified -x test
     if [[ "$deploy_create_vpc" == "true" ]]; then
       cfn_template_file="$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
     else
@@ -778,8 +701,8 @@ else
 fi
 echo ""
 
-aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --alias "${MIGRATIONS_EKS_CLUSTER_NAME}"
-KUBE_CONTEXT="${MIGRATIONS_EKS_CLUSTER_NAME}"
+KUBE_CONTEXT="${kubectl_context:-${MIGRATIONS_EKS_CLUSTER_NAME}}"
+aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --alias "${KUBE_CONTEXT}"
 export KUBE_CONTEXT
 
 if [[ "$skip_setting_k8s_context" == "true" ]]; then
@@ -1110,24 +1033,16 @@ else
     --set images.installer.tag=$RELEASE_VERSION"
 fi
 
-# --- chart and dashboard source selection ---
-# By default, the Helm chart and dashboard JSON files are downloaded from the
-# GitHub release matching $RELEASE_VERSION. With --build-chart-and-dashboards,
-# they come from the local repo checkout instead.
-# To add new release artifacts, add curl downloads here and update
-# .github/workflows/release-drafter.yml to publish them.
-dashboard_dir="${base_dir}/deployment/k8s/dashboards"
+# --- chart source selection ---
+# By default, the Helm chart is downloaded from the GitHub release matching
+# $RELEASE_VERSION. With --build-chart-and-dashboards, it comes from the local
+# repo checkout instead. Dashboard JSONs are bundled inside the chart.
 if [[ "$build_chart_and_dashboards" != "true" ]]; then
   RELEASE_BASE_URL="https://github.com/opensearch-project/opensearch-migrations/releases/download/${RELEASE_VERSION}"
   echo "Downloading release artifacts (${RELEASE_VERSION}) from GitHub..."
   curl -fLO "${RELEASE_BASE_URL}/migration-assistant-${RELEASE_VERSION}.tgz" \
     || { echo "Failed to download Helm chart for version ${RELEASE_VERSION}"; exit 1; }
-  curl -fLO "${RELEASE_BASE_URL}/capture-replay-dashboard.json" \
-    || { echo "Failed to download capture-replay-dashboard.json"; exit 1; }
-  curl -fLO "${RELEASE_BASE_URL}/reindex-from-snapshot-dashboard.json" \
-    || { echo "Failed to download reindex-from-snapshot-dashboard.json"; exit 1; }
   ma_chart_dir="./migration-assistant-${RELEASE_VERSION}.tgz"
-  dashboard_dir="."
 fi
 
 # --- helm install ---
@@ -1272,11 +1187,6 @@ helm install "$namespace" "${ma_chart_dir}" \
 set -x
 
 kubectl config set-context "${KUBE_CONTEXT}" --namespace="$namespace" >/dev/null 2>&1
-
-echo "Deploying CloudWatch dashboards..."
-deploy_dashboard "CaptureReplay" "${dashboard_dir}/capture-replay-dashboard.json"
-deploy_dashboard "ReindexFromSnapshot" "${dashboard_dir}/reindex-from-snapshot-dashboard.json"
-echo "All dashboards deployed to CloudWatch"
 
 if [[ "$disable_general_purpose_pool" == "true" ]]; then
   echo "Disabling EKS Auto Mode general-purpose nodepool..."

@@ -7,6 +7,7 @@ import org.opensearch.migrations.replay.ReplayEngine;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -73,7 +74,7 @@ class ReplayEngineQuiescentTest {
         var ctx = buildMockCtx();
         var packets = new ByteBufList(Unpooled.wrappedBuffer("test".getBytes()));
         engine.scheduleRequest(ctx, sourceRequestTime, sourceRequestTime.plusMillis(50),
-            1, packets, (reqBytes, arr, t) -> null, quiescentDuration);
+            1, ByteBufListProducer.of(packets), (reqBytes, arr, t) -> null, quiescentDuration);
 
         var startCaptor = ArgumentCaptor.forClass(Instant.class);
         verify(orchestrator).scheduleRequest(any(), any(), startCaptor.capture(), any(), any(), any());
@@ -105,7 +106,7 @@ class ReplayEngineQuiescentTest {
 
         // No quiescentUntil — normal timing
         engine.scheduleRequest(ctx, sourceRequestTime, sourceRequestTime.plusMillis(50),
-            1, packets, (reqBytes, arr, t) -> null, null);
+            1, ByteBufListProducer.of(packets), (reqBytes, arr, t) -> null, null);
 
         var startCaptor = ArgumentCaptor.forClass(Instant.class);
         verify(orchestrator).scheduleRequest(any(), any(), startCaptor.capture(), any(), any(), any());

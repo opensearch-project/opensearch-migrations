@@ -42,6 +42,7 @@ import { boolRule } from './rules/boolRule';
 import { fieldRule } from './rules/fieldRule';
 import { matchAllRule } from './rules/matchAllRule';
 import { phraseRule } from './rules/phraseRule';
+import { boostRule } from './rules/boostRule';
 import { rangeRule } from './rules/rangeRule';
 
 /**
@@ -50,6 +51,10 @@ import { rangeRule } from './rules/rangeRule';
  * To add support for a new AST node type:
  *   1. Create a TransformRuleFn in transformer/rules/
  *   2. Register it here with the node's `type` discriminant as the key
+ *
+ * Note: 'group' is handled inline in transformNode() as a pass-through
+ * since OpenSearch has no grouping concept — precedence is handled by
+ * nesting bool queries.
  */
 const rules: Record<string, TransformRuleFn> = {
   // TODO: register remaining rules as they are implemented
@@ -59,6 +64,7 @@ const rules: Record<string, TransformRuleFn> = {
   matchAll: matchAllRule,
   phrase: phraseRule,
   range: rangeRule,
+  boost: boostRule,
 };
 
 /**
@@ -77,6 +83,23 @@ const rules: Record<string, TransformRuleFn> = {
  *         - partial: skips the node, adds a warning, continues translating
  */
 export function transformNode(node: ASTNode): Map<string, any> {
+  /**
+   * GroupNode represents parentheses in Solr syntax, used to override operator
+   * precedence. OpenSearch doesn't have an equivalent concept — precedence is
+   * handled by nesting bool queries. This rule simply unwraps the group and
+   * transforms its child.
+   *
+   * Example:
+   *   Input: GroupNode { child: BoolNode { or: [FieldNode, FieldNode] } }
+   *   Output: Map{"bool" → Map{"should" → [...]}}
+   *
+   * The GroupNode is transparent in the output — it doesn't produce any
+   * OpenSearch DSL structure of its own.
+   */
+  if (node.type === 'group') {
+    return transformNode(node.child);
+  }
+
   const rule = rules[node.type];
   if (!rule) {
     throw new Error(`No transform rule registered for node type: ${node.type}`);

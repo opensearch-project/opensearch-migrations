@@ -28,7 +28,8 @@ public class CreationResult implements Comparable<CreationResult>  {
     @AllArgsConstructor
     @Getter
     public enum CreationFailureType {
-        ALREADY_EXISTS(false, "already exists"),
+        INDEX_ALREADY_EXISTS(true, "already exists"),
+        METADATA_ALREADY_EXISTS(false, "already exists"),
         UNABLE_TO_TRANSFORM_FAILURE(true, "failed to transform to the target version"),
         TARGET_CLUSTER_FAILURE(true, "failed on target cluster"),
         INCOMPATIBLE_REPLICA_COUNT_FAILURE(true, "failed due to incompatible replica count for awareness attribute count"),

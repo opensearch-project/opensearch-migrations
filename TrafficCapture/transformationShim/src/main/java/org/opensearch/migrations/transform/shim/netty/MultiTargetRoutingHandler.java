@@ -70,6 +70,14 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     private static final String HANDLER_READ_TIMEOUT = "readTimeout";
     private static final String HANDLER_RESPONSE = "responseHandler";
     private static final String RESPONSE_KEY = "response";
+    private static final String CURSOR_MARK_PARAM = "cursorMark";
+    private static final String OPENSEARCH_TARGET = "opensearch";
+
+
+
+
+
+
 
     /** Structured tuple logger — mirrors replayer's OutputTupleJsonLogger. */
     private static final Logger TUPLE_LOGGER = LoggerFactory.getLogger("OutputTupleJsonLogger");
@@ -197,16 +205,33 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         ShimRequestContext requestCtx
     ) {
         Map<String, CompletableFuture<TargetResponse>> futures = new LinkedHashMap<>();
+        boolean dualMode = activeTargets.size() > 1;
+        String uri = (String) requestMap.get("URI");
+        // Check for cursorMark in both URL params and JSON request body (P1)
+        boolean hasCursorMark = dualMode && (
+            (uri != null && uri.contains("cursorMark=")) ||
+            requestMap.containsKey(CURSOR_MARK_PARAM)
+        );
+
         for (String name : activeTargets) {
             Target target = targets.get(name);
-            Map<String, Object> targetRequestMap = target.requestTransform() != null
+            Map<String, Object> targetRequestMap = (dualMode || target.requestTransform() != null)
                 ? deepCopyMap(requestMap) : requestMap;
+            targetRequestMap.put("_targetName", name);
+            targetRequestMap.put("_mode", dualMode ? "dual" : "single");
+
+            // In dual mode with cursorMark, split the combined token per target
+            if (hasCursorMark) {
+                rewriteCursorMarkForTarget(targetRequestMap, name);
+            }
 
             TargetDispatchContext dispatchCtx = requestCtx != null
                 ? (TargetDispatchContext) requestCtx.createTargetDispatchContext(name)
                 : null;
 
-            futures.put(name, dispatchToTarget(target, targetRequestMap, requestMap, dispatchCtx));
+            // Response transform needs per-target URI (with rewritten cursorMark)
+            Map<String, Object> responseRequestMap = hasCursorMark ? targetRequestMap : requestMap;
+            futures.put(name, dispatchToTarget(target, targetRequestMap, responseRequestMap, dispatchCtx));
         }
         return new DispatchResult(futures);
     }
@@ -228,7 +253,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
                     Map<String, TargetResponse> allResponses = collectResponses(futures);
 
                     List<ValidationResult> results = runValidators(allResponses);
-                    FullHttpResponse response = buildFinalResponse(primary, allResponses, results);
+                    FullHttpResponse response = buildFinalResponse(primary, allResponses, results, requestMap);
                     HttpMessageUtil.writeResponse(ctx, response, keepAlive);
 
                     logTuple(requestId, requestMap, allResponses, results);
@@ -330,7 +355,7 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
         try {
             long reqTransformStart = System.nanoTime();
-            Map<String, Object> targetMap = applyRequestTransform(target, requestMap, dispatchCtx);
+            Map<String, Object> targetMap = applyRequestTransformOrThrow(target, requestMap, dispatchCtx);
             Duration reqTransformDuration = Duration.ofNanos(System.nanoTime() - reqTransformStart);
 
             FullHttpRequest targetRequest = applyAuth(target, HttpMessageUtil.mapToRequest(targetMap));
@@ -404,6 +429,21 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
             }
         }
         return doRequestTransform(target, requestMap);
+    }
+
+    /**
+     * Apply the request transform, wrapping any failure in TransformException
+     * so callers can distinguish transform errors from upstream failures.
+     */
+    private Map<String, Object> applyRequestTransformOrThrow(
+        Target target, Map<String, Object> requestMap, TargetDispatchContext dispatchCtx
+    ) {
+        try {
+            return applyRequestTransform(target, requestMap, dispatchCtx);
+        } catch (Exception e) {
+            throw new TransformException(
+                String.format("Request transform failed for target '%s'", target.name()), e);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -505,9 +545,17 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
     private FullHttpResponse buildFinalResponse(
         TargetResponse primary,
         Map<String, TargetResponse> allResponses,
-        List<ValidationResult> validationResults
+        List<ValidationResult> validationResults,
+        Map<String, Object> requestMap
     ) {
         FullHttpResponse response = buildPrimaryResponse(primary);
+
+        if (allResponses.size() > 1) {
+            String sentCursorMark = extractQueryParam(
+                (String) requestMap.get("URI"), CURSOR_MARK_PARAM);
+            response = mergeCursorTokens(response, allResponses, sentCursorMark);
+        }
+
         addShimHeaders(response);
         addTargetHeaders(response, allResponses);
         addValidationHeaders(response, validationResults);
@@ -516,9 +564,18 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
 
     private FullHttpResponse buildPrimaryResponse(TargetResponse primary) {
         if (!primary.isSuccess()) {
+            final Throwable err = primary.error();
+            // Transform failures (wrapped in TransformException) return 500
+            // upstream communication failures return 502
+            final HttpResponseStatus status;
+            if (err instanceof TransformException) {
+                status = HttpResponseStatus.INTERNAL_SERVER_ERROR;
+            } else {
+                status = HttpResponseStatus.BAD_GATEWAY;
+            }
             return HttpMessageUtil.errorResponse(
-                HttpResponseStatus.BAD_GATEWAY,
-                "Primary target '" + primary.targetName() + "' failed: " + primary.error().getMessage());
+                status,
+                String.format("Primary target '%s' failed: %s", primary.targetName(), err.getMessage()));
         }
         byte[] body = primary.rawBody() != null ? primary.rawBody() : new byte[0];
         FullHttpResponse response = new DefaultFullHttpResponse(
@@ -529,6 +586,162 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
         return response;
     }
+
+    // --- Cursor pagination dual-mode support ---
+
+    /**
+     * In dual mode, rewrite the cursorMark query param for each target.
+     * Combined token format: base64({"solr":"<native>","os":"<os_token>"})
+     * For initial request (cursorMark=*), no rewrite needed.
+     * For Solr: extract the "solr" portion (native Solr cursorMark).
+     * For OpenSearch: extract the "os" portion (base64-encoded sort values).
+     */
+    static void rewriteCursorMarkForTarget(Map<String, Object> requestMap, String targetName) {
+        String uri = (String) requestMap.get("URI");
+        if (uri == null) return;
+
+        String cursorMark = extractQueryParam(uri, CURSOR_MARK_PARAM);
+        if (cursorMark == null || "*".equals(cursorMark)) return;
+
+        try {
+            String decoded = new String(java.util.Base64.getUrlDecoder().decode(cursorMark), StandardCharsets.UTF_8);
+            Map<String, Object> combined = MAPPER.readValue(decoded, MAP_TYPE_REF);
+
+            String targetToken;
+            if (OPENSEARCH_TARGET.equals(targetName) && combined.containsKey("os")) {
+                targetToken = (String) combined.get("os");
+            } else if (combined.containsKey("solr")) {
+                targetToken = (String) combined.get("solr");
+            } else {
+                return; // Not a combined token, pass through as-is
+            }
+
+            String newUri = replaceQueryParam(uri, CURSOR_MARK_PARAM, targetToken);
+            requestMap.put("URI", newUri);
+        } catch (Exception e) {
+            // Not a combined token — unexpected in dual mode, log for debugging
+            log.warn("cursorMark is not a combined token, passing through: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * After both targets respond, merge their nextCursorMark tokens into a combined token.
+     * Rewrites the primary response body with the combined nextCursorMark.
+     *
+     * Contract: each target's cursor token is treated as an opaque string. The TypeScript
+     * transform layer produces base64-encoded sort values for OpenSearch and Solr returns
+     * its native cursor token. This method combines them without interpreting the format.
+     *
+     * TODO: Consider extracting cursor merge/split into a CursorStrategy interface if
+     * additional pagination strategies are needed beyond the current solr+os dual mode.
+     */
+    @SuppressWarnings("unchecked")
+    FullHttpResponse mergeCursorTokens(
+        FullHttpResponse response, Map<String, TargetResponse> allResponses, String sentCursorMark
+    ) {
+        String solrToken = extractCursorToken(allResponses, "solr");
+        String osToken = extractCursorToken(allResponses, OPENSEARCH_TARGET);
+
+        if (solrToken == null || osToken == null) {
+            logPartialCursorWarning(solrToken, osToken);
+            return response;
+        }
+
+        if (isPaginationEnded(sentCursorMark, solrToken, osToken)) {
+            log.debug("Both targets returned same cursor as sent — end of results");
+            return response;
+        }
+
+        try {
+            String combinedToken = buildCombinedToken(solrToken, osToken);
+            return rewriteResponseWithToken(response, combinedToken);
+        } catch (Exception e) {
+            log.warn("Failed to merge cursor tokens: {}", e.getMessage());
+            return response;
+        }
+    }
+
+    private void logPartialCursorWarning(String solrToken, String osToken) {
+        if (solrToken != null || osToken != null) {
+            log.warn("Only one target returned a cursor token (solr={}, os={}), skipping merge",
+                solrToken != null ? "present" : "missing", osToken != null ? "present" : "missing");
+        }
+    }
+
+    private boolean isPaginationEnded(String sentCursorMark, String solrToken, String osToken) {
+        if (sentCursorMark == null || "*".equals(sentCursorMark)) {
+            return false;
+        }
+        try {
+            String decoded = new String(
+                java.util.Base64.getUrlDecoder().decode(sentCursorMark), StandardCharsets.UTF_8);
+            Map<String, Object> sentCombined = MAPPER.readValue(decoded, MAP_TYPE_REF);
+            String sentSolr = (String) sentCombined.get("solr");
+            String sentOs = (String) sentCombined.get("os");
+            return solrToken.equals(sentSolr) && osToken.equals(sentOs);
+        } catch (Exception e) {
+            log.warn("Sent cursorMark is not a combined token, proceeding with merge: {}",
+                e.getMessage());
+            return false;
+        }
+    }
+
+    private String extractCursorToken(Map<String, TargetResponse> allResponses, String targetKey) {
+        TargetResponse tr = allResponses.get(targetKey);
+        if (tr != null && tr.isSuccess() && tr.parsedBody() != null) {
+            Object nextCursor = tr.parsedBody().get("nextCursorMark");
+            if (nextCursor != null) return nextCursor.toString();
+        }
+        return null;
+    }
+
+    private String buildCombinedToken(String solrToken, String osToken) throws Exception {
+        Map<String, Object> combined = new LinkedHashMap<>();
+        combined.put("v", 1);
+        combined.put("solr", solrToken);
+        combined.put("os", osToken);
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(MAPPER.writeValueAsBytes(combined));
+    }
+
+    private FullHttpResponse rewriteResponseWithToken(
+        FullHttpResponse response, String combinedToken
+    ) throws Exception {
+        byte[] bodyBytes = new byte[response.content().readableBytes()];
+        response.content().getBytes(response.content().readerIndex(), bodyBytes);
+        Map<String, Object> body = MAPPER.readValue(bodyBytes, MAP_TYPE_REF);
+        body.put("nextCursorMark", combinedToken);
+        byte[] newBody = MAPPER.writeValueAsBytes(body);
+
+        HttpResponseStatus status = response.status();
+        response.release();
+        FullHttpResponse newResponse = new DefaultFullHttpResponse(
+            HttpVersion.HTTP_1_1, status, Unpooled.wrappedBuffer(newBody));
+        newResponse.headers().set(HttpHeaderNames.CONTENT_LENGTH, newBody.length);
+        newResponse.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json");
+        return newResponse;
+    }
+
+    static String extractQueryParam(String uri, String param) {
+        int qIdx = uri.indexOf('?');
+        if (qIdx < 0) return null;
+        String query = uri.substring(qIdx + 1);
+        for (String pair : query.split("&")) {
+            String[] kv = pair.split("=", 2);
+            if (kv.length == 2 && param.equals(kv[0])) {
+                return java.net.URLDecoder.decode(kv[1], StandardCharsets.UTF_8);
+            }
+        }
+        return null;
+    }
+
+    static String replaceQueryParam(String uri, String param, String newValue) {
+        String encoded = java.net.URLEncoder.encode(newValue, StandardCharsets.UTF_8);
+        return uri.replaceFirst(
+            "([?&])" + param + "=[^&]*",
+            "$1" + param + "=" + encoded);
+    }
+
+    // --- End cursor pagination support ---
 
     private void addShimHeaders(FullHttpResponse response) {
         response.headers().set("X-Shim-Primary", primaryTarget);

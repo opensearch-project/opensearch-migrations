@@ -19,6 +19,7 @@ def publishedRepoByImageName = [
         traffic_replayer      : "opensearch-migrations-traffic-replayer",
         capture_proxy         : "opensearch-migrations-traffic-capture-proxy",
         reindex_from_snapshot : "opensearch-migrations-reindex-from-snapshot",
+        transformation_shim   : "opensearch-migrations-transformation-shim",
 ]
 
 def getRepoNameIfPublishing = { Map cfg ->
