@@ -62,6 +62,52 @@ class DefaultOperationsLibrary:
         return execute_api_call(cluster=cluster, method=HttpMethod.DELETE, path=f"/{index_name}/{doc_type}/{doc_id}",
                                 **kwargs)
 
+    def update_document(self, index_name: str, doc_id: str, cluster: Cluster, doc: dict, **kwargs):
+        """Partial update via POST /{index}/_update/{id}."""
+        headers = {'Content-Type': 'application/json'}
+        return execute_api_call(cluster=cluster, method=HttpMethod.POST,
+                                path=f"/{index_name}/_update/{doc_id}",
+                                data=json.dumps({"doc": doc}), headers=headers, **kwargs)
+
+    def update_by_query(self, index_name: str, cluster: Cluster, body: dict, **kwargs):
+        """POST /{index}/_update_by_query."""
+        headers = {'Content-Type': 'application/json'}
+        return execute_api_call(cluster=cluster, method=HttpMethod.POST,
+                                path=f"/{index_name}/_update_by_query",
+                                data=json.dumps(body), headers=headers, **kwargs)
+
+    def delete_by_query(self, index_name: str, cluster: Cluster, body: dict, **kwargs):
+        """POST /{index}/_delete_by_query."""
+        headers = {'Content-Type': 'application/json'}
+        return execute_api_call(cluster=cluster, method=HttpMethod.POST,
+                                path=f"/{index_name}/_delete_by_query",
+                                data=json.dumps(body), headers=headers, **kwargs)
+
+    def create_alias(self, cluster: Cluster, actions: list, **kwargs):
+        """POST /_aliases with actions list."""
+        headers = {'Content-Type': 'application/json'}
+        return execute_api_call(cluster=cluster, method=HttpMethod.POST, path="/_aliases",
+                                data=json.dumps({"actions": actions}), headers=headers, **kwargs)
+
+    def create_index_template(self, template_name: str, cluster: Cluster, body: dict, **kwargs):
+        """PUT /_index_template/{name}."""
+        headers = {'Content-Type': 'application/json'}
+        return execute_api_call(cluster=cluster, method=HttpMethod.PUT,
+                                path=f"/_index_template/{template_name}",
+                                data=json.dumps(body), headers=headers, **kwargs)
+
+    def put_settings(self, index_name: str, cluster: Cluster, settings: dict, **kwargs):
+        """PUT /{index}/_settings."""
+        headers = {'Content-Type': 'application/json'}
+        return execute_api_call(cluster=cluster, method=HttpMethod.PUT,
+                                path=f"/{index_name}/_settings",
+                                data=json.dumps(settings), headers=headers, **kwargs)
+
+    def refresh_index(self, index_name: str, cluster: Cluster, **kwargs):
+        """POST /{index}/_refresh."""
+        return execute_api_call(cluster=cluster, method=HttpMethod.POST,
+                                path=f"/{index_name}/_refresh", **kwargs)
+
     def clear_index_templates(self, cluster: Cluster, **kwargs):
         logger.warning(f"Clearing index templates has not been implemented for cluster version: {cluster.version}")
         return

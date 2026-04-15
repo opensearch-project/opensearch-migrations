@@ -109,6 +109,7 @@ pipeline {
                         copyDockerImage('opensearch-migrations-traffic-replayer');
                         copyDockerImage('opensearch-migrations-traffic-capture-proxy');
                         copyDockerImage('opensearch-migrations-reindex-from-snapshot');
+                        copyDockerImage('opensearch-migrations-transformation-shim');
                     }
                 }
             }

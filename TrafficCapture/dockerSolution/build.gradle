@@ -32,7 +32,7 @@ def dockerBuildArgsMap = [
                 BASE_IMAGE: ptc.rewrite("public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3"),
         ],
         "grafana": [
-                BASE_IMAGE: ptc.rewrite("docker.io/grafana/grafana:11.6.1"),
+                BASE_IMAGE: ptc.rewrite("docker.io/grafana/grafana:11.6.13"),
         ],
 ]
 
