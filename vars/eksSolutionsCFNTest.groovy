@@ -121,7 +121,8 @@ def call(Map config = [:]) {
                                 useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
                                 buildImages: params.BUILD_IMAGES,
                                 buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
-                                version: params.VERSION
+                                version: params.VERSION,
+                                useGeneralNodePool: true
                             )
 
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
