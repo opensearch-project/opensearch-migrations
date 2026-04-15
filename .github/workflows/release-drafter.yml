@@ -136,11 +136,13 @@ jobs:
           docker pull opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
           docker pull opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
           docker pull opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-transformation-shim:${{ steps.get_data.outputs.version }}
           # Tag them with the expected names for SBOM scanning
           docker tag opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }} migrations/migration_console:latest
           docker tag opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }} migrations/traffic_replayer:latest
           docker tag opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }} migrations/capture_proxy:latest
           docker tag opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }} migrations/reindex_from_snapshot:latest
+          docker tag opensearchstaging/opensearch-migrations-transformation-shim:${{ steps.get_data.outputs.version }} migrations/transformation_shim:latest
       - name: Generate SBOM for migration_console
         uses: anchore/sbom-action@v0.24.0
         with:
@@ -161,6 +163,11 @@ jobs:
         with:
           image: migrations/reindex_from_snapshot:latest
           output-file: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
+      - name: Generate SBOM for transformation_shim
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          image: migrations/transformation_shim:latest
+          output-file: opensearch-migrations-transformation-shim-sbom.spdx.json
       - name: Generate SBOM for artifacts
         uses: anchore/sbom-action@v0.24.0
         with:
@@ -247,6 +254,7 @@ jobs:
             opensearch-migrations-source.tar.gz
             opensearch-migrations-build.tar.gz
             kiro-cli/build/kiro-assistant.tar.gz
+            bootstrap-kiro-agent.sh
             migration-assistant-${{ steps.get_data.outputs.version }}.tgz
             workflowMigration.schema.json
             deployment/k8s/aws/dist/aws-bootstrap.sh

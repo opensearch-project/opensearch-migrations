@@ -13,9 +13,9 @@
 # ALL helm charts: "name|version|repository"
 CHARTS="
 cert-manager|1.17.2|https://charts.jetstack.io
-strimzi-kafka-operator|0.50.0|https://strimzi.io/charts/
+strimzi-kafka-operator|0.50.1|https://strimzi.io/charts/
 argo-workflows|1.0.5|https://argoproj.github.io/argo-helm
-fluent-bit|0.49.0|https://fluent.github.io/helm-charts
+fluent-bit|0.51.0|https://fluent.github.io/helm-charts
 kube-prometheus-stack|72.0.0|https://prometheus-community.github.io/helm-charts
 etcd-operator|0.4.2|oci://ghcr.io/aenix-io/charts
 opentelemetry-operator|0.86.4|https://open-telemetry.github.io/opentelemetry-helm-charts
@@ -47,13 +47,12 @@ public.ecr.aws/aws-controllers-k8s/acmpca-controller:1.2.2
 public.ecr.aws/aws-controllers-k8s/cloudwatch-controller:1.4.2
 
 # --- strimzi (operator + runtime images) ---
-quay.io/strimzi/operator:0.50.0
-quay.io/strimzi/kafka:0.50.0-kafka-4.0.0
-quay.io/strimzi/kafka:0.50.0-kafka-4.0.1
+quay.io/strimzi/operator:0.50.1
+quay.io/strimzi/kafka:0.50.1-kafka-4.0.0
 quay.io/strimzi/kafka-bridge:0.33.1
-quay.io/strimzi/kaniko-executor:0.50.0
-quay.io/strimzi/maven-builder:0.50.0
-quay.io/strimzi/buildah:0.50.0
+quay.io/strimzi/kaniko-executor:0.50.1
+quay.io/strimzi/maven-builder:0.50.1
+quay.io/strimzi/buildah:0.50.1
 
 # --- argo-workflows ---
 # Keep in sync with values.yaml charts.argo-workflows and
@@ -63,7 +62,7 @@ quay.io/argoproj/argocli:v4.0.3
 quay.io/argoproj/argoexec:v4.0.3
 
 # --- fluent-bit ---
-cr.fluentbit.io/fluent/fluent-bit:4.0.1
+cr.fluentbit.io/fluent/fluent-bit:4.0.7
 mirror.gcr.io/library/busybox:latest
 
 # --- kube-prometheus-stack ---
@@ -72,7 +71,7 @@ quay.io/prometheus-operator/prometheus-operator:v0.82.0
 quay.io/prometheus-operator/prometheus-config-reloader:v0.82.0
 quay.io/prometheus/node-exporter:v1.9.1
 quay.io/prometheus/alertmanager:v0.28.1
-quay.io/kiwigrid/k8s-sidecar:1.30.0
+quay.io/kiwigrid/k8s-sidecar:1.30.11
 registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.15.0
 registry.k8s.io/ingress-nginx/kube-webhook-certgen:v1.5.3
 mirror.gcr.io/bats/bats:v1.4.1
@@ -86,7 +85,7 @@ ghcr.io/open-telemetry/opentelemetry-operator/opentelemetry-operator:0.122.0
 quay.io/brancz/kube-rbac-proxy:v0.18.1
 
 # --- grafana ---
-mirror.gcr.io/grafana/grafana:11.6.1
+mirror.gcr.io/grafana/grafana:11.6.13
 
 # --- jaeger ---
 mirror.gcr.io/jaegertracing/jaeger-agent:1.53.0
@@ -119,7 +118,7 @@ mirror.gcr.io/amazon/aws-cli:2.25.11
 mirror.gcr.io/opensearchproject/opensearch:3.1.0
 
 # --- mountpoint-s3 CSI driver ---
-public.ecr.aws/mountpoint-s3/aws-mountpoint-s3-csi-driver:v2.5.0
+public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.5.0
 public.ecr.aws/csi-components/csi-node-driver-registrar:v2.16.0-eksbuild.3
 public.ecr.aws/csi-components/livenessprobe:v2.18.0-eksbuild.3
 
