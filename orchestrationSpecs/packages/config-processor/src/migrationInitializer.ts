@@ -44,22 +44,22 @@ export class MigrationInitializer {
     /**
      * Generate output files including workflow config, approval ConfigMaps, and concurrency ConfigMaps with semaphores
      */
-    async generateOutputFiles(workflows: WorkflowConfig, outputDir: string, userConfig: any): Promise<void> {
-        const bundle = await this.generateMigrationBundle(userConfig);
+    async generateOutputFiles(workflows: WorkflowConfig, outputDir: string, userConfig: any, workflowName?: string): Promise<void> {
+        const bundle = await this.generateMigrationBundle(userConfig, workflowName);
         await this.writeBundleToFiles(bundle, outputDir);
     }
 
     /**
      * Generate all migration artifacts from user config
      */
-    async generateMigrationBundle(userConfig: any) {
+    async generateMigrationBundle(userConfig: any, workflowName?: string) {
         // Transform user config to workflow config
         const workflows = await this.transformer.processFromObject(userConfig);
         
         // Generate ConfigMaps
         const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
         const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
-        const crdResources = this.generateCRDResources(workflows);
+        const crdResources = this.generateCRDResources(workflows, workflowName);
         
         return {
             workflows,
@@ -90,6 +90,13 @@ export class MigrationInitializer {
         // 4. Write CRD resources
         const crdPath = path.join(outputDir, 'crdResources.yaml');
         await fs.writeFile(crdPath, stringify(bundle.crdResources));
+
+        // 4a. Write approval-gate cleanup script
+        const cleanupScript = this.generateApprovalGateCleanupScript(bundle.crdResources);
+        if (cleanupScript !== null) {
+            const cleanupPath = path.join(outputDir, 'cleanupApprovalGates.sh');
+            await fs.writeFile(cleanupPath, cleanupScript, { mode: 0o755 });
+        }
 
         // 5. Write CRD status patches (status subresource must be patched separately)
         const statusPatches = (bundle.crdResources.items || [])
@@ -170,6 +177,10 @@ export class MigrationInitializer {
         };
     }
 
+    static readonly APPROVAL_GATE_LABEL_KEY = 'migrations.opensearch.org/workflow';
+    static readonly CRD_GROUP = 'migrations.opensearch.org';
+    static readonly CRD_API_VERSION = `${MigrationInitializer.CRD_GROUP}/v1alpha1`;
+
     private makeCrdName(...labels: string[]): string {
         return labels.join('-');
     }
@@ -178,8 +189,11 @@ export class MigrationInitializer {
         return [...parts, action].join('.');
     }
 
-    private generateCRDResources(workflows: WorkflowConfig) {
-        const CRD_API_VERSION = 'migrations.opensearch.org/v1alpha1';
+    private generateCRDResources(workflows: WorkflowConfig, workflowName?: string) {
+        const CRD_API_VERSION = MigrationInitializer.CRD_API_VERSION;
+        const gateLabel = workflowName
+            ? { [MigrationInitializer.APPROVAL_GATE_LABEL_KEY]: workflowName }
+            : undefined;
         const items: any[] = [];
 
         // KafkaCluster resources from workflow-managed Kafka clusters
@@ -241,15 +255,21 @@ export class MigrationInitializer {
                 items.push({
                     apiVersion: CRD_API_VERSION,
                     kind: 'ApprovalGate',
-                    metadata: { name: this.makeApprovalGateName(approvalNameParts, 'evaluateMetadata') },
-                    spec: { dependsOn: [this.makeCrdName(migration.sourceLabel, migration.targetConfig.label, migration.label)] },
+                    metadata: {
+                        name: this.makeApprovalGateName(approvalNameParts, 'evaluateMetadata'),
+                        ...(gateLabel && { labels: gateLabel }),
+                    },
+                    spec: {},
                     status: { phase: 'Initialized' }
                 });
                 items.push({
                     apiVersion: CRD_API_VERSION,
                     kind: 'ApprovalGate',
-                    metadata: { name: this.makeApprovalGateName(approvalNameParts, 'migrateMetadata') },
-                    spec: { dependsOn: [this.makeCrdName(migration.sourceLabel, migration.targetConfig.label, migration.label)] },
+                    metadata: {
+                        name: this.makeApprovalGateName(approvalNameParts, 'migrateMetadata'),
+                        ...(gateLabel && { labels: gateLabel }),
+                    },
+                    spec: {},
                     status: { phase: 'Initialized' }
                 });
             }
@@ -277,6 +297,31 @@ export class MigrationInitializer {
             kind: 'List',
             items
         };
+    }
+
+    generateApprovalGateCleanupScript(crdResources: { items: any[] }): string | null {
+        const gates = crdResources.items.filter((item: any) => item.kind === 'ApprovalGate');
+        if (gates.length === 0) return null;
+
+        const plural = `approvalgates.${MigrationInitializer.CRD_GROUP}`;
+        const lines = ['#!/bin/sh', 'set -x', ''];
+
+        // Label-based cleanup — deletes all gates matching the workflow label
+        const firstLabel = gates[0].metadata.labels;
+        if (firstLabel?.[MigrationInitializer.APPROVAL_GATE_LABEL_KEY]) {
+            const selector = `${MigrationInitializer.APPROVAL_GATE_LABEL_KEY}=${firstLabel[MigrationInitializer.APPROVAL_GATE_LABEL_KEY]}`;
+            lines.push(`kubectl delete ${plural} -l '${selector}' --ignore-not-found`);
+            lines.push('');
+        }
+
+        // Delete-by-name fallback for each known gate
+        lines.push('# Fallback: delete by name in case labels were missing or changed');
+        for (const gate of gates) {
+            lines.push(`kubectl delete ${plural}/${gate.metadata.name} --ignore-not-found`);
+        }
+        lines.push('');
+
+        return lines.join('\n');
     }
 
     private generateWorkflowUidEnrichmentScript(workflows: WorkflowConfig): string | null {

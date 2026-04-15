@@ -53,6 +53,7 @@ export async function main() {
     let userConfigFile = process.env.USER_WORKFLOW_CONFIGURATION;
     let workflowConfigFile = process.env.TRANSFORMED_WORKFLOW_CONFIGURATION;
     let outputDir: string | undefined;
+    let workflowName: string | undefined;
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
@@ -63,6 +64,8 @@ export async function main() {
             workflowConfigFile = args[++i];
         } else if (arg === '--output-dir' && i + 1 < args.length) {
             outputDir = args[++i];
+        } else if (arg === '--workflow-name' && i + 1 < args.length) {
+            workflowName = args[++i];
         } else {
             console.error('Error: unknown arg: `' + arg + '`.');
             process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
@@ -99,7 +102,7 @@ export async function main() {
         // Generate output files
         if (outputDir) {
             const initializer = new MigrationInitializer();
-            await initializer.generateOutputFiles(workflows, outputDir, userConfigFile ? await parseInput(userConfigFile) : null);
+            await initializer.generateOutputFiles(workflows, outputDir, userConfigFile ? await parseInput(userConfigFile) : null, workflowName);
         }
 
         // Output transformed workflow to stdout if no output directory specified - ignoring auxiliary configmap values

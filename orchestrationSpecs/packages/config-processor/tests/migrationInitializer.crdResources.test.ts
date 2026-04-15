@@ -112,6 +112,8 @@ describe('migration initializer CRD resource generation', () => {
         expect(getResource('DataSnapshot', 'source-snap1')?.spec.dependsOn).toEqual(['source-proxy']);
         expect(getResource('SnapshotMigration', 'source-target-snap1')?.spec.dependsOn).toEqual(['source-snap1']);
         expect(getResource('TrafficReplay', 'source-proxy-target-target-replay')?.spec.dependsOn).toEqual(['source-proxy']);
+        expect(getResource('ApprovalGate', 'source.target.snap1.migration-0.evaluateMetadata')?.spec.dependsOn).toBeUndefined();
+        expect(getResource('ApprovalGate', 'source.target.snap1.migration-0.migrateMetadata')?.spec.dependsOn).toBeUndefined();
 
         expect(enrichScript).toContain(
             "snapshot_migration_source_target_snap1=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1 -o jsonpath='{.metadata.uid}')\""
@@ -121,5 +123,79 @@ describe('migration initializer CRD resource generation', () => {
         expect(enrichScript).toContain(
             '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + "-" + .targetConfig.label + "-" + .label)]}))'
         );
+    });
+
+    it('labels approval gates with workflow name and generates cleanup script', async () => {
+        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        repos: { default: { awsRegion: "us-east-2", s3RepoPathUri: "s3://bucket/path" } },
+                        snapshots: { snap1: { repoName: "default", config: { createSnapshotConfig: {} } } }
+                    }
+                }
+            },
+            targetClusters: { target: { endpoint: "https://target.example.com" } },
+            snapshotMigrationConfigs: [{ fromSource: "source", toTarget: "target" }]
+        };
+
+        const initializer = new MigrationInitializer();
+        const bundle = await initializer.generateMigrationBundle(config, 'my-workflow');
+        const gates = bundle.crdResources.items.filter((item: any) => item.kind === 'ApprovalGate');
+
+        // All gates carry the workflow label
+        for (const gate of gates) {
+            expect(gate.metadata.labels).toEqual({
+                [MigrationInitializer.APPROVAL_GATE_LABEL_KEY]: 'my-workflow'
+            });
+        }
+
+        // Cleanup script does label-based delete then per-name fallback
+        const cleanup = initializer.generateApprovalGateCleanupScript(bundle.crdResources);
+        expect(cleanup).toContain(
+            `kubectl delete approvalgates.${MigrationInitializer.CRD_GROUP} -l '${MigrationInitializer.APPROVAL_GATE_LABEL_KEY}=my-workflow' --ignore-not-found`
+        );
+        for (const gate of gates) {
+            expect(cleanup).toContain(
+                `kubectl delete approvalgates.${MigrationInitializer.CRD_GROUP}/${gate.metadata.name} --ignore-not-found`
+            );
+        }
+    });
+
+    it('omits labels and label-based cleanup when no workflow name provided', async () => {
+        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com",
+                    version: "ES 7.10.2",
+                    snapshotInfo: {
+                        repos: { default: { awsRegion: "us-east-2", s3RepoPathUri: "s3://bucket/path" } },
+                        snapshots: { snap1: { repoName: "default", config: { createSnapshotConfig: {} } } }
+                    }
+                }
+            },
+            targetClusters: { target: { endpoint: "https://target.example.com" } },
+            snapshotMigrationConfigs: [{ fromSource: "source", toTarget: "target" }]
+        };
+
+        const initializer = new MigrationInitializer();
+        const bundle = await initializer.generateMigrationBundle(config);
+        const gates = bundle.crdResources.items.filter((item: any) => item.kind === 'ApprovalGate');
+
+        // Gates have no labels
+        for (const gate of gates) {
+            expect(gate.metadata.labels).toBeUndefined();
+        }
+
+        // Cleanup script still has per-name fallback but no label-based delete
+        const cleanup = initializer.generateApprovalGateCleanupScript(bundle.crdResources);
+        expect(cleanup).not.toContain('-l ');
+        for (const gate of gates) {
+            expect(cleanup).toContain(
+                `kubectl delete approvalgates.${MigrationInitializer.CRD_GROUP}/${gate.metadata.name} --ignore-not-found`
+            );
+        }
     });
 });

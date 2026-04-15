@@ -89,13 +89,17 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "configChecksum": {
                   "type": "string"
+                },
+                "resourceUid": {
+                  "type": "string"
                 }
               },
               "required": [
                 "name",
                 "version",
                 "topics",
-                "configChecksum"
+                "configChecksum",
+                "resourceUid"
               ]
             },
             "minItems": 1
@@ -474,6 +478,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "checksumForReplayer": {
                   "type": "string"
+                },
+                "resourceUid": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -483,7 +490,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "proxyConfig",
                 "configChecksum",
                 "checksumForSnapshot",
-                "checksumForReplayer"
+                "checksumForReplayer",
+                "resourceUid"
               ]
             },
             "default": []
@@ -1209,6 +1217,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "checksumForReplayer": {
                   "type": "string"
+                },
+                "resourceUid": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -1221,7 +1232,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "targetConfig",
                 "snapshotConfig",
                 "configChecksum",
-                "checksumForReplayer"
+                "checksumForReplayer",
+                "resourceUid"
               ]
             },
             "default": []
@@ -1629,6 +1641,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "configChecksum": {
                   "type": "string"
+                },
+                "resourceUid": {
+                  "type": "string"
                 }
               },
               "required": [
@@ -1640,7 +1655,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "kafkaConfig",
                 "replayerConfig",
                 "toTarget",
-                "configChecksum"
+                "configChecksum",
+                "resourceUid"
               ]
             },
             "default": []

@@ -185,7 +185,7 @@
           [
             {
               "templateRef": {
-                "template": "setupproxywithlifecycle",
+                "template": "reconcilecapturedtraffic",
                 "name": "setup-capture"
               },
               "arguments": {
@@ -1035,16 +1035,59 @@
           ],
           [
             {
-              "templateRef": {
-                "template": "patchsnapshotmigrationready",
-                "name": "resource-management"
+              "inline": {
+                "inputs": {
+                  "parameters": [
+                    {
+                      "name": "resourceKind"
+                    },
+                    {
+                      "name": "resourceName"
+                    },
+                    {
+                      "name": "phase"
+                    },
+                    {
+                      "name": "configChecksum"
+                    },
+                    {
+                      "name": "checksumForReplayer"
+                    }
+                  ]
+                },
+                "resource": {
+                  "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n  checksumForReplayer: \"{{inputs.parameters.checksumForReplayer}}\"\n",
+                  "action": "patch",
+                  "flags": [
+                    "--type",
+                    "merge",
+                    "--subresource=status"
+                  ]
+                },
+                "retryStrategy": {
+                  "limit": "6",
+                  "retryPolicy": "OnError",
+                  "backoff": {
+                    "duration": "10",
+                    "factor": "2",
+                    "cap": "60"
+                  }
+                }
               },
               "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Completed' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
+                    "name": "resourceKind",
+                    "value": "SnapshotMigration"
+                  },
+                  {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Completed"
                   },
                   {
                     "name": "configChecksum",
@@ -1056,7 +1099,7 @@
                   }
                 ]
               },
-              "name": "patchSnapshotMigration"
+              "name": "patchSnapshotMigrationCompleted"
             }
           ]
         ],
@@ -1166,7 +1209,7 @@
                   },
                   {
                     "name": "resourceName",
-                    "value": "{{=item['source']+'-'+item['snapshot']}}"
+                    "value": "{{=item['source']+'-'+sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))+'-'+item['snapshot']}}"
                   },
                   {
                     "name": "checksumField",
@@ -1319,9 +1362,41 @@
           ],
           [
             {
-              "templateRef": {
-                "template": "patchresourcephase",
-                "name": "resource-management"
+              "inline": {
+                "inputs": {
+                  "parameters": [
+                    {
+                      "name": "resourceKind"
+                    },
+                    {
+                      "name": "resourceName"
+                    },
+                    {
+                      "name": "phase"
+                    },
+                    {
+                      "name": "configChecksum"
+                    }
+                  ]
+                },
+                "resource": {
+                  "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n",
+                  "action": "patch",
+                  "flags": [
+                    "--type",
+                    "merge",
+                    "--subresource=status"
+                  ]
+                },
+                "retryStrategy": {
+                  "limit": "6",
+                  "retryPolicy": "OnError",
+                  "backoff": {
+                    "duration": "10",
+                    "factor": "2",
+                    "cap": "60"
+                  }
+                }
               },
               "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
@@ -1344,7 +1419,7 @@
                   }
                 ]
               },
-              "name": "markReady"
+              "name": "patchTrafficReplayReady"
             }
           ]
         ],

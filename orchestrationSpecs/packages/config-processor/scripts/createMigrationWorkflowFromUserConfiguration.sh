@@ -27,10 +27,28 @@ trap "rm -rf $TEMP_DIR" EXIT
 
 UUID="$(date +%s)"
 echo "Generated unique uniqueRunNonce: $UUID"
+
+# Set the name field based on environment variable
+if [ -n "$USE_GENERATE_NAME" ] && [ "$USE_GENERATE_NAME" != "false" ] && [ "$USE_GENERATE_NAME" != "0" ]; then
+  # Keeping this as 'full-migration' so that it's intentionally different than the
+  # one-single default migration that we will normally be using
+  NAME_FIELD="generateName: m-${UUID}-"
+  WORKFLOW_NAME="m-${UUID}"
+else
+  NAME_FIELD="name: migration-workflow"
+  WORKFLOW_NAME="migration-workflow"
+fi
+
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR $@
+$INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR --workflow-name "$WORKFLOW_NAME" $@
 
 echo "Applying Kubernetes resources..."
+
+# Clean up stale approval gates before creating new ones
+if [ -x "$TEMP_DIR/cleanupApprovalGates.sh" ]; then
+    echo "Cleaning up stale approval gates..."
+    "$TEMP_DIR/cleanupApprovalGates.sh"
+fi
 
 # Apply CRD resources
 if [ -f "$TEMP_DIR/crdResources.yaml" ]; then
@@ -61,15 +79,6 @@ fi
 if [ -x "$TEMP_DIR/enrichWorkflowConfigWithUids.sh" ]; then
     echo "Enriching workflow config with CR UIDs..."
     "$TEMP_DIR/enrichWorkflowConfigWithUids.sh" "$TEMP_DIR/workflowMigration.config.yaml"
-fi
-
-# Set the name field based on environment variable
-if [ -n "$USE_GENERATE_NAME" ] && [ "$USE_GENERATE_NAME" != "false" ] && [ "$USE_GENERATE_NAME" != "0" ]; then
-  # Keeping this as 'full-migration' so that it's intentionally different than the
-  # one-single default migration that we will normally be using
-  NAME_FIELD="generateName: m-${UUID}-"
-else
-  NAME_FIELD="name: migration-workflow"
 fi
 
 echo "Applying workflow to Kubernetes..."
