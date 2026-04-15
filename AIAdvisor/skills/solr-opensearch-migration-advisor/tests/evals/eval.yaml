@@ -161,7 +161,7 @@ tests:
           and that the translation is a behavioral approximation.
         metric: query2-edismax-behavioral-note
 
-  - description: "Provide full migration plan"
+  - description: "Provide full migration plan for search engineer"
     metadata:
       continue: true
     vars:
@@ -243,7 +243,30 @@ tests:
           # Cost
           - Reasonable cost estimates for infrastructure, effort, and required tooling changes where applicable.
         metric: generate-full-report
-
+  - description: "Provide full migration plan for Devops Engineer"
+    metadata:
+      continue: true
+    vars:
+      query: |
+        Now provide the migration plan assuming I would be a Devops Engineer.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response contains a full solr to opensearch migration plan for the role of DevOps Engineer, 
+          covering the main steps and for migrating Solr 6.6.  
+          The plan should emphasize the following points:
+          - Breaking issues that could cause index creation or reindex failures
+          - required cluster level changes
+          - emphasizes the ops side of things over the search relevancy topics
+          - emphasizes resource intensive queries and infrastructure implications
+          - emphasizes authentication, authorization, and operational constraints
+          - gives details regarding the following aspects: instance types, storage (EBS vs. instance store), 
+            node roles (data, coordinating, cluster manager), auto-scaling, monitoring, and deployment automation
+          
+          Regarding the migration plan outline, the response should reflect the following:
+          - lead with the cluster sizing recommendation and infrastructure plan
+          - most prominent sections: deployment sequencing and operational runbook
+        metric: generate-full-report
   - description: "Translate SearchHandler to OpenSearch equivalent"
     metadata:
       continue: false
