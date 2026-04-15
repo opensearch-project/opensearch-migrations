@@ -13,6 +13,7 @@ from .commands.approve import approve_command
 from .commands.status import status_command
 from .commands.output import output_command
 from .commands.manage import manage_command
+from .commands.reset import reset_command
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,7 @@ workflow_cli.add_command(approve_command)
 workflow_cli.add_command(status_command)
 workflow_cli.add_command(output_command)
 workflow_cli.add_command(manage_command)
+workflow_cli.add_command(reset_command)
 workflow_cli.add_command(util_group)
 
 
