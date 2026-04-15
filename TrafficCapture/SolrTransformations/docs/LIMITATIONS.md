@@ -15,6 +15,7 @@ the root cause, and provides a workaround where one exists.
 | [CURSOR-UNIQUEKEY](#cursor-uniquekey) | Cursor pagination assumes `id` as Solr's uniqueKey field |
 | [CURSOR-REPLAY](#cursor-replay) | Traffic replay with cursorMark not supported |
 | [SOLRCONFIG-REPLAYER](#solrconfig-replayer) | Traffic replayer requires manual solrConfig in bindingsObject |
+| [COMMITWITHIN](#commitwithin) | `commitWithin=N` translated to immediate refresh |
 
 ---
 
@@ -211,3 +212,34 @@ supports `solrConfigXmlFile` for automatic XML parsing.
 **Note:** The traffic replayer cannot use `SolrTransformerProvider` directly
 because `SolrConfigProvider` lives in the `transformationShim` module.
 A future PR can move it to a shared module.
+
+
+---
+
+## COMMITWITHIN
+
+**Feature:** Timed commit via `commitWithin=N` parameter
+
+**Solr behaviour:**
+`commitWithin=N` tells Solr to make the document searchable within `N`
+milliseconds. Solr batches multiple updates and performs a single commit
+when the timer expires, which is more efficient than per-request commits.
+
+**OpenSearch behaviour:**
+OpenSearch has no equivalent timed refresh. The `refresh` parameter only
+supports `true` (immediate), `false` (no refresh), or `wait_for` (wait
+for next scheduled refresh).
+
+**Current translation:**
+`commitWithin=N` is translated to `?refresh=true`, which makes the document
+immediately searchable. This satisfies the "searchable within N ms" contract
+but is more aggressive than Solr's batched approach.
+
+**Residual impact:**
+
+* **Performance** — Every request with `commitWithin` triggers an immediate
+  refresh in OpenSearch, which is more expensive than Solr's batched commit.
+  Under high write throughput, this can degrade indexing performance.
+* **Behavioral difference** — Solr batches commits for efficiency; OpenSearch
+  refreshes per-request. Applications that relied on `commitWithin` for
+  batching will see higher refresh overhead.
