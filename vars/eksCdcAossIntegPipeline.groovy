@@ -106,37 +106,22 @@ def call(Map config = [:]) {
                                 version: params.VERSION
                             )
 
-                            parallel(
-                                'Deploy Source Cluster': {
-                                    dir('test') {
-                                        deployClustersStep(
-                                            stage: "${maStageName}",
-                                            clusterContextFilePath: "${clusterContextFilePath}",
-                                            sourceVer: env.sourceVer,
-                                            sourceClusterType: params.SOURCE_CLUSTER_TYPE,
-                                            publicAccess: true
-                                        )
-                                    }
-                                },
-                                'Bootstrap MA': {
-                                    withMigrationsTestAccount(region: params.REGION, duration: 7200) { accountId ->
-                                        bootstrapMA(
-                                            stackName: env.STACK_NAME,
-                                            stage: maStageName,
-                                            region: params.REGION,
-                                            bootstrap: bootstrap,
-                                            eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
-                                            kubectlContext: "migration-eks-${maStageName}"
-                                        )
-                                    }
-                                }
-                            )
+                            withMigrationsTestAccount(region: params.REGION, duration: 7200) { accountId ->
+                                bootstrapMA(
+                                    stackName: env.STACK_NAME,
+                                    stage: maStageName,
+                                    region: params.REGION,
+                                    bootstrap: bootstrap,
+                                    eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
+                                    kubectlContext: "migration-eks-${maStageName}"
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            stage('Deploy AOSS Target') {
+            stage('Deploy Source + AOSS Target') {
                 steps {
                     timeout(time: 60, unit: 'MINUTES') {
                         dir('test') {
@@ -145,26 +130,43 @@ def call(Map config = [:]) {
                                     def jenkinsRoleArn = "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole"
                                     def podRoleArn = "arn:aws:iam::${accountId}:role/${env.eksClusterName}-migrations-role"
 
-                                    def aossContextFile = "tmp/cluster-context-aoss-target-${currentBuild.number}.json"
                                     def context = [
                                         stage: "${maStageName}",
                                         vpcId: "${env.maVpcId}",
-                                        clusters: [[
-                                            clusterId: "target",
-                                            clusterType: "OPENSEARCH_SERVERLESS",
-                                            collectionType: "SEARCH",
-                                            standbyReplicas: "DISABLED",
-                                            domainRemovalPolicy: "DESTROY",
-                                            dataAccessPrincipals: [jenkinsRoleArn, podRoleArn]
-                                        ]]
+                                        clusters: [
+                                            [
+                                                clusterId: "source",
+                                                clusterVersion: env.sourceVer,
+                                                clusterType: params.SOURCE_CLUSTER_TYPE,
+                                                domainRemovalPolicy: "DESTROY",
+                                                publicAccess: true,
+                                                accessPolicies: [
+                                                    Version: "2012-10-17",
+                                                    Statement: [[
+                                                        Effect: "Allow",
+                                                        Principal: [AWS: "arn:aws:iam::${accountId}:root"],
+                                                        Action: "es:*",
+                                                        Resource: "*"
+                                                    ]]
+                                                ]
+                                            ],
+                                            [
+                                                clusterId: "target",
+                                                clusterType: "OPENSEARCH_SERVERLESS",
+                                                collectionType: "SEARCH",
+                                                standbyReplicas: "DISABLED",
+                                                domainRemovalPolicy: "DESTROY",
+                                                dataAccessPrincipals: [jenkinsRoleArn, podRoleArn]
+                                            ]
+                                        ]
                                     ]
-                                    writeJSON file: aossContextFile, json: context
-                                    sh "cat ${aossContextFile}"
-
-                                    sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${aossContextFile}"
+                                    writeJSON file: clusterContextFilePath, json: context
+                                    sh "cat ${clusterContextFilePath}"
+                                    sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath}"
 
                                     def clusterDetails = readJSON text: readFile("tmp/cluster-details-${maStageName}.json")
                                     env.AOSS_COLLECTION_ENDPOINT = clusterDetails['target'].endpoint
+                                    env.clusterDetailsJson = readFile("tmp/cluster-details-${maStageName}.json")
                                     echo "AOSS endpoint: ${env.AOSS_COLLECTION_ENDPOINT}"
                                 }
                             }
