@@ -9,34 +9,52 @@ Implement the orchestration test framework incrementally, starting with one simp
 - a visible failure mode
 - deterministic teardown
 
-Only after that initial slice is stable should the implementation expand to gated and impossible-change flows.
+Only after that slice is stable should the implementation expand to gated and impossible-change flows.
 
 ## Guiding Constraints
 
 - Start narrow
 - Prefer visible reporting over clever abstraction
-- Use ConfigMaps for state handoff from the start
 - Keep mutations manually authored
 - Run one outer test workflow at a time
 - Run one inner migration workflow at a time
 - Require teardown for success
-- Keep the live runner and the outer-workflow path semantically aligned
+- Keep test authoring local to specs, fixtures, mutators, and reports
+- Avoid work in this branch that duplicates the lifecycle/control-plane changes already in flight elsewhere
 
-## Planned PR Boundary
+## Branch Strategy
 
-The current branch should stop after the first visible runtime slice, cut a PR, and then merge `#2462` before the next round of hardening.
+The current branch should keep moving, but it should avoid the lifecycle orchestration area that is still under active development in the other PR.
 
-Why this boundary exists:
+That means:
 
-- the current work proves matrix expansion, reporting, and a live runtime path
-- `#2462` changes the workflow lifecycle in exactly the area the next improvements depend on
-- approval/reset/resubmit/delete behavior should be aligned to the post-`#2462` CLI and CRD lifecycle, not implemented twice
+- keep building the planning layer, authoring layer, reporting, tests, docs, and safe scenarios
+- keep improving the live runner only where it uses stable user-facing commands and does not depend on new CRD lifecycle semantics
+- do not try to re-implement reset, resubmit, delete, or self-teardown control flow in `fullMigration.ts` or related workflow templates before the other PR lands
 
-Working assumption for follow-up work:
+The goal is to make forward progress without setting up avoidable merge conflicts.
 
-- land the current MVP-oriented PR first
-- merge or rebase in `opensearch-project/opensearch-migrations#2462`
-- only then implement the full gated/impossible/delete hardening
+## What Is Safe To Build Now
+
+Safe work in this branch:
+
+- spec format and spec loader hardening
+- fixture registry and fixture naming conventions
+- approved mutator registry and matrix expansion rules
+- checksum report and derived subgraph coverage
+- assert/report schemas and human-readable rendering
+- more safe-case scenarios and snapshots
+- better diagnostics and UX in the live runner
+- tests for spec loading, fixture resolution, matrix expansion, and reporting
+- docs and handoff material
+
+Work to defer until the other PR lands:
+
+- CRD lifecycle ownership changes in `fullMigration.ts`
+- create/getUid/delete/self-teardown orchestration in workflow templates
+- gate/approval control flow changes that depend on new lifecycle primitives
+- delete-and-retry mechanics for impossible flows
+- any attempt to fully converge the outer workflow with a lifecycle model that is still moving
 
 ## Phase 0: Package And Contracts
 
@@ -95,19 +113,6 @@ type ChecksumReport = {
 function buildChecksumReport(rawConfig: unknown): Promise<ChecksumReport>;
 ```
 
-Implementation options:
-
-- refactor `MigrationConfigTransformer` to expose checksum computation
-- or wrap it with a dedicated inspection path that uses the same logic
-
-First cut requirements:
-
-- support one known baseline config
-- include enough information to derive:
-  - self checksum
-  - dependency edges
-  - downstream-facing checksum projections, if used by assertions
-
 Exit criteria:
 
 - given one baseline config, the package can emit a machine-readable checksum report
@@ -141,11 +146,6 @@ type DerivedSubgraph = {
 function deriveSubgraph(report: ChecksumReport, focus: string): DerivedSubgraph;
 ```
 
-First cut:
-
-- support the one baseline topology used by the first scenario
-- do not optimize for generality yet
-
 Exit criteria:
 
 - for `capture-proxy`, the helper can identify one downstream chain, one upstream prerequisite, and one unrelated branch
@@ -157,29 +157,17 @@ Implement `approvedMutators.ts` with only a small reviewed set.
 Minimum first-cut set:
 
 - one safe `focus-change` mutator on `capture-proxy`
-- one safe `immediate-dependent-change` mutator on `snap1` or replay
-- optionally one safe `transitive-dependent-change` mutator on `migration1`
-
-Suggested shape:
-
-```typescript
-type ApprovedMutator = {
-  id: string;
-  path: string;
-  changeClass: "safe" | "gated" | "impossible";
-  patterns: string[];
-  apply: (baseConfig: unknown) => unknown;
-  rationale: string;
-};
-```
+- one safe `immediate-dependent-change` mutator on replay or snapshot
+- optionally one safe `transitive-dependent-change` mutator on snapshot migration
 
 Exit criteria:
 
 - mutators can be looked up deterministically by pattern and change class
+- mis-tagged mutators are rejected by expansion-time validation
 
 ## Phase 4: Minimal Matrix Expander
 
-Implement only one matrix mode:
+Implement only one matrix mode at first:
 
 - `focus`
 - `changeClass: safe`
@@ -187,23 +175,10 @@ Implement only one matrix mode:
   - `focus-change`
   - `immediate-dependent-change`
 
-Target behavior:
-
-- take one matrix spec
-- derive the focus subgraph
-- bind matching reviewed mutators
-- emit concrete expanded test cases
-
-Example output:
-
-```text
-capture-proxy-chain-behaviors/focus-change/safe/noCapture
-capture-proxy-chain-behaviors/immediate-dependent-change/safe/replay.someSafeField
-```
-
 Exit criteria:
 
 - a matrix spec expands into concrete named cases without any Argo execution yet
+- `requireFullCoverage` is enforced
 
 ## Phase 5: Report Schema And Failure Rendering
 
@@ -214,22 +189,8 @@ The report must include:
 - top-level scenario status
 - generated case count
 - pass/fail count
-- per-case:
-  - test name
-  - focus
-  - pattern
-  - mutator id
-  - expected behavior
-  - observed behavior
-- coverage:
-  - selected cases
-  - expanded cases
-  - uncovered cases
-
-Add one intentional failing scenario/case locally so the report can demonstrate:
-
-- what a mismatch looks like
-- how it is surfaced
+- per-case expected behavior and observed behavior
+- coverage for selected, expanded, and uncovered cases
 
 Exit criteria:
 
@@ -237,19 +198,14 @@ Exit criteria:
 
 ## Phase 6: ConfigMap State Store
 
-Implement `stateStore.ts` to read/write observation ConfigMaps.
+Implement `stateStore.ts` to read and write observation ConfigMaps.
 
 Responsibilities:
 
 - write per-run observations
 - read prior-run observations
 - write expected checksum reports for a run
-- scope names by scenario/run identity
-
-Suggested keys:
-
-- `observation.json`
-- `checksum-report.json`
+- scope names by scenario and run identity
 
 Exit criteria:
 
@@ -258,13 +214,6 @@ Exit criteria:
 ## Phase 7: Assert Container MVP
 
 Implement a TypeScript assert container.
-
-Inputs:
-
-- current scenario/run id
-- expected behavior
-- current checksum report
-- prior observation
 
 Assertions for first cut:
 
@@ -275,17 +224,15 @@ Assertions for first cut:
   - one immediate dependent
   - one unrelated branch
 
-Do not implement blocked-before-action logic yet.
-
 Exit criteria:
 
 - given synthetic inputs, the container emits a structured pass/fail result
 
-## Phase 8: Outer Workflow MVP
+## Phase 8: Runtime MVP
 
-Build the smallest useful outer workflow using TS builders.
+Build the smallest useful runtime slice.
 
-It should run:
+The logical run sequence is:
 
 1. baseline configure
 2. baseline wait
@@ -298,62 +245,118 @@ It should run:
 9. case assert
 10. teardown
 
-Use ConfigMaps for state handoff from the beginning.
+This phase may use both runtime paths, but the live runner is the authoritative path for branch-local progress.
 
 Exit criteria:
 
-- one simple matrix case runs end to end in Argo
+- one simple safe matrix case runs end to end
 - a report is produced
 
 ## Phase 9: Visible Failure Path
 
-Add one intentionally wrong expectation to a dev-only scenario so you can inspect:
+Add one intentionally wrong expectation to a dev-only scenario so a developer can inspect:
 
-- what the outer workflow failure looks like
+- what the failure looks like
 - what the scenario report looks like
 - what data is available for debugging
-
-This should be easy to toggle on/off and should not live in the default CI scenario set.
 
 Exit criteria:
 
 - a developer can run one known-failing case and inspect the report shape
 
-## Phase 10: Merge And Reconcile With #2462
+## Phase 10: Branch-Safe Work Ahead
 
-After the current MVP-oriented PR is cut, merge or rebase in `#2462` before continuing.
+After the first visible slice, keep moving only in branch-safe areas until the lifecycle PR lands.
 
-Required reconciliation work:
+Recommended next work in this branch:
 
-- re-run the live runner against the post-`#2462` workflow CLI
-- align the outer-workflow control flow with the new reset/resubmit/approval/delete semantics
-- replace any pre-`#2462` assumptions about workflow lifecycle, teardown, or gate progression
-- update docs and examples so the plan describes the post-merge control surface, not the pre-merge spike
+- finalize the JSON spec shape and quickstart usage
+- add tests for `specLoader`, `fixtureRegistry`, `matrixExpander`, and `assertLogic`
+- improve report formatting and failure diagnostics
+- improve live-runner observability and operator UX
+- add more safe-case specs and reviewed mutators
+- add coverage accounting and better author feedback for missing mutators
+- keep docs aligned with the package as it exists today
+
+Explicitly avoid in this phase:
+
+- changes to `fullMigration.ts` that introduce new CRD lifecycle ownership
+- delete/reset/self-teardown patterns that overlap the other PR
+- outer-workflow gate control changes that depend on still-moving lifecycle behavior
+- impossible/delete runtime semantics
 
 Exit criteria:
 
-- the package still runs the safe matrix slice correctly after the `#2462` merge
-- the plan and code agree on the new workflow lifecycle primitives
+- the branch can keep delivering useful planning, reporting, and safe-case improvements without depending on unresolved lifecycle merges
 
-## Phase 11: Runtime Hardening After #2462
+## Phase 11: Pre-Merge Groundwork For Gated And Impossible Cases
 
-Harden the runtime paths before expanding breadth.
+Before the lifecycle PR lands, it is still safe to prepare the planning and authoring surface for later gated and impossible flows.
+
+Good candidates for this phase:
+
+- add more named fixtures for setup, cleanup, and approval-time validation
+- add fixture registry coverage and tests for those new fixture names
+- add reviewed `gated` and `impossible` mutators without wiring new runtime control flow
+- add spec examples for gated and impossible scenarios
+- extend the report schema so it can later represent before-action and after-action observations
+- add pure planning tests for gated and impossible case expansion and selection
+- improve documentation and quickstart examples for the broader fixture vocabulary
+
+This phase should still avoid:
+
+- new runtime approval orchestration
+- delete or retry control flow
+- workflow-template lifecycle changes
+- outer-workflow behavior that depends on still-moving lifecycle primitives
+
+Exit criteria:
+
+- the branch has the authoring and reporting surface ready for gated and impossible cases
+- fixture coverage is broader and better tested
+- no runtime lifecycle behavior was duplicated from the other PR
+
+## Phase 12: Wait For Lifecycle PR To Land
+
+Do not force a merge of the lifecycle PR into this branch while that work is still churning.
+
+Instead:
+
+- let the current branch ship its safe-slice work first
+- wait until the lifecycle PR lands or stabilizes enough to merge cleanly
+- only then move the test framework into the lifecycle/control-plane area
+
+Exit criteria:
+
+- lifecycle primitives are stable enough that the framework can adopt them once instead of twice
+
+## Phase 13: Post-Merge Reconciliation
+
+Once the lifecycle PR lands, reconcile this package with the merged workflow lifecycle.
+
+Required work:
+
+- re-run the live runner against the merged workflow CLI
+- align the outer-workflow control flow with the merged reset/resubmit/approval/delete semantics
+- replace any pre-merge assumptions about lifecycle, teardown, or gate progression
+- update docs and examples so they describe the merged control surface
+
+Exit criteria:
+
+- the package still runs the safe matrix slice correctly after the merge
+- the plan and code agree on the new lifecycle primitives
+
+## Phase 14: Runtime Convergence Hardening
+
+After the merge, harden the runtime paths before expanding breadth.
 
 Required hardening:
 
 1. make the outer workflow match the live runner's semantics
 2. require validation before approval in gated paths
-3. remove any silent-success or auto-approve-only shortcuts from the final gated implementation
-4. keep the TypeScript assert logic and shell/outer-workflow assertions equivalent
+3. remove silent-success or auto-approve-only shortcuts from the final gated implementation
+4. keep the TypeScript assert logic and shell or outer-workflow assertions equivalent
 5. ensure teardown and observation collection cover all resources touched across all runs, not just the final mutated set
-
-Concrete implementation direction:
-
-- split the outer workflow's gate handling into monitor, validate, approve, and continue steps
-- pass fixture-driven validations into the outer-workflow gate path, not just the live runner
-- make approval conditional on validation success
-- fail fast when setup fixtures fail
-- keep cleanup in `finally`-style control flow where possible
 
 Exit criteria:
 
@@ -361,38 +364,21 @@ Exit criteria:
 - failed validations stop the scenario before approval
 - teardown leaves the scenario context clean after success or failure
 
-## Phase 12: Teardown Hardening
+## Phase 15: Expand Safe Matrix Coverage
 
-Make teardown mandatory for success.
-
-Teardown responsibilities:
-
-1. delete inner workflow(s)
-2. delete migration CRDs created by the scenario
-3. delete scenario-scoped ConfigMaps
-4. verify empty final state
-
-If teardown fails, the outer workflow should fail.
-
-Exit criteria:
-
-- repeated runs start from the same clean context
-
-## Phase 13: Expand Safe Matrix Coverage
-
-Only after the MVP works and the post-`#2462` runtime hardening is done:
+Only after the merged runtime hardening is done:
 
 - add `transitive-dependent-change`
 - add more reviewed safe mutators
-- add coverage accounting for unexpanded cases
+- add more safe-case specs
 - add direct tests for spec loading, fixture resolution, gate matching, and outer-workflow rendering
 
 Exit criteria:
 
 - the framework can exercise a broader safe-change matrix with understandable reports
-- the expanded authoring/report surface has direct automated coverage
+- the expanded authoring and report surface has direct automated coverage
 
-## Phase 14: Add Gated Flow
+## Phase 16: Add Gated Flow
 
 Implement one gated case only:
 
@@ -412,7 +398,7 @@ Exit criteria:
 - progression after approval is visible in the report
 - the same gate validations run in both the live runner and the outer workflow
 
-## Phase 15: Add Impossible/Delete Flow
+## Phase 17: Add Impossible/Delete Flow
 
 Implement one impossible case only:
 
@@ -423,7 +409,7 @@ Required additions:
 - wait-for-block step
 - assert-before-action
 - delete action
-- retry/resubmit path
+- retry or resubmit path
 - assert-after-action
 
 Important semantic:
@@ -431,486 +417,89 @@ Important semantic:
 - impossible means impossible to update in place
 - not impossible to proceed after deleting the old resource and retrying
 
-Post-`#2462` expectation:
-
-- this flow should use the merged workflow lifecycle primitives rather than a parallel custom recovery path
-
 Exit criteria:
 
 - blocked dependent path is visible before delete
-- resumed path is visible after delete/retry
+- resumed path is visible after delete and retry
 
-## Recommended First Delivery Slice
+## Recommended Current Slice
 
-If you are handing this to another agent, the first concrete milestone should stop after Phase 9.
+If you are handing this to another agent today, the concrete milestone should stop after Phase 10.
 
 That milestone should deliver:
 
 - package scaffold and types
 - checksum report API
 - derived subgraph helper
-- tiny approved mutator registry
-- one simple safe matrix expander
+- approved mutator registry
+- simple safe matrix expansion
 - ConfigMap state handoff
 - TypeScript assert container
-- outer workflow MVP
+- live-runner-backed safe runtime slice
 - one passing report
 - one intentionally failing report
 - teardown
+- direct tests for the authoring and planning surface
 
 It should not yet attempt:
 
-- full approval validation in the outer workflow
+- lifecycle-heavy workflow template changes
+- gated approval convergence in the outer workflow
 - impossible/delete recovery
-- broad matrix coverage
-- multiple focuses
-- complex scenario packs
-- post-`#2462` lifecycle reconciliation
+- broad scenario packs
+- post-merge runtime convergence work
 
-## Suggested First Scenario
+## Suggested Branch-Safe Next Tasks
 
-Use one baseline config and one focus:
+If you want to keep moving on this branch right away, prefer this order:
 
-- focus: `capture-proxy`
-
-Generated cases:
-
-- `focus-change/safe`
-- `immediate-dependent-change/safe`
-
-Optional third case:
-
-- `transitive-dependent-change/safe`
-
-Expected value of this slice:
-
-- you can see expansion
-- you can see execution
-- you can see reporting
-- you can see failure rendering
-- you can verify teardown
-
-That is enough confidence to cut the first PR, merge `#2462`, and then move on to gated and impossible behavior.
+1. add tests for `specLoader`, `fixtureRegistry`, `generate-outer`, and more matrix/report cases
+2. improve report output and operator diagnostics in `e2e-run.ts`
+3. add one or two more safe-case specs and reviewed mutators
+4. keep the docs and quickstart aligned with the package
+5. leave `fullMigration.ts` and lifecycle ownership changes alone until the other PR lands
 
 ## Agent Handoff Checklist
-
-This section is written as a direct execution guide for another agent.
 
 ### Ground Rules
 
 - Do not try to implement the full design in one pass.
-- Stop after the first visible end-to-end slice unless explicitly asked to continue.
+- Stop after the first visible end-to-end safe slice unless explicitly asked to continue.
 - Prefer small, inspectable artifacts over broad abstraction.
 - Keep all mutations manually authored.
-- Keep the first matrix limited to `safe` cases only.
-- Do not implement approval or impossible/delete flows in the first slice.
-- After the first slice lands, merge `#2462` before continuing into gated and impossible behavior.
-
-### Workspace Targets
-
-Primary new package:
-
-```text
-orchestrationSpecs/packages/e2e-orchestration-tests/
-```
-
-Primary design references:
-
-- [e2eOrchestrationTestDesign.md](/Users/schohn/dev/m2/docs/e2eOrchestrationTestDesign.md)
-- [e2eOrchestrationImplementationPlan.md](/Users/schohn/dev/m2/docs/e2eOrchestrationImplementationPlan.md)
-
-Likely integration points:
-
-- `packages/config-processor/`
-- `packages/migration-workflow-templates/`
-- `packages/schemas/`
-- `packages/argo-workflow-builders/`
-
-### Phase-by-Phase Execution
-
-#### Phase 0
-
-Create the package scaffold and types only.
-
-Files to create:
-
-```text
-packages/e2e-orchestration-tests/
-  package.json
-  tsconfig.json
-  src/types.ts
-  src/reportSchema.ts
-```
-
-Recommended exported types:
-
-```typescript
-export type ChangeClass = "safe" | "gated" | "impossible";
-
-export type DependencyPattern =
-  | "focus-change"
-  | "immediate-dependent-change"
-  | "transitive-dependent-change"
-  | "focus-gated-change"
-  | "immediate-dependent-gated-change"
-  | "immediate-dependent-impossible-change";
-
-export type ApprovedMutator = { ... };
-export type ScenarioSpec = { ... };
-export type ExpandedTestCase = { ... };
-export type ChecksumReport = { ... };
-export type DerivedSubgraph = { ... };
-export type ScenarioObservation = { ... };
-export type ScenarioReport = { ... };
-```
-
-Done means:
-
-- package builds
-- types compile
-- no runtime implementation yet
-
-#### Phase 1
-
-Implement checksum inspection.
-
-Files to create/update:
-
-```text
-packages/e2e-orchestration-tests/src/checksumReporter.ts
-packages/config-processor/...   # only if refactor is needed
-```
-
-Recommended functions:
-
-```typescript
-export async function buildChecksumReport(rawConfig: unknown): Promise<ChecksumReport>;
-export async function buildWorkflowArtifacts(rawConfig: unknown): Promise<{
-  workflowConfig: unknown;
-  checksumReport: ChecksumReport;
-}>;
-```
-
-Done means:
-
-- one fixture config can produce a checksum report
-- report is deterministic
-- report is snapshot-tested
-
-#### Phase 2
-
-Implement derived-subgraph resolution.
-
-Files to create:
-
-```text
-packages/e2e-orchestration-tests/src/derivedSubgraph.ts
-packages/e2e-orchestration-tests/tests/derivedSubgraph.test.ts
-```
-
-Recommended functions:
-
-```typescript
-export function deriveSubgraph(
-  report: ChecksumReport,
-  focus: string
-): DerivedSubgraph;
-```
-
-Done means:
-
-- for the chosen baseline config, `capture-proxy` resolves to:
-  - focus
-  - one immediate dependent
-  - one transitive dependent
-  - one upstream prerequisite
-  - one independent component
-
-#### Phase 3
-
-Implement the initial approved mutator registry.
-
-Files to create:
-
-```text
-packages/e2e-orchestration-tests/src/approvedMutators.ts
-packages/e2e-orchestration-tests/tests/approvedMutators.test.ts
-```
-
-Initial mutators:
-
-- one `focus-change` safe mutator
-- one `immediate-dependent-change` safe mutator
-- optional one `transitive-dependent-change` safe mutator
-
-Done means:
-
-- mutators can be resolved by `changeClass` and `pattern`
-- mutators produce valid configs for the chosen baseline
-- mis-tagged mutators are rejected by expansion-time validation
-
-#### Phase 4
-
-Implement the smallest matrix expander.
-
-Files to create:
-
-```text
-packages/e2e-orchestration-tests/src/scenarioCompiler.ts
-packages/e2e-orchestration-tests/src/matrixExpander.ts
-packages/e2e-orchestration-tests/tests/matrixExpander.test.ts
-```
-
-Recommended functions:
-
-```typescript
-export function expandScenario(
-  scenario: ScenarioSpec,
-  report: ChecksumReport
-): ExpandedTestCase[];
-```
-
-First-cut supported inputs:
-
-- one `focus`
-- `changeClass: safe`
-- patterns:
-  - `focus-change`
-  - `immediate-dependent-change`
-
-Done means:
-
-- one matrix spec expands into concrete test cases with stable names
-- `requireFullCoverage` is enforced
-- expectations are derived from topology, not just raw checksum diffs
-
-#### Phase 5
-
-Implement the report schema and one intentional failure path.
-
-Files to create:
-
-```text
-packages/e2e-orchestration-tests/src/reportSchema.ts
-packages/e2e-orchestration-tests/tests/reportSchema.test.ts
-packages/e2e-orchestration-tests/fixtures/
-```
-
-Done means:
-
-- one passing report example exists
-- one failing report example exists
-- both are stable and readable
-
-#### Phase 6
-
-Implement ConfigMap state handoff helpers.
-
-Files to create:
-
-```text
-packages/e2e-orchestration-tests/src/stateStore.ts
-```
-
-Recommended functions:
-
-```typescript
-export async function writeObservationConfigMap(...): Promise<void>;
-export async function readObservationConfigMap(...): Promise<ScenarioObservation | null>;
-export async function writeChecksumReportConfigMap(...): Promise<void>;
-export async function readChecksumReportConfigMap(...): Promise<ChecksumReport | null>;
-```
-
-Done means:
-
-- observation and checksum data can be round-tripped through ConfigMaps
-
-#### Phase 7
-
-Implement the TypeScript assert container.
-
-Files to create:
-
-```text
-packages/e2e-orchestration-tests/src/assertContainer/validate.ts
-packages/e2e-orchestration-tests/src/assertContainer/Dockerfile
-```
-
-Recommended function boundaries inside the validator:
-
-```typescript
-function loadExpectedInput(...): ...;
-function loadPriorObservation(...): ...;
-function readCurrentResourceState(...): ...;
-function compareObservedToExpected(...): ...;
-function emitScenarioResult(...): ...;
-```
-
-First-cut assertions:
-
-- focus changed when expected
-- immediate dependent changed when expected
-- unrelated branch unchanged
-
-Done means:
-
-- validator can produce a machine-readable pass/fail result from prepared inputs
-
-#### Phase 8
-
-Implement the outer workflow MVP.
-
-Files to create:
-
-```text
-packages/e2e-orchestration-tests/src/buildOuterWorkflow.ts
-packages/e2e-orchestration-tests/src/templates/...   # if needed
-packages/e2e-orchestration-tests/tests/outputMatch.test.ts   # or equivalent
-```
-
-Workflow steps for first cut:
-
-1. baseline configure
-2. baseline wait
-3. baseline assert
-4. no-op resubmit
-5. no-op wait
-6. no-op assert
-7. safe matrix case configure
-8. safe matrix case wait
-9. safe matrix case assert
-10. teardown
-
-Done means:
-
-- one simple generated matrix case runs end to end
-- a structured report is emitted
-- the live runner and outer workflow can both exercise the same safe scenario
-
-#### Phase 9
-
-Add one intentional failing case.
-
-Approach:
-
-- create a dev-only scenario fixture
-- make one expected unchanged/reran assertion intentionally wrong
-
-Done means:
-
-- a developer can see how failure appears in:
-  - the outer workflow
-  - the scenario report
-
-#### Phase 10
-
-After the first PR lands, merge `#2462` and reconcile the runtime path.
-
-Files to revisit:
-
-```text
-packages/e2e-orchestration-tests/src/e2e-run.ts
-packages/e2e-orchestration-tests/src/buildOuterWorkflow.ts
-packages/e2e-orchestration-tests/src/fixtures.ts
-packages/e2e-orchestration-tests/src/fixtureRegistry.ts
-```
-
-Done means:
-
-- the safe scenario still runs after the `#2462` merge
-- runtime lifecycle control matches the merged CLI/CRD behavior
-- docs and code no longer rely on pre-`#2462` lifecycle assumptions
-
-#### Phase 11
-
-Harden the post-`#2462` runtime semantics.
-
-Key requirements:
-
-- validation must run before approval in gated paths
-- the outer workflow must not be weaker than the live runner
-- setup failures should stop the scenario
-- teardown and observation must account for all touched resources
-
-Done means:
-
-- a failed validation prevents approval
-- the live runner and outer workflow enforce the same gate semantics
-- cleanup leaves the environment clean on success and failure
-
-#### Phase 12
-
-Harden teardown.
-
-Files to create/update:
-
-```text
-packages/e2e-orchestration-tests/src/teardown.ts
-packages/e2e-orchestration-tests/src/buildOuterWorkflow.ts
-```
-
-Recommended responsibilities:
-
-- delete inner workflow
-- delete CRDs created by the scenario
-- delete scenario ConfigMaps
-- verify clean final state
-
-Done means:
-
-- rerunning the same scenario starts cleanly
-
-### First Slice Deliverable
-
-The first deliverable handed back by the agent should include:
-
-- new `e2e-orchestration-tests` package
-- checksum report generation
-- derived subgraph helper
-- initial mutator registry
-- minimal matrix expansion for safe cases
-- ConfigMap state store
-- TypeScript assert container
-- outer workflow MVP
-- one passing report
-- one failing report
-- teardown
-
-### Explicit Non-Goals For First Slice
-
-The agent should not implement yet:
-
-- gated approval flow automation in the outer workflow
-- impossible/delete recovery flow
-- broad scenario packs
-- multi-focus scenarios
-- full coverage accounting across many components
-- post-`#2462` lifecycle reconciliation beyond keeping the plan ready for it
-
-### Suggested First Scenario Fixture
-
-Create one baseline fixture around:
-
-- focus: `capture-proxy`
-
-With these generated cases:
-
-- `focus-change/safe`
-- `immediate-dependent-change/safe`
-
-Optional:
-
-- `transitive-dependent-change/safe`
-
-And one intentionally failing expectation for local/dev inspection.
-
-### What To Show Back After First Slice
-
-Ask the agent to return:
-
-1. The files created/changed
-2. The exact scenario fixture used
-3. The expanded concrete test names
-4. One passing report example
-5. One failing report example
-6. What remains unimplemented from the full design
+- Keep this branch out of the workflow lifecycle control-plane area until the other PR lands.
+
+### Safe Integration Points
+
+Preferred files and modules for branch-local progress:
+
+- `packages/e2e-orchestration-tests/src/types.ts`
+- `packages/e2e-orchestration-tests/src/specLoader.ts`
+- `packages/e2e-orchestration-tests/src/fixtureRegistry.ts`
+- `packages/e2e-orchestration-tests/src/fixtures.ts`
+- `packages/e2e-orchestration-tests/src/checksumReporter.ts`
+- `packages/e2e-orchestration-tests/src/derivedSubgraph.ts`
+- `packages/e2e-orchestration-tests/src/approvedMutators.ts`
+- `packages/e2e-orchestration-tests/src/matrixExpander.ts`
+- `packages/e2e-orchestration-tests/src/assertLogic.ts`
+- `packages/e2e-orchestration-tests/src/reportSchema.ts`
+- `packages/e2e-orchestration-tests/src/e2e-run.ts`
+- `packages/e2e-orchestration-tests/specs/`
+- `docs/e2eOrchestrationTestDesign.md`
+
+Avoid for now unless explicitly asked:
+
+- `packages/migration-workflow-templates/src/workflowTemplates/fullMigration.ts`
+- workflow-template lifecycle ownership changes
+- delete/reset/self-teardown orchestration
+
+### Done Means For The Current Branch
+
+The current branch is in good shape when:
+
+- a developer can define a new safe scenario with a small spec and fixture surface
+- the framework expands it into a concrete case deterministically
+- the live runner can execute it and produce a useful report
+- failures are understandable
+- teardown is reliable
+- no work was duplicated from the still-moving lifecycle PR

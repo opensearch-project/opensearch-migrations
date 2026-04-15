@@ -80,6 +80,7 @@ exports[`reportSchema builds a scenario report 1`] = `
     "selectedCases": [
       "focus-change",
     ],
+    "skippedCases": [],
     "uncoveredCases": [],
   },
   "expandedTests": [
@@ -120,6 +121,7 @@ exports[`reportSchema builds a scenario report 1`] = `
   "summary": {
     "failed": 0,
     "generated": 1,
+    "partial": 0,
     "passed": 1,
   },
 }

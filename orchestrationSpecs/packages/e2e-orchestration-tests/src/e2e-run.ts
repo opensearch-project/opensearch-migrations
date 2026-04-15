@@ -26,9 +26,10 @@ import { buildChecksumReport } from './checksumReporter';
 import { expandMatrix } from './matrixExpander';
 import { defaultMutatorRegistry } from './approvedMutators';
 import { assertRun, formatAssertResult } from './assertLogic';
+import { buildScenarioReport, buildPassingResult, buildFailingResult, formatReport } from './reportSchema';
 import { loadTestSpec } from './specLoader';
 import type { ApprovalGate, FixtureAction, TestFixtures } from './fixtures';
-import type { MatrixSpec, RunExpectation, ScenarioObservation, ChecksumReport } from './types';
+import type { MatrixSpec, RunExpectation, ScenarioObservation, ChecksumReport, TestCaseResult } from './types';
 
 const NAMESPACE = process.argv.includes('--namespace')
     ? process.argv[process.argv.indexOf('--namespace') + 1]
@@ -341,8 +342,10 @@ async function main() {
     console.log(`  base config: ${path.basename(testSpec.baseConfigPath)}\n`);
 
     const baseReport = await buildChecksumReport(baseConfig);
-    const [testCase] = await expandMatrix(testSpec.matrix, baseReport, defaultMutatorRegistry, baseConfig, baseReport);
-    console.log(`Test case: ${testCase.name}`);
+    // TODO: support multiple expanded cases per spec (currently runs only the first)
+    const allCases = await expandMatrix(testSpec.matrix, baseReport, defaultMutatorRegistry, baseConfig, baseReport);
+    const testCase = allCases[0];
+    console.log(`Test case: ${testCase.name} (${allCases.length} case(s) expanded, running first)`);
     console.log(`  expect reran:     [${testCase.expect.reran.join(', ')}]`);
     console.log(`  expect unchanged: [${testCase.expect.unchanged.join(', ')}]`);
 
@@ -363,6 +366,23 @@ async function main() {
     // Noop and mutate use skipApprovals: true — the migration steps are skipped anyway
     const noopConfig = { ...baseConfig, skipApprovals: true };
 
+    // LIMITATION: The mutate run always forces skipApprovals: true because the
+    // live runner does not yet implement approval orchestration for the mutated
+    // submission. This means gated and impossible specs will expand and run, but
+    // the mutate step will NOT actually exercise the approval/gate/delete behavior
+    // they are designed to test. This is acceptable as Phase 11 groundwork — full
+    // gated/impossible runtime support is deferred to Phase 16/17 (post-lifecycle merge).
+    if (testCase.changeClass === 'gated' || testCase.changeClass === 'impossible') {
+        console.warn([
+            ``,
+            `  ⚠ WARNING: Test case "${testCase.name}" is a ${testCase.changeClass} spec,`,
+            `  but the live runner forces skipApprovals: true on the mutate run.`,
+            `  The approval/gate behavior this spec is designed to test will NOT`,
+            `  be exercised. This is a known limitation until Phase 16/17.`,
+            ``
+        ].join('\n'));
+    }
+
     const runs: Array<{
         name: string;
         config: Record<string, unknown>;
@@ -376,7 +396,9 @@ async function main() {
     ];
 
     let priorObservation: ScenarioObservation | null = null;
+    const runObservations: Record<string, ScenarioObservation> = {};
     let allPassed = true;
+    let testCaseResult: TestCaseResult | null = null;
 
     // Wrap in try/finally so cleanup always runs
     try {
@@ -403,6 +425,13 @@ async function main() {
                 }
                 dumpNamespaceDiagnostics();
                 allPassed = false;
+                // Record failure for the test case result
+                const observed: Record<string, { phase: string; changed: boolean }> = {};
+                for (const [k, v] of Object.entries(obs.resources)) {
+                    const prior = priorObservation?.resources[k];
+                    observed[k] = { phase: v.phase, changed: prior ? v.configChecksum !== prior.configChecksum : true };
+                }
+                testCaseResult = buildFailingResult(testCase, observed, [`${run.name} workflow failed: ${phase}`]);
                 break;
             }
 
@@ -413,8 +442,43 @@ async function main() {
             if (result.status === 'fail') {
                 dumpNamespaceDiagnostics();
                 allPassed = false;
+                // Record failure for the test case result
+                const observed: Record<string, { phase: string; changed: boolean }> = {};
+                for (const c of result.components) {
+                    observed[c.component] = { phase: c.details.observedPhase, changed: c.details.changedFromPrior };
+                }
+                testCaseResult = buildFailingResult(testCase, observed, result.failures);
             }
             priorObservation = obs;
+            runObservations[run.name] = obs;
+        }
+
+        // If all runs passed, build a passing result using real observations
+        if (allPassed) {
+            // Derive observed map from real CRD state: compare mutate vs noop
+            const mutateObs = runObservations['mutate'];
+            const noopObs = runObservations['noop'];
+            let realObserved: Record<string, { phase: string; changed: boolean }> | undefined;
+            if (mutateObs && noopObs) {
+                realObserved = {};
+                for (const [k, v] of Object.entries(mutateObs.resources)) {
+                    const prior = noopObs.resources[k];
+                    realObserved[k] = {
+                        phase: v.phase,
+                        changed: prior ? v.configChecksum !== prior.configChecksum : true,
+                    };
+                }
+            }
+
+            const caveats: string[] = [];
+            if (testCase.changeClass === 'gated' || testCase.changeClass === 'impossible') {
+                caveats.push(
+                    `${testCase.changeClass} spec ran with skipApprovals: true — ` +
+                    `approval/gate behavior was not exercised (deferred to Phase 16/17)`
+                );
+            }
+
+            testCaseResult = buildPassingResult(testCase, realObserved, caveats);
         }
     } finally {
         if (WAIT_BEFORE_CLEANUP) {
@@ -426,10 +490,25 @@ async function main() {
     }
 
     console.log(`\n${'='.repeat(60)}`);
-    if (allPassed) {
-        console.log('  ✓ ALL RUNS PASSED');
-    } else {
-        console.log('  ✗ SOME RUNS FAILED');
+    const results = testCaseResult ? [testCaseResult] : [];
+    const scenarioReport = buildScenarioReport(
+        path.basename(specPath, '.test.json'),
+        results,
+        {
+            selectedCases: allCases.map(c => c.name),
+            expandedCases: [testCase.name],
+            skippedCases: allCases.slice(1).map(c => c.name),
+            uncoveredCases: [],
+        },
+    );
+    console.log(formatReport(scenarioReport));
+
+    // Write structured report to file
+    const reportPath = path.resolve(process.cwd(), 'e2e-report.json');
+    fs.writeFileSync(reportPath, JSON.stringify(scenarioReport, null, 2));
+    console.log(`\nReport written to ${reportPath}`);
+
+    if (!allPassed) {
         process.exit(1);
     }
 }

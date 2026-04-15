@@ -80,15 +80,16 @@ describe('expandMatrix', () => {
         expect(cases).toHaveLength(0);
     });
 
-    it('requireFullCoverage throws when patterns have no mutators', async () => {
+    it('requireFullCoverage throws when impossible patterns have no mutators', async () => {
         const config = loadFullMigrationConfig();
         const report = await buildChecksumReport(config);
 
+        // No impossible mutator exists for transitive-dependent-change, so this should throw
         const spec: MatrixSpec = {
             focus: 'proxy:capture-proxy',
             select: [{
                 changeClass: 'impossible',
-                patterns: ['immediate-dependent-impossible-change'],
+                patterns: ['transitive-dependent-change'],
                 requireFullCoverage: true,
             }],
         };

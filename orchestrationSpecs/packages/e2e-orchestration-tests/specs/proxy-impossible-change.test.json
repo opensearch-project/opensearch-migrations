@@ -1,0 +1,12 @@
+{
+  "baseConfig": "../../config-processor/scripts/samples/proxyOnly.wf.yaml",
+  "matrix": {
+    "focus": "proxy:capture-proxy",
+    "select": [{ "changeClass": "impossible", "patterns": ["immediate-dependent-impossible-change"] }]
+  },
+  "fixtures": {
+    "setup": [],
+    "cleanup": [],
+    "approvalGates": []
+  }
+}

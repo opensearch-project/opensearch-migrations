@@ -95,6 +95,34 @@ if missing:
 '`,
 };
 
+export const verifyProxyReady: FixtureAction = {
+    name: 'verify-proxy-ready',
+    description: 'Verify capture proxy CRD is in Ready phase',
+    consoleCommand:
+        'kubectl get capturedtraffics.migrations.opensearch.org capture-proxy -o jsonpath="{.status.phase}" | grep -q Ready',
+};
+
+export const verifyReplayerReady: FixtureAction = {
+    name: 'verify-replayer-ready',
+    description: 'Verify traffic replayer CRD is in Ready phase',
+    consoleCommand:
+        'kubectl get trafficreplays.migrations.opensearch.org capture-proxy-target-replay1 -o jsonpath="{.status.phase}" | grep -q Ready',
+};
+
+export const verifyProxyBlocked: FixtureAction = {
+    name: 'verify-proxy-blocked',
+    description: 'Verify workflow is suspended at a proxy approval gate (gated change)',
+    consoleCommand:
+        'kubectl get workflow migration-workflow -o json | jq -e \'[.status.nodes // {} | to_entries[] | select(.value.type == "Suspend" and .value.phase == "Running")] | length > 0\'',
+};
+
+export const verifySourceIndices: FixtureAction = {
+    name: 'verify-source-indices',
+    description: 'List source cluster indices as a pre-flight sanity check',
+    consoleCommand:
+        'console clusters cat-indices --cluster source || true',
+};
+
 // ─── Default cleanup actions ────────────────────────────────────────
 
 export const deleteTargetIndices: FixtureAction = {

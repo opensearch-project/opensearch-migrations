@@ -9,12 +9,20 @@ import {
     deleteTargetIndices,
     deleteSourceSnapshots,
     compareIndices,
+    verifyProxyReady,
+    verifyReplayerReady,
+    verifyProxyBlocked,
+    verifySourceIndices,
 } from './fixtures';
 
 const registry = new Map<string, FixtureAction>([
     [deleteTargetIndices.name, deleteTargetIndices],
     [deleteSourceSnapshots.name, deleteSourceSnapshots],
     [compareIndices.name, compareIndices],
+    [verifyProxyReady.name, verifyProxyReady],
+    [verifyReplayerReady.name, verifyReplayerReady],
+    [verifyProxyBlocked.name, verifyProxyBlocked],
+    [verifySourceIndices.name, verifySourceIndices],
 ]);
 
 export function resolveFixture(name: string): FixtureAction {

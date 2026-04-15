@@ -1,9 +1,8 @@
 import type { ApprovedMutator, ChangeClass, DependencyPattern } from './types';
 
-/** Deep-set a value at a dot-path, supporting array indices like `foo[0].bar`. */
+/** Deep-set a value at a dot-path, supporting array indices like `foo[0].bar`. Creates missing intermediate objects. */
 function deepSet(obj: Record<string, unknown>, path: string, value: unknown): Record<string, unknown> {
     const clone = JSON.parse(JSON.stringify(obj)) as Record<string, unknown>;
-    // Split on `.` but also handle `[n]` segments
     const parts: (string | number)[] = [];
     for (const segment of path.split('.')) {
         const match = /^([^[]+)\[(\d+)]$/.exec(segment);
@@ -15,7 +14,13 @@ function deepSet(obj: Record<string, unknown>, path: string, value: unknown): Re
     }
     let current: unknown = clone;
     for (let i = 0; i < parts.length - 1; i++) {
-        current = (current as Record<string | number, unknown>)[parts[i]];
+        const key = parts[i];
+        const container = current as Record<string | number, unknown>;
+        if (container[key] === undefined || container[key] === null) {
+            // Create intermediate: array if next key is a number, object otherwise
+            container[key] = typeof parts[i + 1] === 'number' ? [] : {};
+        }
+        current = container[key];
     }
     (current as Record<string | number, unknown>)[parts[parts.length - 1]] = value;
     return clone;
@@ -45,8 +50,24 @@ export const defaultMutatorRegistry: ApprovedMutator[] = [
         path: 'traffic.replayers.replay1.replayerConfig.speedupFactor',
         changeClass: 'safe',
         patterns: ['immediate-dependent-change'],
-        apply: (config) => deepSet(config, 'traffic.replayers.replay1.replayerConfig', { speedupFactor: 2.0 }),
+        apply: (config) => deepSet(config, 'traffic.replayers.replay1.replayerConfig.speedupFactor', 2.0),
         rationale: 'Changing speedupFactor on the replayer (an immediate dependent of proxy) only affects the replayer itself',
+    },
+    {
+        id: 'replayer-removeAuthHeader',
+        path: 'traffic.replayers.replay1.replayerConfig.removeAuthHeader',
+        changeClass: 'gated',
+        patterns: ['immediate-dependent-gated-change'],
+        apply: (config) => deepSet(config, 'traffic.replayers.replay1.replayerConfig.removeAuthHeader', true),
+        rationale: 'Toggling removeAuthHeader on the replayer is gated — requires approval before the replayer restarts with auth stripping enabled',
+    },
+    {
+        id: 'replayer-invalidTimeout',
+        path: 'traffic.replayers.replay1.replayerConfig.targetServerResponseTimeoutSeconds',
+        changeClass: 'impossible',
+        patterns: ['immediate-dependent-impossible-change'],
+        apply: (config) => deepSet(config, 'traffic.replayers.replay1.replayerConfig.targetServerResponseTimeoutSeconds', -1),
+        rationale: 'Setting an invalid timeout is impossible to reconcile in place — the replayer cannot start with this value, requiring delete and recreate',
     },
     {
         id: 'rfs-maxConnections',

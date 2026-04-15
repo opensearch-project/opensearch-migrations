@@ -106,20 +106,30 @@ export type TestCaseResult = {
   pattern: DependencyPattern;
   changeClass: ChangeClass;
   mutatorId: string;
-  status: 'passed' | 'failed';
+  /** 'partial' = ran but could not exercise the full behavior (e.g. gated spec with skipApprovals) */
+  status: 'passed' | 'failed' | 'partial';
   expect: ExpandedExpectation;
   observed: Record<string, { phase: string; changed: boolean }>;
+  /** For gated/impossible flows: state before the action (approval/delete) */
+  beforeAction?: Record<string, { phase: string; configChecksum: string }>;
+  /** For gated/impossible flows: state after the action resolved */
+  afterAction?: Record<string, { phase: string; configChecksum: string }>;
   failures?: string[];
+  /** Why this result is partial rather than a full pass */
+  caveats?: string[];
 };
 
 export type ScenarioReport = {
   scenario: string;
-  status: 'passed' | 'failed';
-  summary: { generated: number; passed: number; failed: number };
+  status: 'passed' | 'failed' | 'partial';
+  summary: { generated: number; passed: number; failed: number; partial: number };
   expandedTests: TestCaseResult[];
   coverage: {
     selectedCases: string[];
     expandedCases: string[];
+    /** Expanded by the matrix but not executed (e.g. runner only runs first case) */
+    skippedCases: string[];
+    /** No mutator found for the requested pattern — a real coverage gap */
     uncoveredCases: string[];
   };
 };

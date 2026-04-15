@@ -98,6 +98,7 @@ async function main() {
     const scenarioReport = buildScenarioReport('fullMigrationWithTraffic', results, {
         selectedCases: cases.map(c => `${c.pattern}/${c.changeClass}`),
         expandedCases: cases.map(c => c.name),
+        skippedCases: [],
         uncoveredCases: [],
     });
     console.log(formatReport(scenarioReport));

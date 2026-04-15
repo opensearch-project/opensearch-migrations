@@ -48,6 +48,7 @@ describe('reportSchema', () => {
         const report = buildScenarioReport('test-scenario', [passing], {
             selectedCases: ['focus-change'],
             expandedCases: [mockTestCase.name],
+            skippedCases: [],
             uncoveredCases: [],
         });
         expect(report).toMatchSnapshot();
@@ -60,6 +61,7 @@ describe('reportSchema', () => {
         const report = buildScenarioReport('test-scenario', [passing], {
             selectedCases: ['focus-change'],
             expandedCases: [mockTestCase.name],
+            skippedCases: [],
             uncoveredCases: [],
         });
         const text = formatReport(report);
