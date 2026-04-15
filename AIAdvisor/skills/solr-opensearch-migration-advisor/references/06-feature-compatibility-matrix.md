@@ -21,8 +21,8 @@ This document provides a comprehensive compatibility matrix covering Solr featur
 | `solr.ICUCollationField` | `icu_collation_keyword` (analysis-icu plugin) | Partial | Requires ICU Analysis plugin |
 | `solr.EnumField` | `keyword` | Partial | No built-in enum ordering; use numeric mapping |
 | `solr.CurrencyFieldType` | `scaled_float` or `double` | Partial | No multi-currency conversion built in |
-| `solr.ExternalFileField` | No direct equivalent | None | Use `function_score` with a lookup or script |
-| `solr.PreAnalyzedField` | No direct equivalent | None | Pre-tokenize at ingest via ingest pipeline |
+| `solr.ExternalFileField` | No direct equivalent | None | Use `function_score` with a lookup or script; embed at index time |
+| `solr.PreAnalyzedField` | No direct equivalent | None | Ingest pipeline script; or `keyword` array (loses position/offset) |
 | `solr.NestPath` / `_nest_path_` | `nested` type | Partial | Different internal representation |
 | Dynamic fields (`dynamicField`) | Dynamic templates | Partial | Pattern matching is less expressive |
 | Copy fields (`copyField`) | `copy_to` parameter | Full | Defined per field in mappings |
@@ -45,12 +45,15 @@ This document provides a comprehensive compatibility matrix covering Solr featur
 | `{!geofilt}` | `geo_distance` query | Full | |
 | `{!bbox}` | `geo_bounding_box` query | Full | |
 | `{!collapse}` | `collapse` parameter (OpenSearch 2.x) | Full | |
-| `{!expand}` | No direct equivalent | None | Implement via aggregations |
+| `{!expand}` | No direct equivalent | None | Use `terms` agg + `top_hits` per group |
 | Function queries (`_val_`, `{!func}`) | `function_score` with `script_score` | Partial | Solr functions must be rewritten as Painless scripts |
 | `{!knn}` (Solr 9+) | `knn` query | Full | Vector field type required |
-| `{!rerank}` | Rerank query (OpenSearch 2.12+) | Partial | Different reranking model interface |
+| `{!rerank}` | `function_score` (query-based); ML rerank (model-based) | Partial | OpenSearch rerank uses ML models, not a secondary Lucene query |
 | `{!mlt}` | `more_like_this` query | Full | |
-| `{!graph}` | No direct equivalent | None | Graph traversal not natively supported |
+| `{!graph}` | No direct equivalent | None | Pre-compute relationships at index time or app-side traversal |
+| `{!complexphrase}` | `span_near` + `span_multi` | Partial | No direct wildcard-in-phrase support |
+| `{!surround}` | `span_near` with `slop`/`in_order` | Partial | Syntax differs; semantics approximated |
+| `{!switch}` | No direct equivalent | None | Implement conditional routing in application layer |
 
 ## 3. Search Components and Request Handlers
 
@@ -107,9 +110,9 @@ This document provides a comprehensive compatibility matrix covering Solr featur
 
 | Solr Feature | OpenSearch Equivalent | Compatibility | Notes |
 | :--- | :--- | :--- | :--- |
-| Atomic updates (`set`, `add`, `remove`) | Partial update via `_update` with `doc` | Partial | No `add`/`remove` for arrays; use scripts |
+| Atomic updates (`set`, `add`, `remove`) | Painless script via `_update` | Partial | No `add`/`remove`/`inc` modifiers; must use scripts |
 | In-place updates | `_update` with `doc` | Partial | Only for fields without `copy_to` or nested |
-| Optimistic concurrency (`_version_`) | `if_seq_no` / `if_primary_term` | Partial | Different mechanism; not field-based |
+| Optimistic concurrency (`_version_`) | `if_seq_no` / `if_primary_term` | Partial | Different mechanism; not a stored field; not queryable |
 | Soft commits / hard commits | Refresh API (`/_refresh`) | Partial | No equivalent to Solr's commit model |
 | `commitWithin` | `refresh=wait_for` | Partial | |
 | Document expiry (`TTL`) | Index Lifecycle Management (ILM) | Partial | No per-document TTL; use ILM policies |
