@@ -227,11 +227,6 @@ awsPrivateCA:
       commonName: "Migration Assistant CA"
     deletionPolicy: delete  # or retain (keeps PCA after helm uninstall)
 
-# Default cert-manager issuer for proxy TLS certificates
-issuerConfig:
-  issuerName: "migrations-ca"     # ClusterIssuer name created by selfSignedClusterIssuer hook
-  issuerKind: "ClusterIssuer"     # Kind: ClusterIssuer or Issuer
-
 charts:
 
   cert-manager:

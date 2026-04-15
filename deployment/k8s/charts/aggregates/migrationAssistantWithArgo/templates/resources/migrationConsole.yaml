@@ -230,21 +230,12 @@ spec:
                   optional: true
             {{- end }}
             {{- if index .Values.conditionalPackageInstalls "cert-manager" }}
-            - name: PROXY_DEFAULT_ISSUER_NAME
-              valueFrom:
-                configMapKeyRef:
-                  name: migration-issuer-config
-                  key: PROXY_DEFAULT_ISSUER_NAME
-            - name: PROXY_DEFAULT_ISSUER_KIND
-              valueFrom:
-                configMapKeyRef:
-                  name: migration-issuer-config
-                  key: PROXY_DEFAULT_ISSUER_KIND
             - name: PROXY_DEFAULT_AWS_REGION
               valueFrom:
                 configMapKeyRef:
-                  name: migration-issuer-config
-                  key: PROXY_DEFAULT_AWS_REGION
+                  name: migrations-default-s3-config
+                  key: AWS_REGION
+                  optional: true
             {{- end }}
           {{- if .Values.defaultBucketConfiguration.create }}
           securityContext:

@@ -210,8 +210,8 @@ function defaultProxyTlsConfig(proxyName: string) {
     return {
         mode: "certManager" as const,
         issuerRef: {
-            name: process.env.PROXY_DEFAULT_ISSUER_NAME || "migrations-ca",
-            kind: (process.env.PROXY_DEFAULT_ISSUER_KIND || "ClusterIssuer") as "ClusterIssuer" | "Issuer",
+            name: "migrations-ca",
+            kind: "ClusterIssuer" as const,
         },
         dnsNames,
         duration: "2160h",
