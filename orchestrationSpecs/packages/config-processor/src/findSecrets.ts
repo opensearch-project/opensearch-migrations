@@ -72,9 +72,10 @@ export async function main() {
     }
 
     // Validate against full Zod schema with refinements
+    let normalized;
     try {
         const transformer = new MigrationConfigTransformer();
-        transformer.validateInput(data);
+        normalized = transformer.validateInput(data);
     } catch (error) {
         if (error instanceof InputValidationError) {
             process.stdout.write(JSON.stringify({valid: false, errors: formatInputValidationError(error)}));
@@ -86,9 +87,9 @@ export async function main() {
         return;
     }
 
-    // Validation passed — scrape secrets
+    // Validation passed — scrape secrets and return normalized config
     const secrets = getCategorizedCredentialsSecretsFromConfig(data);
-    process.stdout.write(JSON.stringify({valid: true, ...secrets}));
+    process.stdout.write(JSON.stringify({valid: true, ...secrets, normalizedConfig: normalized}));
 }
 
 if (require.main === module && !process.env.SUPPRESS_AUTO_LOAD) {

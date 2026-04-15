@@ -194,19 +194,44 @@ def _save_config(store, new_config: WorkflowConfig, session_name: str):
         raise click.ClickException(f"Failed to save configuration: {e}")
 
 
+def _serialize_normalized_config(result: dict) -> Optional[str]:
+    """Serialize the normalized config from the TS validator back to YAML.
+
+    The normalized config includes defaults injected by the config processor
+    (e.g. secure-by-default TLS on the capture proxy). Storing it ensures
+    that `console clusters` commands see the actual deployed endpoints.
+
+    Returns None if no normalized config is available (graceful fallback to raw).
+    """
+    normalized = result.get('normalizedConfig')
+    if not normalized:
+        return None
+    try:
+        import yaml
+        return yaml.dump(normalized, default_flow_style=False, sort_keys=False)
+    except Exception as e:
+        logger.warning(f"Failed to serialize normalized config, falling back to raw: {e}")
+        return None
+
+
 def _handle_stdin_edit(wf_config_store, secret_store, session_name: str):
     """Handle configuration edit from stdin"""
     raw_yaml = _parse_config_from_stdin()
 
     # Validate via TS and get secrets in one call — save regardless of validation result
     result = _validate_and_find_secrets(raw_yaml)
-    new_config = WorkflowConfig(raw_yaml=raw_yaml)
     if not result.get('valid', False):
-        _save_config(wf_config_store, new_config, session_name)
+        # Invalid config: store raw so user can fix it
+        _save_config(wf_config_store, WorkflowConfig(raw_yaml=raw_yaml), session_name)
         raise click.ClickException(
             f"Configuration saved but has validation errors:\n{result.get('errors', 'Unknown error')}")
 
-    _save_config(wf_config_store, new_config, session_name)
+    # Valid config: store normalized version so console commands see actual deployed endpoints.
+    config_to_store = _serialize_normalized_config(result) or raw_yaml
+    if config_to_store != raw_yaml:
+        click.echo("Configuration normalized (secure defaults applied, e.g. proxy TLS). "
+                    "Use `workflow configure view` to see the effective config.")
+    _save_config(wf_config_store, WorkflowConfig(raw_yaml=config_to_store), session_name)
     _process_secrets(secret_store, result, interactive=False)
 
 
@@ -245,7 +270,7 @@ def _handle_editor_edit(store, secret_store, session_name: str):
         click.clear()
         current_config = WorkflowConfig(raw_yaml=raw_yaml)
 
-    _save_config(store, WorkflowConfig(raw_yaml=raw_yaml), session_name)
+    _save_config(store, WorkflowConfig(raw_yaml=_serialize_normalized_config(result) or raw_yaml), session_name)
     _process_secrets(secret_store, result, interactive=True)
 
 
