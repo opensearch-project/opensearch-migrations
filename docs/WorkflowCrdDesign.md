@@ -23,6 +23,7 @@ Argo Workflow
 │   │   └── owns → Coordinator Pods
 │   └── owns (blockOwnerDeletion) → RFS Deployment
 │       └── owns → RFS Pods
+├── runs transiently → Metadata migration pods
 ├── owns → CapturedTraffic CRD
 │   └── owns → Proxy Deployment + Service
 │       └── owns → Proxy Pods
@@ -47,6 +48,28 @@ Argo Workflow
 4. Delete CapturedTraffic CRDs → proxy pods die
 
 Result: zero "connection refused", "coordinator unavailable", or "upstream gone" errors in any component's logs.
+
+### Why metadata migration is not owned by `SnapshotMigration`
+
+Metadata migration remains an Argo-managed container step on purpose.
+
+Reasons:
+
+- it is transient compute, not durable runtime infrastructure
+- there is only one `migration-workflow` at a time
+- replacing or deleting the Argo workflow also deletes the metadata migration pod
+- that means there is no separate long-lived metadata process that can outlive workflow replacement and race with a later workflow
+
+This is different from the RFS deployment and coordinator resources, which are intentionally long-lived enough during snapshot migration execution that they benefit from CR ownership and explicit cleanup.
+
+So the boundary is:
+
+- `SnapshotMigration` owns durable / long-running execution infrastructure:
+  - RFS Deployment
+  - coordinator StatefulSet + Service + Secret
+- Argo workflow owns short-lived metadata migration pods
+
+This is operationally simpler and still safe because workflow replacement already tears down metadata migration execution.
 
 ---
 

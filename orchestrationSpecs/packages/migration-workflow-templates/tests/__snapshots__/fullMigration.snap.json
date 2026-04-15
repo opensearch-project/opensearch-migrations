@@ -699,12 +699,20 @@
                     "value": "{{inputs.parameters.migrationLabel}}"
                   },
                   {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
                   },
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
                   }
                 ]
               },
@@ -1035,52 +1043,13 @@
           ],
           [
             {
-              "inline": {
-                "inputs": {
-                  "parameters": [
-                    {
-                      "name": "resourceKind"
-                    },
-                    {
-                      "name": "resourceName"
-                    },
-                    {
-                      "name": "phase"
-                    },
-                    {
-                      "name": "configChecksum"
-                    },
-                    {
-                      "name": "checksumForReplayer"
-                    }
-                  ]
-                },
-                "resource": {
-                  "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n  checksumForReplayer: \"{{inputs.parameters.checksumForReplayer}}\"\n",
-                  "action": "patch",
-                  "flags": [
-                    "--type",
-                    "merge",
-                    "--subresource=status"
-                  ]
-                },
-                "retryStrategy": {
-                  "limit": "6",
-                  "retryPolicy": "OnError",
-                  "backoff": {
-                    "duration": "10",
-                    "factor": "2",
-                    "cap": "60"
-                  }
-                }
+              "templateRef": {
+                "template": "patchsnapshotmigrationcompleted",
+                "name": "resource-management"
               },
               "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Completed' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "resourceKind",
-                    "value": "SnapshotMigration"
-                  },
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.resourceName}}"
@@ -1362,49 +1331,13 @@
           ],
           [
             {
-              "inline": {
-                "inputs": {
-                  "parameters": [
-                    {
-                      "name": "resourceKind"
-                    },
-                    {
-                      "name": "resourceName"
-                    },
-                    {
-                      "name": "phase"
-                    },
-                    {
-                      "name": "configChecksum"
-                    }
-                  ]
-                },
-                "resource": {
-                  "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n",
-                  "action": "patch",
-                  "flags": [
-                    "--type",
-                    "merge",
-                    "--subresource=status"
-                  ]
-                },
-                "retryStrategy": {
-                  "limit": "6",
-                  "retryPolicy": "OnError",
-                  "backoff": {
-                    "duration": "10",
-                    "factor": "2",
-                    "cap": "60"
-                  }
-                }
+              "templateRef": {
+                "template": "patchtrafficreplayready",
+                "name": "resource-management"
               },
               "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "resourceKind",
-                    "value": "TrafficReplay"
-                  },
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.name}}"

@@ -409,54 +409,12 @@
           ],
           [
             {
-              "inline": {
-                "inputs": {
-                  "parameters": [
-                    {
-                      "name": "resourceKind"
-                    },
-                    {
-                      "name": "resourceName"
-                    },
-                    {
-                      "name": "phase"
-                    },
-                    {
-                      "name": "snapshotName"
-                    },
-                    {
-                      "name": "configChecksum"
-                    },
-                    {
-                      "name": "checksumForSnapshotMigration"
-                    }
-                  ]
-                },
-                "resource": {
-                  "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  snapshotName: \"{{inputs.parameters.snapshotName}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n  checksumForSnapshotMigration: \"{{inputs.parameters.checksumForSnapshotMigration}}\"\n",
-                  "action": "patch",
-                  "flags": [
-                    "--type",
-                    "merge",
-                    "--subresource=status"
-                  ]
-                },
-                "retryStrategy": {
-                  "limit": "6",
-                  "retryPolicy": "OnError",
-                  "backoff": {
-                    "duration": "10",
-                    "factor": "2",
-                    "cap": "60"
-                  }
-                }
+              "templateRef": {
+                "template": "patchdatasnapshotcompleted",
+                "name": "resource-management"
               },
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "resourceKind",
-                    "value": "DataSnapshot"
-                  },
                   {
                     "name": "resourceName",
                     "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')+'-'+jsonpath(inputs.parameters.snapshotConfig, '$.label')}}"

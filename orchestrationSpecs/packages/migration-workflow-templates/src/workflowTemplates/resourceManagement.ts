@@ -8,9 +8,9 @@ import {
     selectInputsForRegister,
     TemplateBuilder,
     typeToken,
+    WorkflowAndTemplatesScope,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
-import type {WorkflowAndTemplatesScope} from '@opensearch-migrations/argo-workflow-builders';
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
@@ -19,78 +19,58 @@ const SECONDS_IN_DAYS = 24 * 3600;
 const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
 const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
 
-type ReservedPatchInputNames = "resourceKind" | "resourceName" | "phase";
+type ReservedPatchInputNames = "resourceName" | "phase";
 type StringStatusFields = Readonly<Record<string, AllowLiteralOrExpression<string>>>;
 type NonReservedStringStatusFields = StringStatusFields & {
     [K in ReservedPatchInputNames]?: never;
 };
-type ProxiedStringStatusFields<T extends StringStatusFields> = { [K in keyof T]: string };
-type InlinePatchRegisterValues<T extends StringStatusFields> = {
-    resourceKind: AllowLiteralOrExpression<string>;
+type RequiredStringInputDefs<T extends StringStatusFields> = {
+    [K in keyof T]: InputParamDef<string, true>;
+};
+type NamedPatchRegisterValues<T extends StringStatusFields> = {
     resourceName: AllowLiteralOrExpression<string>;
     phase: AllowLiteralOrExpression<string>;
 } & T;
 
-function proxiedStringStatusFields<T extends StringStatusFields>(fields: T): ProxiedStringStatusFields<T> {
-    const proxied = {} as ProxiedStringStatusFields<T>;
+function makeRequiredStringInputDefs<T extends StringStatusFields>(fields: T): RequiredStringInputDefs<T> {
+    const defs = {} as RequiredStringInputDefs<T>;
     for (const key of Object.keys(fields) as Array<keyof T>) {
-        proxied[key] = makeStringTypeProxy(fields[key]);
-    }
-    return proxied;
-}
-
-function makeRequiredStringInputDefs<T extends StringStatusFields>(fields: T): InputParametersRecord {
-    const defs: InputParametersRecord = {};
-    for (const key of Object.keys(fields) as Array<keyof T>) {
-        defs[String(key)] = {} as InputParamDef<string, true>;
+        defs[key] = {} as InputParamDef<string, true>;
     }
     return defs;
 }
 
-function placeholderStatusFields<T extends StringStatusFields>(
-    fields: T
-): ProxiedStringStatusFields<T> {
-    const proxied = {} as ProxiedStringStatusFields<T>;
+function placeholderStatusFields<T extends StringStatusFields>(fields: T): Record<string, string> {
+    const proxied: Record<string, string> = {};
     for (const key of Object.keys(fields) as Array<keyof T>) {
-        proxied[key] = `{{inputs.parameters.${String(key)}}}`;
+        proxied[String(key)] = `{{inputs.parameters.${String(key)}}}`;
     }
     return proxied;
 }
 
-export function inlinePatchResourceStatus<
+function buildPatchStatusTemplate<
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
     ExtraFields extends NonReservedStringStatusFields = {}
->(args: {
-    resourceKind: AllowLiteralOrExpression<string>;
-    resourceName: AllowLiteralOrExpression<string>;
-    phase: AllowLiteralOrExpression<string>;
-    extraStatusFields?: ExtraFields;
-}) {
-    const extraStatusFields = (args.extraStatusFields ?? {}) as ExtraFields;
+>(
+    t: TemplateBuilder<ParentWorkflowScope, {}, {}, {}>,
+    resourceKind: string,
+    extraStatusFields: ExtraFields
+) {
     const inputDefs = {
-        resourceKind: {} as InputParamDef<string, true>,
         resourceName: {} as InputParamDef<string, true>,
         phase: {} as InputParamDef<string, true>,
         ...makeRequiredStringInputDefs(extraStatusFields)
     } satisfies InputParametersRecord;
 
-    return {
-        registerValues: {
-            resourceKind: args.resourceKind,
-            resourceName: args.resourceName,
-            phase: args.phase,
-            ...extraStatusFields
-        } as InlinePatchRegisterValues<ExtraFields>,
-        inlineTemplate: <ParentWorkflowScope extends WorkflowAndTemplatesScope>(
-            t: TemplateBuilder<ParentWorkflowScope, {}, {}, {}>
-        ) => t
+    return t
         .addInputsFromRecord(inputDefs)
-        .addResourceTask(_b => _b
+        .addResourceTask(b => b
             .setDefinition({
                 action: "patch",
                 flags: ["--type", "merge", "--subresource=status"],
                 manifest: {
                     apiVersion: CRD_API_VERSION,
-                    kind: "{{inputs.parameters.resourceKind}}",
+                    kind: resourceKind,
                     metadata: {name: "{{inputs.parameters.resourceName}}"},
                     status: {
                         phase: "{{inputs.parameters.phase}}",
@@ -98,8 +78,7 @@ export function inlinePatchResourceStatus<
                     }
                 }
             }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    };
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY);
 }
 
 export const ResourceManagement = WorkflowBuilder.create({
@@ -108,6 +87,26 @@ export const ResourceManagement = WorkflowBuilder.create({
 })
 
     .addParams(CommonWorkflowParameters)
+
+    .addTemplate("patchDataSnapshotCompleted", t => buildPatchStatusTemplate(t, "DataSnapshot", {
+        snapshotName: "",
+        configChecksum: "",
+        checksumForSnapshotMigration: ""
+    }))
+    .addTemplate("patchCapturedTrafficRunning", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
+    .addTemplate("patchCapturedTrafficReady", t => buildPatchStatusTemplate(t, "CapturedTraffic", {
+        configChecksum: "",
+        checksumForSnapshot: "",
+        checksumForReplayer: ""
+    }))
+    .addTemplate("patchCapturedTrafficError", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
+    .addTemplate("patchSnapshotMigrationCompleted", t => buildPatchStatusTemplate(t, "SnapshotMigration", {
+        configChecksum: "",
+        checksumForReplayer: ""
+    }))
+    .addTemplate("patchTrafficReplayReady", t => buildPatchStatusTemplate(t, "TrafficReplay", {
+        configChecksum: ""
+    }))
 
 
     // ── Wait templates (resource get with retry) ─────────────────────────

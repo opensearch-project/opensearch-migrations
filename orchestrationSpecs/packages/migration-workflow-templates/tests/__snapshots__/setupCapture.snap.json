@@ -892,46 +892,13 @@
           ],
           [
             {
-              "inline": {
-                "inputs": {
-                  "parameters": [
-                    {
-                      "name": "resourceKind"
-                    },
-                    {
-                      "name": "resourceName"
-                    },
-                    {
-                      "name": "phase"
-                    }
-                  ]
-                },
-                "resource": {
-                  "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
-                  "action": "patch",
-                  "flags": [
-                    "--type",
-                    "merge",
-                    "--subresource=status"
-                  ]
-                },
-                "retryStrategy": {
-                  "limit": "6",
-                  "retryPolicy": "OnError",
-                  "backoff": {
-                    "duration": "10",
-                    "factor": "2",
-                    "cap": "60"
-                  }
-                }
+              "templateRef": {
+                "template": "patchcapturedtrafficrunning",
+                "name": "resource-management"
               },
               "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "resourceKind",
-                    "value": "CapturedTraffic"
-                  },
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.proxyName}}"
@@ -1051,55 +1018,13 @@
           ],
           [
             {
-              "inline": {
-                "inputs": {
-                  "parameters": [
-                    {
-                      "name": "resourceKind"
-                    },
-                    {
-                      "name": "resourceName"
-                    },
-                    {
-                      "name": "phase"
-                    },
-                    {
-                      "name": "configChecksum"
-                    },
-                    {
-                      "name": "checksumForSnapshot"
-                    },
-                    {
-                      "name": "checksumForReplayer"
-                    }
-                  ]
-                },
-                "resource": {
-                  "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n  checksumForSnapshot: \"{{inputs.parameters.checksumForSnapshot}}\"\n  checksumForReplayer: \"{{inputs.parameters.checksumForReplayer}}\"\n",
-                  "action": "patch",
-                  "flags": [
-                    "--type",
-                    "merge",
-                    "--subresource=status"
-                  ]
-                },
-                "retryStrategy": {
-                  "limit": "6",
-                  "retryPolicy": "OnError",
-                  "backoff": {
-                    "duration": "10",
-                    "factor": "2",
-                    "cap": "60"
-                  }
-                }
+              "templateRef": {
+                "template": "patchcapturedtrafficready",
+                "name": "resource-management"
               },
               "when": "{{=steps.setupProxy.status == 'Succeeded' || steps.setupProxyWithConfiguredKafka.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "resourceKind",
-                    "value": "CapturedTraffic"
-                  },
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.proxyName}}"
@@ -1127,46 +1052,13 @@
           ],
           [
             {
-              "inline": {
-                "inputs": {
-                  "parameters": [
-                    {
-                      "name": "resourceKind"
-                    },
-                    {
-                      "name": "resourceName"
-                    },
-                    {
-                      "name": "phase"
-                    }
-                  ]
-                },
-                "resource": {
-                  "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
-                  "action": "patch",
-                  "flags": [
-                    "--type",
-                    "merge",
-                    "--subresource=status"
-                  ]
-                },
-                "retryStrategy": {
-                  "limit": "6",
-                  "retryPolicy": "OnError",
-                  "backoff": {
-                    "duration": "10",
-                    "factor": "2",
-                    "cap": "60"
-                  }
-                }
+              "templateRef": {
+                "template": "patchcapturedtrafficerror",
+                "name": "resource-management"
               },
               "when": "{{=steps.setupProxy.status == 'Failed' || steps.setupProxyWithConfiguredKafka.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "resourceKind",
-                    "value": "CapturedTraffic"
-                  },
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.proxyName}}"

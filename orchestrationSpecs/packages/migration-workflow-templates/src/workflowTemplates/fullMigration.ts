@@ -24,7 +24,6 @@ import {
     expr,
     IMAGE_PULL_POLICY,
     InputParamDef,
-    INLINE,
     INTERNAL,
     makeParameterLoop,
     selectInputsFieldsAsExpressionRecord,
@@ -35,7 +34,7 @@ import {
 import {DocumentBulkLoad} from "./documentBulkLoad";
 import {MetadataMigration} from "./metadataMigration";
 import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
-import {inlinePatchResourceStatus, ResourceManagement} from "./resourceManagement";
+import {ResourceManagement} from "./resourceManagement";
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
@@ -302,7 +301,9 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("idGenerator", INTERNAL, "doNothing")
             .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c => {
                     return c.register({
-                        ...selectInputsForRegister(b, c)
+                        ...selectInputsForRegister(b, c),
+                        crdName: b.inputs.crdName,
+                        crdUid: b.inputs.resourceUid,
                     });
                 },
                 {when: {templateExp: expr.not(expr.isEmpty(b.inputs.metadataMigrationConfig))}}
@@ -332,21 +333,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
-        .addSteps(b => {
-            const patchSnapshotMigration = inlinePatchResourceStatus({
-                resourceKind: expr.literal("SnapshotMigration"),
-                resourceName: b.inputs.resourceName,
-                phase: expr.literal("Completed"),
-                extraStatusFields: {
-                    configChecksum: b.inputs.configChecksum,
-                    checksumForReplayer: expr.dig(
-                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
-                        ["checksumForReplayer"], ""
-                    ),
-                }
-            });
-
-            return b
+        .addSteps(b => b
             .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
                 c.register({
                     resourceKind: expr.literal("SnapshotMigration"),
@@ -442,14 +429,22 @@ export const FullMigration = WorkflowBuilder.create({
                     ))}),
                 }
             )
-            .addStep("patchSnapshotMigrationCompleted", INLINE, patchSnapshotMigration.inlineTemplate,
-                c => c.register(patchSnapshotMigration.registerValues),
+            .addStep("patchSnapshotMigrationCompleted", ResourceManagement, "patchSnapshotMigrationCompleted",
+                c => c.register({
+                    resourceName: b.inputs.resourceName,
+                    phase: expr.literal("Completed"),
+                    configChecksum: b.inputs.configChecksum,
+                    checksumForReplayer: expr.dig(
+                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                        ["checksumForReplayer"], ""
+                    ),
+                }),
                 {when: c => ({templateExp: expr.not(expr.and(
                     expr.equals(c.checkPhase.outputs.phase, "Completed"),
                     expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
                 ))})}
             )
-        })
+        )
     )
 
 
@@ -471,17 +466,7 @@ export const FullMigration = WorkflowBuilder.create({
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "TrafficReplayer"]))
 
-        .addSteps(b => {
-            const markReplayReady = inlinePatchResourceStatus({
-                resourceKind: expr.literal("TrafficReplay"),
-                resourceName: b.inputs.name,
-                phase: expr.literal("Ready"),
-                extraStatusFields: {
-                    configChecksum: b.inputs.configChecksum,
-                }
-            });
-
-            return b
+        .addSteps(b => b
             .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
                 c.register({
                     resourceKind: expr.literal("TrafficReplay"),
@@ -586,14 +571,18 @@ export const FullMigration = WorkflowBuilder.create({
                     expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
                 ))})}
             )
-            .addStep("patchTrafficReplayReady", INLINE, markReplayReady.inlineTemplate,
-                c => c.register(markReplayReady.registerValues),
+            .addStep("patchTrafficReplayReady", ResourceManagement, "patchTrafficReplayReady",
+                c => c.register({
+                    resourceName: b.inputs.name,
+                    phase: expr.literal("Ready"),
+                    configChecksum: b.inputs.configChecksum,
+                }),
                 {when: c => ({templateExp: expr.not(expr.and(
                     expr.equals(c.checkPhase.outputs.phase, "Ready"),
                     expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
                 ))})}
             )
-        })
+        )
     )
 
 
