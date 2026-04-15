@@ -382,12 +382,11 @@ You have access to a verified knowledge base of technical information about Apac
 | `references/03b-synonyms-and-language.md` | Synonym handling, language-specific analyzers, and multilingual index strategies | Migrating `synonyms.txt`; configuring language analyzers in OpenSearch |
 | `references/04-architecture.md` | SolrCloud vs. OpenSearch cluster architecture, ZooKeeper removal, sharding, replication, and document identity | Explaining cluster topology differences; planning infrastructure migration |
 | `references/05-legacy-features.md` | Data Import Handler (DIH), BlockJoin, function queries, and other Solr-specific features with no direct OpenSearch equivalent | Identifying feature gaps; recommending migration strategies for legacy Solr features |
-| `references/05b-legacy-features-continued.md` | Joins, Streaming Expressions, SpellCheck, MoreLikeThis, custom request handlers, and a full feature gap summary table | Same as above — continuation covering additional legacy features |
+| `references/05b-legacy-features-continued.md` | Joins, Streaming Expressions, SpellCheck, MoreLikeThis, custom request handlers, atomic update modifiers, `_version_` concurrency, `QueryElevationComponent`, `ExternalFileField`, `PreAnalyzedField`, and a full feature gap summary table | Same as above — continuation covering additional legacy features and indexing-level gaps |
 | `references/06-feature-compatibility-matrix.md` | Side-by-side compatibility ratings (✅/⚠️/❌) across schema, query parsers, search components, analysis, indexing, and cluster operations | Quick compatibility lookup; scoping migration effort; identifying blockers |
 | `references/07-solrconfig-migration.md` | `solrconfig.xml` constructs (request handlers, caches, update settings, merge policy, similarity) mapped to OpenSearch equivalents | Migrating `solrconfig.xml`; configuring OpenSearch index and node settings |
-| `references/08-query-behavior-edge-cases.md` | Known behavioral differences between Solr query parsers and OpenSearch Query DSL: default operator, fuzzy scale, date math, scoring, highlighting, sorting, deep pagination | Debugging query result differences; validating query parity after migration |
+| `references/08-query-behavior-edge-cases.md` | Known behavioral differences between Solr query parsers and OpenSearch Query DSL: default operator, fuzzy scale, date math, scoring, highlighting, sorting, deep pagination, Solr-only query parsers (`{!complexphrase}`, `{!surround}`, `{!graph}`, `{!switch}`, `{!rerank}`) with no OpenSearch equivalent | Debugging query result differences; validating query parity after migration; identifying unsupported query parsers |
 | `references/09-sizing-and-performance.md` | Node roles, shard sizing formulas, JVM/heap tuning, bulk indexing settings, cache configuration, hardware recommendations, and monitoring metrics | Sizing a new OpenSearch cluster; performance tuning; capacity planning (Step 3 / DevOps stakeholder) |
-| `references/10-validation-parity-checklist.md` | Seven-phase validation checklist: pre-migration baseline → schema → document counts → query parity → feature-specific → performance → operational readiness | Guiding the user through post-migration validation; generating a sign-off checklist |
 
 ### Usage Guidelines
 
@@ -407,7 +406,7 @@ You have access to a verified knowledge base of technical information about Apac
 #[[file:references/07-solrconfig-migration.md]]
 #[[file:references/08-query-behavior-edge-cases.md]]
 #[[file:references/09-sizing-and-performance.md]]
-#[[file:references/10-validation-parity-checklist.md]]
+
 
 ## Instructions
 
@@ -418,6 +417,7 @@ You have access to a verified knowledge base of technical information about Apac
 - Use the steering documents (Stakeholders, Query Translation, Index Design, Sizing, Incompatibilities, Authentication) to inform all reasoning.
 - **Incompatibility tracking is mandatory.** Every incompatibility found in any step must be recorded in `facts.incompatibilities` (via `SessionState.add_incompatibility`) before moving on. Never silently skip a known issue.
 - When in doubt about whether something is an incompatibility, flag it conservatively — a false positive is far less harmful than a missed breaking change.
+- **Cite reference sources.** Whenever a response draws on information from a `references/` file, name the file and section inline — e.g., *"per `references/06-feature-compatibility-matrix.md`, section 2 — Query Parsers"*. Do not present reference-derived content as general knowledge.
 
 ### Session State Fields
 
