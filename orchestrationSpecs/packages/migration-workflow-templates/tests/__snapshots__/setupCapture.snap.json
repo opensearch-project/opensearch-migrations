@@ -447,8 +447,7 @@
         "resource": {
           "manifest": "apiVersion: cert-manager.io/v1\nkind: Certificate\nmetadata:\n  name: \"{{inputs.parameters.certName}}\"\n",
           "action": "get",
-          "successCondition": "status.conditions.0.status == True",
-          "failureCondition": "status.conditions.0.status == False"
+          "successCondition": "status.conditions.0.status == True"
         },
         "outputs": {
           "parameters": []
