@@ -294,6 +294,7 @@ class TestResetListIntegration:
         assert "Snapshot Migration" in result.stdout
         assert "my-snap" in result.stdout
         assert "workflow reset --all" in result.stdout
+        assert "workflow submit" in result.stdout
 
     def test_list_empty_namespace(self, runner, reset_ns):
         result = _invoke_workflow_cli(runner, ["reset", "--namespace", reset_ns])
@@ -335,7 +336,9 @@ class TestResetSingleIntegration:
 
         result = _invoke_workflow_cli(runner, ["reset", "kafka-a", "--namespace", reset_ns])
         assert result.exit_code != 0
-        assert "Dependent proxies are protected by default." in result.output
+        assert "Cannot delete because protected proxies still depend on this resource:" in result.output
+        assert "Capture Proxy: proxy-a" in result.output
+        assert "--include-proxies" in result.output
 
     def test_reset_blocks_on_dependents_without_cascade(self, runner, reset_ns):
         _create_crd_instance(reset_ns, "datasnapshots", "snap-a", phase=VALID_PHASES["datasnapshots"])
@@ -349,7 +352,7 @@ class TestResetSingleIntegration:
 
         result = _invoke_workflow_cli(runner, ["reset", "snap-a", "--namespace", reset_ns])
         assert result.exit_code != 0
-        assert "Cannot delete" in result.output
+        assert "Cannot delete because dependent resources still exist:" in result.output
         assert "Snapshot Migration: mig-a" in result.output
         assert "--cascade" in result.output
 
@@ -367,6 +370,23 @@ class TestResetSingleIntegration:
         assert result.exit_code == 0
         _assert_deleted(reset_ns, "snapshotmigrations", "mig-z")
         _assert_deleted(reset_ns, "datasnapshots", "snap-z")
+
+    def test_reset_with_cascade_converges_after_partial_prior_deletion(self, runner, reset_ns):
+        _create_crd_instance(reset_ns, "datasnapshots", "snap-r", phase=VALID_PHASES["datasnapshots"])
+        _create_crd_instance(
+            reset_ns,
+            "snapshotmigrations",
+            "mig-r",
+            phase=VALID_PHASES["snapshotmigrations"],
+            depends_on=["snap-r"],
+        )
+
+        assert _delete_crd(reset_ns, "snapshotmigrations", "mig-r") is True
+        _assert_deleted(reset_ns, "snapshotmigrations", "mig-r")
+
+        result = _invoke_workflow_cli(runner, ["reset", "snap-r", "--cascade", "--namespace", reset_ns])
+        assert result.exit_code == 0
+        _assert_deleted(reset_ns, "datasnapshots", "snap-r")
 
 
 @pytest.mark.slow

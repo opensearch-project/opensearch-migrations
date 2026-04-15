@@ -58,28 +58,6 @@ def delete_workflow(namespace, name):
         return e.status == 404
 
 
-def stop_and_delete(namespace, name):
-    """Stop then delete a single Argo workflow."""
-    stop_workflow(namespace, name)
-    delete_workflow(namespace, name)
-
-
-def stop_and_delete_all(namespace):
-    """Stop and delete all Argo workflows in the namespace."""
-    custom = client.CustomObjectsApi()
-    try:
-        items = custom.list_namespaced_custom_object(
-            group=ARGO_GROUP,
-            version=ARGO_VERSION,
-            namespace=namespace,
-            plural='workflows',
-        ).get('items', [])
-    except ApiException:
-        return
-    for wf in items:
-        stop_and_delete(namespace, wf['metadata']['name'])
-
-
 def get_workflow(namespace, name):
     """Get a workflow object by name. Returns None if not found."""
     custom = client.CustomObjectsApi()

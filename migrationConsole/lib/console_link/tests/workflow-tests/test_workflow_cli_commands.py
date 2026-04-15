@@ -10,15 +10,28 @@ from console_link.workflow.models.config import WorkflowConfig
 class TestWorkflowCLICommands:
     """Test suite for workflow CLI command integration."""
 
+    @patch('console_link.workflow.commands.submit.delete_workflow')
+    @patch('console_link.workflow.commands.submit.stop_workflow')
+    @patch('console_link.workflow.commands.submit.workflow_exists')
+    @patch('console_link.workflow.commands.submit.load_k8s_config')
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
-    def test_submit_command_basic(self, mock_store_class, mock_subprocess):
+    def test_submit_command_basic(
+        self,
+        mock_store_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        mock_stop,
+        mock_delete,
+    ):
         """Test basic submit command execution."""
         # Mock subprocess to avoid actual Kubernetes submission
         mock_subprocess.return_value = Mock(
             returncode=0,
             stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
         )
+        mock_exists.return_value = False
 
         runner = CliRunner()
 
@@ -40,17 +53,33 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         # Check for workflow name pattern from test scripts (test-workflow-<timestamp>)
         assert 'test-workflow-' in result.output
+        mock_stop.assert_not_called()
+        mock_delete.assert_not_called()
 
+    @patch('console_link.workflow.commands.submit.delete_workflow')
+    @patch('console_link.workflow.commands.submit.stop_workflow')
+    @patch('console_link.workflow.commands.submit.workflow_exists')
+    @patch('console_link.workflow.commands.submit.load_k8s_config')
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowService')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
-    def test_submit_command_with_wait(self, mock_store_class, mock_service_class, mock_subprocess):
+    def test_submit_command_with_wait(
+        self,
+        mock_store_class,
+        mock_service_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        mock_stop,
+        mock_delete,
+    ):
         """Test submit command with --wait flag."""
         # Mock subprocess to avoid actual Kubernetes submission
         mock_subprocess.return_value = Mock(
             returncode=0,
             stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
         )
+        mock_exists.return_value = False
 
         runner = CliRunner()
 
@@ -88,6 +117,55 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         assert 'Waiting for workflow to complete' in result.output
         assert 'Succeeded' in result.output
+        mock_stop.assert_not_called()
+        mock_delete.assert_not_called()
+
+    @patch('console_link.workflow.commands.submit.delete_workflow')
+    @patch('console_link.workflow.commands.submit.stop_workflow')
+    @patch('console_link.workflow.commands.submit.workflow_exists')
+    @patch('console_link.workflow.commands.submit.load_k8s_config')
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
+    def test_submit_command_replaces_existing_workflow(
+        self,
+        mock_store_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        mock_stop,
+        mock_delete,
+    ):
+        """Test submit replaces an existing workflow before resubmitting."""
+        mock_subprocess.return_value = Mock(
+            returncode=0,
+            stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
+        )
+        mock_exists.return_value = True
+        mock_stop.return_value = True
+        mock_delete.return_value = True
+
+        runner = CliRunner()
+
+        mock_store = Mock()
+        mock_store_class.return_value = mock_store
+        mock_config = WorkflowConfig({
+            'parameters': {
+                'message': 'test',
+                'requiresApproval': False,
+                'approver': ''
+            }
+        })
+        mock_store.load_config.return_value = mock_config
+
+        result = runner.invoke(workflow_cli, ['submit', '--workflow-name', 'migration-workflow'])
+
+        assert result.exit_code == 0
+        assert "Existing workflow 'migration-workflow' found; replacing..." in result.output
+        assert 'Stopped' in result.output
+        assert 'Deleted' in result.output
+        mock_exists.assert_called_once_with('ma', 'migration-workflow')
+        mock_stop.assert_called_once_with('ma', 'migration-workflow')
+        mock_delete.assert_called_once_with('ma', 'migration-workflow')
 
     @patch('console_link.workflow.commands.status.requests.get')
     @patch('console_link.workflow.commands.status.WorkflowService')
@@ -307,15 +385,28 @@ class TestWorkflowCLICommands:
         assert result.exit_code != 0
         assert "Missing argument 'TASK_NAMES...'" in result.output
 
+    @patch('console_link.workflow.commands.submit.delete_workflow')
+    @patch('console_link.workflow.commands.submit.stop_workflow')
+    @patch('console_link.workflow.commands.submit.workflow_exists')
+    @patch('console_link.workflow.commands.submit.load_k8s_config')
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
-    def test_submit_command_with_config_injection(self, mock_store_class, mock_subprocess):
+    def test_submit_command_with_config_injection(
+        self,
+        mock_store_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        mock_stop,
+        mock_delete,
+    ):
         """Test submit command with parameter injection from config."""
         # Mock subprocess to avoid actual Kubernetes submission
         mock_subprocess.return_value = Mock(
             returncode=0,
             stdout='{"workflow_name": "test-workflow-def", "workflow_uid": "uid-789", "namespace": "ma"}'
         )
+        mock_exists.return_value = False
 
         runner = CliRunner()
 
@@ -337,6 +428,8 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         # Check for workflow name pattern from test scripts
         assert 'test-workflow-' in result.output
+        mock_stop.assert_not_called()
+        mock_delete.assert_not_called()
 
 
 class TestConfigureCommands:

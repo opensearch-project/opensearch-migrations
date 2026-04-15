@@ -225,12 +225,11 @@ class TestResetCommandDelete:
 
 
 class TestResetAll:
-    @patch('console_link.workflow.commands.reset._stop_and_delete_workflows')
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._delete_targets')
     @patch('console_link.workflow.commands.reset.list_migration_resources')
     def test_reset_all_skips_proxies_and_their_dependencies(
-        self, mock_list, mock_delete_targets, _mock_k8s, mock_stop_workflows
+        self, mock_list, mock_delete_targets, _mock_k8s
     ):
         mock_list.return_value = [
             ('kafkaclusters', 'kafka', 'Ready', []),
@@ -249,14 +248,12 @@ class TestResetAll:
         )
         assert 'Skipping proxies by default.' in result.output
         assert 'Keeping dependencies required by protected proxies: kafka' in result.output
-        mock_stop_workflows.assert_called_once_with('ma')
 
-    @patch('console_link.workflow.commands.reset._stop_and_delete_workflows')
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._delete_targets')
     @patch('console_link.workflow.commands.reset.list_migration_resources')
     def test_reset_all_with_include_proxies_deletes_everything(
-        self, mock_list, mock_delete_targets, _mock_k8s, mock_stop_workflows
+        self, mock_list, mock_delete_targets, _mock_k8s
     ):
         resources = [
             ('kafkaclusters', 'kafka', 'Ready', []),
@@ -270,4 +267,3 @@ class TestResetAll:
 
         assert result.exit_code == 0
         mock_delete_targets.assert_called_once_with(resources, 'ma')
-        mock_stop_workflows.assert_called_once_with('ma')

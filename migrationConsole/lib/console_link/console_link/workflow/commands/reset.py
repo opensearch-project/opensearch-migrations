@@ -8,7 +8,6 @@ from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode, load_k8s_config
-from .argo_utils import stop_and_delete_all
 from .crd_utils import (
     CRD_GROUP,
     CRD_VERSION,
@@ -91,11 +90,6 @@ def _wait_until_gone(namespace, plural, names, timeout=120):
             time.sleep(2)
     if remaining:
         logger.warning(f"Timed out waiting for deletion: {remaining}")
-
-
-def _stop_and_delete_workflows(namespace):
-    """Stop and delete all Argo workflows in the namespace via k8s API."""
-    stop_and_delete_all(namespace)
 
 
 def _get_resource_completions(ctx, _, incomplete):
@@ -200,6 +194,7 @@ def _show_resource_list(resources):
     click.echo()
     click.echo("Use 'workflow reset <name>' to delete a resource.")
     click.echo("Use 'workflow reset --all' to delete everything.")
+    click.echo("Use 'workflow submit' to replace the Argo workflow without deleting migration resources.")
 
 
 def _filter_proxy_targets(targets, include_proxies):
@@ -231,12 +226,16 @@ def _resolve_cascade_targets(targets, namespace, cascade, include_proxies):
         blocking_proxy = [resource for resource in blocking if resource[0] == 'capturedtraffics']
         blocking_non_proxy = [resource for resource in blocking if resource[0] != 'capturedtraffics']
         if blocking_proxy and not blocking_non_proxy:
-            click.echo("Dependent proxies are protected by default.")
-            click.echo("Use --include-proxies to delete them.")
+            click.echo("Cannot delete because protected proxies still depend on this resource:")
+            for _, name, _, _ in blocking_proxy:
+                click.echo(f"  Capture Proxy: {name}")
+            click.echo()
+            click.echo("Use --include-proxies to delete those proxies too.")
+            click.echo("Otherwise keep their upstream Kafka or other dependencies in place.")
             return None
 
     if not cascade:
-        click.echo("Cannot delete — dependent resources exist:")
+        click.echo("Cannot delete because dependent resources still exist:")
         for plural, name, _, _ in blocking:
             click.echo(f"  {DISPLAY_NAMES.get(plural, plural)}: {name}")
         click.echo()
@@ -283,7 +282,7 @@ def _prune_ancestors_of_protected_proxies(resources, include_proxies):
 
 @click.command(name="reset")
 @click.argument('path', required=False, default=None, shell_complete=_get_resource_completions)
-@click.option('--all', 'reset_all', is_flag=True, default=False, help='Delete all migration resources and workflows')
+@click.option('--all', 'reset_all', is_flag=True, default=False, help='Delete all migration resources')
 @click.option('--cascade', is_flag=True, default=False, help='Also delete dependent resources')
 @click.option('--include-proxies', is_flag=True, default=False,
               help='Also delete capture proxies (they are protected by default)')
@@ -294,7 +293,7 @@ def reset_command(ctx, path, reset_all, cascade, include_proxies, namespace):
 
     With no arguments, lists migration resources and their status.
     With a NAME or glob pattern, deletes matching resources.
-    With --all, deletes all resources and workflows.
+    With --all, deletes all matching migration resources.
     """
     try:
         load_k8s_config()
@@ -341,8 +340,6 @@ def reset_command(ctx, path, reset_all, cascade, include_proxies, namespace):
             ctx.exit(ExitCode.FAILURE.value)
             return
 
-        click.echo("Cleaning up workflows...")
-        _stop_and_delete_workflows(namespace)
         click.echo("Done.")
 
     except Exception as e:
