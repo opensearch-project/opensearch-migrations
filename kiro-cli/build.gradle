@@ -7,6 +7,12 @@ def kiroBuildDir = layout.buildDirectory.dir('.kiro')
 tasks.register('setupKiro', Copy) {
     description = 'Copies kiro-cli-config to build/.kiro'
     from 'kiro-cli-config'
+    // Ship the canonical migration SOPs with the assistant package.
+    // These are copied into build/.kiro/steering so the agent's resources glob loads them.
+    from('../agent-sops') {
+        include '*.md'
+        into 'steering'
+    }
     into kiroBuildDir
 }
 
