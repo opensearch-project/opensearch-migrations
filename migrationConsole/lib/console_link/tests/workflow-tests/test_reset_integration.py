@@ -487,9 +487,9 @@ class TestApproveIntegration:
 class TestAutocompleteIntegration:
     def test_autocomplete_returns_live_resources(self, reset_ns):
         cache_file = (
-            Path(tempfile.gettempdir())
-            / "workflow_completions"
-            / f"reset_resources_{reset_ns}.json"
+            Path(tempfile.gettempdir()) /
+            "workflow_completions" /
+            f"reset_resources_{reset_ns}.json"
         )
         cache_file.unlink(missing_ok=True)
 
@@ -505,9 +505,9 @@ class TestAutocompleteIntegration:
 
     def test_autocomplete_filters_by_prefix(self, reset_ns):
         cache_file = (
-            Path(tempfile.gettempdir())
-            / "workflow_completions"
-            / f"reset_resources_{reset_ns}.json"
+            Path(tempfile.gettempdir()) /
+            "workflow_completions" /
+            f"reset_resources_{reset_ns}.json"
         )
         cache_file.unlink(missing_ok=True)
 

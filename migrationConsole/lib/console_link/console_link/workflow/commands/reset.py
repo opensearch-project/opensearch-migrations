@@ -312,8 +312,8 @@ def _reset_all_resources(ctx, namespace, include_proxies):
         click.echo("Skipping proxies by default. Use --include-proxies to delete them.")
     if protected_ancestor_names:
         click.echo(
-            "Keeping dependencies required by protected proxies: "
-            + ", ".join(sorted(protected_ancestor_names))
+            "Keeping dependencies required by protected proxies: " +
+            ", ".join(sorted(protected_ancestor_names))
         )
 
     if delete_targets and not _delete_targets(delete_targets, namespace):
