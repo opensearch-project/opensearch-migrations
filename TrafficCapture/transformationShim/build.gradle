@@ -53,9 +53,6 @@ if (!project.hasProperty('skipBundleTransforms')) {
         outputs.dir(transformStagingDir)
     }
 
-    afterEvaluate {
-        tasks.matching { it.name in ['jib', 'jibDockerBuild'] }.configureEach {
-            dependsOn stageTransformsForImage
-        }
-    }
+    tasks.named('jib').configure { dependsOn 'stageTransformsForImage' }
+    tasks.named('jibDockerBuild').configure { dependsOn 'stageTransformsForImage' }
 }
