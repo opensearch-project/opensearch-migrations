@@ -1,213 +1,349 @@
-"""Reset command for workflow CLI - tears down migration resources.
+"""Reset command for workflow CLI - delete migration CRDs safely."""
 
-How it works (for developers):
-
-Each long-running migration component (proxy, replayer, backfill) has a corresponding
-custom resource (CRD) that tracks its lifecycle phase: Created → Ready → Teardown.
-The Argo workflow templates block on these resources via waitForExistingResource,
-so patching status.phase to "Teardown" unblocks the workflow and lets it run its
-own cleanup logic (deleting Deployments, coordinator clusters, etc.).
-
-This file has both PATCH and DELETE operations because they serve different purposes:
-- PATCH (status.phase = Teardown): signals each component to begin its teardown
-  sequence. The workflow handles the actual cleanup.
-- DELETE (workflow deletion): after all components have torn down and the workflow
-  has reached a terminal phase, we delete the workflow itself so a new one can be
-  submitted.
-
-The --all flag combines both: patch all resources → wait for workflow completion → delete.
-Single-resource reset only patches — it doesn't touch the workflow.
-"""
-
-import fnmatch
 import logging
-import os
+import time
 
 import click
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode, load_k8s_config
-from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
-from .crd_utils import CRD_GROUP, CRD_VERSION, has_glob
-from .suspend_steps import (
-    wait_for_workflow_completion,
-    delete_workflow,
+from .argo_utils import stop_and_delete_all
+from .crd_utils import (
+    CRD_GROUP,
+    CRD_VERSION,
+    DISPLAY_NAMES,
+    RESETTABLE_PLURALS,
+    cached_crd_completions,
+    has_glob,
+    list_migration_resources,
+    match_names,
 )
 
 logger = logging.getLogger(__name__)
-TEARDOWN_RESOURCES = ['capturedtraffics', 'snapshotmigrations', 'trafficreplays']
-DISPLAY_NAMES = {
-    'capturedtraffics': 'Capture Proxy',
-    'snapshotmigrations': 'Snapshot Migration',
-    'trafficreplays': 'Traffic Replay',
-}
 
 
-def _list_migration_resources(namespace):
-    """List all migration resources with their status phase. Returns list of (plural, name, phase)."""
-    custom = client.CustomObjectsApi()
-    results = []
-    for plural in TEARDOWN_RESOURCES:
-        try:
-            items = custom.list_namespaced_custom_object(
-                group=CRD_GROUP, version=CRD_VERSION,
-                namespace=namespace, plural=plural
-            ).get('items', [])
-            for item in items:
-                name = item['metadata']['name']
-                phase = item.get('status', {}).get('phase', 'Unknown')
-                results.append((plural, name, phase))
-        except ApiException:
-            pass
-    return results
+def _resettable_names(namespace):
+    return [name for _, name, _, _ in list_migration_resources(namespace)]
 
 
 def _find_resource_by_name(namespace, name):
-    """Find a single resource by name across all migration resource types. Returns (plural, name, phase) or None."""
+    """Find a single resource by name across all migration resource types."""
     custom = client.CustomObjectsApi()
-    for plural in TEARDOWN_RESOURCES:
+    for plural in RESETTABLE_PLURALS:
         try:
             item = custom.get_namespaced_custom_object(
-                group=CRD_GROUP, version=CRD_VERSION,
-                namespace=namespace, plural=plural, name=name
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                plural=plural,
+                name=name,
             )
             phase = item.get('status', {}).get('phase', 'Unknown')
-            return (plural, name, phase)
+            deps = item.get('spec', {}).get('dependsOn', []) or []
+            return (plural, name, phase, deps)
         except ApiException:
             pass
     return None
 
 
-def _patch_teardown(namespace, plural, name):
-    """Signal a resource to begin teardown. Returns True if successful."""
+def _delete_crd(namespace, plural, name):
+    """Delete a CRD instance with foreground cascading. Returns True on success."""
     custom = client.CustomObjectsApi()
     try:
-        custom.patch_namespaced_custom_object_status(
-            group=CRD_GROUP, version=CRD_VERSION,
-            namespace=namespace, plural=plural, name=name,
-            body={'status': {'phase': 'Teardown'}}
+        custom.delete_namespaced_custom_object(
+            group=CRD_GROUP,
+            version=CRD_VERSION,
+            namespace=namespace,
+            plural=plural,
+            name=name,
+            body=client.V1DeleteOptions(propagation_policy='Foreground'),
         )
         return True
     except ApiException as e:
-        logger.error(f"Failed to patch {plural}/{name}: {e}")
+        if e.status == 404:
+            return True
+        logger.error(f"Failed to delete {plural}/{name}: {e}")
         return False
 
 
-def _show_resources(crds):
-    """List mode: show all migration resources with friendly display names."""
+def _wait_until_gone(namespace, plural, names, timeout=120):
+    """Wait until all named CRDs are fully deleted."""
+    custom = client.CustomObjectsApi()
+    deadline = time.time() + timeout
+    remaining = set(names)
+    while remaining and time.time() < deadline:
+        gone = set()
+        for name in remaining:
+            try:
+                custom.get_namespaced_custom_object(
+                    group=CRD_GROUP,
+                    version=CRD_VERSION,
+                    namespace=namespace,
+                    plural=plural,
+                    name=name,
+                )
+            except ApiException as e:
+                if e.status == 404:
+                    gone.add(name)
+        remaining -= gone
+        if remaining:
+            time.sleep(2)
+    if remaining:
+        logger.warning(f"Timed out waiting for deletion: {remaining}")
+
+
+def _stop_and_delete_workflows(namespace):
+    """Stop and delete all Argo workflows in the namespace via k8s API."""
+    stop_and_delete_all(namespace)
+
+
+def _get_resource_completions(ctx, _, incomplete):
+    namespace = ctx.params.get('namespace', 'ma')
+    return [
+        name for name in cached_crd_completions(namespace, 'reset_resources', _resettable_names)
+        if name.startswith(incomplete)
+    ]
+
+
+def _find_dependents(target_names, all_resources):
+    """Find all resources that transitively depend on any of target_names."""
+    dependents = []
+    found = set(target_names)
+    changed = True
+    while changed:
+        changed = False
+        for _, name, _, deps in all_resources:
+            if name not in found and any(dep in found for dep in deps):
+                dependents.append(name)
+                found.add(name)
+                changed = True
+    return dependents
+
+
+def _resolve_targets(namespace, path):
+    """Resolve a name or glob to matching resources."""
+    if has_glob(path):
+        resources = list_migration_resources(namespace)
+        matched = set(match_names([name for _, name, _, _ in resources], path))
+        return [resource for resource in resources if resource[1] in matched]
+    match = _find_resource_by_name(namespace, path)
+    return [match] if match else []
+
+
+def _delete_and_wait(namespace, plural, name):
+    """Delete a single CRD and poll until it is gone."""
+    ok = _delete_crd(namespace, plural, name)
+    if ok:
+        _wait_until_gone(namespace, plural, [name])
+    return name, ok
+
+
+def _build_child_map(targets):
+    """Build reverse dependency map: name -> set of children."""
+    target_names = {target[1] for target in targets}
+    children = {name: set() for name in target_names}
+    for _, name, _, deps in targets:
+        for dep in deps:
+            if dep in children:
+                children[dep].add(name)
+    return children
+
+
+def _delete_targets(targets, namespace):
+    """Delete targets in dependency-safe order with concurrency."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    target_map = {target[1]: target for target in targets}
+    pending_children = {name: set(children) for name, children in _build_child_map(targets).items()}
+    failed = False
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        in_flight = {}
+
+        def submit_ready():
+            for name, children in pending_children.items():
+                if name not in in_flight and not children:
+                    plural = target_map[name][0]
+                    in_flight[name] = pool.submit(_delete_and_wait, namespace, plural, name)
+
+        submit_ready()
+
+        while in_flight:
+            done = next(as_completed(in_flight.values()))
+            name = next(candidate for candidate, future in in_flight.items() if future is done)
+            del in_flight[name]
+            del pending_children[name]
+
+            _, ok = done.result()
+            if ok:
+                click.echo(f"  Deleted {name}")
+            else:
+                click.echo(f"  Failed to delete {name}", err=True)
+                failed = True
+
+            for children in pending_children.values():
+                children.discard(name)
+
+            submit_ready()
+
+    return not failed
+
+
+def _show_resource_list(resources):
+    """Display migration resources and their dependencies."""
     click.echo("Migration resources:")
-    for plural, name, phase in crds:
+    for plural, name, phase, deps in resources:
         display = DISPLAY_NAMES.get(plural, plural)
-        click.echo(f"  {display}: {name:<35} ({phase})")
+        dep_str = f" (depends on: {', '.join(deps)})" if deps else ""
+        click.echo(f"  {display}: {name:<35} ({phase}){dep_str}")
     click.echo()
-    click.echo("Use 'workflow reset <name>' to teardown a specific resource.")
-    click.echo("Use 'workflow reset --all' to teardown all resources and delete the workflow.")
+    click.echo("Use 'workflow reset <name>' to delete a resource.")
+    click.echo("Use 'workflow reset --all' to delete everything.")
 
 
-def _patch_targets(namespace, targets):
-    """Patch a list of resources to Teardown. Returns True if all succeeded."""
-    for plural, name, phase in targets:
-        if _patch_teardown(namespace, plural, name):
-            click.echo(f"  ✓ Patched {name} to Teardown")
-        else:
-            click.echo(f"  ✗ Failed to patch {name}", err=True)
-            return False
-    return True
+def _filter_proxy_targets(targets, include_proxies):
+    """Block or remove proxy targets unless explicitly included."""
+    proxy_targets = [target for target in targets if target[0] == 'capturedtraffics']
+    if include_proxies or not proxy_targets:
+        return targets
+
+    names = ', '.join(target[1] for target in proxy_targets)
+    click.echo(f"Proxies are protected by default: {names}")
+    click.echo("Use --include-proxies to delete them.")
+    return None
 
 
-def _reset_all(namespace, workflow_name, argo_server, token, insecure):
-    """Wait for workflow to complete after teardown signals, then delete workflow."""
-    click.echo("Waiting for workflow to complete...")
-    phase = wait_for_workflow_completion(workflow_name, namespace, argo_server, token, insecure)
-    if phase:
-        click.echo(f"Workflow finished: {phase}")
-    else:
-        click.echo("Timed out waiting — force deleting workflow.", err=True)
+def _resolve_cascade_targets(targets, namespace, cascade, include_proxies):
+    """Return expanded delete set or None when blocked."""
+    filtered = _filter_proxy_targets(targets, include_proxies)
+    if filtered is None:
+        return None
 
-    if delete_workflow(workflow_name, namespace, argo_server, token, insecure):
-        click.echo(f"  ✓ Deleted workflow '{workflow_name}'")
-    else:
-        click.echo(f"  ✗ Failed to delete workflow '{workflow_name}'", err=True)
+    target_names = {target[1] for target in filtered}
+    all_resources = list_migration_resources(namespace)
+    dependent_names = _find_dependents(target_names, all_resources)
+    if not dependent_names:
+        return filtered
+
+    blocking = [resource for resource in all_resources if resource[1] in dependent_names]
+    if not include_proxies:
+        blocking_proxy = [resource for resource in blocking if resource[0] == 'capturedtraffics']
+        blocking_non_proxy = [resource for resource in blocking if resource[0] != 'capturedtraffics']
+        if blocking_proxy and not blocking_non_proxy:
+            click.echo("Dependent proxies are protected by default.")
+            click.echo("Use --include-proxies to delete them.")
+            return None
+
+    if not cascade:
+        click.echo("Cannot delete — dependent resources exist:")
+        for plural, name, _, _ in blocking:
+            click.echo(f"  {DISPLAY_NAMES.get(plural, plural)}: {name}")
+        click.echo()
+        click.echo("Use --cascade to delete them too.")
+        return None
+
+    expanded_names = target_names | set(dependent_names)
+    expanded = [resource for resource in all_resources if resource[1] in expanded_names]
+    return _filter_proxy_targets(expanded, include_proxies)
 
 
-def _get_resource_completions(ctx, param, incomplete):
-    try:
-        load_k8s_config()
-        crds = _list_migration_resources(ctx.params.get('namespace', 'ma'))
-        return [n for _, n, ph in crds if n.startswith(incomplete) and ph != 'Teardown']
-    except Exception:
-        return []
+def _find_ancestors(target_names, all_resources):
+    """Find all resources transitively referenced by dependsOn from target_names."""
+    resource_map = {name: deps for _, name, _, deps in all_resources}
+    ancestors = set()
+    pending = list(target_names)
+    while pending:
+        name = pending.pop()
+        for dep in resource_map.get(name, []):
+            if dep not in ancestors:
+                ancestors.add(dep)
+                pending.append(dep)
+    return ancestors
+
+
+def _prune_ancestors_of_protected_proxies(resources, include_proxies):
+    """When proxies are protected, keep their upstream dependencies alive too."""
+    if include_proxies:
+        return resources, set()
+
+    protected_proxy_names = {
+        name for plural, name, _, _ in resources if plural == 'capturedtraffics'
+    }
+    if not protected_proxy_names:
+        return resources, set()
+
+    protected_ancestor_names = _find_ancestors(protected_proxy_names, resources)
+    filtered = [
+        resource for resource in resources
+        if resource[0] == 'capturedtraffics' or resource[1] not in protected_ancestor_names
+    ]
+    return filtered, protected_ancestor_names
 
 
 @click.command(name="reset")
 @click.argument('path', required=False, default=None, shell_complete=_get_resource_completions)
-@click.option('--all', 'reset_all', is_flag=True, default=False, help='Teardown all resources and delete workflow')
-@click.option('--workflow-name', default=DEFAULT_WORKFLOW_NAME, shell_complete=get_workflow_completions)
-@click.option(
-    '--argo-server',
-    default=lambda: os.environ.get(
-        'ARGO_SERVER',
-        f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}:"
-        f"{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}"
-    ),
-    help='Argo Server URL'
-)
+@click.option('--all', 'reset_all', is_flag=True, default=False, help='Delete all migration resources and workflows')
+@click.option('--cascade', is_flag=True, default=False, help='Also delete dependent resources')
+@click.option('--include-proxies', is_flag=True, default=False,
+              help='Also delete capture proxies (they are protected by default)')
 @click.option('--namespace', default='ma')
-@click.option('--insecure', is_flag=True, default=False)
-@click.option('--token', help='Bearer token for authentication')
 @click.pass_context
-def reset_command(ctx, path, reset_all, workflow_name, argo_server, namespace, insecure, token):
-    """Reset workflow resources by signaling teardown.
+def reset_command(ctx, path, reset_all, cascade, include_proxies, namespace):
+    """Reset workflow resources by deleting CRDs.
 
     With no arguments, lists migration resources and their status.
-    With a NAME or glob pattern, signals matching resources to begin teardown.
-    With --all, tears down all active resources, waits for workflow completion, deletes workflow.
-
-    Example:
-        workflow reset                     # list resettable resources
-        workflow reset source-proxy        # teardown just capture proxy
-        workflow reset "source-*"          # teardown all matching resources
-        workflow reset --all               # teardown everything and delete workflow
+    With a NAME or glob pattern, deletes matching resources.
+    With --all, deletes all resources and workflows.
     """
     try:
         load_k8s_config()
 
         if path is not None:
-            if has_glob(path):
-                # Glob pattern — list all and filter
-                crds = _list_migration_resources(namespace)
-                targets = [(p, n, ph) for p, n, ph in crds
-                           if fnmatch.fnmatch(n, path) and ph != 'Teardown']
-            else:
-                # Exact name — direct lookup
-                match = _find_resource_by_name(namespace, path)
-                targets = [match] if match and match[2] != 'Teardown' else []
-
+            targets = _resolve_targets(namespace, path)
             if not targets:
-                click.echo(f"No resources to teardown matching '{path}'.")
+                click.echo(f"No resources matching '{path}'.")
                 return
-            if not _patch_targets(namespace, targets):
+            targets = _resolve_cascade_targets(targets, namespace, cascade, include_proxies)
+            if targets is None:
+                ctx.exit(ExitCode.FAILURE.value)
+                return
+            if not _delete_targets(targets, namespace):
                 ctx.exit(ExitCode.FAILURE.value)
             return
 
-        crds = _list_migration_resources(namespace)
+        resources = list_migration_resources(namespace)
 
-        if not crds and not reset_all:
+        if not resources and not reset_all:
             click.echo("No migration resources found.")
             return
 
         if not reset_all:
-            _show_resources(crds)
+            _show_resource_list(resources)
             return
 
-        targets = [(p, n, ph) for p, n, ph in crds if ph != 'Teardown']
-        if targets:
-            if not _patch_targets(namespace, targets):
-                ctx.exit(ExitCode.FAILURE.value)
-                return
+        delete_targets, protected_ancestor_names = _prune_ancestors_of_protected_proxies(
+            resources, include_proxies
+        )
+        delete_targets = [
+            resource for resource in delete_targets
+            if include_proxies or resource[0] != 'capturedtraffics'
+        ]
+        if not include_proxies and any(resource[0] == 'capturedtraffics' for resource in resources):
+            click.echo("Skipping proxies by default. Use --include-proxies to delete them.")
+        if protected_ancestor_names:
+            click.echo(
+                "Keeping dependencies required by protected proxies: "
+                + ", ".join(sorted(protected_ancestor_names))
+            )
 
-        _reset_all(namespace, workflow_name, argo_server, token, insecure)
+        if delete_targets and not _delete_targets(delete_targets, namespace):
+            ctx.exit(ExitCode.FAILURE.value)
+            return
+
+        click.echo("Cleaning up workflows...")
+        _stop_and_delete_workflows(namespace)
+        click.echo("Done.")
 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
