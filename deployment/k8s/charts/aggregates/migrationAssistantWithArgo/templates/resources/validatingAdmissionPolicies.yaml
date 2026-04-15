@@ -128,6 +128,45 @@ spec:
         values: ["{{ .Release.Namespace }}"]
 
 # ─────────────────────────────────────────────────────────────
+# Kafka DELETE Policy - blocks deletion of Kafka resources without teardown approval
+# The reset workflow stamps the approval annotation before issuing deletes.
+# For DELETE, only oldObject is available (not object).
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-kafka-delete-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["kafka.strimzi.io"]
+      apiVersions: ["v1", "v1beta2"]
+      operations: ["DELETE"]
+      resources: ["kafkas", "kafkanodepools", "kafkatopics"]
+  validations:
+    - expression: |
+        has(oldObject.metadata.annotations) &&
+        'migrations.opensearch.org/approved-for-teardown' in oldObject.metadata.annotations
+      message: "Kafka resource deletion requires teardown approval. Use the reset workflow to safely tear down Kafka resources."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-kafka-delete-binding
+spec:
+  policyName: {{ .Release.Namespace }}-kafka-delete-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+# ─────────────────────────────────────────────────────────────
 # KafkaTopic Policy - partition decrease, replica change
 # ─────────────────────────────────────────────────────────────
 ---

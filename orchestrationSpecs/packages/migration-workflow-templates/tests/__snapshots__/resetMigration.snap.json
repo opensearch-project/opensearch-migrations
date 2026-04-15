@@ -1,0 +1,384 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "reset-migration"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "deletetrafficreplay",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "deletecrd",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceKind",
+                    "value": "TrafficReplay"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  }
+                ]
+              },
+              "name": "delete"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deletesnapshotmigration",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "deletecrd",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceKind",
+                    "value": "SnapshotMigration"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  }
+                ]
+              },
+              "name": "delete"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deletedatasnapshot",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "deletecrd",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceKind",
+                    "value": "DataSnapshot"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  }
+                ]
+              },
+              "name": "delete"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deletecapturedtraffic",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "deletecrd",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceKind",
+                    "value": "CapturedTraffic"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  }
+                ]
+              },
+              "name": "delete"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "teardownkafka",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "kafkaTopicName"
+            },
+            {
+              "name": "kafkaNodePoolName"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "patchteardownapprovalannotation",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceApiVersion",
+                    "value": "kafka.strimzi.io/v1"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "Kafka"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  }
+                ]
+              },
+              "name": "approveKafkaTeardown"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "deletekafkatopic",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  }
+                ]
+              },
+              "name": "deleteTopic"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "deletekafkanodepool",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaNodePoolName}}"
+                  }
+                ]
+              },
+              "name": "deleteNodePool"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "deletekafkacluster",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  }
+                ]
+              },
+              "name": "deleteCluster"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "resetworkflow",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "trafficReplayName"
+            },
+            {
+              "name": "snapshotMigrationName"
+            },
+            {
+              "name": "dataSnapshotName"
+            },
+            {
+              "name": "capturedTrafficName"
+            },
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "kafkaTopicName"
+            },
+            {
+              "name": "kafkaNodePoolName"
+            },
+            {
+              "name": "includeProxy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "deletetrafficreplay",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.trafficReplayName}}"
+                  }
+                ]
+              },
+              "name": "deleteReplay"
+            }
+          ],
+          [
+            {
+              "template": "deletesnapshotmigration",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.snapshotMigrationName}}"
+                  }
+                ]
+              },
+              "name": "deleteSnapshotMigration"
+            },
+            {
+              "template": "deletedatasnapshot",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.dataSnapshotName}}"
+                  }
+                ]
+              },
+              "name": "deleteDataSnapshot"
+            }
+          ],
+          [
+            {
+              "template": "deletecapturedtraffic",
+              "when": "{{inputs.parameters.includeProxy}} == 'true",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.capturedTrafficName}}"
+                  }
+                ]
+              },
+              "name": "deleteProxy"
+            }
+          ],
+          [
+            {
+              "template": "teardownkafka",
+              "when": "{{inputs.parameters.includeProxy}} == 'true",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "kafkaNodePoolName",
+                    "value": "{{inputs.parameters.kafkaNodePoolName}}"
+                  }
+                ]
+              },
+              "name": "teardownKafka"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}

@@ -351,6 +351,101 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     // ── Workflow UID approval annotation patch ───────────────────────────
 
+    // ── Delete resource templates ──────────────────────────────────────
+
+    .addTemplate("deleteCrd", t => t
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "delete",
+                flags: ["--ignore-not-found"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: makeStringTypeProxy(b.inputs.resourceKind),
+                    metadata: { name: b.inputs.resourceName }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("deleteKafkaCluster", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "delete",
+                flags: ["--ignore-not-found"],
+                manifest: {
+                    apiVersion: "kafka.strimzi.io/v1",
+                    kind: "Kafka",
+                    metadata: { name: b.inputs.resourceName }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("deleteKafkaTopic", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "delete",
+                flags: ["--ignore-not-found"],
+                manifest: {
+                    apiVersion: "kafka.strimzi.io/v1beta2",
+                    kind: "KafkaTopic",
+                    metadata: { name: b.inputs.resourceName }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("deleteKafkaNodePool", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "delete",
+                flags: ["--ignore-not-found"],
+                manifest: {
+                    apiVersion: "kafka.strimzi.io/v1",
+                    kind: "KafkaNodePool",
+                    metadata: { name: b.inputs.resourceName }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    // ── Teardown approval annotation ────────────────────────────────────
+
+    .addTemplate("patchTeardownApprovalAnnotation", t => t
+        .addRequiredInput("resourceApiVersion", typeToken<string>())
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge"],
+                manifest: {
+                    apiVersion: makeStringTypeProxy(b.inputs.resourceApiVersion),
+                    kind: makeStringTypeProxy(b.inputs.resourceKind),
+                    metadata: {
+                        name: b.inputs.resourceName,
+                        annotations: {
+                            "migrations.opensearch.org/approved-for-teardown":
+                                makeStringTypeProxy(expr.getWorkflowValue("uid"))
+                        }
+                    }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    // ── Workflow UID approval annotation patch ───────────────────────────
+
     .addTemplate("patchApprovalAnnotation", t => t
         .addRequiredInput("resourceApiVersion", typeToken<string>())
         .addRequiredInput("resourceKind", typeToken<string>())
