@@ -294,12 +294,12 @@ public class MultiTargetRoutingHandler extends SimpleChannelInboundHandler<FullH
         // The secondary FixedChannelPools share the same NioEventLoopGroup, so calling
         // join() on the event loop thread can deadlock when a pooled channel's response
         // handler needs that same thread to fire channelRead0.
-        futures.get(primaryTarget).whenComplete((primaryResp, primaryEx) ->
+        dispatchResult.futures.get(primaryTarget).whenComplete((primaryResp, primaryEx) ->
             CompletableFuture.supplyAsync(() -> {
                 TargetResponse primary = primaryEx != null
                     ? TargetResponse.error(primaryTarget, Duration.ZERO, primaryEx)
                     : primaryResp;
-                Map<String, TargetResponse> allResponses = collectResponses(futures);
+                Map<String, TargetResponse> allResponses = collectResponses(dispatchResult.futures);
                 return Map.entry(primary, allResponses);
             }).thenAcceptAsync(result -> {
                 try {
