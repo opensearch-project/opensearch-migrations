@@ -270,6 +270,10 @@ class MultiTargetRoutingHandlerTest {
             Class.forName("org.opensearch.migrations.transform.shim.tracing.ShimRequestContext"));
         method.setAccessible(true);
         method.invoke(handler, ctx, dr, true, requestMap, 1L, null);
+        // Run pending tasks twice: first for whenComplete callback scheduling,
+        // second for the event loop task that writes the response
+        channel.runPendingTasks();
+        Thread.sleep(50);
         channel.runPendingTasks();
         return channel.readOutbound();
     }
