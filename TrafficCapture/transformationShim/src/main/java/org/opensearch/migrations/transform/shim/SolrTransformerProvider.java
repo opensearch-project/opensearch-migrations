@@ -51,8 +51,8 @@ public class SolrTransformerProvider extends ScriptTransformerProvider {
         "    qs.split('&').forEach(function(pair) {\n" +
         "      var idx = pair.indexOf('=');\n" +
         "      if (idx < 0) return;\n" +
-        "      var k = decodeURIComponent(pair.slice(0, idx));\n" +
-        "      var v = decodeURIComponent(pair.slice(idx + 1));\n" +
+        "      var k = decodeURIComponent(pair.slice(0, idx).replace(/\\+/g, ' '));\n" +
+        "      var v = decodeURIComponent(pair.slice(idx + 1).replace(/\\+/g, ' '));\n" +
         "      if (!this._map[k]) this._map[k] = [];\n" +
         "      this._map[k].push(v);\n" +
         "    }.bind(this));\n" +

@@ -570,5 +570,4 @@ public class ShimMain {
         }
         throw new ParameterException("Unknown auth type: " + authSpec);
     }
-
 }

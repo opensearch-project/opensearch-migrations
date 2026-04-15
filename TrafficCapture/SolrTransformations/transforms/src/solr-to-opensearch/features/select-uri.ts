@@ -9,6 +9,9 @@
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext } from '../context';
 
+/** Solr query params this feature handles. */
+export const params: string[] = [];
+
 export const request: MicroTransform<RequestContext> = {
   name: 'select-uri',
   apply: (ctx) => {
