@@ -233,13 +233,8 @@ class Environment:
         if listen_port is None:
             raise ValueError(f"Proxy '{proxy_name}' is missing proxyConfig.listenPort")
 
-        has_tls = proxy_options.get("tls") is not None
-        # Secure-by-default: match the config processor's normalization behavior.
-        # When no explicit TLS config and no legacy sslConfigFile, the normalizer
-        # injects certManager TLS. Mirror that here so console commands see the
-        # actual deployed endpoint.
-        if not has_tls and not proxy_options.get("sslConfigFile"):
-            has_tls = True
+        tls = proxy_options.get("tls")
+        has_tls = not (isinstance(tls, dict) and tls.get("mode") == "plaintext")
         return {
             "name": proxy_name,
             "endpoint": f"{'https' if has_tls else 'http'}://{proxy_name}:{listen_port}",
