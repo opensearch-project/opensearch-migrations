@@ -214,6 +214,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$disable_general_purpose_pool" == "true" && "$use_general_node_pool" == "true" ]]; then
+  echo "ERROR: --disable-general-purpose-pool and --use-general-node-pool are mutually exclusive"
+  exit 1
+fi
+
 if [[ "$build_images" == "true" ]]; then
   use_public_images=false
 fi
