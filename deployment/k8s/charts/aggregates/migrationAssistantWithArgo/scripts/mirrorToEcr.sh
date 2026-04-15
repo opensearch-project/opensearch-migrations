@@ -113,18 +113,30 @@ mirror_images_to_ecr() {
 
   echo ""
   echo "=== Mirroring container images ==="
-  local _imglist _max_jobs=4
+  local _imglist _max_jobs=4 _failfile
   _imglist=$(mktemp)
+  _failfile=$(mktemp)
   echo "$images" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | grep -v '^#' | grep -v '^$' > "$_imglist"
   while IFS= read -r image; do
     # Throttle to $_max_jobs concurrent copies
     while [ "$(jobs -rp | wc -l)" -ge "$_max_jobs" ]; do
       wait -n 2>/dev/null || true
     done
-    copy_image "$ecr_host" "$region" "$dockerhub_mirrors" "$ptc" "$image" &
+    ( copy_image "$ecr_host" "$region" "$dockerhub_mirrors" "$ptc" "$image" || echo "$image" >> "$_failfile" ) &
   done < "$_imglist"
   rm -f "$_imglist"
-  wait || { echo "❌ Some image copies failed" >&2; exit 1; }
+  wait
+  if [ -s "$_failfile" ]; then
+    echo "" >&2
+    echo "❌ The following image copies failed:" >&2
+    sed 's/^/  - /' "$_failfile" >&2
+    echo "" >&2
+    echo "If this is unexpected, please open an issue at:" >&2
+    echo "  https://github.com/opensearch-project/opensearch-migrations/issues/new" >&2
+    rm -f "$_failfile"
+    exit 1
+  fi
+  rm -f "$_failfile"
 }
 
 # Mirror helm charts to ECR as OCI artifacts.
