@@ -120,7 +120,6 @@ tests:
         My Solr queries to translate are:
         Query #1: title:opensearch AND price:[10 TO 100]
         Query #2: defType=edismax&q=the dark knight&qf=title^10 tagline^2 overview^1 cast^0.5&pf=title^20 overview^5&mm=2<-25%
-
     assert:
       - type: llm-rubric
         value: >-
@@ -150,6 +149,79 @@ tests:
           Response notes that eDisMax pf phrase boost fields have no direct OpenSearch equivalent
           and that the translation is a behavioral approximation.
         metric: query2-edismax-behavioral-note
+
+  - description: "Provide full migration plan"
+    metadata:
+      continue: true
+    vars:
+      query: |
+        On top of that, the operational setup consists of 3 nodes with 8gb ram (4gb heap) and 4 cores each, 2 shards, 
+        50M docs, 10GB index. 
+        Provide me with the final migration plan, given all so far provided information.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response contains a full solr to opensearch migration plan for the role of Search Engineer, 
+          covering the main steps and for migrating Solr 6.6.  
+          It should be suitable for the following Solr 6 Schema:
+          <?xml version="1.0" encoding="UTF-8" ?>
+          <schema name="example-solr6" version="1.6">
+            <fields>
+              <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false" />
+              <field name="product_name" type="text_general" indexed="true" stored="true" />
+              <field name="price" type="currency" indexed="true" stored="true"/>
+              <field name="priority" type="priority_enum" indexed="true" stored="true"/>
+              <field name="_version_" type="long" indexed="true" stored="true"/>
+            </fields>
+            <uniqueKey>id</uniqueKey>
+            <types>
+              <fieldType name="string" class="solr.StrField" sortMissingLast="true" />
+              <fieldType name="long" class="solr.TrieLongField" precisionStep="0" positionIncrementGap="0"/>
+              <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100">
+                <analyzer>
+                  <tokenizer class="solr.StandardTokenizerFactory"/>
+                  <filter class="solr.LowerCaseFilterFactory"/>
+                </analyzer>
+              </fieldType>
+              <fieldType name="currency" class="solr.CurrencyField"
+                         precisionStep="8"
+                         defaultCurrency="USD"
+                         currencyConfig="currency.xml" />
+              <fieldType name="priority_enum" class="solr.EnumField"
+                         enumsConfig="enumsConfig.xml"
+                         enumName="priority" />
+            </types>
+          </schema>
+          
+          It should also incorporate ops considerations based on an initial solr hardware setup of 3 nodes with 8gb ram 
+          (4gb heap) and 4 cores each, 2 shards, 50M docs, 10GB index.
+          It also contains dedicated sections on incompatibilities, milestones, blockers and costs. Under the following
+          bullet points you find some facts that should be mentioned under the respective sections:
+          
+          # Incompatibilities:
+          - Trie field types (Solr) need mapping to Point types (OpenSearch)
+          - Relevance scores will differ between Solr (TF-IDF) and OpenSearch (BM25) without additional changes
+          - Do not migrate the ` _version_` field to the OpenSearch index mapping
+          - `solr.EnumField` unsupported
+          - Fields marked `stored="true"` but `indexed="false"` in Solr may behave differently under `_source` filtering
+            in OpenSearch
+          - eDismax `pf` phrase boost field with no direct equivalent; approximate with `multi_match` type `phrase` in a `should` clause
+          
+          # Milestones
+          - Section provides plausible milestones where steps build logically on top of each other and later steps 
+            do not come before other steps that are logically reqiured before.
+          - Since the role asking for the report is a Search Engineer, check if the report leads with full 
+            incompatibility list and query translation details and contains the previously passed query translations
+            as examples for translated queries:
+            Query #1: title:opensearch AND price:[10 TO 100]
+            Query #2: defType=edismax&q=the dark knight&qf=title^10 tagline^2 overview^1 cast^0.5&pf=title^20 overview^5&mm=2<-25%
+          
+          # Blockers
+          - Section describing expectable difficulties or stoppers when migrating Solr 6.6 to OpenSearch.
+          
+          # Cost
+          - Reasonable cost estimates for infrastructure, effort, and required tooling changes where applicable.
+        metric: generate-full-report
 
   - description: "Translate SearchHandler to OpenSearch equivalent"
     metadata:
@@ -399,7 +471,7 @@ tests:
       continue: false
     vars:
       query: |
-        Hi there, please resume the session 'my-test-session' and fill me in on already stated facts about my role, 
+        Hi there, please resume the session 'my-test-session' and fill me in on already stated facts about my role,
         used solr version, schema used, and my name :).
     assert:
       - type: llm-rubric
@@ -421,7 +493,7 @@ tests:
       continue: false
     vars:
       query: |
-        Hi there, please resume the session 'my-test-session' and fill me in on already stated facts about my role, 
+        Hi there, please resume the session 'my-test-session' and fill me in on already stated facts about my role,
         used solr version, schema used, and my name :).
     assert:
     - type: llm-rubric
