@@ -20,6 +20,7 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
+import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
@@ -96,7 +97,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     @AllArgsConstructor
     class TrafficReplayerAccumulationCallbacks implements AccumulationCallbacks {
         private final ReplayEngine replayEngine;
-        private Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
+        private final ThreadLocalTupleWriter tupleWriter;
+        /** Legacy synchronous tuple consumer (Log4J path). Mutually exclusive with tupleWriter. */
+        private final Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
+        @lombok.Setter
+        private Consumer<SourceTargetCaptureTuple> tupleObserver;
         private ITrafficCaptureSource trafficCaptureSource;
         /** How long to delay the first request on a resumed connection. Configurable via CLI. */
         private final Duration quiescentDuration;
@@ -191,25 +196,39 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 // Escalate it up out handling stack and shutdown.
                 if (t == null || t instanceof Exception) {
                     try (var tupleHandlingContext = httpContext.createTupleContext()) {
-                        packageAndWriteResponse(
-                            tupleHandlingContext,
-                            resultTupleConsumer,
-                            rrPair,
-                            summary,
-                            (Exception) t
-                        );
+                        if (tupleWriter != null) {
+                            var writeFuture = packageAndWriteTuple(
+                                tupleHandlingContext,
+                                tupleWriter,
+                                rrPair,
+                                summary,
+                                (Exception) t
+                            );
+                            writeFuture.whenComplete((v, writeErr) -> {
+                                if (writeErr != null) {
+                                    log.atError().setCause(writeErr)
+                                        .setMessage("Tuple write failed for {} (streams={})")
+                                        .addArgument(context)
+                                        .addArgument(rrPair.trafficStreamKeysBeingHeld).log();
+                                }
+                                commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
+                            });
+                        } else {
+                            packageAndWriteResponse(
+                                tupleHandlingContext,
+                                resultTupleConsumer,
+                                rrPair,
+                                summary,
+                                (Exception) t
+                            );
+                        }
                     }
                     // Count the final outcome once per request (not per retry)
                     countFinalOutcome(summary, t);
-                    // Record target response codes for heartbeat reporting
-                    if (summary != null) {
-                        for (var resp : summary.responses()) {
-                            if (resp.getRawResponse() != null) {
-                                replayEngine.recordTargetResponseCode(resp.getRawResponse().status().code());
-                            }
-                        }
+                    recordTargetResponseCodes(summary);
+                    if (tupleWriter == null) {
+                        commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
                     }
-                    commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
                     return null;
                 } else {
                     log.atError().setCause(t)
@@ -247,6 +266,16 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     exceptionRequestCount.incrementAndGet();
                 } else {
                     successfulRequestCount.incrementAndGet();
+                }
+            }
+        }
+
+        private void recordTargetResponseCodes(TransformedTargetRequestAndResponseList summary) {
+            if (summary != null) {
+                for (var resp : summary.responses()) {
+                    if (resp.getRawResponse() != null) {
+                        replayEngine.recordTargetResponseCode(resp.getRawResponse().status().code());
+                    }
                 }
             }
         }
@@ -323,9 +352,41 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             commitTrafficStreams(true, List.of(ctx.getTrafficStreamKey()));
         }
 
+        private CompletableFuture<Void> packageAndWriteTuple(
+            IReplayContexts.ITupleHandlingContext tupleHandlingContext,
+            ThreadLocalTupleWriter tupleWriter,
+            RequestResponsePacketPair rrPair,
+            TransformedTargetRequestAndResponseList summary,
+            Exception t
+        ) {
+            log.trace("done sending and finalizing data to the packet handler");
+
+            if (t != null) {
+                log.atError().setMessage("Got exception in CompletableFuture callback for {}")
+                    .addArgument(tupleHandlingContext)
+                    .setCause(t)
+                    .log();
+            }
+            CompletableFuture<Void> writeFuture;
+            try (var requestResponseTuple = new SourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
+                log.atDebug()
+                    .setMessage("Source/Target Request/Response tuple: {}").addArgument(requestResponseTuple).log();
+                if (tupleObserver != null) {
+                    tupleObserver.accept(requestResponseTuple);
+                }
+                var parsedMsgs = new ParsedHttpMessagesAsDicts(requestResponseTuple);
+                writeFuture = tupleWriter.writeTuple(requestResponseTuple, parsedMsgs);
+            }
+
+            if (t != null) {
+                throw new CompletionException(t);
+            }
+            return writeFuture;
+        }
+
         private void packageAndWriteResponse(
             IReplayContexts.ITupleHandlingContext tupleHandlingContext,
-            Consumer<SourceTargetCaptureTuple> tupleWriter,
+            Consumer<SourceTargetCaptureTuple> tupleConsumer,
             RequestResponsePacketPair rrPair,
             TransformedTargetRequestAndResponseList summary,
             Exception t
@@ -341,7 +402,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             try (var requestResponseTuple = new SourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
                 log.atDebug()
                     .setMessage("Source/Target Request/Response tuple: {}").addArgument(requestResponseTuple).log();
-                tupleWriter.accept(requestResponseTuple);
+                tupleConsumer.accept(requestResponseTuple);
             }
 
             if (t != null) {

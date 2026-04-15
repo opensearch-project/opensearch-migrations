@@ -9,6 +9,7 @@ import {
     ARGO_RFS_WORKFLOW_OPTION_KEYS,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
+import {CONTAINER_NAMES} from "../containerNames";
 
 import {
     AllowLiteralOrExpression,
@@ -119,7 +120,7 @@ function getRfsDeploymentManifest
 }): Deployment {
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
     const baseContainerDefinition = {
-        name: "bulk-loader",
+        name: CONTAINER_NAMES.BULK_LOADER,
         image: makeStringTypeProxy(args.rfsImageName),
         imagePullPolicy: makeStringTypeProxy(args.rfsImagePullPolicy),
         command: ["/rfs-app/runJavaWithClasspathWithRepeat.sh"],

@@ -1,0 +1,11 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    implementation libs.jackson.databind
+    implementation libs.slf4j.api
+    implementation libs.aws.s3
+    implementation libs.aws.crt
+}

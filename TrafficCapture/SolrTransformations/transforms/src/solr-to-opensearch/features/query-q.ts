@@ -10,7 +10,16 @@
  */
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext, JavaMap } from '../context';
+import type { ParamRule } from './validation';
 import { translateQ } from '../query-engine/orchestrator/translateQ';
+
+/** Solr query params this feature handles. */
+export const params = ['q', 'rows', 'start', 'q.op'];
+export const paramRules: ParamRule[] = [
+  { name: 'rows', type: 'integer' },
+  { name: 'start', type: 'integer' },
+  { name: 'q', type: 'rejectPattern', pattern: String.raw`^\{!`, reason: 'Local params ({!...}) syntax in q is not supported' },
+];
 
 export function parseSolrQuery(q: string): JavaMap {
   if (!q || q === '*:*') return new Map([['match_all', new Map()]]);

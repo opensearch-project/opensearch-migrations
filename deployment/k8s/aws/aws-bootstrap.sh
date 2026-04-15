@@ -45,6 +45,7 @@ skip_console_exec=false
 stage_filter=""
 extra_helm_values=""
 disable_general_purpose_pool=false
+use_general_node_pool=false
 region="${AWS_CFN_REGION:-}"
 deploy_create_vpc=false
 deploy_import_vpc=false
@@ -65,6 +66,7 @@ ma_images_source=""
 skip_setting_k8s_context=false
 skip_test_images=false
 image_tag="latest"
+kubectl_context=""
 
 # --- argument parsing ---
 while [[ $# -gt 0 ]]; do
@@ -77,6 +79,7 @@ while [[ $# -gt 0 ]]; do
     --stage) stage_filter="$2"; shift 2 ;;
     --helm-values) extra_helm_values="$2"; shift 2 ;;
     --disable-general-purpose-pool) disable_general_purpose_pool=true; shift 1 ;;
+    --use-general-node-pool) use_general_node_pool=true; shift 1 ;;
     --region) region="$2"; shift 2 ;;
     --deploy-create-vpc-cfn) deploy_create_vpc=true; shift 1 ;;
     --deploy-import-vpc-cfn) deploy_import_vpc=true; shift 1 ;;
@@ -101,6 +104,7 @@ while [[ $# -gt 0 ]]; do
     --use-public-images) push_images_to_ecr=false; shift 1 ;;
     --ma-images-source) ma_images_source="$2"; shift 2 ;;
     --skip-setting-k8s-context) skip_setting_k8s_context=true; shift 1 ;;
+    --kubectl-context) kubectl_context="$2"; shift 2 ;;
     --skip-test-images) skip_test_images=true; shift 1 ;;
     --image-tag) image_tag="$2"; shift 2 ;;
     --tls-mode) tls_mode="$2"; shift 2 ;;
@@ -150,6 +154,9 @@ while [[ $# -gt 0 ]]; do
       echo "                                            require another nodepool to be configured (such as with"
       echo "                                            'cluster.useCustomKarpenterNodePool: true' in the file"
       echo "                                            passed to --helm-values)"
+      echo "  --use-general-node-pool                   Use the EKS Auto Mode general-purpose pool instead of"
+      echo "                                            the custom Karpenter NodePool. Useful for CI/test"
+      echo "                                            environments that don't need production-safe settings."
       echo "  --stage <val>                             Stage name for CFN exports filter and CFN Stage parameter (default: dev)"
       echo "  --region <val>                            AWS region"
       echo "  --skip-console-exec                       Don't exec into console pod (default: $skip_console_exec)"
@@ -158,6 +165,8 @@ while [[ $# -gt 0 ]]; do
       echo "                                            is left unchanged. Use this on hosts that manage multiple K8s"
       echo "                                            deployments. You will need to pass --context=<context-name>"
       echo "                                            to every kubectl/helm command, or set the context yourself."
+      echo "  --kubectl-context <name>                  Custom alias for the kubectl context (default: EKS cluster name)."
+      echo "                                            Useful for CI systems that need a predictable context name."
       echo "  --skip-test-images                        Skip building test-only images (e.g. elasticsearch_searchguard)"
       echo "  --image-tag <tag>                         Override the image tag (default: git short SHA)"
       echo ""
@@ -204,6 +213,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$disable_general_purpose_pool" == "true" && "$use_general_node_pool" == "true" ]]; then
+  echo "ERROR: --disable-general-purpose-pool and --use-general-node-pool are mutually exclusive"
+  exit 1
+fi
 
 if [[ "$build_images" == "true" ]]; then
   use_public_images=false
@@ -527,7 +541,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
     # intact — they affect template content (AppRegistry names, S3 paths) and
     # the CDK has safe defaults when they're unset.
     STACK_NAME_SUFFIX="" \
-      "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified
+      "$base_dir/gradlew" -p "$base_dir" :deployment:migration-assistant-solution:cdkSynthMinified -x test
     if [[ "$deploy_create_vpc" == "true" ]]; then
       cfn_template_file="$base_dir/deployment/migration-assistant-solution/cdk.out-minified/Migration-Assistant-Infra-Create-VPC-eks.template.json"
     else
@@ -697,8 +711,8 @@ else
 fi
 echo ""
 
-aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --alias "${MIGRATIONS_EKS_CLUSTER_NAME}"
-KUBE_CONTEXT="${MIGRATIONS_EKS_CLUSTER_NAME}"
+KUBE_CONTEXT="${kubectl_context:-${MIGRATIONS_EKS_CLUSTER_NAME}}"
+aws eks update-kubeconfig --region "${AWS_CFN_REGION}" --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --alias "${KUBE_CONTEXT}"
 export KUBE_CONTEXT
 
 if [[ "$skip_setting_k8s_context" == "true" ]]; then
@@ -1057,6 +1071,12 @@ check_existing_ma_release "$namespace" "$namespace"
 # Build TLS-related helm --set flags and create Pod Identity Associations
 TLS_HELM_FLAGS=""
 
+# Override custom nodepool when --use-general-node-pool is set
+NODEPOOL_HELM_FLAGS=""
+if [[ "$use_general_node_pool" == "true" ]]; then
+  NODEPOOL_HELM_FLAGS="--set cluster.useCustomKarpenterNodePool=false"
+fi
+
 # For any PCA mode, ensure Pod Identity Association exists
 if [[ "$tls_mode" == "pca-existing" || "$tls_mode" == "pca-create" ]]; then
   echo "Ensuring Pod Identity Association for aws-pca-issuer..."
@@ -1153,6 +1173,8 @@ echo "Image flags:"
 echo "  ${IMAGE_FLAGS}"
 echo "TLS flags:"
 echo "  ${TLS_HELM_FLAGS}"
+echo "NodePool flags:"
+echo "  ${NODEPOOL_HELM_FLAGS}"
 echo "=== End helm install configuration ==="
 
 echo "Installing Migration Assistant chart now, this can take a couple minutes..."
@@ -1179,6 +1201,7 @@ helm install "$namespace" "${ma_chart_dir}" \
   --set defaultBucketConfiguration.snapshotRoleArn="${SNAPSHOT_ROLE}" \
   $IMAGE_FLAGS \
   $TLS_HELM_FLAGS \
+  $NODEPOOL_HELM_FLAGS \
   || { echo "Installing Migration Assistant chart failed..."; exit 1; }
 set -x
 

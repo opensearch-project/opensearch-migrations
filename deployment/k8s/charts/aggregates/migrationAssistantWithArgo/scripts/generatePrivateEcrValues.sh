@@ -199,6 +199,19 @@ charts:
       image:
         repository: "${M}/public.ecr.aws/k1n1h4h4/cert-manager-aws-privateca-issuer"
 
+  aws-mountpoint-s3-csi-driver:
+    repository: "oci://${ECR}/charts/aws-mountpoint-s3-csi-driver"
+    values:
+      image:
+        repository: "${M}/public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver"
+      sidecars:
+        nodeDriverRegistrar:
+          image:
+            repository: "${M}/public.ecr.aws/csi-components/csi-node-driver-registrar"
+        livenessProbe:
+          image:
+            repository: "${M}/public.ecr.aws/csi-components/livenessprobe"
+
   ack-acmpca-controller:
     repository: "oci://${ECR}/charts/acmpca-chart"
     version: "1.2.2"

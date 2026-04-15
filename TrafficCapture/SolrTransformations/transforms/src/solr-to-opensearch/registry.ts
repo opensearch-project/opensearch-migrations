@@ -2,13 +2,15 @@
  * Transform registry — single source of truth for all feature registrations.
  *
  * To add a new feature:
- *   1. Create features/my-feature.ts exporting { request?, response? }
+ *   1. Create features/my-feature.ts exporting { request?, response?, params?, paramPrefixes? }
  *   2. Import it here
  *   3. Add to the appropriate endpoint group
+ *   4. Add to FEATURE_MODULES so validation auto-discovers its params
  */
 import type { TransformRegistry } from './pipeline';
 import type { RequestContext, ResponseContext } from './context';
 
+import * as solrconfigDefaults from './features/solrconfig-defaults';
 import * as selectUri from './features/select-uri';
 import * as queryQ from './features/query-q';
 import * as cursorPagination from './features/cursor-pagination';
@@ -19,19 +21,63 @@ import * as highlighting from './features/highlighting';
 import * as hitsToDocs from './features/hits-to-docs';
 import * as aggsToFacets from './features/aggs-to-facets';
 import * as responseHeader from './features/response-header';
+import * as validation from './features/validation';
+import { initValidation } from './features/validation';
+import type { ParamRule } from './features/validation';
+
+/** Shape of a feature module that declares supported params for validation. */
+interface FeatureModule {
+  params?: string[];
+  paramPrefixes?: string[];
+  paramRules?: ParamRule[];
+}
+
+/**
+ * All feature modules — used to auto-aggregate supported params and rules.
+ * hitsToDocs and aggsToFacets are response-only transforms with no request
+ * params, so they don't need to be listed here for validation discovery.
+ */
+const FEATURE_MODULES: FeatureModule[] = [
+  selectUri, queryQ, cursorPagination, fieldList,
+  sort, jsonFacets, highlighting,
+];
+
+/**
+ * Common Solr params allowlisted for validation — not rejected as unsupported.
+ * - wt: only json is returned; other formats (xml, csv) are not translated
+ * - indent: pretty-print flag, ignored by the shim
+ * - echoParams: param echo in response header, not implemented
+ * - df: actively used by the query parser as the default field
+ */
+const COMMON_PARAMS = ['wt', 'indent', 'echoParams', 'df'];
+
+/** Auto-aggregated from all feature modules. */
+export const supportedParams = new Set<string>(COMMON_PARAMS);
+export const supportedPrefixes: string[] = [];
+const aggregatedRules: ParamRule[] = [];
+
+for (const mod of FEATURE_MODULES) {
+  mod.params?.forEach((p) => supportedParams.add(p));
+  if (mod.paramPrefixes) supportedPrefixes.push(...mod.paramPrefixes);
+  if (mod.paramRules) aggregatedRules.push(...mod.paramRules);
+}
+
+initValidation(supportedParams, supportedPrefixes, aggregatedRules);
 
 export const requestRegistry: TransformRegistry<RequestContext> = {
-  global: [],
+  global: [
+    validation.request, // Fail fast on null/empty inputs and unsupported params
+  ],
   byEndpoint: {
     select: [
-      selectUri.request, // URI rewrite — must be first
+      solrconfigDefaults.request, // Apply solrconfig.xml defaults/invariants — must be before all others
+      selectUri.request, // URI rewrite
       queryQ.request, // q=... → query DSL
       cursorPagination.request, // cursorMark → search_after (after query-q sets from)
       jsonFacets.request, // json.facet → aggs
       fieldList.request, // fl=... → _source
       highlighting.request, // hl=true → highlight block
       sort.request, // sort=... → sort DSL
-      jsonFacets.request, // json.facet → aggs
     ],
   },
 };

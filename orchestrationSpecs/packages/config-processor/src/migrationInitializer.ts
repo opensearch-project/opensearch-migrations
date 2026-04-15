@@ -2,7 +2,7 @@ import {StreamSchemaParser} from "./streamSchemaTransformer";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {
     ARGO_MIGRATION_CONFIG,
-    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN
+    ARGO_WORKFLOW_SCHEMA, K8S_NAMING_PATTERN,
 } from "@opensearch-migrations/schemas";
 import {stringify} from "yaml";
 import * as fs from "fs/promises";
@@ -10,6 +10,13 @@ import * as path from "path";
 import {scrapeApprovals} from "./formatApprovals";
 import {setNamesInUserConfig} from "./migrationConfigTransformer";
 import { generateSemaphoreKey } from './semaphoreUtils';
+
+type StatusPatchableResource = {
+    apiVersion: string;
+    kind: string;
+    metadata: {name: string};
+    status?: Record<string, unknown>;
+};
 
 export class MigrationInitializer {
     readonly loader: StreamSchemaParser<typeof ARGO_MIGRATION_CONFIG>;
@@ -70,6 +77,21 @@ export class MigrationInitializer {
         // 4. Write CRD resources
         const crdPath = path.join(outputDir, 'crdResources.yaml');
         await fs.writeFile(crdPath, stringify(bundle.crdResources));
+
+        // 5. Write CRD status patches (status subresource must be patched separately)
+        const statusPatches = (bundle.crdResources.items || [])
+            .filter((item: StatusPatchableResource) => item.status !== undefined)
+            .map((item: StatusPatchableResource) => {
+                const group = item.apiVersion.split('/')[0];
+                const kind = item.kind.toLowerCase() + 's.' + group;
+                const patch = JSON.stringify({ status: item.status });
+                return `kubectl patch ${kind}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
+            });
+        if (statusPatches.length > 0) {
+            const patchScript = '#!/bin/sh\nset -e\n' + statusPatches.join('\n') + '\n';
+            const patchPath = path.join(outputDir, 'patchCrdStatus.sh');
+            await fs.writeFile(patchPath, patchScript, { mode: 0o755 });
+        }
     }
 
     private generateApprovalConfigMaps(userConfig: any) {
@@ -143,7 +165,7 @@ export class MigrationInitializer {
                 kind: 'CapturedTraffic',
                 metadata: { name: proxy.name },
                 spec: {},
-                status: { phase: 'Initialized' }
+                status: { phase: 'Initialized', configChecksum: proxy.configChecksum }
             });
         }
 
@@ -155,7 +177,7 @@ export class MigrationInitializer {
                     kind: 'DataSnapshot',
                     metadata: { name: this.makeCrdName(snapshot.sourceConfig.label, item.label) },
                     spec: {},
-                    status: { phase: 'Initialized' }
+                    status: { phase: 'Initialized', configChecksum: item.configChecksum }
                 });
             }
         }
@@ -167,7 +189,18 @@ export class MigrationInitializer {
                 kind: 'SnapshotMigration',
                 metadata: { name: this.makeCrdName(migration.sourceLabel, migration.targetConfig.label, migration.label) },
                 spec: {},
-                status: { phase: 'Initialized' }
+                status: { phase: 'Initialized', configChecksum: migration.configChecksum }
+            });
+        }
+
+        // TrafficReplay resources from trafficReplays
+        for (const replay of workflows.trafficReplays ?? []) {
+            items.push({
+                apiVersion: CRD_API_VERSION,
+                kind: 'TrafficReplay',
+                metadata: { name: replay.name },
+                spec: {},
+                status: { phase: 'Initialized', configChecksum: replay.configChecksum }
             });
         }
 

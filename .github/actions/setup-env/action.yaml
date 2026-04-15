@@ -28,7 +28,7 @@ runs:
 
     - name: Install pipenv globally
       run: |
-        python3 -m pip install --upgrade pipenv
+        python3 -m pip install pipenv==2026.5.0
       shell: bash
 
     - uses: actions/setup-node@v4

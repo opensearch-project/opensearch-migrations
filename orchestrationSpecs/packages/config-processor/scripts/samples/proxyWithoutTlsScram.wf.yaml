@@ -1,0 +1,65 @@
+# Capture proxy without frontside TLS using an auto-created Strimzi Kafka cluster
+# with SCRAM auth enabled explicitly for the migration applications.
+# This variant is functionally similar to proxyWithoutTls.wf.yaml today, but it
+# states the auth choice directly instead of relying on the workflow-managed
+# Kafka default policy.
+kafkaClusterConfiguration:
+  default:
+    autoCreate:
+      auth:
+        type: "scram-sha-512"
+      clusterSpecOverrides:
+        kafka:
+          config:
+            auto.create.topics.enable: false
+            offsets.topic.replication.factor: 1
+            transaction.state.log.replication.factor: 1
+            transaction.state.log.min.isr: 1
+            default.replication.factor: 1
+            min.insync.replicas: 1
+      nodePoolSpecOverrides:
+        replicas: 1
+        roles:
+          - controller
+          - broker
+        storage:
+          type: persistent-claim
+          size: 1Gi
+          deleteClaim: true
+      topicSpecOverrides:
+        partitions: 1
+        replicas: 1
+        config:
+          retention.ms: 604800000
+          segment.bytes: 1073741824
+
+sourceClusters:
+  source:
+    endpoint: "https://elasticsearch-master-headless:9200"
+    allowInsecure: true
+    version: "ES 7.10.2"
+    authConfig:
+      basic:
+        secretName: "source-creds"
+
+targetClusters:
+  target:
+    endpoint: "https://opensearch-cluster-master-headless:9200"
+    allowInsecure: true
+    authConfig:
+      basic:
+        secretName: "target-creds"
+
+snapshotMigrationConfigs: []
+
+traffic:
+  proxies:
+    capture-proxy:
+      source: "source"
+      proxyConfig:
+        listenPort: 9201
+
+  replayers:
+    replay1:
+      fromProxy: "capture-proxy"
+      toTarget: "target"

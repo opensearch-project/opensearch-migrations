@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Optional;
 
 import org.opensearch.migrations.Flavor;
@@ -21,14 +22,12 @@ import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 
 import com.beust.jcommander.ParameterException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @AllArgsConstructor
 public class ClusterReaderExtractor {
-    private static final ObjectMapper MAPPER = new ObjectMapper();
     private final MigrateOrEvaluateArgs arguments;
 
     public ClusterReader extractClusterReader() {
@@ -81,8 +80,14 @@ public class ClusterReaderExtractor {
 
     private ClusterReader getSolrSnapshotReader() {
         Path backupDir;
+        List<String> collectionNames;
         if (arguments.fileSystemRepoPath != null) {
             backupDir = Path.of(arguments.fileSystemRepoPath);
+            try {
+                collectionNames = SolrSnapshotReader.discoverCollections(backupDir);
+            } catch (IOException e) {
+                throw new ParameterException("Failed to list backup directory: " + backupDir + ": " + e.getMessage());
+            }
         } else if (arguments.s3LocalDirPath != null) {
             // Solr BACKUP API writes to s3://<bucket>/<backupName>/ (location=/ at repo root).
             var repoUri = new S3Uri(arguments.s3RepoUri);
@@ -95,26 +100,27 @@ public class ClusterReaderExtractor {
                 arguments.s3Region,
                 Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
             );
-            backupDir = s3Repo.downloadAllFiles();
+            // Discover collections from S3 listing, download only schema metadata (no index data)
+            backupDir = s3Repo.getRepoRootDir();
+            collectionNames = s3Repo.listTopLevelDirectories();
+            for (var collection : collectionNames) {
+                s3Repo.downloadPrefix(collection + "/zk_backup_0");
+            }
         } else {
             throw new ParameterException("Solr snapshot requires --file-system-repo-path or S3 args");
         }
 
-        // Discover collections and parse schemas from backup directory
+        // Parse schemas from backup directory
         var schemas = new LinkedHashMap<String, JsonNode>();
-        try {
-            for (var name : SolrSnapshotReader.discoverCollections(backupDir)) {
-                schemas.put(name, SolrSchemaXmlParser.findAndParse(backupDir.resolve(name)));
-            }
-        } catch (IOException e) {
-            throw new ParameterException("Failed to list backup directory: " + backupDir + ": " + e.getMessage());
+        for (var name : collectionNames) {
+            schemas.put(name, SolrSchemaXmlParser.findAndParse(backupDir.resolve(name)));
         }
 
         if (!arguments.dataFilterArgs.indexAllowlist.isEmpty()) {
             schemas.keySet().retainAll(arguments.dataFilterArgs.indexAllowlist);
         }
 
-        log.info("Solr snapshot reader: found {} collection(s) in {}", schemas.size(), backupDir);
+        log.atInfo().setMessage("Solr snapshot reader: found {} collection(s) in {}").addArgument(schemas.size()).addArgument(backupDir).log();
         return new SolrSnapshotReader(arguments.sourceVersion, backupDir, schemas);
     }
 

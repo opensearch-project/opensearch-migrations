@@ -80,6 +80,16 @@ RUN dnf install -y  \
         && \
         dnf clean all
 
+# Install mount-s3 for direct S3 bucket mounting (requires SYS_ADMIN capability at runtime)
+RUN MOUNT_S3_VERSION="1.22.2" && \
+    ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi && \
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
+        "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNT_S3_VERSION}/${ARCH}/mount-s3-${MOUNT_S3_VERSION}-${ARCH}.rpm" \
+        -o /tmp/mount-s3.rpm && \
+    dnf install -y /tmp/mount-s3.rpm && \
+    rm -f /tmp/mount-s3.rpm
+
 COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
 RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
     /tmp/setupVimSchemaChecker.sh && \
@@ -116,12 +126,8 @@ WORKDIR /root
 COPY nodeStaging/configProcessor /root/configProcessor
 
 RUN chmod +x /root/configProcessor/*.sh
-ENV WORKFLOW_SCHEMA_FILENAME=/root/.workflowUser.schema.json
 ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
 ENV NODEJS=node-22
-RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME" && \
-    echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFIG_PROCESSOR_DIR}/sample.yaml" && \
-    "$NODEJS" "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
 
 COPY nodeStaging/workflowTemplates /root/workflows
 COPY workflowConfigToServicesConfig.jq /root/

@@ -13,6 +13,8 @@ import java.util.stream.Collectors;
 import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
+import org.opensearch.migrations.replay.sink.CallbackTupleSink;
+import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -130,13 +132,15 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                     RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
                     10 * 1024
                 );
-                var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))
+                var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
+                var tupleWriter = new ThreadLocalTupleWriter(i -> new CallbackTupleSink(m -> {}))
             ) {
                 tr.setupRunAndWaitForReplayToFinish(
                     Duration.ofSeconds(70),
                     Duration.ofSeconds(30),
                     blockingTrafficSource,
                     new TimeShifter(10 * 1000),
+                    tupleWriter,
                     t -> {
                         var wasNew = tuplesReceived.add(t.getRequestKey().toString());
                         Assertions.assertTrue(wasNew);
@@ -187,7 +191,9 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("httpTransaction"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("accumulatingRequest"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("accumulatingResponse"));
-        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("transformation"));
+        // 1 transformation span per request from HttpJsonTransformingConsumer, plus 4 per request
+        // from ParsedHttpMessagesAsDicts parsing (source req, source resp, target req, target resp)
+        Assertions.assertEquals(numRequests * 5, traceProcessor.getCountAndRemoveSpan("transformation"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("targetTransaction"));
         Assertions.assertEquals(numRequests * 2, traceProcessor.getCountAndRemoveSpan("scheduled"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("requestSending"));
