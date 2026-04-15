@@ -118,7 +118,7 @@ mirror.gcr.io/amazon/aws-cli:2.25.11
 mirror.gcr.io/opensearchproject/opensearch:3.1.0
 
 # --- mountpoint-s3 CSI driver ---
-public.ecr.aws/mountpoint-s3/aws-mountpoint-s3-csi-driver:v2.5.0
+public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.5.0
 public.ecr.aws/csi-components/csi-node-driver-registrar:v2.16.0-eksbuild.3
 public.ecr.aws/csi-components/livenessprobe:v2.18.0-eksbuild.3
 
