@@ -22,7 +22,7 @@ usage() {
   echo "  --region                                    AWS region"
   echo ""
   echo "Other options:"
-  echo "  --build-images true                         Build images from source instead of public registry"
+  echo "  --build                                     Build all artifacts from source instead of using release"
   echo "  --org-name opensearch-project               Org name when building from source"
   echo "  --branch main                               Git branch when building from source"
   echo ""
@@ -31,7 +31,7 @@ usage() {
   echo "  ./awsRunEksValidation.sh --stage ekscvpc --region us-east-1"
   echo ""
   echo "  # Test from a feature branch"
-  echo "  ./awsRunEksValidation.sh --stage dev --region us-east-1 --build-images true --branch feature-xyz"
+  echo "  ./awsRunEksValidation.sh --stage dev --region us-east-1 --build --branch feature-xyz"
   echo ""
   exit 1
 }

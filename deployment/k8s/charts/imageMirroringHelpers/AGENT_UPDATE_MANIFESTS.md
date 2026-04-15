@@ -111,8 +111,7 @@ If it reports violations, add the missing overrides to `generatePrivateEcrValues
 Deploy to an isolated subnet (no NAT/IGW) with:
 ```bash
 ./aws-bootstrap.sh \
-  --deploy-import-vpc-cfn --build-cfn --build-images \
-  --build-chart-and-dashboards \
+  --deploy-import-vpc-cfn --build \
   --create-vpc-endpoints --stack-name ... --stage ... \
   --vpc-id ... --subnet-ids ... --region ...
 ```
