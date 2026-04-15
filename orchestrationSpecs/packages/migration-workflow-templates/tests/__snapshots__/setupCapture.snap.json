@@ -288,7 +288,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -349,7 +349,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -447,17 +447,7 @@
         "resource": {
           "manifest": "apiVersion: cert-manager.io/v1\nkind: Certificate\nmetadata:\n  name: \"{{inputs.parameters.certName}}\"\n",
           "action": "get",
-          "successCondition": "status.conditions.0.status == True",
-          "failureCondition": "status.conditions.0.status == False"
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "Always",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
+          "successCondition": "status.conditions.0.status == True"
         },
         "outputs": {
           "parameters": []

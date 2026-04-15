@@ -8,7 +8,7 @@ import {
 } from '@opensearch-migrations/argo-workflow-builders';
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {K8S_POLLING_RETRY_STRATEGY, K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
 const SECONDS_IN_DAYS = 24 * 3600;
 const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
@@ -55,11 +55,10 @@ export const ResourceManagement = WorkflowBuilder.create({
                     successCondition: expr.concat(
                         expr.literal("status.listeners, metadata.annotations.migration-configChecksum == "),
                         b.inputs.configChecksum
-                    ),
-                    failureCondition: "status.conditions.0.type == NotReady"
+                    )
                 }
             })
-            .addRetryParameters(K8S_POLLING_RETRY_STRATEGY)
+            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
         )
     )
 
