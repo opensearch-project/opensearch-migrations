@@ -19,7 +19,7 @@ import {
 } from "@opensearch-migrations/schemas";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {z} from "zod";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {K8S_POLLING_RETRY_STRATEGY, K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {CONTAINER_NAMES} from "../containerNames";
 import {ResourceManagement} from "./resourceManagement";
 
@@ -443,7 +443,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     kafkaCaSecretName: b.inputs.kafkaCaSecretName,
                 })
             }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+        .addRetryParameters(K8S_POLLING_RETRY_STRATEGY)
     )
 
 
@@ -479,7 +479,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     tlsSecretName: b.inputs.tlsSecretName,
                 })
             }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+        .addRetryParameters(K8S_POLLING_RETRY_STRATEGY)
     )
 
 
@@ -536,7 +536,8 @@ export const SetupCapture = WorkflowBuilder.create({
                     successCondition: "status.conditions.0.status == True",
                     failureCondition: "status.conditions.0.status == False",
                 }
-            }))
+            })
+            .addRetryParameters(K8S_POLLING_RETRY_STRATEGY))
     )
 
 
