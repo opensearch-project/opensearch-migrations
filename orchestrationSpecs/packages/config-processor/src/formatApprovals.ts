@@ -55,12 +55,20 @@ export function scrapeApprovalsForSnapshotConfigs(
 
 export function scrapeApprovals(userConfig: z.infer<typeof OVERALL_MIGRATION_CONFIG>) {
     const globalSkipApprovals = userConfig.skipApprovals ?? false;
+    const bySource = userConfig.snapshotMigrationConfigs.reduce<Record<string, typeof userConfig.snapshotMigrationConfigs>>((acc, m) => {
+        (acc[m.fromSource] ??= []).push(m);
+        return acc;
+    }, {});
     return Object.fromEntries(
-        Object.entries(Object.groupBy(userConfig.snapshotMigrationConfigs, m=>m.fromSource))
+        Object.entries(bySource)
             .filter(hasDefinedList)
-            .map(([source,topConfigs])=>
-                [source, Object.fromEntries(
-                    Object.entries(Object.groupBy(topConfigs, m=>m.toTarget))
+            .map(([source,topConfigs])=> {
+                const byTarget = topConfigs.reduce<Record<string, typeof topConfigs>>((acc, m) => {
+                    (acc[m.toTarget] ??= []).push(m);
+                    return acc;
+                }, {});
+                return [source, Object.fromEntries(
+                    Object.entries(byTarget)
                         .filter(hasDefinedList)
                         .filter(([_,v])=>v.length > 0)
                         .filter((entry): entry is [string, ConfigWithSnapshot[]] =>
@@ -74,8 +82,8 @@ export function scrapeApprovals(userConfig: z.infer<typeof OVERALL_MIGRATION_CON
                                 )]
                             )
                         )
-                )]
-            )
+                )];
+            })
     );
 }
 

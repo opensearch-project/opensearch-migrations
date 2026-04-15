@@ -314,6 +314,28 @@ jobs:
           docker stop $(docker ps -q) && docker system prune --volumes -f
           docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | xargs -I {} docker image rm {}
 
+  orchestration-specs-tests:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: ./orchestrationSpecs
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-env
+      - name: Install NPM dependencies
+        run: npm ci
+      - name: Run orchestrationSpecs tests
+        run: npm run build && npm -ws --if-present run test -- --coverage
+      - name: Upload coverage to Codecov
+        if: always()
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
+        with:
+          fail_ci_if_error: true
+          flags: node
+          skip_validation: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+
   node-tests:
     runs-on: ubuntu-22.04
     strategy:
@@ -323,11 +345,6 @@ jobs:
           - ./deployment/cdk/opensearch-service-migration
           - ./deployment/migration-assistant-solution
           - ./TrafficCapture/SolrTransformations/transforms
-          # TODO - get these enabled
-#          - ./orchestrationSpecs/packages/argo-workflow-builders
-#          - ./orchestrationSpecs/packages/config-processor
-#          - ./orchestrationSpecs/packages/migration-workflow-templates
-#          - ./orchestrationSpecs/packages/schemas
     defaults:
       run:
         working-directory: ${{ matrix.npm-project }}

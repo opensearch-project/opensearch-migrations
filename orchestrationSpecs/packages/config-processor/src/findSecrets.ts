@@ -42,7 +42,11 @@ export function getCategorizedCredentialsSecretsFromConfig(
     userConfig: Partial<z.infer<typeof OVERALL_MIGRATION_CONFIG>>
 ) {
     const rawSecrets = scrapeSecrets(userConfig);
-    return Object.groupBy(rawSecrets, s=> s && s.match(K8S_NAMING_PATTERN) ? "validSecrets" : "invalidSecrets");
+    return rawSecrets.reduce<Record<string, string[]>>((acc, s) => {
+        const key = s && s.match(K8S_NAMING_PATTERN) ? "validSecrets" : "invalidSecrets";
+        (acc[key] ??= []).push(s);
+        return acc;
+    }, {});
 }
 
 export async function main() {
