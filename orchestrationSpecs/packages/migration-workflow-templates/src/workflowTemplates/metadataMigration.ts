@@ -38,6 +38,8 @@ const COMMON_METADATA_PARAMETERS = {
     sourceVersion: defineRequiredParam<string>(),
     targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
     migrationLabel: defineRequiredParam<string>(),
+    crdName: defineRequiredParam<string>(),
+    crdUid: defineRequiredParam<string>(),
     ...makeRequiredImageParametersForKeys(["MigrationConsole"])
 };
 
@@ -258,7 +260,7 @@ export const MetadataMigration = WorkflowBuilder.create({
             )
             .addStep("approveEvaluate", INTERNAL, "approveEvaluate", c =>
                 c.register({
-                    "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("evaluateMetadata"))
+                    "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("evaluatemetadata"))
                 }),
                 {when: expr.not(b.inputs.skipEvaluateApproval)}
             )
@@ -274,7 +276,7 @@ export const MetadataMigration = WorkflowBuilder.create({
             )
             .addStep("approveMigrate", INTERNAL, "approveMigrate", c =>
                 c.register({
-                    "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("migrateMetadata"))
+                    "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("migratemetadata"))
                 }),
                 {when: expr.not(b.inputs.skipMigrateApproval)}
             )

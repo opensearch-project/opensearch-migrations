@@ -354,11 +354,6 @@ export const SetupCapture = WorkflowBuilder.create({
 })
     .addParams(CommonWorkflowParameters)
 
-    .addTemplate("suspendForRetry", t => t
-        .addRequiredInput("name", typeToken<string>())
-        .addSuspend()
-    )
-
     .addTemplate("applyCapturedTraffic", t => t
         .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
         .addRequiredInput("proxyName", typeToken<string>())
@@ -378,6 +373,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("kafkaTopicName", typeToken<string>())
+        .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
         .addSteps(b => b
@@ -390,9 +386,9 @@ export const SetupCapture = WorkflowBuilder.create({
                 }),
                 {continueOn: {failed: true}}
             )
-            .addStep("waitForFix", INTERNAL, "suspendForRetry", c =>
+            .addStep("waitForFix", ResourceManagement, "waitForApproval", c =>
                 c.register({
-                    name: expr.literal("CapturedTraffic")
+                    resourceName: b.inputs.retryGateName,
                 }),
                 {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
             )
@@ -404,15 +400,23 @@ export const SetupCapture = WorkflowBuilder.create({
                 }),
                 {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
             )
+            .addStep("resetGate", ResourceManagement, "patchApprovalGatePhase", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
+            )
             .addStepToSelf("retryLoop", c =>
                 c.register({
                     proxyConfig: b.inputs.proxyConfig,
                     proxyName: b.inputs.proxyName,
                     kafkaClusterName: b.inputs.kafkaClusterName,
                     kafkaTopicName: b.inputs.kafkaTopicName,
+                    retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
-                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
+                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
             )
         )
     )
@@ -778,6 +782,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     proxyName: b.inputs.proxyName,
                     kafkaClusterName: b.inputs.kafkaClusterName,
                     kafkaTopicName: b.inputs.kafkaTopicName,
+                    retryGateName: expr.concat(b.inputs.proxyName, expr.literal(".capturedtraffic.vapretry")),
                     retryGroupName_view: expr.concat(expr.literal("CapturedTraffic: "), b.inputs.proxyName),
                 }),
                 {when: c => ({templateExp: expr.not(expr.and(

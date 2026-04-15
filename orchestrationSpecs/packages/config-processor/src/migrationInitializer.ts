@@ -87,11 +87,20 @@ export class MigrationInitializer {
         const concurrencyPath = path.join(outputDir, 'concurrencyConfigMaps.yaml');
         await fs.writeFile(concurrencyPath, stringify(bundle.concurrencyConfigMaps));
 
-        // 4. Write CRD resources
-        const crdPath = path.join(outputDir, 'crdResources.yaml');
-        await fs.writeFile(crdPath, stringify(bundle.crdResources));
+        // 4. Write CRD resources (excluding approval gates)
+        const nonGateItems = (bundle.crdResources.items || []).filter((item: any) => item.kind !== 'ApprovalGate');
+        const gateItems = (bundle.crdResources.items || []).filter((item: any) => item.kind === 'ApprovalGate');
 
-        // 4a. Write approval-gate cleanup script
+        const crdPath = path.join(outputDir, 'crdResources.yaml');
+        await fs.writeFile(crdPath, stringify({ ...bundle.crdResources, items: nonGateItems }));
+
+        // 4a. Write approval gates as a separate file (cleaned up and recreated each submission)
+        if (gateItems.length > 0) {
+            const gatesPath = path.join(outputDir, 'approvalGates.yaml');
+            await fs.writeFile(gatesPath, stringify({ ...bundle.crdResources, items: gateItems }));
+        }
+
+        // 4b. Write approval-gate cleanup script
         const cleanupScript = this.generateApprovalGateCleanupScript(bundle.crdResources);
         if (cleanupScript !== null) {
             const cleanupPath = path.join(outputDir, 'cleanupApprovalGates.sh');
@@ -99,17 +108,27 @@ export class MigrationInitializer {
         }
 
         // 5. Write CRD status patches (status subresource must be patched separately)
-        const statusPatches = (bundle.crdResources.items || [])
-            .filter((item: StatusPatchableResource) => item.status !== undefined)
-            .map((item: StatusPatchableResource) => {
-                const group = item.apiVersion.split('/')[0];
-                const kind = item.kind.toLowerCase() + 's.' + group;
-                const patch = JSON.stringify({ status: item.status });
-                return `kubectl patch ${kind}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
-            });
+        const makeStatusPatchScript = (items: StatusPatchableResource[]) =>
+            items
+                .filter((item: StatusPatchableResource) => item.status !== undefined)
+                .map((item: StatusPatchableResource) => {
+                    const group = item.apiVersion.split('/')[0];
+                    const kind = item.kind.toLowerCase() + 's.' + group;
+                    const patch = JSON.stringify({ status: item.status });
+                    return `kubectl patch ${kind}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
+                });
+
+        const statusPatches = makeStatusPatchScript(nonGateItems);
         if (statusPatches.length > 0) {
             const patchScript = '#!/bin/sh\nset -e\n' + statusPatches.join('\n') + '\n';
             const patchPath = path.join(outputDir, 'patchCrdStatus.sh');
+            await fs.writeFile(patchPath, patchScript, { mode: 0o755 });
+        }
+
+        const gateStatusPatches = makeStatusPatchScript(gateItems);
+        if (gateStatusPatches.length > 0) {
+            const patchScript = '#!/bin/sh\nset -e\n' + gateStatusPatches.join('\n') + '\n';
+            const patchPath = path.join(outputDir, 'patchApprovalGateStatus.sh');
             await fs.writeFile(patchPath, patchScript, { mode: 0o755 });
         }
 
@@ -186,7 +205,20 @@ export class MigrationInitializer {
     }
 
     private makeApprovalGateName(parts: string[], action: string): string {
-        return [...parts, action].join('.');
+        return [...parts, action].join('.').toLowerCase();
+    }
+
+    private makeApprovalGateResource(nameParts: string[], gateLabel?: Record<string, string>) {
+        return {
+            apiVersion: MigrationInitializer.CRD_API_VERSION,
+            kind: 'ApprovalGate',
+            metadata: {
+                name: nameParts.join('.').toLowerCase(),
+                ...(gateLabel && { labels: gateLabel }),
+            },
+            spec: {},
+            status: { phase: 'Initialized' }
+        };
     }
 
     private generateCRDResources(workflows: WorkflowConfig, workflowName?: string) {
@@ -205,6 +237,16 @@ export class MigrationInitializer {
                 spec: { dependsOn: [] },
                 status: { phase: 'Initialized', configChecksum: kafkaCluster.configChecksum }
             });
+
+            // VAP retry gates for kafka sub-operations
+            for (const subOp of ['kafkacluster', 'kafkanodepool', 'kafkauser']) {
+                items.push(this.makeApprovalGateResource(
+                    [kafkaCluster.name, subOp, 'vapretry'], gateLabel));
+            }
+            for (const topic of kafkaCluster.topics) {
+                items.push(this.makeApprovalGateResource(
+                    [kafkaCluster.name, 'kafkatopic', topic, 'vapretry'], gateLabel));
+            }
         }
 
         // CapturedTraffic resources from proxies
@@ -216,6 +258,10 @@ export class MigrationInitializer {
                 spec: { dependsOn: [proxy.kafkaConfig.label] },
                 status: { phase: 'Initialized', configChecksum: proxy.configChecksum }
             });
+
+            // VAP retry gate for proxy
+            items.push(this.makeApprovalGateResource(
+                [proxy.name, 'capturedtraffic', 'vapretry'], gateLabel));
         }
 
         // DataSnapshot resources from snapshots
@@ -252,26 +298,10 @@ export class MigrationInitializer {
                     migration.snapshotConfig.label,
                     migrationItem.label,
                 ];
-                items.push({
-                    apiVersion: CRD_API_VERSION,
-                    kind: 'ApprovalGate',
-                    metadata: {
-                        name: this.makeApprovalGateName(approvalNameParts, 'evaluateMetadata'),
-                        ...(gateLabel && { labels: gateLabel }),
-                    },
-                    spec: {},
-                    status: { phase: 'Initialized' }
-                });
-                items.push({
-                    apiVersion: CRD_API_VERSION,
-                    kind: 'ApprovalGate',
-                    metadata: {
-                        name: this.makeApprovalGateName(approvalNameParts, 'migrateMetadata'),
-                        ...(gateLabel && { labels: gateLabel }),
-                    },
-                    spec: {},
-                    status: { phase: 'Initialized' }
-                });
+                items.push(this.makeApprovalGateResource(
+                    [...approvalNameParts, 'evaluateMetadata'], gateLabel));
+                items.push(this.makeApprovalGateResource(
+                    [...approvalNameParts, 'migrateMetadata'], gateLabel));
             }
         }
 

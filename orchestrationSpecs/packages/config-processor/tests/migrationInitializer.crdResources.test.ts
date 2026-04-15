@@ -103,8 +103,15 @@ describe('migration initializer CRD resource generation', () => {
         expect(byKind('SnapshotMigration')).toContain('source-target-snap1');
         expect(byKind('TrafficReplay')).toContain('source-proxy-target-target-replay');
         expect(byKind('ApprovalGate')).toEqual(expect.arrayContaining([
-            'source.target.snap1.migration-0.evaluateMetadata',
-            'source.target.snap1.migration-0.migrateMetadata',
+            'source.target.snap1.migration-0.evaluatemetadata',
+            'source.target.snap1.migration-0.migratemetadata',
+            // Kafka VAP retry gates
+            'default.kafkacluster.vapretry',
+            'default.kafkanodepool.vapretry',
+            'default.kafkauser.vapretry',
+            'default.kafkatopic.source-proxy.vapretry',
+            // Proxy VAP retry gate
+            'source-proxy.capturedtraffic.vapretry',
         ]));
 
         expect(getResource('KafkaCluster', 'default')?.spec.dependsOn).toEqual([]);

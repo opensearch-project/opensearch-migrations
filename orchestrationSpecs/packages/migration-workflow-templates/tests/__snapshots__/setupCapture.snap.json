@@ -25,20 +25,6 @@
     },
     "templates": [
       {
-        "name": "suspendforretry",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "name"
-            }
-          ]
-        },
-        "suspend": {},
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
         "name": "applycapturedtraffic",
         "inputs": {
           "parameters": [
@@ -91,6 +77,9 @@
               "name": "kafkaTopicName"
             },
             {
+              "name": "retryGateName"
+            },
+            {
               "name": "retryGroupName_view",
               "value": "Apply"
             }
@@ -128,13 +117,16 @@
           ],
           [
             {
-              "template": "suspendforretry",
+              "templateRef": {
+                "template": "waitforapproval",
+                "name": "resource-management"
+              },
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
                   {
-                    "name": "name",
-                    "value": "CapturedTraffic"
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.retryGateName}}"
                   }
                 ]
               },
@@ -169,8 +161,30 @@
           ],
           [
             {
-              "template": "applycapturedtrafficwithretry",
+              "templateRef": {
+                "template": "patchapprovalgatephase",
+                "name": "resource-management"
+              },
               "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.retryGateName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "resetGate"
+            }
+          ],
+          [
+            {
+              "template": "applycapturedtrafficwithretry",
+              "when": "{{=steps.resetGate.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -188,6 +202,10 @@
                   {
                     "name": "kafkaTopicName",
                     "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{inputs.parameters.retryGateName}}"
                   },
                   {
                     "name": "retryGroupName_view",
@@ -880,6 +898,10 @@
                   {
                     "name": "kafkaTopicName",
                     "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.proxyName+'.capturedtraffic.vapretry'}}"
                   },
                   {
                     "name": "retryGroupName_view",

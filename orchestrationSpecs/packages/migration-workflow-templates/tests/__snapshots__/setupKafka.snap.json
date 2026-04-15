@@ -327,20 +327,6 @@
         }
       },
       {
-        "name": "suspendforretry",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "name"
-            }
-          ]
-        },
-        "suspend": {},
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
         "name": "deploykafkanodepoolwithretry",
         "inputs": {
           "parameters": [
@@ -352,6 +338,9 @@
             },
             {
               "name": "ownerUid"
+            },
+            {
+              "name": "retryGateName"
             },
             {
               "name": "retryGroupName_view",
@@ -391,13 +380,16 @@
           ],
           [
             {
-              "template": "suspendforretry",
+              "templateRef": {
+                "template": "waitforapproval",
+                "name": "resource-management"
+              },
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
                   {
-                    "name": "name",
-                    "value": "KafkaNodePool"
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.retryGateName}}"
                   }
                 ]
               },
@@ -432,8 +424,30 @@
           ],
           [
             {
-              "template": "deploykafkanodepoolwithretry",
+              "templateRef": {
+                "template": "patchapprovalgatephase",
+                "name": "resource-management"
+              },
               "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.retryGateName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "resetGate"
+            }
+          ],
+          [
+            {
+              "template": "deploykafkanodepoolwithretry",
+              "when": "{{=steps.resetGate.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -447,6 +461,10 @@
                   {
                     "name": "ownerUid",
                     "value": "{{inputs.parameters.ownerUid}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{inputs.parameters.retryGateName}}"
                   },
                   {
                     "name": "retryGroupName_view",
@@ -477,6 +495,9 @@
             },
             {
               "name": "ownerUid"
+            },
+            {
+              "name": "retryGateName"
             },
             {
               "name": "retryGroupName_view",
@@ -520,13 +541,16 @@
           ],
           [
             {
-              "template": "suspendforretry",
+              "templateRef": {
+                "template": "waitforapproval",
+                "name": "resource-management"
+              },
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
                   {
-                    "name": "name",
-                    "value": "KafkaCluster"
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.retryGateName}}"
                   }
                 ]
               },
@@ -561,8 +585,30 @@
           ],
           [
             {
-              "template": "deploykafkaclusterkraftwithretry",
+              "templateRef": {
+                "template": "patchapprovalgatephase",
+                "name": "resource-management"
+              },
               "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.retryGateName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "resetGate"
+            }
+          ],
+          [
+            {
+              "template": "deploykafkaclusterkraftwithretry",
+              "when": "{{=steps.resetGate.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -580,6 +626,10 @@
                   {
                     "name": "ownerUid",
                     "value": "{{inputs.parameters.ownerUid}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{inputs.parameters.retryGateName}}"
                   },
                   {
                     "name": "retryGroupName_view",
@@ -623,6 +673,9 @@
             },
             {
               "name": "topicConfig"
+            },
+            {
+              "name": "retryGateName"
             },
             {
               "name": "retryGroupName_view",
@@ -674,13 +727,16 @@
           ],
           [
             {
-              "template": "suspendforretry",
+              "templateRef": {
+                "template": "waitforapproval",
+                "name": "resource-management"
+              },
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
                   {
-                    "name": "name",
-                    "value": "KafkaTopic"
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.retryGateName}}"
                   }
                 ]
               },
@@ -715,8 +771,30 @@
           ],
           [
             {
-              "template": "createkafkatopicwithretry",
+              "templateRef": {
+                "template": "patchapprovalgatephase",
+                "name": "resource-management"
+              },
               "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.retryGateName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "resetGate"
+            }
+          ],
+          [
+            {
+              "template": "createkafkatopicwithretry",
+              "when": "{{=steps.resetGate.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -742,6 +820,10 @@
                   {
                     "name": "topicConfig",
                     "value": "{{inputs.parameters.topicConfig}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{inputs.parameters.retryGateName}}"
                   },
                   {
                     "name": "retryGroupName_view",
@@ -776,6 +858,9 @@
             },
             {
               "name": "ownerUid"
+            },
+            {
+              "name": "retryGateName"
             },
             {
               "name": "retryGroupName_view",
@@ -815,13 +900,16 @@
           ],
           [
             {
-              "template": "suspendforretry",
+              "templateRef": {
+                "template": "waitforapproval",
+                "name": "resource-management"
+              },
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
                   {
-                    "name": "name",
-                    "value": "KafkaUser"
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.retryGateName}}"
                   }
                 ]
               },
@@ -856,6 +944,28 @@
           ],
           [
             {
+              "templateRef": {
+                "template": "patchapprovalgatephase",
+                "name": "resource-management"
+              },
+              "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.retryGateName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "resetGate"
+            }
+          ],
+          [
+            {
               "template": "createkafkauserwithretry",
               "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
               "arguments": {
@@ -871,6 +981,10 @@
                   {
                     "name": "ownerUid",
                     "value": "{{inputs.parameters.ownerUid}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{inputs.parameters.retryGateName}}"
                   },
                   {
                     "name": "retryGroupName_view",
@@ -934,6 +1048,10 @@
                     "value": "{{inputs.parameters.ownerUid}}"
                   },
                   {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.clusterName+'.kafkacluster.vapretry'}}"
+                  },
+                  {
                     "name": "retryGroupName_view",
                     "value": "{{inputs.parameters.retryGroupName_view}}"
                   }
@@ -958,6 +1076,10 @@
                   {
                     "name": "ownerUid",
                     "value": "{{inputs.parameters.ownerUid}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.clusterName+'.kafkanodepool.vapretry'}}"
                   },
                   {
                     "name": "retryGroupName_view",
@@ -987,6 +1109,10 @@
                     "value": "{{inputs.parameters.ownerUid}}"
                   },
                   {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.clusterName+'.kafkauser.vapretry'}}"
+                  },
+                  {
                     "name": "retryGroupName_view",
                     "value": "{{='KafkaUser: '+inputs.parameters.clusterName}}"
                   }
@@ -1012,6 +1138,10 @@
                   {
                     "name": "ownerUid",
                     "value": "{{inputs.parameters.ownerUid}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.clusterName+'.kafkatopic.'+item+'.vapretry'}}"
                   },
                   {
                     "name": "partitions",
@@ -1097,6 +1227,10 @@
                     "value": "{{inputs.parameters.ownerUid}}"
                   },
                   {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.clusterName+'.kafkanodepool.vapretry'}}"
+                  },
+                  {
                     "name": "retryGroupName_view",
                     "value": "{{='KafkaNodePool: '+inputs.parameters.clusterName}}"
                   }
@@ -1128,6 +1262,10 @@
                     "value": "{{inputs.parameters.ownerUid}}"
                   },
                   {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.clusterName+'.kafkacluster.vapretry'}}"
+                  },
+                  {
                     "name": "retryGroupName_view",
                     "value": "{{='KafkaCluster: '+inputs.parameters.clusterName}}"
                   }
@@ -1153,6 +1291,10 @@
                   {
                     "name": "ownerUid",
                     "value": "{{inputs.parameters.ownerUid}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.clusterName+'.kafkauser.vapretry'}}"
                   },
                   {
                     "name": "retryGroupName_view",

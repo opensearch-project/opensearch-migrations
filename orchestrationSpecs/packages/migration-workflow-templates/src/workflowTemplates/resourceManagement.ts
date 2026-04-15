@@ -293,6 +293,23 @@ export const ResourceManagement = WorkflowBuilder.create({
         )
     )
 
+    .addTemplate("patchApprovalGatePhase", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("phase", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "ApprovalGate",
+                    metadata: { name: "{{inputs.parameters.resourceName}}" },
+                    status: { phase: "{{inputs.parameters.phase}}" }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
 
     .addTemplate("readResourcePhase", t => t
         .addRequiredInput("resourceKind", typeToken<string>())

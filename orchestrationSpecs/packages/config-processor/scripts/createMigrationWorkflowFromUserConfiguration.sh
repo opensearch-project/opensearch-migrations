@@ -64,6 +64,15 @@ if [ -f "$TEMP_DIR/crdResources.yaml" ]; then
     fi
 fi
 
+# Create approval gates (these are always cleaned up and recreated)
+if [ -f "$TEMP_DIR/approvalGates.yaml" ]; then
+    echo "Creating approval gates..."
+    kubectl create -f "$TEMP_DIR/approvalGates.yaml"
+    if [ -f "$TEMP_DIR/patchApprovalGateStatus.sh" ]; then
+        sh "$TEMP_DIR/patchApprovalGateStatus.sh"
+    fi
+fi
+
 # Apply approval config maps
 if [ -f "$TEMP_DIR/approvalConfigMaps.yaml" ]; then
     echo "Applying approval config maps..."
