@@ -29,12 +29,4 @@ def wait_for_workflow_completion(workflow_name, namespace, argo_server, token, i
     return None
 
 
-def delete_workflow(workflow_name, namespace, argo_server, token, insecure):
-    """Delete the Argo workflow. Returns True if deleted."""
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
-    try:
-        resp = requests.delete(url, headers=headers, verify=not insecure, timeout=10)
-        return resp.status_code == 200
-    except requests.RequestException:
-        return False
+

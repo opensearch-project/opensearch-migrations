@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from console_link.workflow.services.workflow_service import WorkflowApproveResult, logger, WorkflowService
+from console_link.workflow.commands.approve import approve_gate
 from console_link.workflow.tree_utils import clean_display_name
 
 
@@ -156,8 +157,23 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
         return res, slim_data
 
     def approve(namespace: str, workflow_name: str, node_data: dict) -> WorkflowApproveResult:
-        return WorkflowService().approve_workflow(workflow_name, namespace, argo_url, token, insecure,
-                                                  f"id={node_data.get('id')}")
+        gate_name = node_data.get('displayName', node_data.get('id', ''))
+        success = approve_gate(namespace, gate_name)
+        if success:
+            return WorkflowApproveResult(
+                success=True,
+                workflow_name=workflow_name,
+                namespace=namespace,
+                message=f"Approved gate {gate_name}",
+                error=None,
+            )
+        return WorkflowApproveResult(
+            success=False,
+            workflow_name=workflow_name,
+            namespace=namespace,
+            message=f"Failed to approve gate {gate_name}",
+            error=f"Failed to approve gate {gate_name}",
+        )
 
     return ArgoWorkflowInterface(
         get_workflow=lambda name, namespace: _get_workflow_data_internal(WorkflowService(), name, namespace),

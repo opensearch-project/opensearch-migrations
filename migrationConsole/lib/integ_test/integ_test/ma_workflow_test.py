@@ -1,4 +1,5 @@
 import logging
+import subprocess
 
 import pytest
 
@@ -30,6 +31,12 @@ def setup_and_teardown(request, keep_workflows, test_case: MATestBase):
             test_case.argo_service.save_namespace_diagnostics("./logs")
         if not keep_workflows:
             test_case.argo_service.delete_workflow(workflow_name=test_case.workflow_name)
+    # Clean up migration CRDs via workflow reset to test the reset command
+    if not keep_workflows:
+        try:
+            subprocess.run(["workflow", "reset", "--all", "--include-proxies"], check=True)
+        except Exception as e:
+            logger.warning(f"workflow reset --all failed during teardown: {e}")
 
 
 def record_test(test_case: MATestBase, record_data) -> None:
