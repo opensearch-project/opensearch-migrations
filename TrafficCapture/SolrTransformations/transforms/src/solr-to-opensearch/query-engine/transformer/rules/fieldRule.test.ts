@@ -96,6 +96,16 @@ describe('fieldRule', () => {
     );
   });
 
+  it('clamps fuzziness above 2 to max of 2', () => {
+    const node: FieldNode = { type: 'field', field: 'title', value: 'roam~9' };
+
+    const result = fieldRule(node, stubTransformChild);
+
+    expect(result).toEqual(
+      new Map([['fuzzy', new Map([['title', new Map([['value', 'roam'], ['fuzziness', 2]])]])]]),
+    );
+  });
+
   // --- Non-fuzzy tilde patterns (should NOT be treated as fuzzy) ---
 
   it.each([

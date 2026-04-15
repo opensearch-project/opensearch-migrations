@@ -50,8 +50,11 @@ export const fieldRule: TransformRuleFn = (
     const term = fuzzyMatch[1];
     const distance = fuzzyMatch[2];
     const fuzzyParams = new Map<string, any>([['value', term]]);
-    if (distance) {
-      fuzzyParams.set('fuzziness', parseInt(distance, 10));
+    if (distance !== '') {
+      const fuzziness = Number.parseInt(distance, 10);
+      // Both Solr and OpenSearch only support fuzziness 0, 1, or 2.
+      // Clamp to 2 to match Solr's behavior (Solr silently caps at 2).
+      fuzzyParams.set('fuzziness', Math.min(fuzziness, 2));
     }
     return new Map([['fuzzy', new Map([[field, fuzzyParams]])]]);
   }
