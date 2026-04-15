@@ -12,7 +12,7 @@ async def call_api(prompt: str, options: dict, context: dict) -> dict:
         # picks up most revent conversation (allows sequential tests, would fail on parallelized)
         continue_conversation=continue_conversation,
         allowed_tools=["Read", "Edit", "Glob", "Grep", "Skill", "WebFetch"],  # Tools Claude can use
-        # permission_mode="acceptEdits",  # Auto-approve file edits
+        permission_mode="acceptEdits",  # Auto-approve file edits
         setting_sources=["project"],  # for paths: https://platform.claude.com/docs/en/agent-sdk/skills
         effort="medium",
         cwd=cwd

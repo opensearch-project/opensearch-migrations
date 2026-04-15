@@ -485,3 +485,9 @@ Or configure it in your MCP client (e.g. `.kiro/settings/mcp.json`):
   }
 }
 ```
+
+### Persistence Fallback
+In case you are not successful using provided session persistence tools for persistence as a JSON file at 
+`sessions/<session_id>.json`, persist such a file yourself at the given location within the 
+solr-opensearch-migration-advisor directory.
+The file is human-readable and contains the full conversation history, all discovered facts, and migration progress.
