@@ -254,6 +254,7 @@ jobs:
             opensearch-migrations-source.tar.gz
             opensearch-migrations-build.tar.gz
             kiro-cli/build/kiro-assistant.tar.gz
+            bootstrap-kiro-agent.sh
             migration-assistant-${{ steps.get_data.outputs.version }}.tgz
             workflowMigration.schema.json
             deployment/k8s/aws/dist/aws-bootstrap.sh
