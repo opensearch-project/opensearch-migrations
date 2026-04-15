@@ -967,7 +967,7 @@
           [
             {
               "template": "createkafkauserwithretry",
-              "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
+              "when": "{{=steps.resetGate.status == 'Succeeded'}}",
               "arguments": {
                 "parameters": [
                   {

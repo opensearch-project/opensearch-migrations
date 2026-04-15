@@ -331,9 +331,9 @@ def reset_command(ctx, path, reset_all, cascade, include_proxies, namespace):
         if not include_proxies and any(resource[0] == 'capturedtraffics' for resource in resources):
             click.echo("Skipping proxies by default. Use --include-proxies to delete them.")
         if protected_ancestor_names:
+            protected_dependencies = ", ".join(sorted(protected_ancestor_names))
             click.echo(
-                "Keeping dependencies required by protected proxies: "
-                + ", ".join(sorted(protected_ancestor_names))
+                f"Keeping dependencies required by protected proxies: {protected_dependencies}"
             )
 
         if delete_targets and not _delete_targets(delete_targets, namespace):

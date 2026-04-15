@@ -180,7 +180,9 @@ class TestResetCommandDelete:
         result = runner.invoke(workflow_cli, ['reset', 'kafka'])
 
         assert result.exit_code != 0
-        assert 'Dependent proxies are protected by default.' in result.output
+        assert 'Cannot delete because protected proxies still depend on this resource:' in result.output
+        assert 'Capture Proxy: source-proxy' in result.output
+        assert '--include-proxies' in result.output
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset.list_migration_resources')

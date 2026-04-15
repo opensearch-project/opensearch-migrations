@@ -177,22 +177,38 @@ def _create_crd_instance(namespace, plural, name, phase=None, depends_on=None):
         "spec": {"dependsOn": depends_on or []},
     }
 
-    custom.create_namespaced_custom_object(
-        group=CRD_GROUP,
-        version=CRD_VERSION,
-        namespace=namespace,
-        plural=plural,
-        body=body,
-    )
+    create_deadline = time.time() + 15
+    while True:
+        try:
+            custom.create_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                plural=plural,
+                body=body,
+            )
+            break
+        except ApiException as e:
+            if e.status != 404 or time.time() >= create_deadline:
+                raise
+            time.sleep(0.5)
     if phase:
-        custom.patch_namespaced_custom_object_status(
-            group=CRD_GROUP,
-            version=CRD_VERSION,
-            namespace=namespace,
-            plural=plural,
-            name=name,
-            body={"status": {"phase": phase}},
-        )
+        status_deadline = time.time() + 15
+        while True:
+            try:
+                custom.patch_namespaced_custom_object_status(
+                    group=CRD_GROUP,
+                    version=CRD_VERSION,
+                    namespace=namespace,
+                    plural=plural,
+                    name=name,
+                    body={"status": {"phase": phase}},
+                )
+                break
+            except ApiException as e:
+                if e.status != 404 or time.time() >= status_deadline:
+                    raise
+                time.sleep(0.5)
 
 
 def _invoke_workflow_cli(runner, args):
@@ -487,9 +503,7 @@ class TestApproveIntegration:
 class TestAutocompleteIntegration:
     def test_autocomplete_returns_live_resources(self, reset_ns):
         cache_file = (
-            Path(tempfile.gettempdir())
-            / "workflow_completions"
-            / f"reset_resources_{reset_ns}.json"
+            Path(tempfile.gettempdir()) / "workflow_completions" / f"reset_resources_{reset_ns}.json"
         )
         cache_file.unlink(missing_ok=True)
 
@@ -505,9 +519,7 @@ class TestAutocompleteIntegration:
 
     def test_autocomplete_filters_by_prefix(self, reset_ns):
         cache_file = (
-            Path(tempfile.gettempdir())
-            / "workflow_completions"
-            / f"reset_resources_{reset_ns}.json"
+            Path(tempfile.gettempdir()) / "workflow_completions" / f"reset_resources_{reset_ns}.json"
         )
         cache_file.unlink(missing_ok=True)
 
