@@ -280,6 +280,49 @@ def _prune_ancestors_of_protected_proxies(resources, include_proxies):
     return filtered, protected_ancestor_names
 
 
+def _reset_single_resource(ctx, path, namespace, cascade, include_proxies):
+    """Handle reset of a single named resource or glob pattern."""
+    targets = _resolve_targets(namespace, path)
+    if not targets:
+        click.echo(f"No resources matching '{path}'.")
+        return
+    targets = _resolve_cascade_targets(targets, namespace, cascade, include_proxies)
+    if targets is None:
+        ctx.exit(ExitCode.FAILURE.value)
+        return
+    if not _delete_targets(targets, namespace):
+        ctx.exit(ExitCode.FAILURE.value)
+
+
+def _reset_all_resources(ctx, namespace, include_proxies):
+    """Handle --all reset: delete all migration resources respecting proxy protection."""
+    resources = list_migration_resources(namespace)
+    if not resources:
+        click.echo("No migration resources found.")
+        return
+
+    delete_targets, protected_ancestor_names = _prune_ancestors_of_protected_proxies(
+        resources, include_proxies
+    )
+    delete_targets = [
+        resource for resource in delete_targets
+        if include_proxies or resource[0] != 'capturedtraffics'
+    ]
+    if not include_proxies and any(resource[0] == 'capturedtraffics' for resource in resources):
+        click.echo("Skipping proxies by default. Use --include-proxies to delete them.")
+    if protected_ancestor_names:
+        click.echo(
+            "Keeping dependencies required by protected proxies: "
+            + ", ".join(sorted(protected_ancestor_names))
+        )
+
+    if delete_targets and not _delete_targets(delete_targets, namespace):
+        ctx.exit(ExitCode.FAILURE.value)
+        return
+
+    click.echo("Done.")
+
+
 @click.command(name="reset")
 @click.argument('path', required=False, default=None, shell_complete=_get_resource_completions)
 @click.option('--all', 'reset_all', is_flag=True, default=False, help='Delete all migration resources')
@@ -299,48 +342,15 @@ def reset_command(ctx, path, reset_all, cascade, include_proxies, namespace):
         load_k8s_config()
 
         if path is not None:
-            targets = _resolve_targets(namespace, path)
-            if not targets:
-                click.echo(f"No resources matching '{path}'.")
+            _reset_single_resource(ctx, path, namespace, cascade, include_proxies)
+        elif reset_all:
+            _reset_all_resources(ctx, namespace, include_proxies)
+        else:
+            resources = list_migration_resources(namespace)
+            if not resources:
+                click.echo("No migration resources found.")
                 return
-            targets = _resolve_cascade_targets(targets, namespace, cascade, include_proxies)
-            if targets is None:
-                ctx.exit(ExitCode.FAILURE.value)
-                return
-            if not _delete_targets(targets, namespace):
-                ctx.exit(ExitCode.FAILURE.value)
-            return
-
-        resources = list_migration_resources(namespace)
-
-        if not resources and not reset_all:
-            click.echo("No migration resources found.")
-            return
-
-        if not reset_all:
             _show_resource_list(resources)
-            return
-
-        delete_targets, protected_ancestor_names = _prune_ancestors_of_protected_proxies(
-            resources, include_proxies
-        )
-        delete_targets = [
-            resource for resource in delete_targets
-            if include_proxies or resource[0] != 'capturedtraffics'
-        ]
-        if not include_proxies and any(resource[0] == 'capturedtraffics' for resource in resources):
-            click.echo("Skipping proxies by default. Use --include-proxies to delete them.")
-        if protected_ancestor_names:
-            click.echo(
-                "Keeping dependencies required by protected proxies: "
-                + ", ".join(sorted(protected_ancestor_names))
-            )
-
-        if delete_targets and not _delete_targets(delete_targets, namespace):
-            ctx.exit(ExitCode.FAILURE.value)
-            return
-
-        click.echo("Done.")
 
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
