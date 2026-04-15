@@ -534,7 +534,6 @@ export const SetupCapture = WorkflowBuilder.create({
                 },
                 conditions: {
                     successCondition: "status.conditions.0.status == True",
-                    failureCondition: "status.conditions.0.status == False",
                 }
             }))
     )
