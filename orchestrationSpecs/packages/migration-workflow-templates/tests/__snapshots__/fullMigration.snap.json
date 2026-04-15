@@ -51,6 +51,9 @@
               "name": "version"
             },
             {
+              "name": "resourceUid"
+            },
+            {
               "name": "configChecksum"
             },
             {
@@ -67,7 +70,7 @@
           [
             {
               "templateRef": {
-                "template": "deploykafkaclusterwithretry",
+                "template": "deploykafkaclusterandtopicswithretry",
                 "name": "setup-kafka"
               },
               "arguments": {
@@ -83,6 +86,14 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{=jsonpath(inputs.parameters.kafkaClusterConfig, '$.config')}}"
+                  },
+                  {
+                    "name": "topics",
+                    "value": "{{=jsonpath(inputs.parameters.kafkaClusterConfig, '$.topics')}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
                   }
                 ]
               },
@@ -138,6 +149,9 @@
             },
             {
               "name": "proxyName"
+            },
+            {
+              "name": "resourceUid"
             },
             {
               "name": "listenPort"
@@ -215,6 +229,10 @@
                   {
                     "name": "imageCaptureProxyPullPolicy",
                     "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
                   },
                   {
                     "name": "configChecksum",
@@ -576,6 +594,12 @@
               "name": "migrationLabel"
             },
             {
+              "name": "crdName"
+            },
+            {
+              "name": "resourceUid"
+            },
+            {
               "name": "groupName_view"
             },
             {
@@ -721,6 +745,10 @@
                     "value": "{{inputs.parameters.migrationLabel}}"
                   },
                   {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
                     "name": "sourceEndpoint",
                     "value": "{{inputs.parameters.sourceEndpoint}}"
                   },
@@ -751,6 +779,10 @@
                   {
                     "name": "sessionName",
                     "value": "{{steps.idGenerator.id}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
                   }
                 ]
               },
@@ -774,6 +806,9 @@
             },
             {
               "name": "configChecksum"
+            },
+            {
+              "name": "resourceUid"
             },
             {
               "name": "groupName_view",
@@ -902,6 +937,10 @@
               "arguments": {
                 "parameters": [
                   {
+                    "name": "resourceUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
+                  },
+                  {
                     "name": "groupName_view",
                     "value": "{{=item['label']}}"
                   },
@@ -982,6 +1021,10 @@
                     "value": "{{=item['label']}}"
                   },
                   {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
                     "name": "sourceEndpoint",
                     "value": "{{=sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
                   }
@@ -1045,6 +1088,9 @@
             },
             {
               "name": "name"
+            },
+            {
+              "name": "resourceUid"
             },
             {
               "name": "configChecksum"
@@ -1228,7 +1274,7 @@
                   },
                   {
                     "name": "name",
-                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                    "value": "{{inputs.parameters.name}}"
                   },
                   {
                     "name": "targetConfig",
@@ -1261,6 +1307,10 @@
                   {
                     "name": "resolvedKafkaAuthType",
                     "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.authType}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
                   }
                 ]
               },
@@ -1415,7 +1465,7 @@
                 "parameters": [
                   {
                     "name": "kafkaClusterConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"version\", item['version'], \"config\", fromJSON(item['config']), \"topics\", fromJSON(item['topics']), \"configChecksum\", item['configChecksum']))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"version\", item['version'], \"config\", fromJSON(item['config']), \"topics\", fromJSON(item['topics']), \"configChecksum\", item['configChecksum'], \"resourceUid\", item['resourceUid']))}}"
                   },
                   {
                     "name": "clusterName",
@@ -1424,6 +1474,10 @@
                   {
                     "name": "version",
                     "value": "{{=item['version']}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=item['resourceUid']}}"
                   },
                   {
                     "name": "configChecksum",
@@ -1464,7 +1518,7 @@
                   },
                   {
                     "name": "proxyConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item)))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
                   },
                   {
                     "name": "kafkaClusterName",
@@ -1477,6 +1531,10 @@
                   {
                     "name": "proxyName",
                     "value": "{{=item['name']}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=item['resourceUid']}}"
                   },
                   {
                     "name": "listenPort",
@@ -1622,11 +1680,15 @@
                   },
                   {
                     "name": "snapshotMigrationConfig",
-                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotNameResolution\", fromJSON(item['snapshotNameResolution']), \"snapshotConfigChecksum\", item['snapshotConfigChecksum'], \"migrations\", fromJSON(item['migrations']), \"sourceVersion\", item['sourceVersion'], \"sourceLabel\", item['sourceLabel'], \"targetConfig\", fromJSON(item['targetConfig']), \"snapshotConfig\", fromJSON(item['snapshotConfig']), \"sourceEndpoint\", sprig.dig('sourceEndpoint', '', item), \"configChecksum\", item['configChecksum'], \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item)))}}"
+                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotNameResolution\", fromJSON(item['snapshotNameResolution']), \"snapshotConfigChecksum\", item['snapshotConfigChecksum'], \"migrations\", fromJSON(item['migrations']), \"sourceVersion\", item['sourceVersion'], \"sourceLabel\", item['sourceLabel'], \"targetConfig\", fromJSON(item['targetConfig']), \"snapshotConfig\", fromJSON(item['snapshotConfig']), \"sourceEndpoint\", sprig.dig('sourceEndpoint', '', item), \"configChecksum\", item['configChecksum'], \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
                   },
                   {
                     "name": "configChecksum",
                     "value": "{{=sprig.dig('configChecksum', '', item)}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=item['resourceUid']}}"
                   },
                   {
                     "name": "sortOrder_view",
@@ -1692,6 +1754,10 @@
                   {
                     "name": "configChecksum",
                     "value": "{{=jsonpath(toJSON(item), '$.configChecksum')}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=jsonpath(toJSON(item), '$.resourceUid')}}"
                   },
                   {
                     "name": "targetConfig",

@@ -25,7 +25,7 @@ def _pending_gate_names(namespace):
     return [
         name
         for _, name, phase, _ in list_migration_resources(namespace, ['approvalgates'])
-        if phase == 'Pending'
+        if phase in ('Initialized', 'Pending')
     ]
 
 

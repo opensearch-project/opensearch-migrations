@@ -285,6 +285,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("groupName_view", typeToken<string>())
         .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addOptionalInput("metadataMigrationConfig", c =>
@@ -309,7 +311,9 @@ export const FullMigration = WorkflowBuilder.create({
                         ...(selectInputsForRegister(b, c)),
                         sessionName: c.steps.idGenerator.id,
                         sourceVersion: b.inputs.sourceVersion,
-                        sourceLabel: b.inputs.sourceLabel
+                        sourceLabel: b.inputs.sourceLabel,
+                        crdName: b.inputs.crdName,
+                        crdUid: b.inputs.resourceUid
                     }),
                 {when: {templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig))}}
             )
@@ -321,6 +325,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("resourceUid", typeToken<string>())
         .addOptionalInput("groupName_view", c => "Snapshot Migration")
         .addOptionalInput("sortOrder_view", c => 999)
         .addInputsFromRecord(uniqueRunNonceParam)
@@ -408,6 +413,8 @@ export const FullMigration = WorkflowBuilder.create({
                             repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
                         })),
                         migrationLabel: expr.get(c.item, "label"),
+                        crdName: b.inputs.resourceName,
+                        resourceUid: b.inputs.resourceUid,
                         groupName_view: expr.get(c.item, "label"),
                         sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], "")
                     });
@@ -705,9 +712,11 @@ export const FullMigration = WorkflowBuilder.create({
                         sourceEndpoint: expr.dig(c.item, ["sourceEndpoint"], ""),
                         configChecksum: expr.get(c.item, "configChecksum"),
                         checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
+                        resourceUid: expr.get(c.item, "resourceUid"),
                     })),
 //                    snapshotMigrationConfig: expr.cast(c.item).to<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>()
                     configChecksum: expr.dig(c.item, ["configChecksum"], ""),
+                    resourceUid: expr.get(c.item, "resourceUid"),
                     sortOrder_view: expr.literal(4),
                 }), {
                     loopWith: makeParameterLoop(

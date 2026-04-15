@@ -289,43 +289,6 @@ export const ResourceManagement = WorkflowBuilder.create({
         )
     )
 
-
-    // ── Teardown signal templates ───────────────────────────────────────
-
-    .addTemplate("waitForTeardown", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("resourceKind", typeToken<string>())
-        .addWaitForExistingResource(b => b
-            .setDefinition({
-                resource: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: b.inputs.resourceKind,
-                    name: b.inputs.resourceName
-                },
-                conditions: {successCondition: "status.phase == Teardown"}
-            })
-        )
-    )
-
-
-    .addTemplate("patchTeardown", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("resourceKind", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "patch",
-                flags: ["--type", "merge", "--subresource=status"],
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: b.inputs.resourceKind,
-                    metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Teardown"}
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
     .addTemplate("deleteDeployment", t => t
         .addRequiredInput("deploymentName", typeToken<string>())
         .addResourceTask(b => b

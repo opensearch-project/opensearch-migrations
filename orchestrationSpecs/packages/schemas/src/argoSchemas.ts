@@ -215,6 +215,7 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     sourceAuth: z.any().optional(),
     configChecksum: z.string(),
     checksumForReplayer: z.string(),
+    resourceUid: z.string(),
 });
 
 export const NAMED_KAFKA_CLIENT_CONFIG =
@@ -299,6 +300,9 @@ function makePreEnrichMigrationConfigSchema() {
         ).min(1).optional(),
         proxies: z.array(
             makeResourceUidOptional(DENORMALIZED_PROXY_CONFIG)
+        ).default([]),
+        snapshotMigrations: z.array(
+            makeResourceUidOptional(SNAPSHOT_MIGRATION_CONFIG)
         ).default([]),
         trafficReplays: z.array(
             makeResourceUidOptional(DENORMALIZED_REPLAY_CONFIG)

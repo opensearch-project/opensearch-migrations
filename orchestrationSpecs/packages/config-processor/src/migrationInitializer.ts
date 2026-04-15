@@ -282,7 +282,15 @@ export class MigrationInitializer {
     private generateWorkflowUidEnrichmentScript(workflows: WorkflowConfig): string | null {
         const kafkaClusters = (workflows.kafkaClusters ?? []) as KafkaClusterConfig[];
         const proxies = workflows.proxies as ProxyConfig[];
+        const snapshotMigrations = workflows.snapshotMigrations as SnapshotMigrationConfig[];
         const trafficReplays = workflows.trafficReplays as ReplayConfig[];
+        const snapshotMigrationResources = snapshotMigrations.map(migration => ({
+            name: this.makeCrdName(
+                migration.sourceLabel,
+                migration.targetConfig.label,
+                migration.label
+            )
+        }));
         if (kafkaClusters.length === 0 && proxies.length === 0 && trafficReplays.length === 0) {
             return null;
         }
@@ -305,6 +313,12 @@ export class MigrationInitializer {
                     proxy.name,
                     shellVar('proxy', proxy.name)
                 )),
+            ...snapshotMigrationResources.map(migration =>
+                kubectlGetUid(
+                    'snapshotmigrations.migrations.opensearch.org',
+                    migration.name,
+                    shellVar('snapshot_migration', migration.name)
+                )),
             ...trafficReplays.map(replay =>
                 kubectlGetUid(
                     'trafficreplays.migrations.opensearch.org',
@@ -316,6 +330,9 @@ export class MigrationInitializer {
         const uidMapArgs = [
             ...kafkaClusters.map(cluster => `  --arg ${shellVar('kafka', cluster.name)} "$${shellVar('kafka', cluster.name)}"`),
             ...proxies.map(proxy => `  --arg ${shellVar('proxy', proxy.name)} "$${shellVar('proxy', proxy.name)}"`),
+            ...snapshotMigrationResources.map(migration =>
+                `  --arg ${shellVar('snapshot_migration', migration.name)} "$${shellVar('snapshot_migration', migration.name)}"`
+            ),
             ...trafficReplays.map(replay => `  --arg ${shellVar('replay', replay.name)} "$${shellVar('replay', replay.name)}"`),
         ];
 
@@ -331,6 +348,9 @@ export class MigrationInitializer {
             "    },",
             "    proxies: {",
             mapEntries(proxies, 'proxy'),
+            "    },",
+            "    snapshotMigrations: {",
+            mapEntries(snapshotMigrationResources, 'snapshot_migration'),
             "    },",
             "    trafficReplays: {",
             mapEntries(trafficReplays, 'replay'),
@@ -355,6 +375,7 @@ export class MigrationInitializer {
             "jq --argjson uids \"$uid_map_json\" '",
             "  .kafkaClusters |= ((. // []) | map(. + {resourceUid: $uids.kafkaClusters[.name]}))",
             "  | .proxies |= ((. // []) | map(. + {resourceUid: $uids.proxies[.name]}))",
+            "  | .snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + \"-\" + .targetConfig.label + \"-\" + .label)]}))",
             "  | .trafficReplays |= ((. // []) | map(. + {resourceUid: $uids.trafficReplays[.name]}))",
             "' \"$CONFIG_PATH\" > \"$tmp_file\"",
             "",

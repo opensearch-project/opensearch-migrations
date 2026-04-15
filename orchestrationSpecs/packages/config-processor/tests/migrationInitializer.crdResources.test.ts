@@ -4,7 +4,7 @@ import { OVERALL_MIGRATION_CONFIG } from "@opensearch-migrations/schemas";
 import { z } from "zod";
 
 describe('migration initializer CRD resource generation', () => {
-    it('generates kafka, replay, and approval-gate CR resources with expected names', async () => {
+    it('generates CR resources and UID enrichment script entries with expected names', async () => {
         const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 source: {
@@ -90,6 +90,7 @@ describe('migration initializer CRD resource generation', () => {
         const initializer = new MigrationInitializer();
         const bundle = await initializer.generateMigrationBundle(config);
         const resources = bundle.crdResources.items;
+        const enrichScript = (initializer as any).generateWorkflowUidEnrichmentScript(bundle.workflows);
 
         const byKind = (kind: string) =>
             resources.filter((item: any) => item.kind === kind).map((item: any) => item.metadata.name);
@@ -111,5 +112,14 @@ describe('migration initializer CRD resource generation', () => {
         expect(getResource('DataSnapshot', 'source-snap1')?.spec.dependsOn).toEqual(['source-proxy']);
         expect(getResource('SnapshotMigration', 'source-target-snap1')?.spec.dependsOn).toEqual(['source-snap1']);
         expect(getResource('TrafficReplay', 'source-proxy-target-target-replay')?.spec.dependsOn).toEqual(['source-proxy']);
+
+        expect(enrichScript).toContain(
+            "snapshot_migration_source_target_snap1=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1 -o jsonpath='{.metadata.uid}')\""
+        );
+        expect(enrichScript).toContain('snapshotMigrations: {');
+        expect(enrichScript).toContain('"source-target-snap1": $snapshot_migration_source_target_snap1');
+        expect(enrichScript).toContain(
+            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + "-" + .targetConfig.label + "-" + .label)]}))'
+        );
     });
 });
