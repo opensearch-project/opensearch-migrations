@@ -136,11 +136,13 @@ jobs:
           docker pull opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
           docker pull opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
           docker pull opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-transformation-shim:${{ steps.get_data.outputs.version }}
           # Tag them with the expected names for SBOM scanning
           docker tag opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }} migrations/migration_console:latest
           docker tag opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }} migrations/traffic_replayer:latest
           docker tag opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }} migrations/capture_proxy:latest
           docker tag opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }} migrations/reindex_from_snapshot:latest
+          docker tag opensearchstaging/opensearch-migrations-transformation-shim:${{ steps.get_data.outputs.version }} migrations/transformation_shim:latest
       - name: Generate SBOM for migration_console
         uses: anchore/sbom-action@v0.24.0
         with:
@@ -161,6 +163,11 @@ jobs:
         with:
           image: migrations/reindex_from_snapshot:latest
           output-file: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
+      - name: Generate SBOM for transformation_shim
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          image: migrations/transformation_shim:latest
+          output-file: opensearch-migrations-transformation-shim-sbom.spdx.json
       - name: Generate SBOM for artifacts
         uses: anchore/sbom-action@v0.24.0
         with:
@@ -174,6 +181,35 @@ jobs:
           helm package deployment/k8s/charts/aggregates/migrationAssistantWithArgo \
             --version ${{ steps.get_data.outputs.version }} \
             --app-version ${{ steps.get_data.outputs.version }}
+      - name: Set up Kind cluster for schema verification
+        if: ${{ !github.event.act }}
+        uses: helm/kind-action@v1.14.0
+        with:
+          cluster_name: release-schema-verification
+          node_image: kindest/node:v1.33.1
+      - name: Deploy Helm chart and copy generated workflow schema
+        if: ${{ !github.event.act }}
+        run: |
+          chmod +x ./deployment/k8s/generateWorkflowSchemaArtifact.sh
+          KUBE_CONTEXT=kind-release-schema-verification \
+          IMAGE_REPOSITORY_PREFIX=opensearchstaging \
+          IMAGE_TAG=${{ steps.get_data.outputs.version }} \
+          OUTPUT_PATH="${PWD}/workflowMigration.schema.json" \
+          ./deployment/k8s/generateWorkflowSchemaArtifact.sh
+      - name: Upload unified schema artifact
+        if: ${{ !github.event.act }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: workflowMigration-schema-${{ steps.get_data.outputs.version }}
+          path: workflowMigration.schema.json
+      - name: Dump schema verification diagnostics
+        if: ${{ failure() && !github.event.act }}
+        run: |
+          kubectl --context kind-release-schema-verification get pods -A
+          kubectl --context kind-release-schema-verification -n ma describe statefulset migration-console || true
+          kubectl --context kind-release-schema-verification -n ma describe pod migration-console-0 || true
+          kubectl --context kind-release-schema-verification -n ma logs migration-console-0 -c workflow-schema-generator || true
+          kubectl --context kind-release-schema-verification -n ma logs migration-console-0 -c console || true
       - name: Configure AWS Credentials for Solutions Credentials
         if: ${{ !github.event.act }}
         uses: aws-actions/configure-aws-credentials@v6
@@ -209,7 +245,7 @@ jobs:
           deployment/k8s/aws/assemble-bootstrap.sh
       - name: Draft a release
         if: ${{ !github.event.act }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           draft: true
           generate_release_notes: true
@@ -219,5 +255,6 @@ jobs:
             opensearch-migrations-build.tar.gz
             kiro-cli/build/kiro-assistant.tar.gz
             migration-assistant-${{ steps.get_data.outputs.version }}.tgz
+            workflowMigration.schema.json
             deployment/k8s/aws/dist/aws-bootstrap.sh
             **/*.spdx.json

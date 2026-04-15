@@ -200,6 +200,12 @@ export interface TestCase {
   opensearchMapping?: OpenSearchMapping;
   solrVersions?: string[];
   plugins?: string[];
+  /** Optional bindings passed to transforms at init (e.g., solrConfig defaults from solrconfig.xml). */
+  transformBindings?: Record<string, unknown>;
+  /** Expected HTTP status code from the proxy. When set, skips Solr comparison and asserts status + error message. */
+  expectedStatusCode?: number;
+  /** Expected substring in the error response body. Only used with expectedStatusCode. */
+  expectedErrorContains?: string;
 }
 
 /** Solr-internal fields that OpenSearch doesn't have — always safe to ignore. */

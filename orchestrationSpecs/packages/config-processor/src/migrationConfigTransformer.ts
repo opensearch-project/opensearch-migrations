@@ -1,19 +1,28 @@
 import {
     ARGO_REPLAYER_OPTIONS,
     DENORMALIZED_S3_REPO_CONFIG,
+    DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     OVERALL_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
-    ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, CAPTURE_CONFIG,
-    GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT,
+    ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
+    GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT, PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
+    FieldMeta, ChecksumDependency,
+    USER_PROXY_PROCESS_OPTIONS, USER_PROXY_WORKFLOW_OPTIONS,
+    USER_RFS_PROCESS_OPTIONS,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
 import {promises as dns} from "dns";
+import {createHash} from "crypto";
 import { generateSemaphoreKey } from './semaphoreUtils';
+import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG>;
+export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration"> & {
+    kafkaClusterConfiguration: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>;
+};
 
 /** Kafka version deployed by auto-created clusters. Not user-configurable. */
 const KAFKA_VERSION = "4.0.0";
@@ -161,6 +170,66 @@ function validateNoExtraKeys(data: any, schema: z.ZodTypeAny, path: string[] = [
 }
 
 const DEFAULT_AUTO_CREATE_CONFIG: z.infer<typeof KAFKA_CLUSTER_CONFIG> = { autoCreate: {} };
+const DEFAULT_WORKFLOW_MANAGED_KAFKA_AUTH = {type: "scram-sha-512" as const};
+
+function resolveWorkflowManagedKafkaAuth(
+    cluster: z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>}
+) {
+    return cluster.autoCreate.auth ?? DEFAULT_WORKFLOW_MANAGED_KAFKA_AUTH;
+}
+
+function normalizeKafkaClusterConfig(
+    cluster: z.infer<typeof KAFKA_CLUSTER_CONFIG>
+): z.infer<typeof KAFKA_CLUSTER_CONFIG> {
+    // Keep the cluster in the user-config schema family while resolving
+    // workflow-managed defaults into an explicit canonical form.
+    if ("existing" in cluster) {
+        return cluster;
+    }
+
+    return {
+        autoCreate: {
+            ...cluster.autoCreate,
+            auth: resolveWorkflowManagedKafkaAuth(
+                cluster as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>}
+            ),
+        }
+    };
+}
+
+function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["traffic"] {
+    // Drop user-schema sentinel placeholders that are equivalent to omission so
+    // AJV validates the canonical user config rather than Zod's empty-string defaults.
+    if (!traffic) {
+        return traffic;
+    }
+
+    const normalizedProxies: NonNullable<InputConfig["traffic"]>["proxies"] = {};
+    for (const [key, proxy] of Object.entries(traffic.proxies ?? {})) {
+        normalizedProxies[key] = proxy.kafkaTopic === ""
+            ? (({kafkaTopic, ...rest}) => rest)(proxy)
+            : proxy;
+    }
+
+    return {
+        ...traffic,
+        proxies: normalizedProxies,
+    };
+}
+
+export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConfig {
+    const namedConfig = setNamesInUserConfig(userConfig);
+    return {
+        ...namedConfig,
+        traffic: normalizeTrafficConfig(namedConfig.traffic),
+        kafkaClusterConfiguration: Object.fromEntries(
+            Object.entries(namedConfig.kafkaClusterConfiguration ?? {}).map(([key, cluster]) => [
+                key,
+                normalizeKafkaClusterConfig(cluster)
+            ])
+        ),
+    };
+}
 
 /** Resolve kafkaClusterConfiguration, auto-injecting autoCreate entries only when no explicit kafka config was provided. */
 function resolveKafkaClusters(userConfig: { kafkaClusterConfiguration?: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>, traffic?: { proxies?: Record<string, { kafka?: string }> } }) {
@@ -189,17 +258,36 @@ function buildKafkaClientConfig(
         throw new Error(`Kafka cluster '${kafkaClusterKey}' not found in kafkaClusterConfiguration`);
     }
     if ('existing' in cluster) {
+        const auth = cluster.existing.auth ?? {type: "none" as const};
         return {
-            ...cluster.existing,
+            enableMSKAuth: cluster.existing.enableMSKAuth,
+            kafkaConnection: cluster.existing.kafkaConnection,
             kafkaTopic: topic || cluster.existing.kafkaTopic,
+            managedByWorkflow: false,
+            listenerName: "",
+            authType: auth.type,
+            secretName: "secretName" in auth ? auth.secretName : "",
+            caSecretName: "caSecretName" in auth ? auth.caSecretName : "",
+            kafkaUserName: "kafkaUserName" in auth ? (auth.kafkaUserName ?? "") : "",
+            topicSpecOverrides: DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
             label: kafkaClusterKey
         };
     }
-    // autoCreate — Strimzi creates a deterministic bootstrap service: <clusterName>-kafka-bootstrap:9092
+    const auth = resolveWorkflowManagedKafkaAuth(cluster as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>});
+    const listenerName = auth.type === "scram-sha-512" ? "tls" : "plain";
+    const listenerPort = auth.type === "scram-sha-512" ? 9093 : 9092;
+    // autoCreate — Strimzi creates a deterministic bootstrap service for the selected internal listener.
     return {
         enableMSKAuth: false,
-        kafkaConnection: `${kafkaClusterKey}-kafka-bootstrap:9092`,
+        kafkaConnection: `${kafkaClusterKey}-kafka-bootstrap:${listenerPort}`,
         kafkaTopic: topic,
+        managedByWorkflow: true,
+        listenerName,
+        authType: auth.type,
+        secretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
+        caSecretName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-cluster-ca-cert` : "",
+        kafkaUserName: auth.type === "scram-sha-512" ? `${kafkaClusterKey}-migration-app` : "",
+        topicSpecOverrides: cluster.autoCreate.topicSpecOverrides,
         label: kafkaClusterKey
     };
 }
@@ -216,22 +304,28 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         super(OVERALL_MIGRATION_CONFIG, ARGO_MIGRATION_CONFIG);
     }
 
-    validateInput(data: unknown): InputConfig {
-        // First pass: normal schema validation (including refinements)
-        const obj = super.validateInput(data);
-        
-        // Second pass: check for extra keys
+    validateInput(data: unknown): NormalizedUserConfig {
+        // First pass: zod schema validation (including refinements)
+        const parsed = super.validateInput(data);
+        const normalized = normalizeUserConfig(parsed);
+
+        // Second pass: unified schema validation against the normalized user config.
+        // This stays in the user-config schema family and avoids mixing raw input
+        // with selectively patched normalized subtrees.
+        validateInputAgainstUnifiedSchema(normalized);
+
+        // Third pass: check for extra keys
         validateNoExtraKeys(data, OVERALL_MIGRATION_CONFIG);
         
-        return obj;
+        return normalized;
     }
 
-    async transform(input: InputConfig): Promise<OutputConfig> {
+    async transform(input: NormalizedUserConfig): Promise<OutputConfig> {
         const processedInput = await this.preprocessInput(input);
         return await this.transformSync(processedInput);
     }
 
-    private async preprocessInput(input: InputConfig): Promise<InputConfig> {
+    private async preprocessInput(input: NormalizedUserConfig): Promise<NormalizedUserConfig> {
         const processedSourceClusters = {...input.sourceClusters};
 
         for (const [name, cluster] of Object.entries(input.sourceClusters)) {
@@ -249,19 +343,95 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         return { ...input, sourceClusters: processedSourceClusters };
     }
 
-    private async transformSync(userConfig: InputConfig): Promise<OutputConfig> {
+    private async transformSync(userConfig: NormalizedUserConfig): Promise<OutputConfig> {
         const kafkaClusters = this.buildKafkaClusters(userConfig);
         const proxies = this.buildProxies(userConfig);
         const snapshots = this.buildSnapshots(userConfig);
         const snapshotMigrations = await this.buildSnapshotMigrations(userConfig);
         const trafficReplays = this.buildTrafficReplays(userConfig);
 
+        // Compute config checksums with dependency chaining
+        const cs = MigrationConfigTransformer.configChecksum;
+        const csDep = MigrationConfigTransformer.checksumForDependency;
+        const PROXY_SCHEMA = z.object({...USER_PROXY_WORKFLOW_OPTIONS.shape, ...USER_PROXY_PROCESS_OPTIONS.shape});
+        const RFS_SCHEMA = USER_RFS_PROCESS_OPTIONS;
+        const kafkaChecksums = new Map(kafkaClusters.map(k => [k.name, cs(k)]));
+
+        const proxiesWithChecksums = proxies.map(p => ({
+            ...p,
+            kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksums.get(p.kafkaConfig.label) ?? '' },
+            configChecksum: cs(p.proxyConfig, kafkaChecksums.get(p.kafkaConfig.label)),
+            checksumForSnapshot: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'snapshot', kafkaChecksums.get(p.kafkaConfig.label)),
+            checksumForReplayer: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'replayer', kafkaChecksums.get(p.kafkaConfig.label)),
+        }));
+        const proxyChecksums = new Map(proxiesWithChecksums.map(p => [p.name, p.configChecksum]));
+        const proxyChecksumForSnapshot = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForSnapshot]));
+        const proxyChecksumForReplayer = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForReplayer]));
+
+        const snapshotsWithChecksums = snapshots.map(s => ({
+            ...s,
+            createSnapshotConfig: s.createSnapshotConfig.map((item: z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>) => {
+                const enrichedDeps = (item.dependsOnProxySetups ?? []).map((dep: {name: string}) => ({
+                    ...dep,
+                    configChecksum: proxyChecksumForSnapshot.get(dep.name) ?? '',
+                }));
+                return {
+                    ...item,
+                    dependsOnProxySetups: enrichedDeps,
+                    configChecksum: cs(item.config, item.repo, ...enrichedDeps.map(d => d.configChecksum)),
+                };
+            }),
+        }));
+        const snapshotChecksums = new Map<string, string>();
+        for (const s of snapshotsWithChecksums) {
+            for (const item of s.createSnapshotConfig) {
+                snapshotChecksums.set([s.sourceConfig.label, item.label].join('-'), item.configChecksum!);
+            }
+        }
+
+        const migrationsWithChecksums = snapshotMigrations.map(m => {
+            // Extract replayer-material fields from each migration's documentBackfillConfig
+            const replayerMaterialParts = m.migrations.map((mig: any) =>
+                mig.documentBackfillConfig
+                    ? csDep(RFS_SCHEMA, mig.documentBackfillConfig as Record<string, unknown>, 'replayer')
+                    : ''
+            );
+            return {
+                ...m,
+                snapshotConfigChecksum: snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '',
+                configChecksum: cs(m.migrations, m.targetConfig, snapshotChecksums.get([m.sourceLabel, m.label].join('-'))),
+                checksumForReplayer: cs(m.targetConfig, ...replayerMaterialParts),
+            };
+        });
+        const migrationChecksums = new Map(migrationsWithChecksums.map(m =>
+            [[m.sourceLabel, m.label].join('-'), m.configChecksum]
+        ));
+        const migrationChecksumForReplayer = new Map(migrationsWithChecksums.map(m =>
+            [[m.sourceLabel, m.label].join('-'), m.checksumForReplayer]
+        ));
+
+        const replaysWithChecksums = trafficReplays.map(r => ({
+            ...r,
+            kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
+            fromProxyConfigChecksum: proxyChecksumForReplayer.get(r.fromProxy) ?? '',
+            configChecksum: cs(r.replayerConfig, r.toTarget, proxyChecksumForReplayer.get(r.fromProxy)),
+            dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).map(dep => ({
+                ...dep,
+                configChecksum: migrationChecksumForReplayer.get([dep.source, dep.snapshot].join('-')) ?? '',
+            })),
+        }));
+
+        const kafkasWithChecksums = kafkaClusters.map(k => ({
+            ...k,
+            configChecksum: kafkaChecksums.get(k.name),
+        }));
+
         const output = {
-            ...(kafkaClusters.length > 0 ? { kafkaClusters } : {}),
-            ...(proxies.length > 0 ? { proxies } : {}),
-            ...(snapshots.length > 0 ? { snapshots } : {}),
-            ...(snapshotMigrations.length > 0 ? { snapshotMigrations } : {}),
-            ...(trafficReplays.length > 0 ? { trafficReplays } : {})
+            ...(kafkasWithChecksums.length > 0 ? { kafkaClusters: kafkasWithChecksums } : {}),
+            ...(proxiesWithChecksums.length > 0 ? { proxies: proxiesWithChecksums } : {}),
+            ...(snapshotsWithChecksums.length > 0 ? { snapshots: snapshotsWithChecksums } : {}),
+            ...(migrationsWithChecksums.length > 0 ? { snapshotMigrations: migrationsWithChecksums } : {}),
+            ...(replaysWithChecksums.length > 0 ? { trafficReplays: replaysWithChecksums } : {})
         };
 
         try {
@@ -273,7 +443,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Collect auto-created kafka clusters with their aggregated topics from proxies. */
-    private buildKafkaClusters(userConfig: InputConfig) {
+    private buildKafkaClusters(userConfig: NormalizedUserConfig) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
         // Aggregate topics per kafka cluster from proxies
         const topicsByCluster = new Map<string, Set<string>>();
@@ -288,13 +458,16 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             .map(([name, config]) => ({
                 name,
                 version: KAFKA_VERSION,
-                config: (config as any).autoCreate,
+                config: {
+                    ...(config as any).autoCreate,
+                    auth: resolveWorkflowManagedKafkaAuth(config as z.infer<typeof KAFKA_CLUSTER_CONFIG> & {autoCreate: z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>}),
+                },
                 topics: [...(topicsByCluster.get(name) ?? [])]
             }));
     }
 
     /** Denormalize each proxy with source endpoint and kafka client config. */
-    private buildProxies(userConfig: InputConfig) {
+    private buildProxies(userConfig: NormalizedUserConfig) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
         return Object.entries(userConfig.traffic?.proxies || {}).map(([proxyName, proxy]) => {
             const sourceCluster = userConfig.sourceClusters[proxy.source];
@@ -312,7 +485,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         });
     }
 
-    private getSourceAttachedProxy(userConfig: InputConfig, sourceName: string) {
+    private getSourceAttachedProxy(userConfig: NormalizedUserConfig, sourceName: string) {
         const matchingProxies = Object.entries(userConfig.traffic?.proxies || {})
             .filter(([_, proxy]) => proxy.source === sourceName);
 
@@ -337,7 +510,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Build snapshot creation configs grouped by source cluster. */
-    private buildSnapshots(userConfig: InputConfig) {
+    private buildSnapshots(userConfig: NormalizedUserConfig) {
         // Build a map of source → proxy names for dependsOnProxySetups
         const proxyNamesBySource = new Map<string, string[]>();
         for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
@@ -371,7 +544,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     },
                     repo: repoConfig,
                     ...semaphore,
-                    ...{dependsOnProxySetups: proxyDeps ?? []}
+                    ...{dependsOnProxySetups: (proxyDeps ?? []).map(name => ({
+                        name,
+                        configChecksum: ''
+                    }))}
                 });
             }
 
@@ -392,7 +568,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Build snapshot migration configs from snapshotMigrationConfigs + perSnapshotConfig. */
-    private async buildSnapshotMigrations(userConfig: InputConfig) {
+    private async buildSnapshotMigrations(userConfig: NormalizedUserConfig) {
         const results: any[] = [];
 
         for (const mc of userConfig.snapshotMigrationConfigs) {
@@ -441,6 +617,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 results.push({
                     label: snapshotName,
                     snapshotNameResolution,
+                    snapshotConfigChecksum: '',
                     migrations: autoLabelMigrations(migrations),
                     sourceVersion: sourceCluster.version || "",
                     sourceLabel: fromSource,
@@ -461,11 +638,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     }
 
     /** Build traffic replay configs by resolving proxy → kafka chain. */
-    private buildTrafficReplays(userConfig: InputConfig) {
+    private buildTrafficReplays(userConfig: NormalizedUserConfig) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
         const proxies = userConfig.traffic?.proxies;
 
-        return Object.entries(userConfig.traffic?.replayers || {}).map(([_name, replayer]) => {
+        return Object.entries(userConfig.traffic?.replayers || {}).map(([name, replayer]) => {
             const proxy = proxies?.[replayer.fromProxy];
             if (!proxy) {
                 throw new Error(`Replayer references unknown proxy '${replayer.fromProxy}'`);
@@ -480,6 +657,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const replayerConfig = ARGO_REPLAYER_OPTIONS.parse(replayer.replayerConfig ?? {});
 
             return {
+                name: [replayer.fromProxy, replayer.toTarget, name].join('-'),
                 fromProxy: replayer.fromProxy,
                 kafkaClusterName: proxy.kafka ?? "default",
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
@@ -495,5 +673,32 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             semaphoreConfigMapName: 'concurrency-config',
             semaphoreKey: generateSemaphoreKey(sourceVersion, sourceName, snapshotName)
         };
+    }
+
+    /**
+     * Pick only the fields from `data` whose schema annotation includes `dep` in checksumFor,
+     * then hash them (plus any extra upstream checksums).
+     */
+    static checksumForDependency(
+        schema: z.ZodObject<any>,
+        data: Record<string, unknown>,
+        dep: ChecksumDependency,
+        ...upstreamChecksums: (string | undefined)[]
+    ): string {
+        const picked: Record<string, unknown> = {};
+        for (const [key, fieldSchema] of Object.entries(schema.shape)) {
+            const meta = (fieldSchema as z.ZodType).meta() as FieldMeta | undefined;
+            if (meta?.checksumFor?.includes(dep)) {
+                picked[key] = data[key];
+            }
+        }
+        return MigrationConfigTransformer.configChecksum(picked, ...upstreamChecksums);
+    }
+
+    static configChecksum(...parts: unknown[]): string {
+        return createHash('sha256')
+            .update(JSON.stringify(parts))
+            .digest('hex')
+            .slice(0, 16);
     }
 }

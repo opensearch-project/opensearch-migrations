@@ -8,6 +8,7 @@ dependencies {
     implementation project(':coreUtilities')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformer')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonGraalTransformerBase')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
     implementation project(':awsUtilities')
 
@@ -25,6 +26,8 @@ dependencies {
 
     testImplementation libs.junit.jupiter.api
     testImplementation testFixtures(project(':coreUtilities'))
+    testImplementation libs.mockito.core
+    testImplementation libs.mockito.junit.jupiter
     testRuntimeOnly libs.junit.jupiter.engine
 }
 
@@ -34,4 +37,24 @@ application {
 
 tasks.withType(Test).configureEach {
     systemProperty 'io.netty.handler.codec.http.defaultStrictLineParsing', false
+}
+
+// Bundle Solr-to-OpenSearch transforms into the Docker image by default.
+// Skip with: ./gradlew :TrafficCapture:transformationShim:jibDockerBuild -PskipBundleTransforms
+if (!project.hasProperty('skipBundleTransforms')) {
+    def transformStagingDir = layout.buildDirectory.dir("docker/transforms")
+
+    tasks.register('stageTransformsForImage', Sync) {
+        description = 'Sync built transforms into build/docker/transforms/ for Jib extraDirectories'
+        from "${project(':TrafficCapture:SolrTransformations').projectDir}/transforms/dist"
+        into transformStagingDir
+        include '*.js'
+        dependsOn ':TrafficCapture:SolrTransformations:buildTransforms'
+
+        inputs.dir("${project(':TrafficCapture:SolrTransformations').projectDir}/transforms/dist")
+        outputs.dir(transformStagingDir)
+    }
+
+    tasks.named('jib').configure { dependsOn 'stageTransformsForImage' }
+    tasks.named('jibDockerBuild').configure { dependsOn 'stageTransformsForImage' }
 }

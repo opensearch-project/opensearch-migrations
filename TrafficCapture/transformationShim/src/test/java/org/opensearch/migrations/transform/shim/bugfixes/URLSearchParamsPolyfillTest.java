@@ -12,8 +12,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.transform.JavascriptTransformer;
-import org.opensearch.migrations.transform.shim.ShimMain;
 import org.opensearch.migrations.transform.shim.ShimProxy;
+import org.opensearch.migrations.transform.shim.SolrTransformerProvider;
 import org.opensearch.migrations.transform.shim.validation.Target;
 
 import io.netty.bootstrap.ServerBootstrap;
@@ -55,7 +55,7 @@ class URLSearchParamsPolyfillTest {
     /** Minimal URLSearchParams polyfill — uses the production polyfill from ShimMain. */
 
     /** Transform that parses query params with URLSearchParams and exercises all polyfill methods. */
-    private static final String TRANSFORM = ShimMain.JS_POLYFILL +
+    private static final String TRANSFORM = SolrTransformerProvider.JS_POLYFILL +
         "(function(bindings) {\n" +
         "  return function(request) {\n" +
         "    var uri = request.get('URI');\n" +
@@ -156,6 +156,55 @@ class URLSearchParamsPolyfillTest {
         // delete
         assertTrue(body.contains("\"hasRowsBefore\":true"), "has('rows') should be true before delete: " + body);
         assertTrue(body.contains("\"hasRowsAfter\":false"), "has('rows') should be false after delete: " + body);
+    }
+
+    @Test
+    void urlSearchParams_decodesPlus_asSpace() throws Exception {
+        int backendPort = findFreePort();
+        int proxyPort = findFreePort();
+
+        startEchoBackend(backendPort);
+
+        // Transform that extracts q param to verify + decoding
+        var plusTransform = new JavascriptTransformer(SolrTransformerProvider.JS_POLYFILL +
+            "(function(bindings) {\n" +
+            "  return function(request) {\n" +
+            "    var uri = request.get('URI');\n" +
+            "    var qIdx = uri.indexOf('?');\n" +
+            "    if (qIdx >= 0) {\n" +
+            "      var params = new URLSearchParams(uri.substring(qIdx + 1));\n" +
+            "      request.set('URI', '/parsed');\n" +
+            "      request.set('method', 'POST');\n" +
+            "      var payload = new Map();\n" +
+            "      var body = new Map();\n" +
+            "      body.set('q', params.get('q'));\n" +
+            "      body.set('sort', params.get('sort'));\n" +
+            "      body.set('literal', params.get('literal'));\n" +
+            "      payload.set('inlinedJsonBody', body);\n" +
+            "      request.set('payload', payload);\n" +
+            "    }\n" +
+            "    return request;\n" +
+            "  };\n" +
+            "})", new LinkedHashMap<>());
+
+        var targets = Map.of("backend",
+            new Target("backend", URI.create("http://localhost:" + backendPort), plusTransform, null, null));
+        proxy = new ShimProxy(proxyPort, targets, "backend", List.of());
+        proxy.start();
+
+        // + should decode as space, %2B should decode as literal +
+        var resp = HTTP.send(
+            HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + proxyPort
+                    + "/search?q=hello+world&sort=price+asc&literal=1%2B2"))
+                .GET().build(),
+            HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, resp.statusCode());
+        var body = resp.body();
+        assertTrue(body.contains("\"q\":\"hello world\""), "+ should decode as space: " + body);
+        assertTrue(body.contains("\"sort\":\"price asc\""), "+ in sort should decode as space: " + body);
+        assertTrue(body.contains("\"literal\":\"1+2\""), "%2B should decode as literal +: " + body);
     }
 
     private void startEchoBackend(int port) throws InterruptedException {

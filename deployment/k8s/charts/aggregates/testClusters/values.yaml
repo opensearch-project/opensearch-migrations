@@ -81,6 +81,8 @@ source:
     elasticsearch.yml: |
       cluster.name: "docker-cluster"
       network.host: 0.0.0.0
+      xpack.security.enabled: false
+      xpack.ml.enabled: false
       
       ######## Start Search Guard Demo Configuration ########
       # WARNING: revise all the lines below before you go into production
@@ -109,6 +111,8 @@ source:
       s3.client.default.endpoint: "http://localstack:4566"
       s3.client.default.path_style_access: true
 
+  sysctlInitContainer:
+    enabled: false
   minimumMasterNodes: 1
   persistence:
     enabled: false
