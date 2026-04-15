@@ -19,6 +19,7 @@ defaultTest:
 
 prompts:
   - |-
+    Do only stick to resources within the the directory set as your cwd, but ignore all resources under the test folder.
     Load the skill in .claude/skills/migration-advisor (if you have not already done so) before answering the following query: 
     {{query}}
 
@@ -385,4 +386,49 @@ tests:
           - 4gb - 8gb jvm heap per node
           - SolrCloud setup needs migration to OpenSearch ClusterManager
           - if ZooKeeper was mentioned as SolrCloud dependency, that is not valid for OpenSearch, this dependency is not needed anymore
-        metric: sizing-recommendationn
+        metric: sizing-recommendation
+  - description: "Resumes session 1"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        I am a Search Relevancy Engineer. We want to migrate our system based on Solr 8.0 to OpenSearch.
+        We are using the TMDB schema. And my name is Peter Parker. Remember this session as 'my-test-session'
+  - description: "Resume session 2"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        Hi there, please resume the session 'my-test-session' and fill me in on already stated facts about my role, 
+        used solr version, schema used, and my name :).
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response shall state the following facts:
+          - Role is Search Relevancy Engineer
+          - Solr is Solr 8.0
+          - Schema is the TMDB schema
+          - Name is Peter Parker
+        metric: session-resumption
+  - description: "Resumes session 3 - Clear session"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        Hi there, please clear the session state for the session name 'my-test-session'.
+  - description: "Resumes session 4 - No session resumption after clearance"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        Hi there, please resume the session 'my-test-session' and fill me in on already stated facts about my role, 
+        used solr version, schema used, and my name :).
+    assert:
+    - type: llm-rubric
+      value: >-
+        Response shall not contain any of the following facts:
+        - Role is Search Relevancy Engineer
+        - Solr is Solr 8.0
+        - Schema is the TMDB schema
+        - Name is Peter Parker
+        The response should state that no session with name 'my-test-session' exists.
