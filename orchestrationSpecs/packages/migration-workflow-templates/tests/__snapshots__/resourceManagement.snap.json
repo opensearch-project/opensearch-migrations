@@ -99,7 +99,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "OnError",
+          "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
             "factor": "2",

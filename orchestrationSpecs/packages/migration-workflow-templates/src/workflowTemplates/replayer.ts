@@ -19,7 +19,7 @@ import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {CONTAINER_NAMES} from "../containerNames";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {K8S_POLLING_RETRY_STRATEGY, K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -286,7 +286,7 @@ export const Replayer = WorkflowBuilder.create({
                     kafkaCaSecretName: b.inputs.kafkaCaSecretName
                 })
             }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+        .addRetryParameters(K8S_POLLING_RETRY_STRATEGY)
     )
 
   .addTemplate("createKafkaClientPropertiesConfigMap", (t) =>
