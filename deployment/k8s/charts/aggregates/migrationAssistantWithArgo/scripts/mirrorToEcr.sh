@@ -113,10 +113,14 @@ mirror_images_to_ecr() {
 
   echo ""
   echo "=== Mirroring container images ==="
-  local _imglist
+  local _imglist _max_jobs=4
   _imglist=$(mktemp)
   echo "$images" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//' | grep -v '^#' | grep -v '^$' > "$_imglist"
   while IFS= read -r image; do
+    # Throttle to $_max_jobs concurrent copies
+    while [ "$(jobs -rp | wc -l)" -ge "$_max_jobs" ]; do
+      wait -n 2>/dev/null || true
+    done
     copy_image "$ecr_host" "$region" "$dockerhub_mirrors" "$ptc" "$image" &
   done < "$_imglist"
   rm -f "$_imglist"
