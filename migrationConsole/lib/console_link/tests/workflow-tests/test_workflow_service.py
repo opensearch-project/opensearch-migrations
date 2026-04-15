@@ -934,6 +934,3 @@ class TestWorkflowServiceStatus:
         assert result['phase'] == 'Unknown'
         assert result['error'] is not None
         assert 'failed' in result['error'].lower() or '404' in result['error']
-
-
-

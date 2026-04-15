@@ -27,6 +27,3 @@ def wait_for_workflow_completion(workflow_name, namespace, argo_server, token, i
             pass
         time.sleep(5)
     return None
-
-
-

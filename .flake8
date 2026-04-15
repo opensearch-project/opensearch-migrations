@@ -6,7 +6,8 @@
 # E999 - SyntaxError: EOL while scanning string literal
 # W293 - Blank line contains whitespace (IDEs automatically add whitespace to indent to same level as block)
 # W504 - Line break occurred after a binary operator
-ignore = E265,E402,E999,W293,W504
+# W503 - Line break occurred before a binary operator (contradicts W504; PEP 8 recommends before)
+ignore = E265,E402,E999,W293,W503,W504
 max-line-length = 120
 exclude = .tox,.git,*/migrations/*,*/static/CACHE/*,docs,node_modules,.venv,venv,test_env,*/cdk.out/*,*/build/*,.gradle
 
