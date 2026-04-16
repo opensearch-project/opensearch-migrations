@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
@@ -23,16 +24,32 @@ public class SolrBackupIndexMetadataFactory implements IndexMetadata.Factory {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private final Path backupDir;
     private final Map<String, JsonNode> schemas;
+    private final Consumer<String> collectionPreparer;
 
     public SolrBackupIndexMetadataFactory(Path backupDir, Map<String, JsonNode> schemas) {
+        this(backupDir, schemas, null);
+    }
+
+    /**
+     * @param collectionPreparer called once per collection before counting shards.
+     *                           For S3 sources this downloads shard_backup_metadata so that
+     *                           {@link SolrBackupSource#listPartitions} can discover all shards.
+     */
+    public SolrBackupIndexMetadataFactory(Path backupDir, Map<String, JsonNode> schemas, Consumer<String> collectionPreparer) {
         this.backupDir = backupDir;
         this.schemas = schemas;
+        this.collectionPreparer = collectionPreparer;
     }
 
     @Override
     public IndexMetadata fromRepo(String snapshotName, String indexName) {
         var schema = schemas.get(indexName);
         var schemaNode = schema != null ? schema.path("schema") : MAPPER.createObjectNode();
+
+        // Ensure shard metadata is available (e.g. downloaded from S3) before counting shards
+        if (collectionPreparer != null) {
+            collectionPreparer.accept(indexName);
+        }
 
         // Discover shard count from backup directory
         var source = new SolrBackupSource(backupDir.resolve(indexName), indexName, schemaNode);

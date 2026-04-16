@@ -859,83 +859,10 @@ public class RfsMigrateDocuments {
             );
         }
 
-        // Resolve backup directory: local or S3
-        Path backupDir;
-        S3Repo s3Repo = null;
-        if (arguments.snapshotLocalDir != null) {
-            backupDir = Paths.get(arguments.snapshotLocalDir);
-            log.atInfo().setMessage("Starting Solr backup document migration from local dir: {}").addArgument(backupDir).log();
-        } else if (arguments.s3RepoUri != null && arguments.s3Region != null && arguments.s3LocalDir != null) {
-            // Solr BACKUP API writes under the s3RepoUri path: s3://<bucket>/<repoPath>/<backupName>/
-            var repoUri = new S3Uri(arguments.s3RepoUri);
-            var backupS3Uri = repoUri.key.isEmpty()
-                ? "s3://" + repoUri.bucketName + "/" + arguments.snapshotName
-                : "s3://" + repoUri.bucketName + "/" + repoUri.key + "/" + arguments.snapshotName;
-            log.atInfo().setMessage("Downloading Solr backup metadata from S3: {}").addArgument(backupS3Uri).log();
-            s3Repo = S3Repo.createRaw(
-                Paths.get(arguments.s3LocalDir),
-                new S3Uri(backupS3Uri),
-                arguments.s3Region,
-                arguments.s3Endpoint != null ? URI.create(arguments.s3Endpoint) : null
-            );
-            backupDir = s3Repo.getRepoRootDir();
-        } else {
-            throw new ParameterException(
-                "When source version is SOLR, provide either --snapshot-local-dir or S3 args (--s3-local-dir, --s3-repo-uri, --s3-region)."
-            );
-        }
-
         try {
-            // Parse schemas from backup directory (no live Solr API access needed).
-            var schemas = new java.util.LinkedHashMap<String, JsonNode>();
-            if (s3Repo != null) {
-                // List S3 to discover collection names, then download only schema metadata
-                var collections = new java.util.ArrayList<>(s3Repo.listTopLevelDirectories());
-                if (!arguments.indexAllowlist.isEmpty()) {
-                    collections.retainAll(arguments.indexAllowlist);
-                }
-                for (var collection : collections) {
-                    s3Repo.downloadPrefix(collection + "/zk_backup_0");
-                    schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
-                }
-            } else {
-                // Local filesystem: discover and parse schemas directly
-                var collections = new java.util.ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
-                if (!arguments.indexAllowlist.isEmpty()) {
-                    collections.retainAll(arguments.indexAllowlist);
-                }
-                for (var collection : collections) {
-                    schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
-                }
-            }
-
-            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas);
-            // For S3: download shard metadata at collection-prepare time (small),
-            // then download only the specific shard's index files when readDocuments is called.
-            final S3Repo finalS3Repo = s3Repo;
-            java.util.function.Consumer<String> collectionPreparer = (finalS3Repo != null) ? collection -> {
-                log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
-                finalS3Repo.downloadPrefix(collection + "/shard_backup_metadata");
-            } : null;
-            java.util.function.Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
-                var mapping = partition.fileNameMapping();
-                if (mapping != null) {
-                    // SolrCloud UUID backup: download only the UUID files for this shard
-                    log.atInfo().setMessage("Downloading {} index files for shard '{}/{}' from S3")
-                        .addArgument(mapping.size()).addArgument(partition.collection()).addArgument(partition.shard()).log();
-                    for (var uuid : mapping.values()) {
-                        finalS3Repo.downloadFile(partition.collection() + "/index/" + uuid);
-                    }
-                } else {
-                    // Non-UUID layout: download the shard's directory
-                    log.atInfo().setMessage("Downloading index data for shard '{}/{}' from S3")
-                        .addArgument(partition.collection()).addArgument(partition.shard()).log();
-                    finalS3Repo.downloadPrefix(partition.collection() + "/index");
-                }
-            } : null;
-            var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer);
-
-            // Now flow through the standard coordinator path
+            // Check the coordinator for pending work BEFORE downloading anything from S3.
+            // This avoids wasting time/bandwidth downloading schema metadata on every pod restart
+            // when all work items have already been completed.
             var targetConnectionContext = arguments.targetArgs.toConnectionContext();
             var targetVersion = targetClient.getClusterVersion();
             var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
@@ -969,6 +896,91 @@ public class RfsMigrateDocuments {
                             cleanShutdownCompleted,
                             context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
                     Clock.systemUTC())) {
+
+                // Early exit: if the work coordination index already exists and all items are complete,
+                // skip the expensive S3 downloads entirely.
+                if (!workCoordinator.workItemsNotYetComplete(
+                        context.getWorkCoordinationContext()::createItemsPendingContext)) {
+                    log.atInfo().setMessage("No pending Solr work items — skipping S3 download and exiting early").log();
+                    cleanShutdownCompleted.set(true);
+                    return;
+                }
+
+                // Work is available — now download metadata from S3 / local
+                Path backupDir;
+                S3Repo s3Repo = null;
+                if (arguments.snapshotLocalDir != null) {
+                    backupDir = Paths.get(arguments.snapshotLocalDir);
+                    log.atInfo().setMessage("Starting Solr backup document migration from local dir: {}").addArgument(backupDir).log();
+                } else if (arguments.s3RepoUri != null && arguments.s3Region != null && arguments.s3LocalDir != null) {
+                    // Solr BACKUP API writes under the s3RepoUri path: s3://<bucket>/<repoPath>/<backupName>/
+                    var repoUri = new S3Uri(arguments.s3RepoUri);
+                    var backupS3Uri = repoUri.key.isEmpty()
+                        ? "s3://" + repoUri.bucketName + "/" + arguments.snapshotName
+                        : "s3://" + repoUri.bucketName + "/" + repoUri.key + "/" + arguments.snapshotName;
+                    log.atInfo().setMessage("Downloading Solr backup metadata from S3: {}").addArgument(backupS3Uri).log();
+                    s3Repo = S3Repo.createRaw(
+                        Paths.get(arguments.s3LocalDir),
+                        new S3Uri(backupS3Uri),
+                        arguments.s3Region,
+                        arguments.s3Endpoint != null ? URI.create(arguments.s3Endpoint) : null
+                    );
+                    backupDir = s3Repo.getRepoRootDir();
+                } else {
+                    throw new ParameterException(
+                        "When source version is SOLR, provide either --snapshot-local-dir or S3 args (--s3-local-dir, --s3-repo-uri, --s3-region)."
+                    );
+                }
+
+                // Parse schemas from backup directory (no live Solr API access needed).
+                var schemas = new java.util.LinkedHashMap<String, JsonNode>();
+                if (s3Repo != null) {
+                    // List S3 to discover collection names, then download only schema metadata
+                    var collections = new java.util.ArrayList<>(s3Repo.listTopLevelDirectories());
+                    if (!arguments.indexAllowlist.isEmpty()) {
+                        collections.retainAll(arguments.indexAllowlist);
+                    }
+                    for (var collection : collections) {
+                        s3Repo.downloadPrefix(collection + "/zk_backup_0");
+                        schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
+                    }
+                } else {
+                    // Local filesystem: discover and parse schemas directly
+                    var collections = new java.util.ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
+                    if (!arguments.indexAllowlist.isEmpty()) {
+                        collections.retainAll(arguments.indexAllowlist);
+                    }
+                    for (var collection : collections) {
+                        schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
+                    }
+                }
+
+                // For S3: download shard metadata at collection-prepare time (small),
+                // then download only the specific shard's index files when readDocuments is called.
+                final S3Repo finalS3Repo = s3Repo;
+                java.util.function.Consumer<String> collectionPreparer = (finalS3Repo != null) ? collection -> {
+                    log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
+                    finalS3Repo.downloadPrefix(collection + "/shard_backup_metadata");
+                } : null;
+                java.util.function.Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
+                    var mapping = partition.fileNameMapping();
+                    if (mapping != null) {
+                        // SolrCloud UUID backup: download only the UUID files for this shard
+                        log.atInfo().setMessage("Downloading {} index files for shard '{}/{}' from S3")
+                            .addArgument(mapping.size()).addArgument(partition.collection()).addArgument(partition.shard()).log();
+                        for (var uuid : mapping.values()) {
+                            finalS3Repo.downloadFile(partition.collection() + "/index/" + uuid);
+                        }
+                    } else {
+                        // Non-UUID layout: download the shard's directory
+                        log.atInfo().setMessage("Downloading index data for shard '{}/{}' from S3")
+                            .addArgument(partition.collection()).addArgument(partition.shard()).log();
+                        finalS3Repo.downloadPrefix(partition.collection() + "/index");
+                    }
+                } : null;
+
+                var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer);
+                var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer);
 
                 // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
                 // event of a SIGTERM signal.
