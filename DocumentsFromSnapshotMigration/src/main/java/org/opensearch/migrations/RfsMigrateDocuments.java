@@ -898,12 +898,19 @@ public class RfsMigrateDocuments {
                     Clock.systemUTC())) {
 
                 // Early exit: if the work coordination index already exists and all items are complete,
-                // skip the expensive S3 downloads entirely.
-                if (!workCoordinator.workItemsNotYetComplete(
-                        context.getWorkCoordinationContext()::createItemsPendingContext)) {
-                    log.atInfo().setMessage("No pending Solr work items — skipping S3 download and exiting early").log();
-                    cleanShutdownCompleted.set(true);
-                    return;
+                // skip the expensive S3 downloads entirely. If the coordinator index does not yet
+                // exist (first worker to run), this will throw — in that case, work cannot be complete
+                // yet, so fall through to the normal setup path which creates the index.
+                try {
+                    if (!workCoordinator.workItemsNotYetComplete(
+                            context.getWorkCoordinationContext()::createItemsPendingContext)) {
+                        log.atInfo().setMessage("No pending Solr work items — skipping S3 download and exiting early").log();
+                        cleanShutdownCompleted.set(true);
+                        return;
+                    }
+                } catch (Exception e) {
+                    log.atInfo().setMessage("Coordinator index not yet initialized ({}); proceeding with normal Solr backup setup.")
+                        .addArgument(e.getClass().getSimpleName()).log();
                 }
 
                 // Work is available — now download metadata from S3 / local
