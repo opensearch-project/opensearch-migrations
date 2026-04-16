@@ -85,6 +85,7 @@ def call(Map config = [:]) {
             }
 
             stage('Build') {
+                when { expression { !params.USE_RELEASE_BOOTSTRAP && (params.BUILD_IMAGES || params.BUILD_CHART_AND_DASHBOARDS) } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         sh './gradlew clean build -x test --no-daemon --stacktrace'
@@ -103,7 +104,8 @@ def call(Map config = [:]) {
                                 buildImages: params.BUILD_IMAGES,
                                 buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
                                 skipTestImages: true,
-                                version: params.VERSION
+                                version: params.VERSION,
+                                useGeneralNodePool: true
                             )
 
                             withMigrationsTestAccount(region: params.REGION, duration: 7200) { accountId ->
