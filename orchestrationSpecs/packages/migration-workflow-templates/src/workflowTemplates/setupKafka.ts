@@ -66,15 +66,6 @@ function makeKafkaClusterManifest(
                         expr.literal("persistent-claim")) as any),
                 },
             },
-            topics: makeDirectTypeProxy(
-                expr.get(kc, "topics") as any
-            ),
-            topicPartitions: makeDirectTypeProxy(
-                expr.dig(config, ["topicSpecOverrides", "partitions"], 1) as any
-            ),
-            topicReplicas: makeDirectTypeProxy(
-                expr.dig(config, ["topicSpecOverrides", "replicas"], 1) as any
-            ),
         }
     };
 }
@@ -717,7 +708,6 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("version", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
-        .addRequiredInput("topics", typeToken<readonly string[]>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
@@ -751,23 +741,6 @@ export const SetupKafka = WorkflowBuilder.create({
                         retryGroupName_view: expr.concat(expr.literal("KafkaUser: "), b.inputs.clusterName),
                     }),
                     {when: c => ({templateExp: shouldCreateManagedKafkaUser(b.inputs.clusterConfig)})}
-                )
-                .addStep("createTopic", INTERNAL, "createKafkaTopicWithRetry", c =>
-                    c.register({
-                        clusterName: b.inputs.clusterName,
-                        topicName: c.item,
-                        ownerUid: b.inputs.ownerUid,
-                        retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".kafkatopic."), c.item, expr.literal(".vapretry")),
-                        partitions: expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["topicSpecOverrides", "partitions"], 1),
-                        replicas: expr.dig(expr.deserializeRecord(b.inputs.clusterConfig), ["topicSpecOverrides", "replicas"], 1),
-                        topicConfig: expr.serialize(expr.dig(
-                            expr.deserializeRecord(b.inputs.clusterConfig),
-                            ["topicSpecOverrides", "config"],
-                            expr.makeDict({})
-                        )),
-                        retryGroupName_view: expr.concat(expr.literal("KafkaTopic: "), c.item),
-                    }),
-                    {loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.topics))}
                 );
         })
     )

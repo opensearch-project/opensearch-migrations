@@ -136,10 +136,6 @@
                     "value": "{{=jsonpath(inputs.parameters.kafkaClusterConfig, '$.config')}}"
                   },
                   {
-                    "name": "topics",
-                    "value": "{{=jsonpath(inputs.parameters.kafkaClusterConfig, '$.topics')}}"
-                  },
-                  {
                     "name": "ownerUid",
                     "value": "{{inputs.parameters.resourceUid}}"
                   }
@@ -226,13 +222,28 @@
               "name": "proxyName"
             },
             {
+              "name": "topicCrName"
+            },
+            {
               "name": "resourceUid"
+            },
+            {
+              "name": "kafkaClusterOwnerUid"
             },
             {
               "name": "listenPort"
             },
             {
               "name": "podReplicas"
+            },
+            {
+              "name": "topicPartitions"
+            },
+            {
+              "name": "topicReplicas"
+            },
+            {
+              "name": "topicConfig"
             },
             {
               "name": "groupName_view",
@@ -260,7 +271,7 @@
           [
             {
               "templateRef": {
-                "template": "reconcilecapturedtraffic",
+                "template": "reconcilecapturetopicandproxy",
                 "name": "setup-capture"
               },
               "arguments": {
@@ -282,12 +293,32 @@
                     "value": "{{inputs.parameters.proxyName}}"
                   },
                   {
+                    "name": "topicCrName",
+                    "value": "{{inputs.parameters.topicCrName}}"
+                  },
+                  {
                     "name": "listenPort",
                     "value": "{{inputs.parameters.listenPort}}"
                   },
                   {
                     "name": "podReplicas",
                     "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "topicPartitions",
+                    "value": "{{inputs.parameters.topicPartitions}}"
+                  },
+                  {
+                    "name": "topicReplicas",
+                    "value": "{{inputs.parameters.topicReplicas}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{inputs.parameters.topicConfig}}"
+                  },
+                  {
+                    "name": "kafkaClusterOwnerUid",
+                    "value": "{{inputs.parameters.kafkaClusterOwnerUid}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -312,6 +343,10 @@
                   {
                     "name": "configChecksum",
                     "value": "{{=sprig.dig('configChecksum', '', fromJSON(inputs.parameters.proxyConfig))}}"
+                  },
+                  {
+                    "name": "topicConfigChecksum",
+                    "value": "{{=sprig.dig('topicConfigChecksum', '', fromJSON(inputs.parameters.proxyConfig))}}"
                   },
                   {
                     "name": "checksumForSnapshot",
@@ -417,7 +452,7 @@
           [
             {
               "templateRef": {
-                "template": "waitforcapturedtraffic",
+                "template": "waitforcaptureproxy",
                 "name": "resource-management"
               },
               "withParam": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['dependsOnProxySetups']}}",
@@ -1267,7 +1302,7 @@
           [
             {
               "templateRef": {
-                "template": "waitforcapturedtraffic",
+                "template": "waitforcaptureproxy",
                 "name": "resource-management"
               },
               "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
@@ -1631,7 +1666,7 @@
                   },
                   {
                     "name": "proxyConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
                   },
                   {
                     "name": "kafkaClusterName",
@@ -1646,8 +1681,16 @@
                     "value": "{{=item['name']}}"
                   },
                   {
+                    "name": "topicCrName",
+                    "value": "{{=item['name']+'-topic'}}"
+                  },
+                  {
                     "name": "resourceUid",
                     "value": "{{=item['resourceUid']}}"
+                  },
+                  {
+                    "name": "kafkaClusterOwnerUid",
+                    "value": "{{=sprig.dig('clusterResourceUid', '', fromJSON(item['kafkaConfig']))}}"
                   },
                   {
                     "name": "listenPort",
@@ -1656,6 +1699,18 @@
                   {
                     "name": "podReplicas",
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(item['proxyConfig']))}}"
+                  },
+                  {
+                    "name": "topicPartitions",
+                    "value": "{{=sprig.dig('topicSpecOverrides', 'partitions', 1, fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "topicReplicas",
+                    "value": "{{=sprig.dig('topicSpecOverrides', 'replicas', 1, fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{=toJSON(sprig.dig('topicSpecOverrides', 'config', sprig.dict(), fromJSON(item['kafkaConfig'])))}}"
                   },
                   {
                     "name": "groupName_view",

@@ -361,6 +361,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             ...p,
             kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksums.get(p.kafkaConfig.label) ?? '' },
             configChecksum: cs(p.proxyConfig, kafkaChecksums.get(p.kafkaConfig.label)),
+            topicConfigChecksum: cs(p.kafkaConfig.kafkaTopic, p.kafkaConfig.topicSpecOverrides, kafkaChecksums.get(p.kafkaConfig.label)),
             checksumForSnapshot: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'snapshot', kafkaChecksums.get(p.kafkaConfig.label)),
             checksumForReplayer: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'replayer', kafkaChecksums.get(p.kafkaConfig.label)),
         }));

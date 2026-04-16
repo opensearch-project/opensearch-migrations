@@ -100,6 +100,11 @@ export const ResourceManagement = WorkflowBuilder.create({
         checksumForReplayer: ""
     }))
     .addTemplate("patchCapturedTrafficError", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
+    .addTemplate("patchCaptureProxyRunning", t => buildPatchStatusTemplate(t, "CaptureProxy", {}))
+    .addTemplate("patchCaptureProxyReady", t => buildPatchStatusTemplate(t, "CaptureProxy", {
+        configChecksum: ""
+    }))
+    .addTemplate("patchCaptureProxyError", t => buildPatchStatusTemplate(t, "CaptureProxy", {}))
     .addTemplate("patchSnapshotMigrationCompleted", t => buildPatchStatusTemplate(t, "SnapshotMigration", {
         configChecksum: "",
         checksumForReplayer: ""
@@ -195,6 +200,33 @@ export const ResourceManagement = WorkflowBuilder.create({
                 resource: {
                     apiVersion: CRD_API_VERSION,
                     kind: "CapturedTraffic",
+                    name: b.inputs.resourceName
+                },
+                conditions: {
+                    successCondition: expr.concat(
+                        expr.literal("status.phase == Ready, status."),
+                        b.inputs.checksumField,
+                        expr.literal(" == "),
+                        b.inputs.configChecksum
+                    ),
+                    failureCondition: "status.phase == Error"
+                }
+            })
+            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+        )
+    )
+
+
+    .addTemplate("waitForCaptureProxy", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("checksumField", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addWaitForExistingResource(b => b
+            .setDefinition({
+                resource: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "CaptureProxy",
                     name: b.inputs.resourceName
                 },
                 conditions: {
@@ -327,6 +359,22 @@ export const ResourceManagement = WorkflowBuilder.create({
             })
             .addJsonPathOutput("phase", "{.status.phase}", typeToken<string>())
             .addJsonPathOutput("configChecksum", "{.status.configChecksum}", typeToken<string>()))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("readResourceUid", t => t
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "get",
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: makeStringTypeProxy(b.inputs.resourceKind),
+                    metadata: { name: b.inputs.resourceName }
+                }
+            })
+            .addJsonPathOutput("uid", "{.metadata.uid}", typeToken<string>()))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 

@@ -321,19 +321,33 @@ export class MigrationInitializer {
                 [kafkaCluster.name, 'vapretry'], gateLabel));
         }
 
-        // CapturedTraffic resources from proxies
+        // CapturedTraffic (topic/stream) and CaptureProxy resources from proxies
         for (const proxy of (workflows.proxies ?? []) as ProxyConfig[]) {
+            const topicCrName = proxy.name + '-topic';
+
+            // CapturedTraffic: topic/stream contract
             items.push({
                 apiVersion: CRD_API_VERSION,
                 kind: 'CapturedTraffic',
-                metadata: { name: proxy.name },
+                metadata: { name: topicCrName },
                 spec: { dependsOn: [proxy.kafkaConfig.label] },
+                status: { phase: 'Initialized', configChecksum: proxy.topicConfigChecksum }
+            });
+
+            // CaptureProxy: proxy deployment contract
+            items.push({
+                apiVersion: CRD_API_VERSION,
+                kind: 'CaptureProxy',
+                metadata: { name: proxy.name },
+                spec: { dependsOn: [topicCrName] },
                 status: { phase: 'Initialized', configChecksum: proxy.configChecksum }
             });
 
-            // VAP retry gate for proxy
+            // VAP retry gates
             items.push(this.makeApprovalGateResource(
-                [proxy.name, 'capturedtraffic', 'vapretry'], gateLabel));
+                [topicCrName, 'capturedtraffic', 'vapretry'], gateLabel));
+            items.push(this.makeApprovalGateResource(
+                [proxy.name, 'captureproxy', 'vapretry'], gateLabel));
         }
 
         // DataSnapshot resources from snapshots
@@ -460,7 +474,7 @@ export class MigrationInitializer {
                 )),
             ...proxies.map(proxy =>
                 kubectlGetUid(
-                    'capturedtraffics.migrations.opensearch.org',
+                    'captureproxies.migrations.opensearch.org',
                     proxy.name,
                     shellVar('proxy', proxy.name)
                 )),
@@ -525,7 +539,7 @@ export class MigrationInitializer {
             "",
             "jq --argjson uids \"$uid_map_json\" '",
             "  .kafkaClusters |= ((. // []) | map(. + {resourceUid: $uids.kafkaClusters[.name]}))",
-            "  | .proxies |= ((. // []) | map(. + {resourceUid: $uids.proxies[.name]}))",
+            "  | .proxies |= ((. // []) | map(. + {resourceUid: $uids.proxies[.name]} | .kafkaConfig += {clusterResourceUid: $uids.kafkaClusters[.kafkaConfig.label]}))",
             "  | .snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + \"-\" + .targetConfig.label + \"-\" + .label)]}))",
             "  | .trafficReplays |= ((. // []) | map(. + {resourceUid: $uids.trafficReplays[.name]}))",
             "' \"$CONFIG_PATH\" > \"$tmp_file\"",

@@ -28,6 +28,7 @@ import {
     makeParameterLoop,
     selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister,
+    Serialized,
     typeToken,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
@@ -124,7 +125,6 @@ export const FullMigration = WorkflowBuilder.create({
                     clusterName: b.inputs.clusterName,
                     version: b.inputs.version,
                     clusterConfig: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "config"),
-                    topics: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "topics"),
                     ownerUid: b.inputs.resourceUid,
                 }),
                 {when: c => ({templateExp: expr.not(expr.and(
@@ -166,27 +166,38 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("kafkaTopicName", typeToken<string>())
         .addRequiredInput("proxyName", typeToken<string>())
+        .addRequiredInput("topicCrName", typeToken<string>())
         .addRequiredInput("resourceUid", typeToken<string>())
+        .addRequiredInput("kafkaClusterOwnerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
+        .addRequiredInput("topicPartitions", typeToken<number>())
+        .addRequiredInput("topicReplicas", typeToken<number>())
+        .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
         .addOptionalInput("groupName_view", c => "Proxy")
         .addOptionalInput("sortOrder_view", c => 999)
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "CaptureProxy"]))
 
         .addSteps(b => b
-            .addStep("setupProxy", SetupCapture, "reconcileCapturedTraffic", c =>
+            .addStep("setupProxy", SetupCapture, "reconcileCaptureTopicAndProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     proxyConfig: b.inputs.proxyConfig,
                     kafkaClusterName: b.inputs.kafkaClusterName,
                     kafkaTopicName: b.inputs.kafkaTopicName,
                     proxyName: b.inputs.proxyName,
+                    topicCrName: b.inputs.topicCrName,
                     ownerUid: b.inputs.resourceUid,
+                    kafkaClusterOwnerUid: b.inputs.kafkaClusterOwnerUid,
                     configChecksum: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["configChecksum"], ""),
+                    topicConfigChecksum: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["topicConfigChecksum"], ""),
                     checksumForSnapshot: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForSnapshot"], ""),
                     checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForReplayer"], ""),
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    topicPartitions: b.inputs.topicPartitions,
+                    topicReplicas: b.inputs.topicReplicas,
+                    topicConfig: b.inputs.topicConfig,
                 })
             )
         )
@@ -214,7 +225,7 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.resourceName,
                 })
             )
-            .addStep("waitForProxyDeps", ResourceManagement, "waitForCapturedTraffic", c =>
+            .addStep("waitForProxyDeps", ResourceManagement, "waitForCaptureProxy", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: expr.get(c.item, "name"),
@@ -537,7 +548,7 @@ export const FullMigration = WorkflowBuilder.create({
                     )}),
                 }
             )
-            .addStep("waitForProxy", ResourceManagement, "waitForCapturedTraffic", c =>
+            .addStep("waitForProxy", ResourceManagement, "waitForCaptureProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.fromProxy,
@@ -657,7 +668,7 @@ export const FullMigration = WorkflowBuilder.create({
                     })),
                     //kafkaClusterConfig: expr.cast(c.item).to<Serialized<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>>(),
                     clusterName: expr.get(c.item, "name"),
-                    version: expr.cast(expr.get(c.item, "version")).to<string>(),
+                    version: expr.get(c.item, "version"),
                     resourceUid: expr.get(c.item, "resourceUid"),
                     configChecksum: expr.dig(c.item, ["configChecksum"], ""),
                     groupName_view: expr.get(c.item, "name"),
@@ -682,6 +693,7 @@ export const FullMigration = WorkflowBuilder.create({
                         sourceAllowInsecure: expr.get(c.item, "sourceAllowInsecure"),
                         proxyConfig: expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
                         configChecksum: expr.dig(c.item, ["configChecksum"], ""),
+                        topicConfigChecksum: expr.dig(c.item, ["topicConfigChecksum"], ""),
                         checksumForSnapshot: expr.dig(c.item, ["checksumForSnapshot"], ""),
                         checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
                         resourceUid: expr.get(c.item, "resourceUid"),
@@ -698,7 +710,13 @@ export const FullMigration = WorkflowBuilder.create({
                         ""
                     ),
                     proxyName: expr.get(c.item, "name"),
+                    topicCrName: expr.concat(expr.get(c.item, "name"), expr.literal("-topic")),
                     resourceUid: expr.get(c.item, "resourceUid"),
+                    kafkaClusterOwnerUid: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["clusterResourceUid"],
+                        ""
+                    ),
                     listenPort: expr.dig(
                         expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
                         ["listenPort"],
@@ -709,6 +727,21 @@ export const FullMigration = WorkflowBuilder.create({
                         ["podReplicas"],
                         1
                     ),
+                    topicPartitions: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["topicSpecOverrides", "partitions"],
+                        1
+                    ),
+                    topicReplicas: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["topicSpecOverrides", "replicas"],
+                        1
+                    ),
+                    topicConfig: expr.serialize(expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["topicSpecOverrides", "config"],
+                        expr.makeDict({})
+                    )),
                     groupName_view: expr.get(c.item, "name"),
                     sortOrder_view: expr.literal(2),
                 }), {

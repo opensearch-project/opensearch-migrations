@@ -34,7 +34,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: KafkaCluster\nmetadata:\n  name: \"{{=fromJSON(inputs.parameters.kafkaClusterConfig)['name']}}\"\n  labels:\n    workflows.argoproj.io/run-uid: \"{{workflow.uid}}\"\nspec:\n  version: \"{{=fromJSON(inputs.parameters.kafkaClusterConfig)['version']}}\"\n  auth:\n    type: \"{{=sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\"\n  nodePool:\n    replicas: {{=sprig.dig('nodePoolSpecOverrides', 'replicas', 1, fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\n    roles: {{=sprig.dig('nodePoolSpecOverrides', 'roles', [\"controller\",\"broker\"], fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\n    storage:\n      size: \"{{=sprig.dig('nodePoolSpecOverrides', 'storage', 'size', '5Gi', fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\"\n      type: \"{{=sprig.dig('nodePoolSpecOverrides', 'storage', 'type', 'persistent-claim', fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\"\n  topics: {{=fromJSON(inputs.parameters.kafkaClusterConfig)['topics']}}\n  topicPartitions: {{=sprig.dig('topicSpecOverrides', 'partitions', 1, fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\n  topicReplicas: {{=sprig.dig('topicSpecOverrides', 'replicas', 1, fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: KafkaCluster\nmetadata:\n  name: \"{{=fromJSON(inputs.parameters.kafkaClusterConfig)['name']}}\"\n  labels:\n    workflows.argoproj.io/run-uid: \"{{workflow.uid}}\"\nspec:\n  version: \"{{=fromJSON(inputs.parameters.kafkaClusterConfig)['version']}}\"\n  auth:\n    type: \"{{=sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\"\n  nodePool:\n    replicas: {{=sprig.dig('nodePoolSpecOverrides', 'replicas', 1, fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\n    roles: {{=sprig.dig('nodePoolSpecOverrides', 'roles', [\"controller\",\"broker\"], fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\n    storage:\n      size: \"{{=sprig.dig('nodePoolSpecOverrides', 'storage', 'size', '5Gi', fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\"\n      type: \"{{=sprig.dig('nodePoolSpecOverrides', 'storage', 'type', 'persistent-claim', fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\"\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -1169,9 +1169,6 @@
               "name": "clusterConfig"
             },
             {
-              "name": "topics"
-            },
-            {
               "name": "ownerUid"
             },
             {
@@ -1274,49 +1271,6 @@
                 ]
               },
               "name": "deployKafkaUser"
-            }
-          ],
-          [
-            {
-              "template": "createkafkatopicwithretry",
-              "withParam": "{{inputs.parameters.topics}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "topicName",
-                    "value": "{{item}}"
-                  },
-                  {
-                    "name": "ownerUid",
-                    "value": "{{inputs.parameters.ownerUid}}"
-                  },
-                  {
-                    "name": "retryGateName",
-                    "value": "{{=inputs.parameters.clusterName+'.kafkatopic.'+item+'.vapretry'}}"
-                  },
-                  {
-                    "name": "partitions",
-                    "value": "{{=sprig.dig('topicSpecOverrides', 'partitions', 1, fromJSON(inputs.parameters.clusterConfig))}}"
-                  },
-                  {
-                    "name": "replicas",
-                    "value": "{{=sprig.dig('topicSpecOverrides', 'replicas', 1, fromJSON(inputs.parameters.clusterConfig))}}"
-                  },
-                  {
-                    "name": "topicConfig",
-                    "value": "{{=toJSON(sprig.dig('topicSpecOverrides', 'config', sprig.dict(), fromJSON(inputs.parameters.clusterConfig)))}}"
-                  },
-                  {
-                    "name": "retryGroupName_view",
-                    "value": "{{='KafkaTopic: '+item}}"
-                  }
-                ]
-              },
-              "name": "createTopic"
             }
           ]
         ],

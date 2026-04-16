@@ -98,7 +98,8 @@ describe('migration initializer CRD resource generation', () => {
             resources.find((item: any) => item.kind === kind && item.metadata.name === name);
 
         expect(byKind('KafkaCluster')).toContain('default');
-        expect(byKind('CapturedTraffic')).toContain('source-proxy');
+        expect(byKind('CapturedTraffic')).toContain('source-proxy-topic');
+        expect(byKind('CaptureProxy')).toContain('source-proxy');
         expect(byKind('DataSnapshot')).toContain('source-snap1');
         expect(byKind('SnapshotMigration')).toContain('source-target-snap1');
         expect(byKind('TrafficReplay')).toContain('source-proxy-target-target-replay');
@@ -112,14 +113,16 @@ describe('migration initializer CRD resource generation', () => {
             'default.kafkatopic.source-proxy.vapretry',
             // Root KafkaCluster CR reconcile gate
             'default.vapretry',
-            // Proxy VAP retry gate
-            'source-proxy.capturedtraffic.vapretry',
+            // Topic and proxy VAP retry gates
+            'source-proxy-topic.capturedtraffic.vapretry',
+            'source-proxy.captureproxy.vapretry',
             // Replay VAP retry gate
             'source-proxy-target-target-replay.trafficreplay.vapretry',
         ]));
 
         expect(getResource('KafkaCluster', 'default')?.spec.dependsOn).toEqual([]);
-        expect(getResource('CapturedTraffic', 'source-proxy')?.spec.dependsOn).toEqual(['default']);
+        expect(getResource('CapturedTraffic', 'source-proxy-topic')?.spec.dependsOn).toEqual(['default']);
+        expect(getResource('CaptureProxy', 'source-proxy')?.spec.dependsOn).toEqual(['source-proxy-topic']);
         expect(getResource('DataSnapshot', 'source-snap1')?.spec.dependsOn).toEqual(['source-proxy']);
         expect(getResource('SnapshotMigration', 'source-target-snap1')?.spec.dependsOn).toEqual(['source-snap1']);
         expect(getResource('TrafficReplay', 'source-proxy-target-target-replay')?.spec.dependsOn).toEqual(['source-proxy']);

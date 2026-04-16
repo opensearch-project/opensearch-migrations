@@ -228,6 +228,7 @@ export const NAMED_KAFKA_CLIENT_CONFIG =
         }).default(DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES),
         label: z.string(),
         configChecksum: z.string(),
+        clusterResourceUid: z.string().optional(),
     });
 
 export const DENORMALIZED_PROXY_CONFIG = z.object({
@@ -237,6 +238,7 @@ export const DENORMALIZED_PROXY_CONFIG = z.object({
     sourceAllowInsecure: z.boolean().default(false),
     proxyConfig: ARGO_PROXY_OPTIONS,
     configChecksum: z.string(),
+    topicConfigChecksum: z.string(),
     checksumForSnapshot: z.string(),
     checksumForReplayer: z.string(),
     resourceUid: z.string(),

@@ -179,6 +179,111 @@
         }
       },
       {
+        "name": "patchcaptureproxyrunning",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchcaptureproxyready",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            },
+            {
+              "name": "configChecksum"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchcaptureproxyerror",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "patchsnapshotmigrationcompleted",
         "inputs": {
           "parameters": [
@@ -535,6 +640,46 @@
         }
       },
       {
+        "name": "waitforcaptureproxy",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "configChecksum"
+            },
+            {
+              "name": "checksumField"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
+          "action": "get",
+          "successCondition": "{{='status.phase == Ready, status.'+inputs.parameters.checksumField+' == '+inputs.parameters.configChecksum}}",
+          "failureCondition": "status.phase == Error"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "waitfordatasnapshot",
         "inputs": {
           "parameters": [
@@ -736,6 +881,42 @@
               "name": "configChecksum",
               "valueFrom": {
                 "jsonPath": "{.status.configChecksum}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "readresourceuid",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceKind"
+            },
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
+          "action": "get"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "uid",
+              "valueFrom": {
+                "jsonPath": "{.metadata.uid}"
               }
             }
           ]
