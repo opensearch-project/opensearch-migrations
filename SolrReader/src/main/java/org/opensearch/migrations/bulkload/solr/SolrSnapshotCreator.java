@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.solr;
 
+import java.net.URI;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -65,7 +66,8 @@ public class SolrSnapshotCreator {
                 solrBaseUrl, backupName, collection, asyncId
             ));
             if (backupLocation != null && backupLocation.startsWith("s3://") && repositoryName != null) {
-                urlBuilder.append("&repository=").append(repositoryName).append("&location=/");
+                var location = extractS3Path(backupLocation);
+                urlBuilder.append("&repository=").append(repositoryName).append("&location=").append(location);
             } else if (backupLocation != null) {
                 urlBuilder.append("&location=").append(backupLocation);
             }
@@ -113,5 +115,18 @@ public class SolrSnapshotCreator {
         public SolrBackupFailed(String message) {
             super(message);
         }
+    }
+
+    /**
+     * Extract the path portion from an S3 URI for use as the Solr backup location.
+     * e.g. "s3://bucket/some/path" → "/some/path", "s3://bucket" → "/"
+     */
+    static String extractS3Path(String s3Uri) {
+        var uri = URI.create(s3Uri);
+        var path = uri.getPath();
+        if (path == null || path.isEmpty()) {
+            return "/";
+        }
+        return path;
     }
 }
