@@ -110,8 +110,12 @@ describe('migration initializer CRD resource generation', () => {
             'default.kafkanodepool.vapretry',
             'default.kafkauser.vapretry',
             'default.kafkatopic.source-proxy.vapretry',
+            // Root KafkaCluster CR reconcile gate
+            'default.vapretry',
             // Proxy VAP retry gate
             'source-proxy.capturedtraffic.vapretry',
+            // Replay VAP retry gate
+            'source-proxy-target-target-replay.trafficreplay.vapretry',
         ]));
 
         expect(getResource('KafkaCluster', 'default')?.spec.dependsOn).toEqual([]);

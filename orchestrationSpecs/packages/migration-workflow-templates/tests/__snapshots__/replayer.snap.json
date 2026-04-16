@@ -25,6 +25,175 @@
     },
     "templates": [
       {
+        "name": "applytrafficreplay",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "name"
+            },
+            {
+              "name": "replayerOptions"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: TrafficReplay\nmetadata:\n  name: \"{{inputs.parameters.name}}\"\n  labels:\n    workflows.argoproj.io/run-uid: \"{{workflow.uid}}\"\nspec:\n  jvmArgs: \"{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.replayerOptions))}}\"\n  loggingConfigurationOverrideConfigMap: \"{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.replayerOptions))}}\"\n  podReplicas: {{=sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.replayerOptions))}}\n  resources: {{=fromJSON(inputs.parameters.replayerOptions)['resources']}}\n  kafkaTrafficEnableMSKAuth: {{=sprig.dig('kafkaTrafficEnableMSKAuth', false, fromJSON(inputs.parameters.replayerOptions))}}\n  kafkaTrafficPropertyFile: \"{{=sprig.dig('kafkaTrafficPropertyFile', '', fromJSON(inputs.parameters.replayerOptions))}}\"\n  lookaheadTimeSeconds: {{=sprig.dig('lookaheadTimeSeconds', 400, fromJSON(inputs.parameters.replayerOptions))}}\n  maxConcurrentRequests: {{=sprig.dig('maxConcurrentRequests', 10000, fromJSON(inputs.parameters.replayerOptions))}}\n  numClientThreads: {{=sprig.dig('numClientThreads', 0, fromJSON(inputs.parameters.replayerOptions))}}\n  observedPacketConnectionTimeout: {{=sprig.dig('observedPacketConnectionTimeout', 360, fromJSON(inputs.parameters.replayerOptions))}}\n  otelCollectorEndpoint: \"{{=sprig.dig('otelCollectorEndpoint', 'http://otel-collector:4317', fromJSON(inputs.parameters.replayerOptions))}}\"\n  quiescentPeriodMs: {{=sprig.dig('quiescentPeriodMs', 5000, fromJSON(inputs.parameters.replayerOptions))}}\n  removeAuthHeader: {{=sprig.dig('removeAuthHeader', false, fromJSON(inputs.parameters.replayerOptions))}}\n  speedupFactor: {{=sprig.dig('speedupFactor', 1.1, fromJSON(inputs.parameters.replayerOptions))}}\n  targetServerResponseTimeoutSeconds: {{=sprig.dig('targetServerResponseTimeoutSeconds', 150, fromJSON(inputs.parameters.replayerOptions))}}\n  transformerConfig: \"{{=sprig.dig('transformerConfig', '', fromJSON(inputs.parameters.replayerOptions))}}\"\n  transformerConfigEncoded: \"{{=sprig.dig('transformerConfigEncoded', '', fromJSON(inputs.parameters.replayerOptions))}}\"\n  transformerConfigFile: \"{{=sprig.dig('transformerConfigFile', '', fromJSON(inputs.parameters.replayerOptions))}}\"\n  tupleTransformerConfig: \"{{=sprig.dig('tupleTransformerConfig', '', fromJSON(inputs.parameters.replayerOptions))}}\"\n  tupleTransformerConfigBase64: \"{{=sprig.dig('tupleTransformerConfigBase64', '', fromJSON(inputs.parameters.replayerOptions))}}\"\n  tupleTransformerConfigFile: \"{{=sprig.dig('tupleTransformerConfigFile', '', fromJSON(inputs.parameters.replayerOptions))}}\"\n  userAgent: \"{{=sprig.dig('userAgent', '', fromJSON(inputs.parameters.replayerOptions))}}\"\n",
+          "action": "apply",
+          "setOwnerReference": false
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "applytrafficreplaywithretry",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "name"
+            },
+            {
+              "name": "replayerOptions"
+            },
+            {
+              "name": "retryGateName"
+            },
+            {
+              "name": "retryGroupName_view",
+              "value": "Apply"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "applytrafficreplay",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{inputs.parameters.name}}"
+                  },
+                  {
+                    "name": "replayerOptions",
+                    "value": "{{inputs.parameters.replayerOptions}}"
+                  }
+                ]
+              },
+              "name": "tryApply",
+              "continueOn": {
+                "failed": true
+              }
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforapproval",
+                "name": "resource-management"
+              },
+              "when": "{{=steps.tryApply.status == 'Failed'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.retryGateName}}"
+                  }
+                ]
+              },
+              "name": "waitForFix"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchapprovalannotation",
+                "name": "resource-management"
+              },
+              "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceApiVersion",
+                    "value": "migrations.opensearch.org/v1alpha1"
+                  },
+                  {
+                    "name": "resourceKind",
+                    "value": "TrafficReplay"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.name}}"
+                  }
+                ]
+              },
+              "name": "patchApproval"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchapprovalgatephase",
+                "name": "resource-management"
+              },
+              "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.retryGateName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "resetGate"
+            }
+          ],
+          [
+            {
+              "template": "applytrafficreplaywithretry",
+              "when": "{{=steps.resetGate.status == 'Succeeded'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{inputs.parameters.name}}"
+                  },
+                  {
+                    "name": "replayerOptions",
+                    "value": "{{inputs.parameters.replayerOptions}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{inputs.parameters.retryGateName}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{inputs.parameters.retryGroupName_view}}"
+                  }
+                ]
+              },
+              "name": "retryLoop"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "createdeployment",
         "inputs": {
           "parameters": [

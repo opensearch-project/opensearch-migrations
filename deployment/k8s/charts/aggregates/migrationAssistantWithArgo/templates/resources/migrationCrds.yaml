@@ -364,6 +364,41 @@ spec:
                   type: array
                   items:
                     type: string
+                version:
+                  type: string
+                auth:
+                  type: object
+                  properties:
+                    type:
+                      type: string
+                      enum: [scram-sha-512, none]
+                nodePool:
+                  type: object
+                  properties:
+                    replicas:
+                      type: integer
+                      minimum: 1
+                    roles:
+                      type: array
+                      items:
+                        type: string
+                    storage:
+                      type: object
+                      properties:
+                        size:
+                          type: string
+                        type:
+                          type: string
+                topics:
+                  type: array
+                  items:
+                    type: string
+                topicPartitions:
+                  type: integer
+                  minimum: 1
+                topicReplicas:
+                  type: integer
+                  minimum: 1
             status:
               type: object
               properties:

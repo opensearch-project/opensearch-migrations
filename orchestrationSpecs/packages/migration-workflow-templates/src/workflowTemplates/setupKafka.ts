@@ -11,7 +11,7 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
-import {KAFKA_CLUSTER_CREATION_CONFIG} from "@opensearch-migrations/schemas";
+import {KAFKA_CLUSTER_CREATION_CONFIG, NAMED_KAFKA_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
@@ -34,6 +34,49 @@ function makeOwnerReferences(
 
 function getKafkaAuthType(config: BaseExpression<Serialized<KafkaConfig>>) {
     return expr.dig(expr.deserializeRecord(config), ["auth", "type"], "none");
+}
+
+function makeKafkaClusterManifest(
+    kafkaClusterConfig: BaseExpression<Serialized<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>>,
+) {
+    const kc = expr.deserializeRecord(kafkaClusterConfig) as any;
+    const config = expr.get(kc, "config") as any;
+    return {
+        apiVersion: "migrations.opensearch.org/v1alpha1",
+        kind: "KafkaCluster",
+        metadata: {
+            name: makeStringTypeProxy(expr.get(kc, "name") as any),
+            labels: {
+                "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
+            }
+        },
+        spec: {
+            version: makeStringTypeProxy(expr.get(kc, "version") as any),
+            auth: {
+                type: makeStringTypeProxy(expr.dig(config, ["auth", "type"], "none")),
+            },
+            nodePool: {
+                replicas: makeDirectTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "replicas"], 1) as any),
+                roles: makeDirectTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "roles"],
+                    expr.literal(["controller", "broker"])) as any),
+                storage: {
+                    size: makeStringTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "storage", "size"],
+                        expr.literal("5Gi")) as any),
+                    type: makeStringTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "storage", "type"],
+                        expr.literal("persistent-claim")) as any),
+                },
+            },
+            topics: makeDirectTypeProxy(
+                expr.get(kc, "topics") as any
+            ),
+            topicPartitions: makeDirectTypeProxy(
+                expr.dig(config, ["topicSpecOverrides", "partitions"], 1) as any
+            ),
+            topicReplicas: makeDirectTypeProxy(
+                expr.dig(config, ["topicSpecOverrides", "replicas"], 1) as any
+            ),
+        }
+    };
 }
 
 function makePlainListener() {
@@ -223,6 +266,61 @@ export const SetupKafka = WorkflowBuilder.create({
     parallelism: 1
 })
     .addParams(CommonWorkflowParameters)
+
+    .addTemplate("applyKafkaClusterCr", t => t
+        .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: false,
+                manifest: makeKafkaClusterManifest(b.inputs.kafkaClusterConfig)
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("applyKafkaClusterCrWithRetry", t => t
+        .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
+        .addRequiredInput("retryGateName", typeToken<string>())
+        .addOptionalInput("retryGroupName_view", c => "Apply")
+
+        .addSteps(b => b
+            .addStep("tryApply", INTERNAL, "applyKafkaClusterCr", c =>
+                c.register({
+                    kafkaClusterConfig: b.inputs.kafkaClusterConfig,
+                }),
+                {continueOn: {failed: true}}
+            )
+            .addStep("waitForFix", ResourceManagement, "waitForApproval", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
+            )
+            .addStep("patchApproval", ResourceManagement, "patchApprovalAnnotation", c =>
+                c.register({
+                    resourceApiVersion: expr.literal("migrations.opensearch.org/v1alpha1"),
+                    resourceKind: expr.literal("KafkaCluster"),
+                    resourceName: expr.jsonPathStrict(b.inputs.kafkaClusterConfig, "name"),
+                }),
+                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
+            )
+            .addStep("resetGate", ResourceManagement, "patchApprovalGatePhase", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
+            )
+            .addStepToSelf("retryLoop", c =>
+                c.register({
+                    kafkaClusterConfig: b.inputs.kafkaClusterConfig,
+                    retryGateName: b.inputs.retryGateName,
+                    retryGroupName_view: b.inputs.retryGroupName_view,
+                }),
+                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
+            )
+        )
+    )
 
 
     // Leaf templates defined first so deployKafkaCluster can reference them via INTERNAL
@@ -625,6 +723,15 @@ export const SetupKafka = WorkflowBuilder.create({
 
         .addSteps(b => {
             return b
+                .addStep("deployNodePool", INTERNAL, "deployKafkaNodePoolWithRetry", c =>
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        clusterConfig: b.inputs.clusterConfig,
+                        ownerUid: b.inputs.ownerUid,
+                        retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".kafkanodepool.vapretry")),
+                        retryGroupName_view: b.inputs.retryGroupName_view,
+                    })
+                )
                 .addStep("deployCluster", INTERNAL, "deployKafkaClusterKraftWithRetry", c =>
                     c.register({
                         clusterName: b.inputs.clusterName,
@@ -632,15 +739,6 @@ export const SetupKafka = WorkflowBuilder.create({
                         clusterConfig: b.inputs.clusterConfig,
                         ownerUid: b.inputs.ownerUid,
                         retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".kafkacluster.vapretry")),
-                        retryGroupName_view: b.inputs.retryGroupName_view,
-                    })
-                )
-                .addStep("deployNodePool", INTERNAL, "deployKafkaNodePoolWithRetry", c =>
-                    c.register({
-                        clusterName: b.inputs.clusterName,
-                        clusterConfig: b.inputs.clusterConfig,
-                        ownerUid: b.inputs.ownerUid,
-                        retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".kafkanodepool.vapretry")),
                         retryGroupName_view: b.inputs.retryGroupName_view,
                     })
                 )

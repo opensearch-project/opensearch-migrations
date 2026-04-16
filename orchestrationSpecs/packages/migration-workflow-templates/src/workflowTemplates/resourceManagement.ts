@@ -107,6 +107,9 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("patchTrafficReplayReady", t => buildPatchStatusTemplate(t, "TrafficReplay", {
         configChecksum: ""
     }))
+    .addTemplate("patchKafkaClusterReady", t => buildPatchStatusTemplate(t, "KafkaCluster", {
+        configChecksum: ""
+    }))
 
 
     // ── Wait templates (resource get with retry) ─────────────────────────

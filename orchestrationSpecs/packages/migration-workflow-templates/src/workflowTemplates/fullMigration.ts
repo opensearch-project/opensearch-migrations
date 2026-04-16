@@ -102,6 +102,23 @@ export const FullMigration = WorkflowBuilder.create({
         .addOptionalInput("sortOrder_view", c => 999)
 
         .addSteps(b => b
+            .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
+                c.register({
+                    resourceKind: expr.literal("KafkaCluster"),
+                    resourceName: b.inputs.clusterName,
+                })
+            )
+            .addStep("reconcileKafkaCluster", SetupKafka, "applyKafkaClusterCrWithRetry", c =>
+                c.register({
+                    kafkaClusterConfig: b.inputs.kafkaClusterConfig,
+                    retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".vapretry")),
+                    retryGroupName_view: expr.concat(expr.literal("KafkaCluster: "), b.inputs.clusterName),
+                }),
+                {when: c => ({templateExp: expr.not(expr.and(
+                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
+                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
+                ))})}
+            )
             .addStep("deployCluster", SetupKafka, "deployKafkaClusterAndTopicsWithRetry", c =>
                 c.register({
                     clusterName: b.inputs.clusterName,
@@ -109,7 +126,11 @@ export const FullMigration = WorkflowBuilder.create({
                     clusterConfig: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "config"),
                     topics: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "topics"),
                     ownerUid: b.inputs.resourceUid,
-                })
+                }),
+                {when: c => ({templateExp: expr.not(expr.and(
+                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
+                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
+                ))})}
             )
             .addStep("stampChecksum", ResourceManagement, "patchConfigChecksumAnnotation", c =>
                 c.register({
@@ -117,7 +138,22 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceKind: expr.literal("Kafka"),
                     resourceName: b.inputs.clusterName,
                     configChecksum: b.inputs.configChecksum,
-                })
+                }),
+                {when: c => ({templateExp: expr.not(expr.and(
+                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
+                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
+                ))})}
+            )
+            .addStep("patchKafkaClusterReady", ResourceManagement, "patchKafkaClusterReady", c =>
+                c.register({
+                    resourceName: b.inputs.clusterName,
+                    phase: expr.literal("Ready"),
+                    configChecksum: b.inputs.configChecksum,
+                }),
+                {when: c => ({templateExp: expr.not(expr.and(
+                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
+                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
+                ))})}
             )
         )
     )
@@ -554,6 +590,19 @@ export const FullMigration = WorkflowBuilder.create({
                     )
                 )}),
             })
+
+            .addStep("reconcileTrafficReplay", Replayer, "applyTrafficReplayWithRetry", c =>
+                c.register({
+                    name: b.inputs.name,
+                    replayerOptions: b.inputs.replayerOptions,
+                    retryGateName: expr.concat(b.inputs.name, expr.literal(".trafficreplay.vapretry")),
+                    retryGroupName_view: expr.concat(expr.literal("TrafficReplay: "), b.inputs.name),
+                }),
+                {when: c => ({templateExp: expr.not(expr.and(
+                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
+                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
+                ))})}
+            )
 
             .addStep("deployReplayer", Replayer, "setupReplayer", c =>
                 c.register({

@@ -316,6 +316,9 @@ export class MigrationInitializer {
                 items.push(this.makeApprovalGateResource(
                     [kafkaCluster.name, 'kafkatopic', topic, 'vapretry'], gateLabel));
             }
+            // VAP retry gate for the root KafkaCluster CR reconcile
+            items.push(this.makeApprovalGateResource(
+                [kafkaCluster.name, 'vapretry'], gateLabel));
         }
 
         // CapturedTraffic resources from proxies
@@ -389,6 +392,10 @@ export class MigrationInitializer {
                 },
                 status: { phase: 'Initialized', configChecksum: replay.configChecksum }
             });
+
+            // VAP retry gate for replay
+            items.push(this.makeApprovalGateResource(
+                [replay.name, 'trafficreplay', 'vapretry'], gateLabel));
         }
 
         return {

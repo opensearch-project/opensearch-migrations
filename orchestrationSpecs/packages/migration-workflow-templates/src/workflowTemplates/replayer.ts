@@ -21,6 +21,7 @@ import {getTargetHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {CONTAINER_NAMES} from "../containerNames";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {ResourceManagement} from "./resourceManagement";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
@@ -38,6 +39,55 @@ function makeOwnerReferences(
         controller: true,
         blockOwnerDeletion: true,
     }];
+}
+
+function makeTrafficReplayManifest(
+    name: BaseExpression<string>,
+    replayerOptions: BaseExpression<Serialized<z.infer<typeof ARGO_REPLAYER_OPTIONS>>>,
+) {
+    const opts = expr.deserializeRecord(replayerOptions) as any;
+    return {
+        apiVersion: "migrations.opensearch.org/v1alpha1",
+        kind: "TrafficReplay",
+        metadata: {
+            name: makeStringTypeProxy(name),
+            labels: {
+                "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
+            }
+        },
+        spec: {
+            // Deployment-level fields
+            jvmArgs: makeStringTypeProxy(expr.dig(opts, ["jvmArgs"], expr.literal(""))),
+            loggingConfigurationOverrideConfigMap: makeStringTypeProxy(
+                expr.dig(opts, ["loggingConfigurationOverrideConfigMap"], expr.literal(""))
+            ),
+            podReplicas: makeDirectTypeProxy(expr.dig(opts, ["podReplicas"], 1) as any),
+            resources: makeDirectTypeProxy(expr.get(opts, "resources") as any),
+            // Replayer CLI params
+            kafkaTrafficEnableMSKAuth: makeDirectTypeProxy(expr.dig(opts, ["kafkaTrafficEnableMSKAuth"], false) as any),
+            kafkaTrafficPropertyFile: makeStringTypeProxy(expr.dig(opts, ["kafkaTrafficPropertyFile"], expr.literal(""))),
+            lookaheadTimeSeconds: makeDirectTypeProxy(expr.dig(opts, ["lookaheadTimeSeconds"], 400) as any),
+            maxConcurrentRequests: makeDirectTypeProxy(expr.dig(opts, ["maxConcurrentRequests"], 10000) as any),
+            numClientThreads: makeDirectTypeProxy(expr.dig(opts, ["numClientThreads"], 0) as any),
+            observedPacketConnectionTimeout: makeDirectTypeProxy(expr.dig(opts, ["observedPacketConnectionTimeout"], 360) as any),
+            otelCollectorEndpoint: makeStringTypeProxy(
+                expr.dig(opts, ["otelCollectorEndpoint"], expr.literal("http://otel-collector:4317"))
+            ),
+            quiescentPeriodMs: makeDirectTypeProxy(expr.dig(opts, ["quiescentPeriodMs"], 5000) as any),
+            removeAuthHeader: makeDirectTypeProxy(expr.dig(opts, ["removeAuthHeader"], false) as any),
+            speedupFactor: makeDirectTypeProxy(expr.dig(opts, ["speedupFactor"], 1.1) as any),
+            targetServerResponseTimeoutSeconds: makeDirectTypeProxy(
+                expr.dig(opts, ["targetServerResponseTimeoutSeconds"], 150) as any
+            ),
+            transformerConfig: makeStringTypeProxy(expr.dig(opts, ["transformerConfig"], expr.literal(""))),
+            transformerConfigEncoded: makeStringTypeProxy(expr.dig(opts, ["transformerConfigEncoded"], expr.literal(""))),
+            transformerConfigFile: makeStringTypeProxy(expr.dig(opts, ["transformerConfigFile"], expr.literal(""))),
+            tupleTransformerConfig: makeStringTypeProxy(expr.dig(opts, ["tupleTransformerConfig"], expr.literal(""))),
+            tupleTransformerConfigBase64: makeStringTypeProxy(expr.dig(opts, ["tupleTransformerConfigBase64"], expr.literal(""))),
+            tupleTransformerConfigFile: makeStringTypeProxy(expr.dig(opts, ["tupleTransformerConfigFile"], expr.literal(""))),
+            userAgent: makeStringTypeProxy(expr.dig(opts, ["userAgent"], expr.literal(""))),
+        }
+    };
 }
 
 function makeReplayerTargetParamDict(
@@ -264,6 +314,65 @@ export const Replayer = WorkflowBuilder.create({
 })
 
   .addParams(CommonWorkflowParameters)
+
+  .addTemplate("applyTrafficReplay", t => t
+      .addRequiredInput("name", typeToken<string>())
+      .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
+      .addResourceTask(b => b
+          .setDefinition({
+              action: "apply",
+              setOwnerReference: false,
+              manifest: makeTrafficReplayManifest(b.inputs.name, b.inputs.replayerOptions)
+          }))
+      .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+  )
+
+  .addTemplate("applyTrafficReplayWithRetry", t => t
+      .addRequiredInput("name", typeToken<string>())
+      .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
+      .addRequiredInput("retryGateName", typeToken<string>())
+      .addOptionalInput("retryGroupName_view", c => "Apply")
+
+      .addSteps(b => b
+          .addStep("tryApply", INTERNAL, "applyTrafficReplay", c =>
+              c.register({
+                  name: b.inputs.name,
+                  replayerOptions: b.inputs.replayerOptions,
+              }),
+              {continueOn: {failed: true}}
+          )
+          .addStep("waitForFix", ResourceManagement, "waitForApproval", c =>
+              c.register({
+                  resourceName: b.inputs.retryGateName,
+              }),
+              {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
+          )
+          .addStep("patchApproval", ResourceManagement, "patchApprovalAnnotation", c =>
+              c.register({
+                  resourceApiVersion: expr.literal("migrations.opensearch.org/v1alpha1"),
+                  resourceKind: expr.literal("TrafficReplay"),
+                  resourceName: b.inputs.name,
+              }),
+              {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
+          )
+          .addStep("resetGate", ResourceManagement, "patchApprovalGatePhase", c =>
+              c.register({
+                  resourceName: b.inputs.retryGateName,
+                  phase: expr.literal("Pending"),
+              }),
+              {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
+          )
+          .addStepToSelf("retryLoop", c =>
+              c.register({
+                  name: b.inputs.name,
+                  replayerOptions: b.inputs.replayerOptions,
+                  retryGateName: b.inputs.retryGateName,
+                  retryGroupName_view: b.inputs.retryGroupName_view,
+              }),
+              {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
+          )
+      )
+  )
 
   .addTemplate("createDeployment", (t) =>
     t

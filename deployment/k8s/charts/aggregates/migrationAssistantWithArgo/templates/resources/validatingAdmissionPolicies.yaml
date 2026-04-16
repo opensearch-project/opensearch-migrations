@@ -14,169 +14,95 @@
 # ─────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────
-# KafkaNodePool Policy - replicas, storage size, storage type, roles
+# KafkaCluster Policy - version, nodePool, and topic changes
 # ─────────────────────────────────────────────────────────────
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: {{ .Release.Namespace }}-kafkanodepool-policy
+  name: {{ .Release.Namespace }}-kafkacluster-policy
 spec:
   failurePolicy: Fail
   matchConstraints:
     resourceRules:
-    - apiGroups: ["kafka.strimzi.io"]
-      apiVersions: ["v1", "v1beta2"]
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
       operations: ["UPDATE"]
-      resources: ["kafkanodepools"]
-  validations:
-    # Gated: replica scaling
-    - expression: |
-        object.spec.replicas == oldObject.spec.replicas ||
-        (has(object.metadata.annotations) &&
-         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
-         has(object.metadata.labels) &&
-         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
-         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
-           object.metadata.labels['workflows.argoproj.io/run-uid'])
-      messageExpression: |
-        "Gated Change [replicas]: NodePool scaling from " +
-        string(oldObject.spec.replicas) + " to " + string(object.spec.replicas) +
-        ". Approve via the Argo Workflow UI to proceed."
-    # Gated: storage size
-    - expression: |
-        !has(object.spec.storage.size) || !has(oldObject.spec.storage.size) ||
-        object.spec.storage.size == oldObject.spec.storage.size ||
-        (has(object.metadata.annotations) &&
-         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
-         has(object.metadata.labels) &&
-         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
-         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
-           object.metadata.labels['workflows.argoproj.io/run-uid'])
-      messageExpression: |
-        "Gated Change [storage.size]: Storage resize from " +
-        oldObject.spec.storage.size + " to " + object.spec.storage.size +
-        ". Approve via the Argo Workflow UI to proceed."
-    # Impossible: storage type
-    - expression: |
-        object.spec.storage.type == oldObject.spec.storage.type
-      message: "Impossible: Storage type cannot be changed after creation. Delete and recreate."
-    # Impossible: roles
-    - expression: |
-        object.spec.roles == oldObject.spec.roles
-      message: "Impossible: Node pool roles cannot be changed after creation. Delete and recreate."
-
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  name: {{ .Release.Namespace }}-kafkanodepool-binding
-spec:
-  policyName: {{ .Release.Namespace }}-kafkanodepool-policy
-  validationActions: [Deny]
-  matchResources:
-    namespaceSelector:
-      matchExpressions:
-      - key: kubernetes.io/metadata.name
-        operator: In
-        values: ["{{ .Release.Namespace }}"]
-
-# ─────────────────────────────────────────────────────────────
-# Kafka Cluster Policy - version changes
-# ─────────────────────────────────────────────────────────────
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
-metadata:
-  name: {{ .Release.Namespace }}-kafka-policy
-spec:
-  failurePolicy: Fail
-  matchConstraints:
-    resourceRules:
-    - apiGroups: ["kafka.strimzi.io"]
-      apiVersions: ["v1", "v1beta2"]
-      operations: ["UPDATE"]
-      resources: ["kafkas"]
+      resources: ["kafkaclusters"]
   validations:
     # Gated: Kafka version change
     - expression: |
-        object.spec.kafka.version == oldObject.spec.kafka.version ||
+        !has(oldObject.spec.version) || !has(object.spec.version) ||
+        object.spec.version == oldObject.spec.version ||
         (has(object.metadata.annotations) &&
          'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
          has(object.metadata.labels) &&
          'workflows.argoproj.io/run-uid' in object.metadata.labels &&
          object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
            object.metadata.labels['workflows.argoproj.io/run-uid'])
-      messageExpression: |
-        "Gated Change [version]: Kafka version change from '" +
-        oldObject.spec.kafka.version + "' to '" + object.spec.kafka.version +
-        "'. Approve via the Argo Workflow UI to proceed."
-
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  name: {{ .Release.Namespace }}-kafka-binding
-spec:
-  policyName: {{ .Release.Namespace }}-kafka-policy
-  validationActions: [Deny]
-  matchResources:
-    namespaceSelector:
-      matchExpressions:
-      - key: kubernetes.io/metadata.name
-        operator: In
-        values: ["{{ .Release.Namespace }}"]
-
-# ─────────────────────────────────────────────────────────────
-# KafkaTopic Policy - partition decrease, replica change
-# ─────────────────────────────────────────────────────────────
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
-metadata:
-  name: {{ .Release.Namespace }}-kafkatopic-policy
-spec:
-  failurePolicy: Fail
-  matchConstraints:
-    resourceRules:
-    - apiGroups: ["kafka.strimzi.io"]
-      apiVersions: ["v1", "v1beta2"]
-      operations: ["UPDATE"]
-      resources: ["kafkatopics"]
-  validations:
-    # Impossible: partition decrease (Kafka limitation)
+      message: "Gated: Kafka version change requires approval."
+    # Gated: nodePool replica scaling
     - expression: |
-        object.spec.partitions >= oldObject.spec.partitions
-      messageExpression: |
-        "Impossible: Partition count cannot decrease (Kafka limitation). " +
-        "Current: " + string(oldObject.spec.partitions) + ", Requested: " + string(object.spec.partitions)
-    # Gated: topic replication factor
-    - expression: |
-        object.spec.replicas == oldObject.spec.replicas ||
+        !has(oldObject.spec.nodePool) || !has(object.spec.nodePool) ||
+        !has(oldObject.spec.nodePool.replicas) || !has(object.spec.nodePool.replicas) ||
+        object.spec.nodePool.replicas == oldObject.spec.nodePool.replicas ||
         (has(object.metadata.annotations) &&
          'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
          has(object.metadata.labels) &&
          'workflows.argoproj.io/run-uid' in object.metadata.labels &&
          object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
            object.metadata.labels['workflows.argoproj.io/run-uid'])
-      messageExpression: |
-        "Gated Change [replicas]: Topic replication factor change from " +
-        string(oldObject.spec.replicas) + " to " + string(object.spec.replicas) +
-        ". Approve via the Argo Workflow UI to proceed."
-    # Impossible: cluster assignment
+      message: "Gated: NodePool replica scaling requires approval."
+    # Gated: nodePool storage size
     - expression: |
-        !has(oldObject.metadata.labels) ||
-        !('strimzi.io/cluster' in oldObject.metadata.labels) ||
-        object.metadata.labels['strimzi.io/cluster'] == oldObject.metadata.labels['strimzi.io/cluster']
-      message: "Impossible: Topic cannot be moved to a different cluster."
+        !has(oldObject.spec.nodePool) || !has(object.spec.nodePool) ||
+        !has(oldObject.spec.nodePool.storage) || !has(object.spec.nodePool.storage) ||
+        !has(oldObject.spec.nodePool.storage.size) || !has(object.spec.nodePool.storage.size) ||
+        object.spec.nodePool.storage.size == oldObject.spec.nodePool.storage.size ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
+      message: "Gated: NodePool storage size change requires approval."
+    # Impossible: nodePool storage type
+    - expression: |
+        !has(oldObject.spec.nodePool) || !has(object.spec.nodePool) ||
+        !has(oldObject.spec.nodePool.storage) || !has(object.spec.nodePool.storage) ||
+        !has(oldObject.spec.nodePool.storage.type) || !has(object.spec.nodePool.storage.type) ||
+        object.spec.nodePool.storage.type == oldObject.spec.nodePool.storage.type
+      message: "Impossible: Storage type cannot be changed. Delete and recreate."
+    # Impossible: nodePool roles
+    - expression: |
+        !has(oldObject.spec.nodePool) || !has(object.spec.nodePool) ||
+        !has(oldObject.spec.nodePool.roles) || !has(object.spec.nodePool.roles) ||
+        object.spec.nodePool.roles == oldObject.spec.nodePool.roles
+      message: "Impossible: Node pool roles cannot be changed. Delete and recreate."
+    # Gated: topic replication factor change
+    - expression: |
+        !has(oldObject.spec.topicReplicas) || !has(object.spec.topicReplicas) ||
+        object.spec.topicReplicas == oldObject.spec.topicReplicas ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
+      message: "Gated: Topic replication factor change requires approval."
+    # Impossible: topic partition decrease
+    - expression: |
+        !has(oldObject.spec.topicPartitions) || !has(object.spec.topicPartitions) ||
+        object.spec.topicPartitions >= oldObject.spec.topicPartitions
+      message: "Impossible: Topic partition count cannot decrease."
 
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: {{ .Release.Namespace }}-kafkatopic-binding
+  name: {{ .Release.Namespace }}-kafkacluster-binding
 spec:
-  policyName: {{ .Release.Namespace }}-kafkatopic-policy
+  policyName: {{ .Release.Namespace }}-kafkacluster-policy
   validationActions: [Deny]
   matchResources:
     namespaceSelector:

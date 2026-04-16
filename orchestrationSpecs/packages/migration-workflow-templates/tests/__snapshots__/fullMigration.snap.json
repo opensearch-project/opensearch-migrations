@@ -70,9 +70,57 @@
           [
             {
               "templateRef": {
+                "template": "readresourcephase",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceKind",
+                    "value": "KafkaCluster"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "checkPhase"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "applykafkaclustercrwithretry",
+                "name": "setup-kafka"
+              },
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "kafkaClusterConfig",
+                    "value": "{{inputs.parameters.kafkaClusterConfig}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.clusterName+'.vapretry'}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='KafkaCluster: '+inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "reconcileKafkaCluster"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "deploykafkaclusterandtopicswithretry",
                 "name": "setup-kafka"
               },
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -106,6 +154,7 @@
                 "template": "patchconfigchecksumannotation",
                 "name": "resource-management"
               },
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -127,6 +176,32 @@
                 ]
               },
               "name": "stampChecksum"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchkafkaclusterready",
+                "name": "resource-management"
+              },
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Ready"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  }
+                ]
+              },
+              "name": "patchKafkaClusterReady"
             }
           ]
         ],
@@ -1269,6 +1344,36 @@
                 ]
               },
               "name": "readKafkaConnectionProfile"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "applytrafficreplaywithretry",
+                "name": "replayer"
+              },
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{inputs.parameters.name}}"
+                  },
+                  {
+                    "name": "replayerOptions",
+                    "value": "{{inputs.parameters.replayerOptions}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.name+'.trafficreplay.vapretry'}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='TrafficReplay: '+inputs.parameters.name}}"
+                  }
+                ]
+              },
+              "name": "reconcileTrafficReplay"
             }
           ],
           [
