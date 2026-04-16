@@ -21,6 +21,7 @@ import * as highlighting from './features/highlighting';
 import * as hitsToDocs from './features/hits-to-docs';
 import * as aggsToFacets from './features/aggs-to-facets';
 import * as responseHeader from './features/response-header';
+import * as updateDoc from './features/update-doc';
 import * as validation from './features/validation';
 import { initValidation } from './features/validation';
 import type { ParamRule } from './features/validation';
@@ -79,6 +80,9 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
       highlighting.request, // hl=true → highlight block
       sort.request, // sort=... → sort DSL
     ],
+    update: [
+      updateDoc.request, // single doc: /update/json/docs → /_doc/{id}
+    ],
   },
 };
 
@@ -91,6 +95,9 @@ export const responseRegistry: TransformRegistry<ResponseContext> = {
       hitsToDocs.response, // hits.hits → response.docs
       aggsToFacets.response, // aggregations → facets
       responseHeader.response, // synthesize responseHeader
+    ],
+    update: [
+      updateDoc.response, // OpenSearch _doc response → Solr update response format
     ],
   },
 };
