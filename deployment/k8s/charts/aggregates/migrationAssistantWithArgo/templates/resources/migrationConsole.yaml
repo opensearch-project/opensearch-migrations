@@ -229,6 +229,14 @@ spec:
                   key: ENDPOINT_HTTP
                   optional: true
             {{- end }}
+            {{- if index .Values.conditionalPackageInstalls "cert-manager" }}
+            - name: PROXY_DEFAULT_AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: AWS_REGION
+                  optional: true
+            {{- end }}
           {{- if .Values.defaultBucketConfiguration.create }}
           securityContext:
             privileged: true

@@ -197,6 +197,28 @@ function normalizeKafkaClusterConfig(
     };
 }
 
+function defaultProxyTlsConfig(proxyName: string) {
+    const awsRegion = process.env.PROXY_DEFAULT_AWS_REGION;
+    const dnsNames = [
+        proxyName,
+        `${proxyName}.ma`,
+        `${proxyName}.ma.svc.cluster.local`,
+    ];
+    if (awsRegion) {
+        dnsNames.push(`*.elb.${awsRegion}.amazonaws.com`);
+    }
+    return {
+        mode: "certManager" as const,
+        issuerRef: {
+            name: "migrations-ca",
+            kind: "ClusterIssuer" as const,
+        },
+        dnsNames,
+        duration: "2160h",
+        renewBefore: "360h",
+    };
+}
+
 function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["traffic"] {
     // Drop user-schema sentinel placeholders that are equivalent to omission so
     // AJV validates the canonical user config rather than Zod's empty-string defaults.
@@ -206,9 +228,32 @@ function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["t
 
     const normalizedProxies: NonNullable<InputConfig["traffic"]>["proxies"] = {};
     for (const [key, proxy] of Object.entries(traffic.proxies ?? {})) {
-        normalizedProxies[key] = proxy.kafkaTopic === ""
+        let normalized = proxy.kafkaTopic === ""
             ? (({kafkaTopic, ...rest}) => rest)(proxy)
             : proxy;
+
+        // Secure-by-default: inject self-signed TLS when no TLS config is specified
+        // and no legacy sslConfigFile is in use. Users can opt out with tls.mode: "plaintext".
+        if (!normalized.proxyConfig?.tls && !normalized.proxyConfig?.sslConfigFile) {
+            console.info(`TLS was auto-configured for '${key}' (secure-by-default). Use tls.mode: "plaintext" to opt out.`);
+            normalized = {
+                ...normalized,
+                proxyConfig: {
+                    ...normalized.proxyConfig,
+                    tls: defaultProxyTlsConfig(key),
+                },
+            };
+        }
+
+        // Strip plaintext mode so Argo sees no TLS. This preserves existing HTTP behavior.
+        if (normalized.proxyConfig?.tls &&
+            'mode' in normalized.proxyConfig.tls &&
+            normalized.proxyConfig.tls.mode === "plaintext") {
+            const {tls: _, ...proxyConfigWithoutTls} = normalized.proxyConfig;
+            normalized = {...normalized, proxyConfig: proxyConfigWithoutTls};
+        }
+
+        normalizedProxies[key] = normalized;
     }
 
     return {
