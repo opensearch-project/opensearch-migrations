@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.solr.SolrHttpClient;
 import org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator;
@@ -15,6 +16,12 @@ import com.beust.jcommander.ParameterException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 /**
  * Backup strategy for Solr sources. Handles both SolrCloud (Collections API)
@@ -125,6 +132,12 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     private void runCloudBackup(String solrUrl, String backupLocation) {
         log.info("Detected SolrCloud — using Collections API backup");
+        // Solr S3BackupRepository validates that the location directory exists in S3 before writing.
+        // If the s3RepoUri has a subpath (e.g. s3://bucket/solr-migration-v3), we must ensure
+        // the directory marker object exists at that path before calling the backup API.
+        if (args.s3RepoUri != null && args.s3Region != null) {
+            ensureS3LocationExists(args.s3RepoUri, args.s3Region);
+        }
         var creator = new SolrSnapshotCreator(
             solrUrl, args.snapshotName, backupLocation,
             args.solrCollections, connectionContext, args.snapshotRepoName
@@ -152,6 +165,47 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         );
         creator.createBackup();
         waitForCompletion(creator::isBackupFinished);
+    }
+
+    /**
+     * Ensure the S3 directory marker exists for the Solr backup location.
+     * Solr's S3BackupRepository checks that the location path exists (via HeadObject)
+     * before accepting a backup request. For subpaths like s3://bucket/solr-migration-v3,
+     * we must create a zero-byte directory marker object with the appropriate content-type.
+     */
+    private void ensureS3LocationExists(String s3RepoUri, String region) {
+        var repoUri = new S3Uri(s3RepoUri);
+        if (repoUri.key.isEmpty()) {
+            log.info("S3 backup location is bucket root, no directory marker needed");
+            return;
+        }
+
+        var dirKey = repoUri.key.endsWith("/") ? repoUri.key : repoUri.key + "/";
+        log.info("Ensuring S3 directory marker exists: s3://{}/{}", repoUri.bucketName, dirKey);
+
+        try (var s3Client = S3Client.builder().region(Region.of(region)).build()) {
+            // Check if the directory marker already exists
+            try {
+                s3Client.headObject(HeadObjectRequest.builder()
+                    .bucket(repoUri.bucketName)
+                    .key(dirKey)
+                    .build());
+                log.info("S3 directory marker already exists");
+                return;
+            } catch (NoSuchKeyException e) {
+                // Expected — need to create it
+            }
+
+            // Create the directory marker (matches Solr's S3StorageClient.createDirectory behavior)
+            s3Client.putObject(
+                PutObjectRequest.builder()
+                    .bucket(repoUri.bucketName)
+                    .key(dirKey)
+                    .contentType("application/x-directory")
+                    .build(),
+                RequestBody.empty());
+            log.info("Created S3 directory marker: s3://{}/{}", repoUri.bucketName, dirKey);
+        }
     }
 
     private void waitForCompletion(java.util.function.BooleanSupplier isFinished) {
