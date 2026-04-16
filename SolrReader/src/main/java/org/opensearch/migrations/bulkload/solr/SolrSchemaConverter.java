@@ -28,6 +28,7 @@ public final class SolrSchemaConverter {
     private static final String OS_KEYWORD = "keyword";
     private static final String OS_TEXT = "text";
     private static final String OS_BINARY = "binary";
+    private static final String OS_FORMAT_FIELD = "format";
 
     /** Maps Solr field type names to OpenSearch types. */
     private static final Map<String, String> SOLR_TO_OS_TYPE = Map.ofEntries(
@@ -168,7 +169,7 @@ public final class SolrSchemaConverter {
                 var fieldMapping = MAPPER.createObjectNode();
                 fieldMapping.put("type", osType);
                 if (OS_DATE.equals(osType)) {
-                    fieldMapping.put("format", OS_DATE_FORMAT);
+                    fieldMapping.put(OS_FORMAT_FIELD, OS_DATE_FORMAT);
                 }
                 properties.set(dest, fieldMapping);
             }
@@ -214,7 +215,7 @@ public final class SolrSchemaConverter {
         ObjectNode fieldMapping = MAPPER.createObjectNode();
         fieldMapping.put("type", osType);
         if (OS_DATE.equals(osType)) {
-            fieldMapping.put("format", OS_DATE_FORMAT);
+            fieldMapping.put(OS_FORMAT_FIELD, OS_DATE_FORMAT);
         }
         return fieldMapping;
     }
@@ -286,7 +287,7 @@ public final class SolrSchemaConverter {
         var mapping = MAPPER.createObjectNode();
         mapping.put("type", osType);
         if (OS_DATE.equals(osType)) {
-            mapping.put("format", OS_DATE_FORMAT);
+            mapping.put(OS_FORMAT_FIELD, OS_DATE_FORMAT);
         }
         inner.set("mapping", mapping);
         template.set(templateName, inner);

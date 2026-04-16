@@ -40,6 +40,7 @@ public class Items implements JsonOutput {
     @NonNull
     private final List<CreationResult> aliases;
     private final String failureMessage;
+    @SuppressWarnings("java:S1170") // Builder.Default fields are instance-level, not static
     @Builder.Default
     private final boolean succeedOnEmpty = false;
 
