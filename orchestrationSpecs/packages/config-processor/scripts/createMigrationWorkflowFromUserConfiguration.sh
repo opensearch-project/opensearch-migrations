@@ -35,14 +35,14 @@ echo "Applying Kubernetes resources..."
 # Apply CRD resources
 if [ -f "$TEMP_DIR/crdResources.yaml" ]; then
     echo "Applying CRD resources..."
-    if kubectl create -f "$TEMP_DIR/crdResources.yaml" 2>/dev/null; then
+    if CREATE_OUTPUT=$(kubectl create -f "$TEMP_DIR/crdResources.yaml" 2>&1); then
         # Patch status subresource (kubectl create ignores status)
         if [ -f "$TEMP_DIR/patchCrdStatus.sh" ]; then
             echo "Patching CRD status subresources..."
             sh "$TEMP_DIR/patchCrdStatus.sh"
         fi
     else
-        echo "CRD resources already exist, skipping."
+        echo "CRD create failed with: $CREATE_OUTPUT"
     fi
 fi
 
