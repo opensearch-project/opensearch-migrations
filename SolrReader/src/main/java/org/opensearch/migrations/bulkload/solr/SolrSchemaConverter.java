@@ -108,7 +108,7 @@ public final class SolrSchemaConverter {
 
         processExplicitFields(solrFields, typeClassMap, properties);
         var dynamicTemplates = processDynamicFields(dynamicFields, typeClassMap);
-        processCopyFields(copyFields, properties);
+        processCopyFields(copyFields, dynamicFields, typeClassMap, properties);
 
         mappings.set("properties", properties);
         if (!dynamicTemplates.isEmpty()) {
@@ -151,18 +151,62 @@ public final class SolrSchemaConverter {
         return dynamicTemplates;
     }
 
-    private static void processCopyFields(JsonNode copyFields, ObjectNode properties) {
+    private static void processCopyFields(
+        JsonNode copyFields, JsonNode dynamicFields, Map<String, String> typeClassMap, ObjectNode properties
+    ) {
         if (copyFields == null || !copyFields.isArray()) {
             return;
         }
         for (var cf : copyFields) {
             var dest = cf.path("dest").asText();
             if (!dest.isEmpty() && !properties.has(dest) && !isInternalField(dest)) {
+                // Try to resolve the dest field's type from dynamic field patterns
+                var osType = resolveDynamicFieldType(dest, dynamicFields, typeClassMap);
+                if (osType == null) {
+                    osType = OS_TEXT;
+                }
                 var fieldMapping = MAPPER.createObjectNode();
-                fieldMapping.put("type", OS_TEXT);
+                fieldMapping.put("type", osType);
+                if (OS_DATE.equals(osType)) {
+                    fieldMapping.put("format", OS_DATE_FORMAT);
+                }
                 properties.set(dest, fieldMapping);
             }
         }
+    }
+
+    /**
+     * Resolve the OpenSearch type for a field name by matching it against dynamic field patterns.
+     * Returns null if no dynamic field pattern matches.
+     */
+    private static String resolveDynamicFieldType(String fieldName, JsonNode dynamicFields, Map<String, String> typeClassMap) {
+        if (dynamicFields == null || !dynamicFields.isArray()) {
+            return null;
+        }
+        for (var dynField : dynamicFields) {
+            var pattern = dynField.path("name").asText();
+            var type = dynField.path("type").asText();
+            if (pattern.isEmpty() || type.isEmpty()) {
+                continue;
+            }
+            if (matchesDynamicPattern(fieldName, pattern)) {
+                return resolveOsType(type, typeClassMap);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Check if a field name matches a Solr dynamic field pattern.
+     * Patterns are either prefix (e.g., "attr_*") or suffix (e.g., "*_s").
+     */
+    private static boolean matchesDynamicPattern(String fieldName, String pattern) {
+        if (pattern.startsWith("*") && pattern.length() > 1) {
+            return fieldName.endsWith(pattern.substring(1));
+        } else if (pattern.endsWith("*") && pattern.length() > 1) {
+            return fieldName.startsWith(pattern.substring(0, pattern.length() - 1));
+        }
+        return false;
     }
 
     private static ObjectNode resolveFieldMapping(String solrType, Map<String, String> typeClassMap) {

@@ -323,6 +323,90 @@ public class SolrToOpenSearchEndToEndTest {
     }
 
     /**
+     * E2E: copyField destinations resolve their type from dynamic field patterns, not hardcoded text.
+     * Simulates the common Solr pattern: text_general field + copyField to *_str (type=strings)
+     * for faceting. Verifies the *_str fields get "keyword" mapping in OpenSearch, not "text".
+     */
+    @ParameterizedTest(name = "copyField type resolution: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch")
+    void copyFieldDestinationsResolveTypeFromDynamicFields(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            createSolrCollection(solr, COLLECTION_NAME);
+
+            // Add fields, a dynamic field pattern, and copyField directives
+            // This mirrors a real-world Solr pattern: text_general fields with *_str for faceting
+            solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/" + COLLECTION_NAME + "/schema",
+                "-d", "{\"add-field\":["
+                    + "{\"name\":\"brand\",\"type\":\"text_general\",\"stored\":true},"
+                    + "{\"name\":\"category\",\"type\":\"text_general\",\"stored\":true}"
+                    + "],"
+                    + "\"add-dynamic-field\":["
+                    + "{\"name\":\"*_str\",\"type\":\"strings\",\"stored\":false,\"docValues\":true,\"indexed\":false}"
+                    + "],"
+                    + "\"add-copy-field\":["
+                    + "{\"source\":\"brand\",\"dest\":\"brand_str\",\"maxChars\":256},"
+                    + "{\"source\":\"category\",\"dest\":\"category_str\",\"maxChars\":256}"
+                    + "]}");
+
+            // Index a document
+            solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/" + COLLECTION_NAME + "/update?commit=true",
+                "-d", "[{\"id\":\"cf1\",\"brand\":\"Acme Corp\",\"category\":\"Electronics\"}]");
+
+            var schema = fetchSolrSchema(solr, COLLECTION_NAME);
+            var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
+
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
+            var targetClient = createOpenSearchClient(target);
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
+            var pipeline = new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE);
+            pipeline.migrateAll().collectList().block();
+
+            var restClient = createRestClient(target);
+            var ctx = DocumentMigrationTestContext.factory().noOtelTracking();
+            restClient.get("_refresh", ctx.createUnboundRequestContext());
+
+            // --- Verify mappings: *_str fields should be "keyword", not "text" ---
+            var mappingResp = restClient.get(
+                COLLECTION_NAME + "/_mapping", ctx.createUnboundRequestContext()
+            );
+            var properties = MAPPER.readTree(mappingResp.body)
+                .path(COLLECTION_NAME).path("mappings").path("properties");
+            log.atInfo().setMessage("CopyField mapping test — properties: {}").addArgument(properties).log();
+
+            assertThat("brand → text", properties.path("brand").path("type").asText(), equalTo("text"));
+            assertThat("category → text", properties.path("category").path("type").asText(), equalTo("text"));
+            assertThat("brand_str → keyword (from *_str dynamic pattern)",
+                properties.path("brand_str").path("type").asText(), equalTo("keyword"));
+            assertThat("category_str → keyword (from *_str dynamic pattern)",
+                properties.path("category_str").path("type").asText(), equalTo("keyword"));
+
+            // --- Verify the source document fields migrated ---
+            var searchResp = restClient.get(
+                COLLECTION_NAME + "/_search?q=id:cf1&size=1", ctx.createUnboundRequestContext()
+            );
+            var hits = MAPPER.readTree(searchResp.body).path("hits").path("hits");
+            assertThat("Should find cf1", hits.size(), equalTo(1));
+
+            var doc = hits.get(0).path("_source");
+            assertThat("brand value", doc.path("brand").asText(), equalTo("Acme Corp"));
+            assertThat("category value", doc.path("category").asText(), equalTo("Electronics"));
+        }
+    }
+
+    /**
      * E2E: Date fields get proper format mapping (strict_date_optional_time||epoch_millis)
      * so OpenSearch can accept both ISO 8601 strings and epoch millis from Lucene.
      */
