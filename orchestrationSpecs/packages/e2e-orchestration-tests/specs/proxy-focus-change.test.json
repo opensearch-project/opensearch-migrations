@@ -1,0 +1,28 @@
+{
+  "baseConfig": "../../config-processor/scripts/samples/fullMigrationWithTraffic.wf.yaml",
+  "matrix": {
+    "focus": "proxy:capture-proxy",
+    "select": [{ "changeClass": "safe", "patterns": ["focus-change"] }]
+  },
+  "fixtures": {
+    "setup": [],
+    "cleanup": ["delete-target-indices", "delete-source-snapshots"],
+    "approvalGates": [
+      {
+        "approvePattern": "*.evaluateMetadata",
+        "description": "After metadata evaluation",
+        "validations": []
+      },
+      {
+        "approvePattern": "*.migrateMetadata",
+        "description": "After metadata migration — verify indices on target",
+        "validations": ["compare-indices"]
+      },
+      {
+        "approvePattern": "*.documentBackfill",
+        "description": "After document backfill — verify doc counts",
+        "validations": ["compare-indices"]
+      }
+    ]
+  }
+}

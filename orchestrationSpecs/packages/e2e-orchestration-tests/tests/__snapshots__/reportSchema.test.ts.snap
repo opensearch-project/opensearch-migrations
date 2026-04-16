@@ -1,0 +1,128 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`reportSchema builds a failing result 1`] = `
+{
+  "changeClass": "safe",
+  "expect": {
+    "reran": [
+      "proxy:capture-proxy",
+    ],
+    "unchanged": [
+      "kafka:default",
+      "snapshot:source-snap1",
+    ],
+  },
+  "failures": [
+    "kafka:default was expected unchanged but changed",
+  ],
+  "focus": "proxy:capture-proxy",
+  "mutatorId": "proxy-numThreads",
+  "name": "proxy:capture-proxy/focus-change/proxy-numThreads",
+  "observed": {
+    "kafka:default": {
+      "changed": true,
+      "phase": "completed",
+    },
+    "proxy:capture-proxy": {
+      "changed": true,
+      "phase": "completed",
+    },
+    "snapshot:source-snap1": {
+      "changed": false,
+      "phase": "skipped",
+    },
+  },
+  "pattern": "focus-change",
+  "status": "failed",
+}
+`;
+
+exports[`reportSchema builds a passing result 1`] = `
+{
+  "changeClass": "safe",
+  "expect": {
+    "reran": [
+      "proxy:capture-proxy",
+    ],
+    "unchanged": [
+      "kafka:default",
+      "snapshot:source-snap1",
+    ],
+  },
+  "focus": "proxy:capture-proxy",
+  "mutatorId": "proxy-numThreads",
+  "name": "proxy:capture-proxy/focus-change/proxy-numThreads",
+  "observed": {
+    "kafka:default": {
+      "changed": false,
+      "phase": "skipped",
+    },
+    "proxy:capture-proxy": {
+      "changed": true,
+      "phase": "completed",
+    },
+    "snapshot:source-snap1": {
+      "changed": false,
+      "phase": "skipped",
+    },
+  },
+  "pattern": "focus-change",
+  "status": "passed",
+}
+`;
+
+exports[`reportSchema builds a scenario report 1`] = `
+{
+  "coverage": {
+    "expandedCases": [
+      "proxy:capture-proxy/focus-change/proxy-numThreads",
+    ],
+    "selectedCases": [
+      "focus-change",
+    ],
+    "skippedCases": [],
+    "uncoveredCases": [],
+  },
+  "expandedTests": [
+    {
+      "changeClass": "safe",
+      "expect": {
+        "reran": [
+          "proxy:capture-proxy",
+        ],
+        "unchanged": [
+          "kafka:default",
+          "snapshot:source-snap1",
+        ],
+      },
+      "focus": "proxy:capture-proxy",
+      "mutatorId": "proxy-numThreads",
+      "name": "proxy:capture-proxy/focus-change/proxy-numThreads",
+      "observed": {
+        "kafka:default": {
+          "changed": false,
+          "phase": "skipped",
+        },
+        "proxy:capture-proxy": {
+          "changed": true,
+          "phase": "completed",
+        },
+        "snapshot:source-snap1": {
+          "changed": false,
+          "phase": "skipped",
+        },
+      },
+      "pattern": "focus-change",
+      "status": "passed",
+    },
+  ],
+  "scenario": "test-scenario",
+  "status": "passed",
+  "summary": {
+    "failed": 0,
+    "generated": 1,
+    "partial": 0,
+    "passed": 1,
+  },
+}
+`;

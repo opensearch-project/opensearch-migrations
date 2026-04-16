@@ -1,4 +1,5 @@
-import {ARGO_WORKFLOW_SCHEMA} from "@opensearch-migrations/schemas";
+import {ARGO_MIGRATION_CONFIG_PRE_ENRICH} from "@opensearch-migrations/schemas";
+import {z} from "zod";
 import {MigrationInitializer} from "./migrationInitializer";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {parse} from "yaml";
@@ -52,6 +53,7 @@ export async function main() {
     let userConfigFile = process.env.USER_WORKFLOW_CONFIGURATION;
     let workflowConfigFile = process.env.TRANSFORMED_WORKFLOW_CONFIGURATION;
     let outputDir: string | undefined;
+    let workflowName: string | undefined;
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
@@ -62,6 +64,8 @@ export async function main() {
             workflowConfigFile = args[++i];
         } else if (arg === '--output-dir' && i + 1 < args.length) {
             outputDir = args[++i];
+        } else if (arg === '--workflow-name' && i + 1 < args.length) {
+            workflowName = args[++i];
         } else {
             console.error('Error: unknown arg: `' + arg + '`.');
             process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
@@ -83,13 +87,13 @@ export async function main() {
     }
 
     try {
-        const workflows: ARGO_WORKFLOW_SCHEMA = await (async ()=>{
+        const workflows: z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH> = await (async ()=>{
             if (userConfigFile) {
                 const processor = new MigrationConfigTransformer();
                 const userConfig = await parseInput(userConfigFile) as any;
                 return processor.processFromObject(userConfig);
             } else if (workflowConfigFile) {
-                return parseInput(workflowConfigFile) as any;
+                return ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(await parseInput(workflowConfigFile));
             } else {
                 throw new Error("Neither userConfigFile nor workflowConfigFile found");
             }
@@ -98,7 +102,7 @@ export async function main() {
         // Generate output files
         if (outputDir) {
             const initializer = new MigrationInitializer();
-            await initializer.generateOutputFiles(workflows, outputDir, userConfigFile ? await parseInput(userConfigFile) : null);
+            await initializer.generateOutputFiles(workflows, outputDir, userConfigFile ? await parseInput(userConfigFile) : null, workflowName);
         }
 
         // Output transformed workflow to stdout if no output directory specified - ignoring auxiliary configmap values

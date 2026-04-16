@@ -1,0 +1,519 @@
+/**
+ * E2E Live Runner
+ *
+ * Runs a single expanded test case against a real K8s cluster with Argo.
+ * Uses the real `workflow configure edit --stdin` and `workflow submit`
+ * commands via the migration console pod — same path a user would take.
+ *
+ * Usage: npx tsx src/e2e-run.ts [--namespace ma]
+ *
+ * NOTE: This runner uses the shared workflow name 'migration-workflow'
+ * (determined by createMigrationWorkflowFromUserConfiguration.sh).
+ * Do not run this concurrently with other workflow CLI usage in the
+ * same namespace.
+ *
+ * NOTE: This is an integration script that shells into a live cluster.
+ * It is not unit-testable — correctness is validated by running it.
+ * The pure logic it depends on (assertLogic, checksumReporter, etc.)
+ * has full unit test coverage.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import readline from 'node:readline';
+import { execSync } from 'node:child_process';
+import yaml from 'yaml';
+import { buildChecksumReport } from './checksumReporter';
+import { expandMatrix } from './matrixExpander';
+import { defaultMutatorRegistry } from './approvedMutators';
+import { assertRun, formatAssertResult } from './assertLogic';
+import { buildScenarioReport, buildPassingResult, buildFailingResult, formatReport } from './reportSchema';
+import { loadTestSpec } from './specLoader';
+import type { ApprovalGate, FixtureAction, TestFixtures } from './fixtures';
+import type { MatrixSpec, RunExpectation, ScenarioObservation, ChecksumReport, TestCaseResult } from './types';
+
+const NAMESPACE = process.argv.includes('--namespace')
+    ? process.argv[process.argv.indexOf('--namespace') + 1]
+    : 'ma';
+
+const WAIT_BEFORE_CLEANUP = process.argv.includes('--wait-before-cleanup');
+
+const WORKFLOW_NAME = 'migration-workflow';
+const OVERALL_TIMEOUT = 3600;       // 1 hour max for the entire test
+const STALL_TIMEOUT = 120;          // 2 min with no phase change = stall
+
+// ─── Shell helpers ──────────────────────────────────────────────────
+
+function kubectl(args: string): string {
+    const cmd = `kubectl -n ${NAMESPACE} ${args}`;
+    console.log(`  $ ${cmd}`);
+    return execSync(cmd, { encoding: 'utf-8', timeout: 60000, maxBuffer: 50 * 1024 * 1024 }).trim();
+}
+
+function kubectlQuiet(args: string): string {
+    return execSync(`kubectl -n ${NAMESPACE} ${args}`, { encoding: 'utf-8', timeout: 30000, maxBuffer: 50 * 1024 * 1024 }).trim();
+}
+
+function consoleExec(cmd: string): string {
+    const fullCmd = `kubectl -n ${NAMESPACE} exec migration-console-0 -c console -- bash -c '${cmd.replace(/'/g, "'\\''")}'`;
+    console.log(`  $ (console) ${cmd}`);
+    return execSync(fullCmd, { encoding: 'utf-8', timeout: 120000 }).trim();
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function waitForConfirmation(prompt: string): Promise<void> {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    return new Promise(resolve => {
+        rl.question(prompt, () => { rl.close(); resolve(); });
+    });
+}
+
+// ─── Fixture runner ─────────────────────────────────────────────────
+
+function runFixtures(label: string, actions: FixtureAction[], failOnError: boolean = false): void {
+    if (actions.length === 0) return;
+    console.log(`\n  [${label}] Running ${actions.length} fixture action(s)...`);
+    for (const action of actions) {
+        console.log(`    ${action.name}: ${action.description}`);
+        try {
+            consoleExec(action.consoleCommand);
+        } catch (e) {
+            if (failOnError) {
+                throw new Error(`Setup fixture "${action.name}" failed: ${e}`);
+            }
+            console.log(`      (warning: ${e})`);
+        }
+    }
+}
+
+// ─── CRD helpers ────────────────────────────────────────────────────
+
+const CRD_KIND_MAP: Record<string, string> = {
+    proxy: 'capturedtraffics.migrations.opensearch.org',
+    snapshot: 'datasnapshots.migrations.opensearch.org',
+    snapshotMigration: 'snapshotmigrations.migrations.opensearch.org',
+    trafficReplay: 'trafficreplays.migrations.opensearch.org',
+};
+
+function readCrdStates(report: ChecksumReport, runIndex: number, runName: string): ScenarioObservation {
+    const resources: ScenarioObservation['resources'] = {};
+    for (const [key, entry] of Object.entries(report.components)) {
+        const crdKind = CRD_KIND_MAP[entry.kind];
+        if (!crdKind) continue;
+        try {
+            const phase = kubectlQuiet(`get ${crdKind} ${entry.resourceName} -o jsonpath='{.status.phase}'`);
+            const checksum = kubectlQuiet(`get ${crdKind} ${entry.resourceName} -o jsonpath='{.status.configChecksum}'`);
+            resources[key] = { kind: entry.kind, resourceName: entry.resourceName, phase, configChecksum: checksum };
+        } catch {
+            resources[key] = { kind: entry.kind, resourceName: entry.resourceName, phase: 'NotFound', configChecksum: '' };
+        }
+    }
+    return { scenario: 'e2e-live', run: runIndex, runName, observedAt: new Date().toISOString(), resources };
+}
+
+// ─── Workflow submission via migration console ──────────────────────
+
+function configureAndSubmit(rawConfig: Record<string, unknown>): void {
+    const configYaml = yaml.stringify(rawConfig);
+
+    console.log(`  Loading config via 'workflow configure edit --stdin'...`);
+    const escaped = configYaml.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
+    consoleExec(`echo "${escaped}" | workflow configure edit --stdin`);
+
+    console.log(`  Deleting previous workflow...`);
+    try { kubectl(`delete workflow ${WORKFLOW_NAME} --ignore-not-found=true`); } catch { /* ok */ }
+
+    console.log(`  Submitting via 'workflow submit'...`);
+    consoleExec(`workflow submit`);
+}
+
+/**
+ * Wait for workflow with progress-based stall detection.
+ * Fails fast if no node changes phase for STALL_TIMEOUT seconds.
+ */
+async function waitForWorkflow(approvalGates: ApprovalGate[]): Promise<string> {
+    console.log(`  Waiting for workflow ${WORKFLOW_NAME} (stall timeout ${STALL_TIMEOUT}s)...`);
+    const overallStart = Date.now();
+    let lastNodeSnapshot = '';
+    let lastProgressTime = Date.now();
+    let nextGateIndex = 0;
+
+    while (Date.now() - overallStart < OVERALL_TIMEOUT * 1000) {
+        try {
+            const phase = kubectlQuiet(`get workflow ${WORKFLOW_NAME} -o jsonpath='{.status.phase}'`);
+            if (['Succeeded', 'Failed', 'Error'].includes(phase)) {
+                console.log(`\n  Workflow ${WORKFLOW_NAME}: ${phase}`);
+                return phase;
+            }
+
+            // Check for suspended nodes (approval gates)
+            if (nextGateIndex < approvalGates.length) {
+                // Get full node names of suspended nodes (includes path like source.target.snap1.migration-0.evaluateMetadata)
+                const suspendedNames = execSync(
+                    `kubectl -n ${NAMESPACE} get workflow ${WORKFLOW_NAME} -o json 2>/dev/null | jq -r '[.status.nodes // {} | to_entries[] | select(.value.type == "Suspend" and .value.phase == "Running") | .value.displayName] | .[]'`,
+                    { encoding: 'utf-8', timeout: 30000, maxBuffer: 50 * 1024 * 1024 }
+                ).trim().split('\n').filter(Boolean);
+
+                if (suspendedNames.length > 0) {
+                    // Find the gate whose pattern matches a suspended node
+                    const gate = approvalGates.slice(nextGateIndex).find(g => {
+                        const suffix = g.approvePattern.replace('*.', '');
+                        return suspendedNames.some(n => n.endsWith(suffix) || n.includes(suffix));
+                    });
+
+                    if (gate) {
+                        console.log(`\n  ⏸ Suspended at: ${suspendedNames.join(', ')}`);
+                        console.log(`  Gate: ${gate.description} (${gate.approvePattern})`);
+
+                        // Run validations — all must pass before approving
+                        let validationsPassed = true;
+                        for (const v of gate.validations) {
+                            console.log(`    [validate] ${v.name}: ${v.description}`);
+                            try {
+                                const out = consoleExec(v.consoleCommand);
+                                console.log(out);
+                            } catch (e) {
+                                console.log(`    ✗ validation failed: ${e}`);
+                                validationsPassed = false;
+                            }
+                        }
+
+                        if (!validationsPassed) {
+                            console.log(`\n  ✗ Gate validation failed — not approving`);
+                            return 'Failed';
+                        }
+
+                        // Approve
+                        console.log(`    [approve] ${gate.approvePattern}`);
+                        consoleExec(`workflow approve "${gate.approvePattern}"`);
+                        nextGateIndex = approvalGates.indexOf(gate) + 1;
+                        lastProgressTime = Date.now();
+                        continue;
+                    }
+                }
+            }
+
+            // Check for progress: snapshot all node phases (nodes is a map, not array)
+            const nodeSnapshot = execSync(
+                `kubectl -n ${NAMESPACE} get workflow ${WORKFLOW_NAME} -o json 2>/dev/null | jq -r '[.status.nodes // {} | .[].phase] | sort | join(",")'`,
+                { encoding: 'utf-8', timeout: 30000, maxBuffer: 50 * 1024 * 1024 }
+            ).trim();
+            if (nodeSnapshot !== lastNodeSnapshot) {
+                lastNodeSnapshot = nodeSnapshot;
+                lastProgressTime = Date.now();
+                process.stdout.write('.');
+            }
+
+            // Stall detection
+            if (Date.now() - lastProgressTime > STALL_TIMEOUT * 1000) {
+                console.log(`\n  ✗ Workflow stalled — no progress for ${STALL_TIMEOUT}s`);
+                printWorkflowFailures();
+                return 'Failed';
+            }
+        } catch { /* workflow may not exist yet */ }
+        await sleep(5000);
+    }
+    throw new Error(`Workflow ${WORKFLOW_NAME} exceeded overall timeout of ${OVERALL_TIMEOUT}s`);
+}
+
+function printWorkflowFailures(): void {
+    try {
+        // Use jq to extract only failed nodes — avoids ENOBUFS from full workflow JSON
+        const raw = execSync(
+            `kubectl -n ${NAMESPACE} get workflow ${WORKFLOW_NAME} -o json | jq -r '.status.nodes | to_entries[] | select(.value.phase == "Failed" or .value.phase == "Error") | "\\(.value.displayName)\\t\\(.value.phase)\\t\\(.value.message // "")"'`,
+            { encoding: 'utf-8', timeout: 30000, maxBuffer: 50 * 1024 * 1024 }
+        ).trim();
+        for (const line of raw.split('\n')) {
+            if (!line) continue;
+            const [name, phase, msg] = line.split('\t');
+            console.log(`    ${name}: ${phase} — ${(msg ?? '').substring(0, 200)}`);
+        }
+    } catch (e) {
+        console.log(`    (could not read workflow failures: ${e})`);
+    }
+}
+
+/**
+ * Dump full namespace diagnostics on failure, matching the Python e2e pattern:
+ * - Resource summary (pods, services, deployments, statefulsets, workflows)
+ * - Migration CRDs
+ * - Recent events sorted by timestamp
+ * - Cluster indices via migration console
+ * - Pod logs for failed/errored pods
+ */
+function dumpNamespaceDiagnostics(): void {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log('=== NAMESPACE DIAGNOSTICS ===');
+
+    const diagnosticCommands = [
+        { label: 'Resource summary', cmd: `get pods,services,deployments,statefulsets,workflows -o wide` },
+        { label: 'Migration CRDs', cmd: `get capturedtraffics,datasnapshots,snapshotmigrations,trafficreplays -o wide` },
+        { label: 'Recent events', cmd: `get events --sort-by=.lastTimestamp` },
+    ];
+
+    for (const { label, cmd } of diagnosticCommands) {
+        console.log(`\n--- ${label} ---`);
+        try {
+            const out = execSync(`kubectl -n ${NAMESPACE} ${cmd}`, {
+                encoding: 'utf-8', timeout: 30000, maxBuffer: 50 * 1024 * 1024
+            }).trim();
+            console.log(out);
+        } catch (e) {
+            console.log(`  (error: ${e})`);
+        }
+    }
+
+    // Cluster indices via migration console
+    console.log(`\n--- Cluster indices ---`);
+    try {
+        const indices = execSync(
+            `kubectl -n ${NAMESPACE} exec migration-console-0 -c console -- console clusters cat-indices 2>&1`,
+            { encoding: 'utf-8', timeout: 30000, maxBuffer: 50 * 1024 * 1024 }
+        ).trim();
+        console.log(indices);
+    } catch (e) {
+        console.log(`  (error: ${e})`);
+    }
+
+    // Pod logs for non-running pods (failed/error/crashloop)
+    console.log(`\n--- Failed/Error pod logs ---`);
+    try {
+        const podJson = execSync(
+            `kubectl -n ${NAMESPACE} get pods -o json | jq -r '.items[] | select(.status.phase != "Running" and .status.phase != "Succeeded") | .metadata.name'`,
+            { encoding: 'utf-8', timeout: 15000, maxBuffer: 50 * 1024 * 1024 }
+        ).trim();
+        for (const pod of podJson.split('\n').filter(Boolean).slice(0, 5)) {
+            console.log(`\n  --- logs: ${pod} ---`);
+            try {
+                const logs = execSync(`kubectl -n ${NAMESPACE} logs ${pod} --tail=30 2>&1`, {
+                    encoding: 'utf-8', timeout: 10000, maxBuffer: 10 * 1024 * 1024
+                }).trim();
+                console.log(logs);
+            } catch { console.log('  (no logs)'); }
+        }
+    } catch { /* no failed pods */ }
+
+    console.log(`\n${'='.repeat(60)}`);
+}
+
+// ─── Cleanup ────────────────────────────────────────────────────────
+
+function collectAllCrdResources(reports: ChecksumReport[]): Array<{ kind: string; resourceName: string }> {
+    const seen = new Set<string>();
+    const result: Array<{ kind: string; resourceName: string }> = [];
+    for (const report of reports) {
+        for (const entry of Object.values(report.components)) {
+            const crdKind = CRD_KIND_MAP[entry.kind];
+            if (!crdKind) continue;
+            const key = `${crdKind}/${entry.resourceName}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                result.push({ kind: entry.kind, resourceName: entry.resourceName });
+            }
+        }
+    }
+    return result;
+}
+
+function cleanup(allResources: Array<{ kind: string; resourceName: string }>): void {
+    console.log('\n=== Teardown ===');
+    try { kubectl(`delete workflow ${WORKFLOW_NAME} --ignore-not-found=true`); } catch { /* ok */ }
+    for (const { kind, resourceName } of allResources) {
+        const crdKind = CRD_KIND_MAP[kind];
+        if (crdKind) {
+            try { kubectl(`delete ${crdKind} ${resourceName} --ignore-not-found=true`); } catch { /* ok */ }
+        }
+    }
+}
+
+// ─── Main ───────────────────────────────────────────────────────────
+
+async function main() {
+    const specPath = process.argv.find(a => a.endsWith('.json'))
+        ?? path.resolve(__dirname, '..', 'specs', 'proxy-focus-change.test.json');
+    const testSpec = loadTestSpec(specPath);
+    const baseConfig = yaml.parse(fs.readFileSync(testSpec.baseConfigPath, 'utf-8')) as Record<string, unknown>;
+
+    console.log('=== E2E Live Runner ===');
+    console.log(`  namespace: ${NAMESPACE}`);
+    console.log(`  spec: ${path.basename(specPath)}`);
+    console.log(`  base config: ${path.basename(testSpec.baseConfigPath)}\n`);
+
+    const baseReport = await buildChecksumReport(baseConfig);
+    // TODO: support multiple expanded cases per spec (currently runs only the first)
+    const allCases = await expandMatrix(testSpec.matrix, baseReport, defaultMutatorRegistry, baseConfig, baseReport);
+    const testCase = allCases[0];
+    console.log(`Test case: ${testCase.name} (${allCases.length} case(s) expanded, running first)`);
+    console.log(`  expect reran:     [${testCase.expect.reran.join(', ')}]`);
+    console.log(`  expect unchanged: [${testCase.expect.unchanged.join(', ')}]`);
+
+    const filterToCrdComponents = (report: ChecksumReport): ChecksumReport => ({
+        components: Object.fromEntries(
+            Object.entries(report.components).filter(([, e]) => e.kind in CRD_KIND_MAP)
+        ),
+    });
+
+    const baseReportCrd = filterToCrdComponents(baseReport);
+    const mutatedReportCrd = filterToCrdComponents(testCase.mutatedChecksumReport);
+    const allCrdResources = collectAllCrdResources([baseReportCrd, mutatedReportCrd]);
+
+    const fixtures: TestFixtures = testSpec.fixtures;
+
+    // Baseline uses skipApprovals: false so we can validate at each gate
+    const baselineConfig = { ...baseConfig, skipApprovals: false };
+    // Noop and mutate use skipApprovals: true — the migration steps are skipped anyway
+    const noopConfig = { ...baseConfig, skipApprovals: true };
+
+    // LIMITATION: The mutate run always forces skipApprovals: true because the
+    // live runner does not yet implement approval orchestration for the mutated
+    // submission. This means gated and impossible specs will expand and run, but
+    // the mutate step will NOT actually exercise the approval/gate/delete behavior
+    // they are designed to test. This is acceptable as Phase 11 groundwork — full
+    // gated/impossible runtime support is deferred to Phase 16/17 (post-lifecycle merge).
+    if (testCase.changeClass === 'gated' || testCase.changeClass === 'impossible') {
+        console.warn([
+            ``,
+            `  ⚠ WARNING: Test case "${testCase.name}" is a ${testCase.changeClass} spec,`,
+            `  but the live runner forces skipApprovals: true on the mutate run.`,
+            `  The approval/gate behavior this spec is designed to test will NOT`,
+            `  be exercised. This is a known limitation until Phase 16/17.`,
+            ``
+        ].join('\n'));
+    }
+
+    const runs: Array<{
+        name: string;
+        config: Record<string, unknown>;
+        checksumReport: ChecksumReport;
+        expectation: RunExpectation;
+        approvalGates: ApprovalGate[];
+    }> = [
+        { name: 'baseline', config: baselineConfig, checksumReport: baseReportCrd, expectation: { mode: 'allCompleted' }, approvalGates: fixtures.approvalGates },
+        { name: 'noop', config: noopConfig, checksumReport: baseReportCrd, expectation: { mode: 'allSkipped' }, approvalGates: [] },
+        { name: 'mutate', config: { ...testCase.mutatedConfig, skipApprovals: true }, checksumReport: mutatedReportCrd, expectation: { mode: 'selective', reran: testCase.expect.reran.filter(k => !k.startsWith('kafka:')), unchanged: testCase.expect.unchanged.filter(k => !k.startsWith('kafka:')) }, approvalGates: [] },
+    ];
+
+    let priorObservation: ScenarioObservation | null = null;
+    const runObservations: Record<string, ScenarioObservation> = {};
+    let allPassed = true;
+    let testCaseResult: TestCaseResult | null = null;
+
+    // Wrap in try/finally so cleanup always runs
+    try {
+        // Backstop: clean cluster data from any prior crashed run
+        runFixtures('pre-cleanup', fixtures.cleanup);
+
+        // Setup: load test data, etc.
+        runFixtures('setup', fixtures.setup, true);
+
+        for (const run of runs) {
+            console.log(`\n${'='.repeat(60)}`);
+            console.log(`=== Run: ${run.name} ===`);
+
+            configureAndSubmit(run.config);
+            const phase = await waitForWorkflow(run.approvalGates);
+
+            if (phase !== 'Succeeded') {
+                console.log(`\n  ✗ ${run.name} workflow failed: ${phase}`);
+                printWorkflowFailures();
+                const obs = readCrdStates(run.checksumReport, runs.indexOf(run), run.name);
+                console.log('  CRD states at failure:');
+                for (const [k, v] of Object.entries(obs.resources)) {
+                    console.log(`    ${k}: phase=${v.phase} checksum=${v.configChecksum}`);
+                }
+                dumpNamespaceDiagnostics();
+                allPassed = false;
+                // Record failure for the test case result
+                const observed: Record<string, { phase: string; changed: boolean }> = {};
+                for (const [k, v] of Object.entries(obs.resources)) {
+                    const prior = priorObservation?.resources[k];
+                    observed[k] = { phase: v.phase, changed: prior ? v.configChecksum !== prior.configChecksum : true };
+                }
+                testCaseResult = buildFailingResult(testCase, observed, [`${run.name} workflow failed: ${phase}`]);
+                break;
+            }
+
+            const obs = readCrdStates(run.checksumReport, runs.indexOf(run), run.name);
+            const result = assertRun(run.expectation, run.checksumReport, priorObservation, obs);
+            console.log(`\n  Assert (${run.expectation.mode}):`);
+            console.log(formatAssertResult(result));
+            if (result.status === 'fail') {
+                dumpNamespaceDiagnostics();
+                allPassed = false;
+                // Record failure for the test case result
+                const observed: Record<string, { phase: string; changed: boolean }> = {};
+                for (const c of result.components) {
+                    observed[c.component] = { phase: c.details.observedPhase, changed: c.details.changedFromPrior };
+                }
+                testCaseResult = buildFailingResult(testCase, observed, result.failures);
+            }
+            priorObservation = obs;
+            runObservations[run.name] = obs;
+        }
+
+        // If all runs passed, build a passing result using real observations
+        if (allPassed) {
+            // Derive observed map from real CRD state: compare mutate vs noop
+            const mutateObs = runObservations['mutate'];
+            const noopObs = runObservations['noop'];
+            let realObserved: Record<string, { phase: string; changed: boolean }> | undefined;
+            if (mutateObs && noopObs) {
+                realObserved = {};
+                for (const [k, v] of Object.entries(mutateObs.resources)) {
+                    const prior = noopObs.resources[k];
+                    realObserved[k] = {
+                        phase: v.phase,
+                        changed: prior ? v.configChecksum !== prior.configChecksum : true,
+                    };
+                }
+            }
+
+            const caveats: string[] = [];
+            if (testCase.changeClass === 'gated' || testCase.changeClass === 'impossible') {
+                caveats.push(
+                    `${testCase.changeClass} spec ran with skipApprovals: true — ` +
+                    `approval/gate behavior was not exercised (deferred to Phase 16/17)`
+                );
+            }
+
+            testCaseResult = buildPassingResult(testCase, realObserved, caveats);
+        }
+    } finally {
+        if (WAIT_BEFORE_CLEANUP) {
+            console.log('\n  Resources are still up. Poke around, then press Enter to clean up.');
+            await waitForConfirmation('  Press Enter to proceed with cleanup...');
+        }
+        cleanup(allCrdResources);
+        runFixtures('post-cleanup', fixtures.cleanup);
+    }
+
+    console.log(`\n${'='.repeat(60)}`);
+    const results = testCaseResult ? [testCaseResult] : [];
+    const scenarioReport = buildScenarioReport(
+        path.basename(specPath, '.test.json'),
+        results,
+        {
+            selectedCases: allCases.map(c => c.name),
+            expandedCases: [testCase.name],
+            skippedCases: allCases.slice(1).map(c => c.name),
+            uncoveredCases: [],
+        },
+    );
+    console.log(formatReport(scenarioReport));
+
+    // Write structured report to file
+    const reportPath = path.resolve(process.cwd(), 'e2e-report.json');
+    fs.writeFileSync(reportPath, JSON.stringify(scenarioReport, null, 2));
+    console.log(`\nReport written to ${reportPath}`);
+
+    if (!allPassed) {
+        process.exit(1);
+    }
+}
+
+main().catch(err => {
+    console.error('Fatal error:', err);
+    process.exit(1);
+});

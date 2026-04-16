@@ -1,0 +1,135 @@
+import type { ChecksumDependency } from '@opensearch-migrations/schemas';
+
+export type ChangeClass = 'safe' | 'gated' | 'impossible';
+
+export type DependencyPattern =
+  | 'focus-change'
+  | 'immediate-dependent-change'
+  | 'transitive-dependent-change'
+  | 'focus-gated-change'
+  | 'immediate-dependent-gated-change'
+  | 'immediate-dependent-impossible-change';
+
+export type ChecksumReportEntry = {
+  kind: string;
+  resourceName: string;
+  configChecksum: string;
+  downstreamChecksums: Partial<Record<ChecksumDependency, string>>;
+  dependsOn: string[];
+};
+
+export type ChecksumReport = {
+  components: Record<string, ChecksumReportEntry>;
+};
+
+export type DerivedSubgraph = {
+  focus: string;
+  immediateDependents: string[];
+  transitiveDependents: string[];
+  upstreamPrerequisites: string[];
+  independent: string[];
+};
+
+export type ApprovedMutator<C = Record<string, unknown>> = {
+  id: string;
+  path: string;
+  changeClass: ChangeClass;
+  patterns: DependencyPattern[];
+  apply: (baseConfig: C) => C;
+  rationale: string;
+};
+
+export type MatrixSelector = {
+  changeClass: ChangeClass;
+  patterns: DependencyPattern[];
+  requireFullCoverage?: boolean;
+};
+
+export type MatrixSpec = {
+  focus: string;
+  select: MatrixSelector[];
+};
+
+export type ScenarioSpec = {
+  name: string;
+  base: string;
+  matrix?: MatrixSpec[];
+};
+
+export type ExpandedTestCase = {
+  name: string;
+  focus: string;
+  pattern: DependencyPattern;
+  changeClass: ChangeClass;
+  mutatorId: string;
+  baselineChecksumReport: ChecksumReport;
+  mutatedConfig: Record<string, unknown>;
+  mutatedChecksumReport: ChecksumReport;
+  expect: ExpandedExpectation;
+};
+
+export type ExpandedExpectation = {
+  reran: string[];
+  unchanged: string[];
+  blockedOn?: Record<string, string[]>;
+};
+
+/**
+ * Runtime expectation for a single run within a test.
+ * - allCompleted: baseline run — every component should reach Ready/Completed
+ * - allSkipped: noop run — every component checksum unchanged from prior
+ * - reran/unchanged: mutation run — specific components changed, others didn't
+ */
+export type RunExpectation =
+  | { mode: 'allCompleted' }
+  | { mode: 'allSkipped' }
+  | { mode: 'selective'; reran: string[]; unchanged: string[]; blockedOn?: Record<string, string[]> };
+
+export type ComponentObservation = {
+  kind: string;
+  resourceName: string;
+  phase: string;
+  configChecksum: string;
+};
+
+export type ScenarioObservation = {
+  scenario: string;
+  run: number;
+  runName: string;
+  observedAt: string;
+  resources: Record<string, ComponentObservation>;
+};
+
+export type TestCaseResult = {
+  name: string;
+  focus: string;
+  pattern: DependencyPattern;
+  changeClass: ChangeClass;
+  mutatorId: string;
+  /** 'partial' = ran but could not exercise the full behavior (e.g. gated spec with skipApprovals) */
+  status: 'passed' | 'failed' | 'partial';
+  expect: ExpandedExpectation;
+  observed: Record<string, { phase: string; changed: boolean }>;
+  /** For gated/impossible flows: state before the action (approval/delete) */
+  beforeAction?: Record<string, { phase: string; configChecksum: string }>;
+  /** For gated/impossible flows: state after the action resolved */
+  afterAction?: Record<string, { phase: string; configChecksum: string }>;
+  failures?: string[];
+  /** Why this result is partial rather than a full pass */
+  caveats?: string[];
+};
+
+export type ScenarioReport = {
+  scenario: string;
+  status: 'passed' | 'failed' | 'partial';
+  summary: { generated: number; passed: number; failed: number; partial: number };
+  expandedTests: TestCaseResult[];
+  coverage: {
+    selectedCases: string[];
+    expandedCases: string[];
+    /** Expanded by the matrix but not executed (e.g. runner only runs first case) */
+    skippedCases: string[];
+    /** No mutator found for the requested pattern — a real coverage gap */
+    uncoveredCases: string[];
+  };
+};

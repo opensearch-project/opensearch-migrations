@@ -1,9 +1,14 @@
 import {
+    AllowLiteralOrExpression,
     expr,
     INTERNAL,
+    InputParamDef,
+    InputParametersRecord,
     makeStringTypeProxy,
     selectInputsForRegister,
+    TemplateBuilder,
     typeToken,
+    WorkflowAndTemplatesScope,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
@@ -14,12 +19,94 @@ const SECONDS_IN_DAYS = 24 * 3600;
 const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
 const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
 
+type ReservedPatchInputNames = "resourceName" | "phase";
+type StringStatusFields = Readonly<Record<string, AllowLiteralOrExpression<string>>>;
+type NonReservedStringStatusFields = StringStatusFields & {
+    [K in ReservedPatchInputNames]?: never;
+};
+type RequiredStringInputDefs<T extends StringStatusFields> = {
+    [K in keyof T]: InputParamDef<string, true>;
+};
+type NamedPatchRegisterValues<T extends StringStatusFields> = {
+    resourceName: AllowLiteralOrExpression<string>;
+    phase: AllowLiteralOrExpression<string>;
+} & T;
+
+function makeRequiredStringInputDefs<T extends StringStatusFields>(fields: T): RequiredStringInputDefs<T> {
+    const defs = {} as RequiredStringInputDefs<T>;
+    for (const key of Object.keys(fields) as Array<keyof T>) {
+        defs[key] = {} as InputParamDef<string, true>;
+    }
+    return defs;
+}
+
+function placeholderStatusFields<T extends StringStatusFields>(fields: T): Record<string, string> {
+    const proxied: Record<string, string> = {};
+    for (const key of Object.keys(fields) as Array<keyof T>) {
+        proxied[String(key)] = `{{inputs.parameters.${String(key)}}}`;
+    }
+    return proxied;
+}
+
+function buildPatchStatusTemplate<
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
+    ExtraFields extends NonReservedStringStatusFields = {}
+>(
+    t: TemplateBuilder<ParentWorkflowScope, {}, {}, {}>,
+    resourceKind: string,
+    extraStatusFields: ExtraFields
+) {
+    const inputDefs = {
+        resourceName: {} as InputParamDef<string, true>,
+        phase: {} as InputParamDef<string, true>,
+        ...makeRequiredStringInputDefs(extraStatusFields)
+    } satisfies InputParametersRecord;
+
+    return t
+        .addInputsFromRecord(inputDefs)
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: resourceKind,
+                    metadata: {name: "{{inputs.parameters.resourceName}}"},
+                    status: {
+                        phase: "{{inputs.parameters.phase}}",
+                        ...placeholderStatusFields(extraStatusFields)
+                    }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY);
+}
+
 export const ResourceManagement = WorkflowBuilder.create({
     k8sResourceName: "resource-management",
     serviceAccountName: "argo-workflow-executor"
 })
 
     .addParams(CommonWorkflowParameters)
+
+    .addTemplate("patchDataSnapshotCompleted", t => buildPatchStatusTemplate(t, "DataSnapshot", {
+        snapshotName: "",
+        configChecksum: "",
+        checksumForSnapshotMigration: ""
+    }))
+    .addTemplate("patchCapturedTrafficRunning", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
+    .addTemplate("patchCapturedTrafficReady", t => buildPatchStatusTemplate(t, "CapturedTraffic", {
+        configChecksum: "",
+        checksumForSnapshot: "",
+        checksumForReplayer: ""
+    }))
+    .addTemplate("patchCapturedTrafficError", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
+    .addTemplate("patchSnapshotMigrationCompleted", t => buildPatchStatusTemplate(t, "SnapshotMigration", {
+        configChecksum: "",
+        checksumForReplayer: ""
+    }))
+    .addTemplate("patchTrafficReplayReady", t => buildPatchStatusTemplate(t, "TrafficReplay", {
+        configChecksum: ""
+    }))
 
 
     // ── Wait templates (resource get with retry) ─────────────────────────
@@ -94,23 +181,6 @@ export const ResourceManagement = WorkflowBuilder.create({
             .addJsonPathOutput("authType", "{.spec.kafka.listeners[0].authentication.type}", typeToken<string>()))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
-
-
-    .addTemplate("waitForKafkaTopic", b => b
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addWaitForNewResource(b => b
-            .setDefinition({
-                resourceKindAndName: expr.concat(expr.literal(""), b.inputs.resourceName),
-                waitForCreation: {
-                    kubectlImage: b.inputs.imageMigrationConsoleLocation,
-                    kubectlImagePullPolicy: b.inputs.imageMigrationConsolePullPolicy,
-                    maxDurationSeconds: LONGEST_POSSIBLE_MIGRATION
-                }
-            })
-        )
-    )
-
 
     .addTemplate("waitForCapturedTraffic", t => t
         .addRequiredInput("resourceName", typeToken<string>())
@@ -193,72 +263,6 @@ export const ResourceManagement = WorkflowBuilder.create({
     )
 
 
-    // ── CRD patch-to-ready templates ─────────────────────────────────────
-
-    .addTemplate("patchCapturedTrafficReady", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "patch",
-                flags: ["--type", "merge", "--subresource=status"],
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: "CapturedTraffic",
-                    metadata: {name: b.inputs.resourceName},
-                    status: {phase: "Ready"}
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
-    .addTemplate("patchDataSnapshotReady", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("snapshotName", typeToken<string>())
-        .addRequiredInput("configChecksum", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "patch",
-                flags: ["--type", "merge", "--subresource=status"],
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: "DataSnapshot",
-                    metadata: {name: b.inputs.resourceName},
-                    status: {
-                        phase: "Completed",
-                        snapshotName: b.inputs.snapshotName,
-                        configChecksum: makeStringTypeProxy(b.inputs.configChecksum),
-                        checksumForSnapshotMigration: makeStringTypeProxy(b.inputs.configChecksum),
-                    }
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
-    .addTemplate("patchSnapshotMigrationReady", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("configChecksum", typeToken<string>())
-        .addRequiredInput("checksumForReplayer", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "patch",
-                flags: ["--type", "merge", "--subresource=status"],
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: "SnapshotMigration",
-                    metadata: {name: b.inputs.resourceName},
-                    status: {
-                        phase: "Completed",
-                        configChecksum: makeStringTypeProxy(b.inputs.configChecksum),
-                        checksumForReplayer: makeStringTypeProxy(b.inputs.checksumForReplayer),
-                    }
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
     .addTemplate("readDataSnapshotName", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addResourceTask(b => b
@@ -274,8 +278,37 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
+    .addTemplate("waitForApproval", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addWaitForExistingResource(b => b
+            .setDefinition({
+                resource: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "ApprovalGate",
+                    name: b.inputs.resourceName
+                },
+                conditions: {successCondition: "status.phase == Approved"}
+            })
+        )
+    )
 
-    // ── Generic phase patch template ────────────────────────────────────
+    .addTemplate("patchApprovalGatePhase", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("phase", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "ApprovalGate",
+                    metadata: { name: "{{inputs.parameters.resourceName}}" },
+                    status: { phase: "{{inputs.parameters.phase}}" }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
 
     .addTemplate("readResourcePhase", t => t
         .addRequiredInput("resourceKind", typeToken<string>())
@@ -291,34 +324,6 @@ export const ResourceManagement = WorkflowBuilder.create({
             })
             .addJsonPathOutput("phase", "{.status.phase}", typeToken<string>())
             .addJsonPathOutput("configChecksum", "{.status.configChecksum}", typeToken<string>()))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-    .addTemplate("patchResourcePhase", t => t
-        .addRequiredInput("resourceKind", typeToken<string>())
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("phase", typeToken<string>())
-        .addOptionalInput("configChecksum", c => "")
-        .addOptionalInput("checksumForSnapshot", c => "")
-        .addOptionalInput("checksumForReplayer", c => "")
-        .addOptionalInput("checksumForSnapshotMigration", c => "")
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "patch",
-                flags: ["--type", "merge", "--subresource=status"],
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: makeStringTypeProxy(b.inputs.resourceKind),
-                    metadata: { name: b.inputs.resourceName },
-                    status: {
-                        phase: makeStringTypeProxy(b.inputs.phase),
-                        configChecksum: makeStringTypeProxy(b.inputs.configChecksum),
-                        checksumForSnapshot: makeStringTypeProxy(b.inputs.checksumForSnapshot),
-                        checksumForReplayer: makeStringTypeProxy(b.inputs.checksumForReplayer),
-                        checksumForSnapshotMigration: makeStringTypeProxy(b.inputs.checksumForSnapshotMigration),
-                    }
-                }
-            }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 

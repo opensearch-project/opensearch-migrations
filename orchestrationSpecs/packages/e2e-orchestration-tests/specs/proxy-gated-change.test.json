@@ -1,0 +1,18 @@
+{
+  "baseConfig": "../../config-processor/scripts/samples/proxyOnly.wf.yaml",
+  "matrix": {
+    "focus": "proxy:capture-proxy",
+    "select": [{ "changeClass": "gated", "patterns": ["focus-gated-change"] }]
+  },
+  "fixtures": {
+    "setup": [],
+    "cleanup": [],
+    "approvalGates": [
+      {
+        "approvePattern": "*.captureProxy",
+        "description": "After gated proxy change — verify proxy is blocked before approving",
+        "validations": ["verify-proxy-blocked"]
+      }
+    ]
+  }
+}

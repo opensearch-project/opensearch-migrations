@@ -228,16 +228,17 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     targetK8sLabel: b.inputs.targetLabel,
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
                 }))
-
-            .addStep("patchDataSnapshot", ResourceManagement, "patchDataSnapshotReady", c =>
+            .addStep("patchDataSnapshotCompleted", ResourceManagement, "patchDataSnapshotCompleted", c =>
                 c.register({
                     resourceName: expr.concat(
                         expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
                         expr.literal("-"),
                         expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
                     ),
+                    phase: expr.literal("Completed"),
                     snapshotName: expr.jsonPathStrict(b.inputs.snapshotConfig, "snapshotName"),
                     configChecksum: b.inputs.configChecksum,
+                    checksumForSnapshotMigration: b.inputs.configChecksum,
                 }))
         )
         .addSynchronization(c => ({

@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "moduleResolution": "bundler",
+    "module": "Preserve",
+    "paths": {
+      "@opensearch-migrations/schemas": ["../schemas/src/index.ts"],
+      "@opensearch-migrations/config-processor": ["../config-processor/src/index.ts"]
+    },
+    "skipLibCheck": true
+  },
+  "include": ["./src/**/*"],
+  "exclude": ["node_modules", "dist", "tests", "**/*.test.ts"]
+}
