@@ -551,6 +551,10 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
 }).describe("Workflow-level options for metadata migration, controlling JVM settings and approval gates.");
 
 export const USER_METADATA_PROCESS_OPTIONS = z.object({
+    succeedOnEmpty: z.boolean().default(false).optional()
+        .describe("When true, metadata migration/evaluation will succeed even if no migration items " +
+            "(index templates, component templates, indexes, aliases) are found. By default, finding 0 items is treated " +
+            "as a failure to catch configuration problems early (such as an incorrect snapshot or wrong allowlist)."),
     componentTemplateAllowlist: z.array(z.string()).default([]).optional()
         .describe("List of component template names to include in the metadata migration. " +
             "Each entry is either an exact name or a regex pattern prefixed with 'regex:'. " +
