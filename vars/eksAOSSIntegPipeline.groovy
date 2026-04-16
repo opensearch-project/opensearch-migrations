@@ -15,6 +15,7 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
             choice(name: 'SOURCE_VERSION', choices: ['OS_1.3'], description: 'Version of the cluster that created the snapshot')
@@ -41,6 +42,7 @@ def call(Map config = [:]) {
                 genericVariables: [
                     [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
                     [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                    [key: 'GIT_COMMIT', value: '$.GIT_COMMIT'],
                     [key: 'job_name', value: '$.job_name']
                 ],
                 tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
@@ -53,7 +55,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout & Print Params') {
                 steps {
-                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
+                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
                         def pool = jobName.startsWith("main-") ? "m" : jobName.startsWith("release-") ? "r" : "p"
                         env.maStageName = "${params.STAGE ?: defaultStageId}-${pool}${currentBuild.number}"
@@ -83,9 +85,7 @@ def call(Map config = [:]) {
 
             stage('Test Caller Identity') {
                 steps {
-                    script {
-                        sh 'aws sts get-caller-identity'
-                    }
+                    sh 'aws sts get-caller-identity'
                 }
             }
 
@@ -95,9 +95,7 @@ def call(Map config = [:]) {
                 when { expression { !params.USE_RELEASE_BOOTSTRAP && (params.BUILD_IMAGES || params.BUILD_CHART_AND_DASHBOARDS) } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
-                        script {
-                            sh './gradlew clean build -x test --no-daemon --stacktrace'
-                        }
+                        sh './gradlew clean build -x test --no-daemon --stacktrace'
                     }
                 }
             }

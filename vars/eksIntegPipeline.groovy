@@ -67,7 +67,7 @@ def call(Map config = [:]) {
         }
 
         stages {
-            stage('Checkout') {
+            stage('Checkout & Print Params') {
                 steps {
                     script {
                         def pool = jobName.startsWith("main-") ? "m" : jobName.startsWith("release-") ? "r" : "p"
@@ -94,9 +94,7 @@ def call(Map config = [:]) {
 
             stage('Test Caller Identity') {
                 steps {
-                    script {
-                        sh 'aws sts get-caller-identity'
-                    }
+                    sh 'aws sts get-caller-identity'
                 }
             }
 
@@ -107,9 +105,7 @@ def call(Map config = [:]) {
                 when { expression { !params.USE_RELEASE_BOOTSTRAP && (params.BUILD_IMAGES || params.BUILD_CHART_AND_DASHBOARDS) } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
-                        script {
-                            sh './gradlew clean build -x test --no-daemon --stacktrace'
-                        }
+                        sh './gradlew clean build -x test --no-daemon --stacktrace'
                     }
                 }
             }
@@ -244,6 +240,9 @@ def call(Map config = [:]) {
                         def maStackName = env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
 
                         withMigrationsTestAccount(region: region, duration: 4500) { accountId ->
+                                sh "mkdir -p libraries/testAutomation/logs"
+                                archiveArtifacts artifacts: 'libraries/testAutomation/logs/**', allowEmptyArchive: true
+
                                 // EKS/k8s cleanup (only if EKS was deployed)
                                 if (env.eksClusterName) {
                                     dir('libraries/testAutomation') {
