@@ -107,13 +107,19 @@ class Test0034CdcOnlyAossTarget(MATestBase):
 
     def verify_clusters(self):
         logger.info("Verifying docs on AOSS target...")
-        for attempt in range(3):
-            resp = self.target_cluster.call_api(f"/{self.cdc_index}/_count")
-            count = resp.json().get("count", 0)
-            if count == self.CDC_NUM_DOCS:
-                logger.info("AOSS target: %s has %d docs ✓", self.cdc_index, count)
-                return
-            logger.info("Attempt %d: %s has %d/%d docs", attempt + 1, self.cdc_index, count, self.CDC_NUM_DOCS)
+        count = 0
+        for attempt in range(30):
+            try:
+                resp = self.target_cluster.call_api(f"/{self.cdc_index}/_count", raise_error=False)
+                if resp.status_code == 200:
+                    count = resp.json().get("count", 0)
+                    if count == self.CDC_NUM_DOCS:
+                        logger.info("AOSS target: %s has %d docs ✓", self.cdc_index, count)
+                        return
+                logger.info("Attempt %d: %s status=%d, count=%d/%d",
+                            attempt + 1, self.cdc_index, resp.status_code, count, self.CDC_NUM_DOCS)
+            except Exception as e:
+                logger.info("Attempt %d: %s", attempt + 1, e)
             time.sleep(10)
         raise AssertionError(f"{self.cdc_index}: expected {self.CDC_NUM_DOCS} docs, got {count}")
 
@@ -207,14 +213,23 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
         # generate-data uses auto-generated IDs, so replayed docs don't overwrite backfilled ones.
         expected_pre = self.PRE_SNAPSHOT_DOCS * 2
         logger.info("Verifying both indices on AOSS target...")
-        for attempt in range(3):
-            pre = self.target_cluster.call_api(f"/{self.idx_pre}/_count").json().get("count", 0)
-            post = self.target_cluster.call_api(f"/{self.idx_post}/_count").json().get("count", 0)
-            if pre == expected_pre and post == self.POST_SNAPSHOT_DOCS:
-                logger.info("AOSS target: %s=%d, %s=%d ✓", self.idx_pre, pre, self.idx_post, post)
-                return
-            logger.info("Attempt %d: %s=%d/%d, %s=%d/%d", attempt + 1,
-                        self.idx_pre, pre, expected_pre, self.idx_post, post, self.POST_SNAPSHOT_DOCS)
+        pre, post = 0, 0
+        for attempt in range(30):
+            try:
+                resp_pre = self.target_cluster.call_api(f"/{self.idx_pre}/_count", raise_error=False)
+                resp_post = self.target_cluster.call_api(f"/{self.idx_post}/_count", raise_error=False)
+                if resp_pre.status_code == 200:
+                    pre = resp_pre.json().get("count", 0)
+                if resp_post.status_code == 200:
+                    post = resp_post.json().get("count", 0)
+                if pre == expected_pre and post == self.POST_SNAPSHOT_DOCS:
+                    logger.info("AOSS target: %s=%d, %s=%d ✓", self.idx_pre, pre, self.idx_post, post)
+                    return
+                logger.info("Attempt %d: %s=%d/%d (status=%d), %s=%d/%d (status=%d)", attempt + 1,
+                            self.idx_pre, pre, expected_pre, resp_pre.status_code,
+                            self.idx_post, post, self.POST_SNAPSHOT_DOCS, resp_post.status_code)
+            except Exception as e:
+                logger.info("Attempt %d: %s", attempt + 1, e)
             time.sleep(10)
         raise AssertionError(
             f"Expected {self.idx_pre}={expected_pre}, {self.idx_post}={self.POST_SNAPSHOT_DOCS}, "
