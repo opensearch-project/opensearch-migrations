@@ -17,6 +17,7 @@ CRD_VERSION = 'v1alpha1'
 RESETTABLE_PLURALS = [
     'kafkaclusters',
     'capturedtraffics',
+    'captureproxies',
     'datasnapshots',
     'snapshotmigrations',
     'trafficreplays',
@@ -25,7 +26,8 @@ RESETTABLE_PLURALS = [
 
 DISPLAY_NAMES = {
     'kafkaclusters': 'Kafka Cluster',
-    'capturedtraffics': 'Capture Proxy',
+    'capturedtraffics': 'Captured Traffic',
+    'captureproxies': 'Capture Proxy',
     'datasnapshots': 'Data Snapshot',
     'snapshotmigrations': 'Snapshot Migration',
     'trafficreplays': 'Traffic Replay',

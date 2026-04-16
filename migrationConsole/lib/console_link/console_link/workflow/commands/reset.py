@@ -199,7 +199,7 @@ def _show_resource_list(resources):
 
 def _filter_proxy_targets(targets, include_proxies):
     """Block or remove proxy targets unless explicitly included."""
-    proxy_targets = [target for target in targets if target[0] == 'capturedtraffics']
+    proxy_targets = [target for target in targets if target[0] == 'captureproxies']
     if include_proxies or not proxy_targets:
         return targets
 
@@ -210,7 +210,13 @@ def _filter_proxy_targets(targets, include_proxies):
 
 
 def _resolve_cascade_targets(targets, namespace, cascade, include_proxies):
-    """Return expanded delete set or None when blocked."""
+    """Return expanded delete set or None when blocked.
+
+    Protected proxies (captureproxies) are never included in the delete set
+    unless --include-proxies is passed. When a target has a protected proxy
+    as a dependent, the proxy is silently skipped — it does not block deletion
+    of the target.
+    """
     filtered = _filter_proxy_targets(targets, include_proxies)
     if filtered is None:
         return None
@@ -222,29 +228,32 @@ def _resolve_cascade_targets(targets, namespace, cascade, include_proxies):
         return filtered
 
     blocking = [resource for resource in all_resources if resource[1] in dependent_names]
-    if not include_proxies:
-        blocking_proxy = [resource for resource in blocking if resource[0] == 'capturedtraffics']
-        blocking_non_proxy = [resource for resource in blocking if resource[0] != 'capturedtraffics']
-        if blocking_proxy and not blocking_non_proxy:
-            click.echo("Cannot delete because protected proxies still depend on this resource:")
-            for _, name, _, _ in blocking_proxy:
-                click.echo(f"  Capture Proxy: {name}")
-            click.echo()
-            click.echo("Use --include-proxies to delete those proxies too.")
-            click.echo("Otherwise keep their upstream Kafka or other dependencies in place.")
-            return None
 
-    if not cascade:
+    # Separate proxy dependents from non-proxy dependents
+    blocking_proxy = [r for r in blocking if r[0] == 'captureproxies']
+    blocking_non_proxy = [r for r in blocking if r[0] != 'captureproxies']
+
+    # Protected proxies don't block — they're just skipped
+    if not include_proxies and blocking_proxy:
+        proxy_names = ', '.join(r[1] for r in blocking_proxy)
+        click.echo(f"Keeping protected proxies alive: {proxy_names}")
+
+    # Non-proxy dependents still require --cascade
+    if blocking_non_proxy and not cascade:
         click.echo("Cannot delete because dependent resources still exist:")
-        for plural, name, _, _ in blocking:
+        for plural, name, _, _ in blocking_non_proxy:
             click.echo(f"  {DISPLAY_NAMES.get(plural, plural)}: {name}")
         click.echo()
         click.echo("Use --cascade to delete them too.")
         return None
 
-    expanded_names = target_names | set(dependent_names)
+    # Build the final delete set: targets + non-proxy dependents (cascade)
+    # Proxy dependents are excluded unless --include-proxies
+    expanded_names = target_names | {r[1] for r in blocking_non_proxy}
+    if include_proxies:
+        expanded_names |= {r[1] for r in blocking_proxy}
     expanded = [resource for resource in all_resources if resource[1] in expanded_names]
-    return _filter_proxy_targets(expanded, include_proxies)
+    return expanded
 
 
 def _find_ancestors(target_names, all_resources):
@@ -262,22 +271,26 @@ def _find_ancestors(target_names, all_resources):
 
 
 def _prune_ancestors_of_protected_proxies(resources, include_proxies):
-    """When proxies are protected, keep their upstream dependencies alive too."""
+    """When proxies are protected, remove only the proxy CRs from the delete set.
+
+    Unlike before, upstream dependencies (topics, kafka clusters) are NOT
+    protected — they can be deleted independently. The proxy stays alive
+    to continue serving traffic even if its upstream is torn down.
+    """
     if include_proxies:
         return resources, set()
 
     protected_proxy_names = {
-        name for plural, name, _, _ in resources if plural == 'capturedtraffics'
+        name for plural, name, _, _ in resources if plural == 'captureproxies'
     }
     if not protected_proxy_names:
         return resources, set()
 
-    protected_ancestor_names = _find_ancestors(protected_proxy_names, resources)
     filtered = [
         resource for resource in resources
-        if resource[0] == 'capturedtraffics' or resource[1] not in protected_ancestor_names
+        if resource[0] != 'captureproxies'
     ]
-    return filtered, protected_ancestor_names
+    return filtered, protected_proxy_names
 
 
 def _reset_by_path(ctx, path, namespace, cascade, include_proxies):
@@ -326,20 +339,13 @@ def reset_command(ctx, path, reset_all, cascade, include_proxies, namespace):
             _show_resource_list(resources)
             return
 
-        delete_targets, protected_ancestor_names = _prune_ancestors_of_protected_proxies(
+        delete_targets, protected_proxy_names = _prune_ancestors_of_protected_proxies(
             resources, include_proxies
         )
-        delete_targets = [
-            resource for resource in delete_targets
-            if include_proxies or resource[0] != 'capturedtraffics'
-        ]
-        if not include_proxies and any(resource[0] == 'capturedtraffics' for resource in resources):
-            click.echo("Skipping proxies by default. Use --include-proxies to delete them.")
-        if protected_ancestor_names:
-            protected_dependencies = ", ".join(sorted(protected_ancestor_names))
-            click.echo(
-                f"Keeping dependencies required by protected proxies: {protected_dependencies}"
-            )
+        if not include_proxies and protected_proxy_names:
+            proxy_names = ", ".join(sorted(protected_proxy_names))
+            click.echo(f"Keeping protected proxies alive: {proxy_names}")
+            click.echo("Use --include-proxies to delete them.")
 
         if delete_targets and not _delete_targets(delete_targets, namespace):
             ctx.exit(ExitCode.FAILURE.value)

@@ -46,25 +46,28 @@ class TestResetHelpers:
             'replay': set(),
         }
 
-    def test_prune_ancestors_of_protected_proxies_keeps_kafka_alive(self):
+    def test_prune_ancestors_of_protected_proxies_removes_only_capture_proxies(self):
         resources = [
             ('kafkaclusters', 'kafka', 'Ready', []),
-            ('capturedtraffics', 'proxy', 'Ready', ['kafka']),
+            ('capturedtraffics', 'topic', 'Ready', ['kafka']),
+            ('captureproxies', 'proxy', 'Ready', ['topic']),
             ('trafficreplays', 'replay', 'Ready', ['proxy']),
         ]
 
         filtered, protected = _prune_ancestors_of_protected_proxies(resources, include_proxies=False)
 
         assert filtered == [
-            ('capturedtraffics', 'proxy', 'Ready', ['kafka']),
+            ('kafkaclusters', 'kafka', 'Ready', []),
+            ('capturedtraffics', 'topic', 'Ready', ['kafka']),
             ('trafficreplays', 'replay', 'Ready', ['proxy']),
         ]
-        assert protected == {'kafka'}
+        assert protected == {'proxy'}
 
     def test_prune_ancestors_is_noop_when_proxies_included(self):
         resources = [
             ('kafkaclusters', 'kafka', 'Ready', []),
-            ('capturedtraffics', 'proxy', 'Ready', ['kafka']),
+            ('capturedtraffics', 'topic', 'Ready', ['kafka']),
+            ('captureproxies', 'proxy', 'Ready', ['topic']),
         ]
 
         filtered, protected = _prune_ancestors_of_protected_proxies(resources, include_proxies=True)
@@ -96,7 +99,7 @@ class TestResetCommandList:
     @patch('console_link.workflow.commands.reset.list_migration_resources')
     def test_list_mode(self, mock_list, _mock_k8s):
         mock_list.return_value = [
-            ('capturedtraffics', 'source-proxy', 'Ready', ['kafka']),
+            ('captureproxies', 'source-proxy', 'Ready', ['source-topic']),
             ('trafficreplays', 'src-tgt-replayer', 'Ready', ['source-proxy']),
         ]
 
@@ -107,7 +110,7 @@ class TestResetCommandList:
         assert 'source-proxy' in result.output
         assert 'src-tgt-replayer' in result.output
         assert 'Capture Proxy' in result.output
-        assert 'depends on: kafka' in result.output
+        assert 'depends on: source-topic' in result.output
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset.list_migration_resources')
@@ -156,7 +159,7 @@ class TestResetCommandDelete:
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._find_resource_by_name')
     def test_delete_proxy_blocked_without_include_proxies(self, mock_find, _mock_k8s):
-        mock_find.return_value = ('capturedtraffics', 'source-proxy', 'Ready', ['kafka'])
+        mock_find.return_value = ('captureproxies', 'source-proxy', 'Ready', ['source-topic'])
 
         runner = CliRunner()
         result = runner.invoke(workflow_cli, ['reset', 'source-proxy'])
@@ -165,24 +168,21 @@ class TestResetCommandDelete:
         assert 'Proxies are protected by default' in result.output
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')
+    @patch('console_link.workflow.commands.reset._delete_targets')
     @patch('console_link.workflow.commands.reset.list_migration_resources')
     @patch('console_link.workflow.commands.reset._find_resource_by_name')
-    def test_delete_kafka_blocked_when_proxy_depends_on_it(
-        self, mock_find, mock_list, _mock_k8s
+    def test_delete_kafka_is_not_blocked_by_protected_proxy(
+        self, mock_find, mock_list, mock_delete_targets, _mock_k8s
     ):
         mock_find.return_value = ('kafkaclusters', 'kafka', 'Ready', [])
-        mock_list.return_value = [
-            ('kafkaclusters', 'kafka', 'Ready', []),
-            ('capturedtraffics', 'source-proxy', 'Ready', ['kafka']),
-        ]
+        mock_list.return_value = [('kafkaclusters', 'kafka', 'Ready', [])]
+        mock_delete_targets.return_value = True
 
         runner = CliRunner()
         result = runner.invoke(workflow_cli, ['reset', 'kafka'])
 
-        assert result.exit_code != 0
-        assert 'Cannot delete because protected proxies still depend on this resource:' in result.output
-        assert 'Capture Proxy: source-proxy' in result.output
-        assert '--include-proxies' in result.output
+        assert result.exit_code == 0
+        mock_delete_targets.assert_called_once_with([('kafkaclusters', 'kafka', 'Ready', [])], 'ma')
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset.list_migration_resources')
@@ -230,12 +230,13 @@ class TestResetAll:
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._delete_targets')
     @patch('console_link.workflow.commands.reset.list_migration_resources')
-    def test_reset_all_skips_proxies_and_their_dependencies(
+    def test_reset_all_skips_only_proxies(
         self, mock_list, mock_delete_targets, _mock_k8s
     ):
         mock_list.return_value = [
             ('kafkaclusters', 'kafka', 'Ready', []),
-            ('capturedtraffics', 'source-proxy', 'Ready', ['kafka']),
+            ('capturedtraffics', 'source-topic', 'Ready', ['kafka']),
+            ('captureproxies', 'source-proxy', 'Ready', ['source-topic']),
             ('trafficreplays', 'replay', 'Ready', ['source-proxy']),
         ]
         mock_delete_targets.return_value = True
@@ -245,11 +246,15 @@ class TestResetAll:
 
         assert result.exit_code == 0
         mock_delete_targets.assert_called_once_with(
-            [('trafficreplays', 'replay', 'Ready', ['source-proxy'])],
+            [
+                ('kafkaclusters', 'kafka', 'Ready', []),
+                ('capturedtraffics', 'source-topic', 'Ready', ['kafka']),
+                ('trafficreplays', 'replay', 'Ready', ['source-proxy']),
+            ],
             'ma',
         )
-        assert 'Skipping proxies by default.' in result.output
-        assert 'Keeping dependencies required by protected proxies: kafka' in result.output
+        assert 'Keeping protected proxies alive: source-proxy' in result.output
+        assert 'Use --include-proxies to delete them.' in result.output
 
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._delete_targets')
@@ -259,7 +264,8 @@ class TestResetAll:
     ):
         resources = [
             ('kafkaclusters', 'kafka', 'Ready', []),
-            ('capturedtraffics', 'source-proxy', 'Ready', ['kafka']),
+            ('capturedtraffics', 'source-topic', 'Ready', ['kafka']),
+            ('captureproxies', 'source-proxy', 'Ready', ['source-topic']),
         ]
         mock_list.return_value = resources
         mock_delete_targets.return_value = True

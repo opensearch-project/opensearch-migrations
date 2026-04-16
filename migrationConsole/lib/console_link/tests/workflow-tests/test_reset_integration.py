@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import uuid
+import json
 from pathlib import Path
 
 import pytest
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 VALID_PHASES = {
     "approvalgates": "Initialized",
     "capturedtraffics": "Ready",
+    "captureproxies": "Ready",
     "datasnapshots": "Completed",
     "kafkaclusters": "Ready",
     "snapshotmigrations": "Running",
@@ -41,6 +43,7 @@ CRD_MANIFESTS = []
 for _kind, _plural, _singular in [
     ("ApprovalGate", "approvalgates", "approvalgate"),
     ("CapturedTraffic", "capturedtraffics", "capturedtraffic"),
+    ("CaptureProxy", "captureproxies", "captureproxy"),
     ("DataSnapshot", "datasnapshots", "datasnapshot"),
     ("SnapshotMigration", "snapshotmigrations", "snapshotmigration"),
     ("TrafficReplay", "trafficreplays", "trafficreplay"),
@@ -161,13 +164,32 @@ def _wait_for_crd(ext_api, crd_name, timeout=30):
     raise TimeoutError(f"CRD {crd_name} not established in {timeout}s")
 
 
+def _wait_for_crd_endpoint(custom, namespace, plural, timeout=60):
+    deadline = time.time() + timeout
+    while True:
+        try:
+            custom.list_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                plural=plural,
+            )
+            return
+        except ApiException as e:
+            if e.status != 404 or time.time() >= deadline:
+                raise
+            time.sleep(0.5)
+
+
 def _create_crd_instance(namespace, plural, name, phase=None, depends_on=None):
     custom = client.CustomObjectsApi()
+    _wait_for_crd_endpoint(custom, namespace, plural)
     body = {
         "apiVersion": f"{CRD_GROUP}/{CRD_VERSION}",
         "kind": {
             "approvalgates": "ApprovalGate",
             "capturedtraffics": "CapturedTraffic",
+            "captureproxies": "CaptureProxy",
             "datasnapshots": "DataSnapshot",
             "kafkaclusters": "KafkaCluster",
             "snapshotmigrations": "SnapshotMigration",
@@ -177,7 +199,7 @@ def _create_crd_instance(namespace, plural, name, phase=None, depends_on=None):
         "spec": {"dependsOn": depends_on or []},
     }
 
-    create_deadline = time.time() + 15
+    create_deadline = time.time() + 60
     while True:
         try:
             custom.create_namespaced_custom_object(
@@ -193,7 +215,7 @@ def _create_crd_instance(namespace, plural, name, phase=None, depends_on=None):
                 raise
             time.sleep(0.5)
     if phase:
-        status_deadline = time.time() + 15
+        status_deadline = time.time() + 60
         while True:
             try:
                 custom.patch_namespaced_custom_object_status(
@@ -212,10 +234,46 @@ def _create_crd_instance(namespace, plural, name, phase=None, depends_on=None):
 
 
 def _invoke_workflow_cli(runner, args):
-    env = {}
+    env = os.environ.copy()
     if os.environ.get("KUBECONFIG"):
         env["KUBECONFIG"] = os.environ["KUBECONFIG"]
-    return runner.invoke(workflow_cli, args, env=env)
+    completed = subprocess.run(
+        [sys.executable, "-m", "console_link.workflow.cli", *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    return type("CliResult", (), {
+        "exit_code": completed.returncode,
+        "output": completed.stdout + completed.stderr,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    })()
+
+
+def _get_resource_completions_subprocess(namespace, incomplete):
+    env = os.environ.copy()
+    if os.environ.get("KUBECONFIG"):
+        env["KUBECONFIG"] = os.environ["KUBECONFIG"]
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import json; "
+                "from console_link.workflow.commands.reset import _get_resource_completions; "
+                "FakeCtx = type('FakeCtx', (), {'params': {'namespace': %r}}); "
+                "print(json.dumps(_get_resource_completions(FakeCtx(), None, %r)))"
+            ) % (namespace, incomplete)
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    return json.loads(completed.stdout)
 
 
 def _get_phase(namespace, plural, name):
@@ -293,7 +351,7 @@ class TestDeleteCrdIntegration:
 @pytest.mark.slow
 class TestResetListIntegration:
     def test_list_shows_friendly_names(self, reset_ns):
-        _create_crd_instance(reset_ns, "capturedtraffics", "my-proxy", phase=VALID_PHASES["capturedtraffics"])
+        _create_crd_instance(reset_ns, "captureproxies", "my-proxy", phase=VALID_PHASES["captureproxies"])
         _create_crd_instance(reset_ns, "snapshotmigrations", "my-snap", phase=VALID_PHASES["snapshotmigrations"])
         _wait_for_resource_names(reset_ns, {"my-proxy", "my-snap"})
 
@@ -334,27 +392,37 @@ class TestResetSingleIntegration:
         assert "No resources matching" in result.output
 
     def test_reset_proxy_requires_include_proxies(self, runner, reset_ns):
-        _create_crd_instance(reset_ns, "capturedtraffics", "proxy-p", phase=VALID_PHASES["capturedtraffics"])
+        _create_crd_instance(reset_ns, "captureproxies", "proxy-p", phase=VALID_PHASES["captureproxies"])
 
         result = _invoke_workflow_cli(runner, ["reset", "proxy-p", "--namespace", reset_ns])
         assert result.exit_code != 0
         assert "Proxies are protected by default" in result.output
 
-    def test_reset_kafka_blocked_when_proxy_depends_on_it(self, runner, reset_ns):
+    def test_reset_kafka_blocked_by_captured_traffic_dependency(self, runner, reset_ns):
         _create_crd_instance(reset_ns, "kafkaclusters", "kafka-a", phase=VALID_PHASES["kafkaclusters"])
         _create_crd_instance(
             reset_ns,
             "capturedtraffics",
-            "proxy-a",
+            "topic-a",
             phase=VALID_PHASES["capturedtraffics"],
             depends_on=["kafka-a"],
+        )
+        _create_crd_instance(
+            reset_ns,
+            "captureproxies",
+            "proxy-a",
+            phase=VALID_PHASES["captureproxies"],
+            depends_on=["topic-a"],
         )
 
         result = _invoke_workflow_cli(runner, ["reset", "kafka-a", "--namespace", reset_ns])
         assert result.exit_code != 0
-        assert "Cannot delete because protected proxies still depend on this resource:" in result.output
-        assert "Capture Proxy: proxy-a" in result.output
-        assert "--include-proxies" in result.output
+        assert "Cannot delete because dependent resources still exist:" in result.output
+        assert "Captured Traffic: topic-a" in result.output
+        assert "--cascade" in result.output
+        assert _get_phase(reset_ns, "kafkaclusters", "kafka-a") == VALID_PHASES["kafkaclusters"]
+        assert _get_phase(reset_ns, "capturedtraffics", "topic-a") == VALID_PHASES["capturedtraffics"]
+        assert _get_phase(reset_ns, "captureproxies", "proxy-a") == VALID_PHASES["captureproxies"]
 
     def test_reset_blocks_on_dependents_without_cascade(self, runner, reset_ns):
         _create_crd_instance(reset_ns, "datasnapshots", "snap-a", phase=VALID_PHASES["datasnapshots"])
@@ -417,14 +485,21 @@ class TestResetAllIntegration:
         _assert_deleted(reset_ns, "trafficreplays", "replay-f")
         assert "Deleted" in result.output
 
-    def test_reset_all_skips_proxies_and_required_kafka(self, runner, reset_ns):
+    def test_reset_all_skips_only_proxies(self, runner, reset_ns):
         _create_crd_instance(reset_ns, "kafkaclusters", "kafka-g", phase=VALID_PHASES["kafkaclusters"])
         _create_crd_instance(
             reset_ns,
             "capturedtraffics",
-            "proxy-g",
+            "topic-g",
             phase=VALID_PHASES["capturedtraffics"],
             depends_on=["kafka-g"],
+        )
+        _create_crd_instance(
+            reset_ns,
+            "captureproxies",
+            "proxy-g",
+            phase=VALID_PHASES["captureproxies"],
+            depends_on=["topic-g"],
         )
         _create_crd_instance(
             reset_ns,
@@ -437,24 +512,33 @@ class TestResetAllIntegration:
         result = _invoke_workflow_cli(runner, ["reset", "--all", "--namespace", reset_ns])
         assert result.exit_code == 0
         _assert_deleted(reset_ns, "trafficreplays", "replay-g")
-        assert _get_phase(reset_ns, "capturedtraffics", "proxy-g") == VALID_PHASES["capturedtraffics"]
-        assert _get_phase(reset_ns, "kafkaclusters", "kafka-g") == VALID_PHASES["kafkaclusters"]
-        assert "Skipping proxies by default" in result.output
-        assert "Keeping dependencies required by protected proxies: kafka-g" in result.output
+        _assert_deleted(reset_ns, "capturedtraffics", "topic-g")
+        _assert_deleted(reset_ns, "kafkaclusters", "kafka-g")
+        assert _get_phase(reset_ns, "captureproxies", "proxy-g") == VALID_PHASES["captureproxies"]
+        assert "Keeping protected proxies alive: proxy-g" in result.output
+        assert "Use --include-proxies to delete them." in result.output
 
     def test_reset_all_with_include_proxies_deletes_everything(self, runner, reset_ns):
         _create_crd_instance(reset_ns, "kafkaclusters", "kafka-h", phase=VALID_PHASES["kafkaclusters"])
         _create_crd_instance(
             reset_ns,
             "capturedtraffics",
-            "proxy-h",
+            "topic-h",
             phase=VALID_PHASES["capturedtraffics"],
             depends_on=["kafka-h"],
+        )
+        _create_crd_instance(
+            reset_ns,
+            "captureproxies",
+            "proxy-h",
+            phase=VALID_PHASES["captureproxies"],
+            depends_on=["topic-h"],
         )
 
         result = _invoke_workflow_cli(runner, ["reset", "--all", "--include-proxies", "--namespace", reset_ns])
         assert result.exit_code == 0
-        _assert_deleted(reset_ns, "capturedtraffics", "proxy-h")
+        _assert_deleted(reset_ns, "capturedtraffics", "topic-h")
+        _assert_deleted(reset_ns, "captureproxies", "proxy-h")
         _assert_deleted(reset_ns, "kafkaclusters", "kafka-h")
 
 
@@ -507,13 +591,9 @@ class TestAutocompleteIntegration:
         )
         cache_file.unlink(missing_ok=True)
 
-        _create_crd_instance(reset_ns, "capturedtraffics", "proxy-ac", phase=VALID_PHASES["capturedtraffics"])
+        _create_crd_instance(reset_ns, "captureproxies", "proxy-ac", phase=VALID_PHASES["captureproxies"])
         _create_crd_instance(reset_ns, "snapshotmigrations", "snap-ac", phase=VALID_PHASES["snapshotmigrations"])
-
-        class FakeCtx:
-            params = {"namespace": reset_ns}
-
-        completions = _get_resource_completions(FakeCtx(), None, "")
+        completions = _get_resource_completions_subprocess(reset_ns, "")
         assert "proxy-ac" in completions
         assert "snap-ac" in completions
 
@@ -523,12 +603,8 @@ class TestAutocompleteIntegration:
         )
         cache_file.unlink(missing_ok=True)
 
-        _create_crd_instance(reset_ns, "capturedtraffics", "proxy-x", phase=VALID_PHASES["capturedtraffics"])
-        _create_crd_instance(reset_ns, "capturedtraffics", "other-y", phase=VALID_PHASES["capturedtraffics"])
-
-        class FakeCtx:
-            params = {"namespace": reset_ns}
-
-        completions = _get_resource_completions(FakeCtx(), None, "proxy")
+        _create_crd_instance(reset_ns, "captureproxies", "proxy-x", phase=VALID_PHASES["captureproxies"])
+        _create_crd_instance(reset_ns, "captureproxies", "other-y", phase=VALID_PHASES["captureproxies"])
+        completions = _get_resource_completions_subprocess(reset_ns, "proxy")
         assert "proxy-x" in completions
         assert "other-y" not in completions
