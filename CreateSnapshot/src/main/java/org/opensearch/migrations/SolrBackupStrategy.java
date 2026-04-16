@@ -190,16 +190,9 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             log.info("Using custom S3 endpoint: {}", endpoint);
         }
         try (var s3Client = s3ClientBuilder.build()) {
-            // Check if the directory marker already exists
-            try {
-                s3Client.headObject(HeadObjectRequest.builder()
-                    .bucket(repoUri.bucketName)
-                    .key(dirKey)
-                    .build());
+            if (s3DirectoryMarkerExists(s3Client, repoUri.bucketName, dirKey)) {
                 log.info("S3 directory marker already exists");
                 return;
-            } catch (NoSuchKeyException e) {
-                // Expected — need to create it
             }
 
             // Create the directory marker (matches Solr's S3StorageClient.createDirectory behavior)
@@ -215,6 +208,18 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             log.warn("Failed to ensure S3 directory marker at s3://{}/{}: {} — continuing; "
                 + "backup may still succeed if Solr's S3BackupRepository creates it implicitly.",
                 repoUri.bucketName, dirKey, e.getMessage());
+        }
+    }
+
+    private boolean s3DirectoryMarkerExists(S3Client s3Client, String bucket, String key) {
+        try {
+            s3Client.headObject(HeadObjectRequest.builder()
+                .bucket(bucket)
+                .key(key)
+                .build());
+            return true;
+        } catch (NoSuchKeyException e) {
+            return false;
         }
     }
 
