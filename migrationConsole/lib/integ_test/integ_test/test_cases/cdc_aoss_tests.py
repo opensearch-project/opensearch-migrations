@@ -22,6 +22,7 @@ from .cdc_base import (
     wait_for_pod_ready, wait_for_replayer_consuming,
     cleanup_cdc_resources, run_generate_data,
 )
+from ..default_operations import DefaultOperationsLibrary
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ class Test0034CdcOnlyAossTarget(MATestBase):
             allow_source_target_combinations=[],
         )
         self.cdc_index = f"cdc0034-aoss-{self.unique_id}"
+        self.target_operations = DefaultOperationsLibrary()
 
     def import_existing_clusters(self):
         self.target_cluster = _make_aoss_target_cluster()
@@ -142,6 +144,7 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
         uid = self.unique_id
         self.idx_pre = f"cdc0041-pre-{uid}"
         self.idx_post = f"cdc0041-post-{uid}"
+        self.target_operations = DefaultOperationsLibrary()
 
     def import_existing_clusters(self):
         self.target_cluster = _make_aoss_target_cluster()
