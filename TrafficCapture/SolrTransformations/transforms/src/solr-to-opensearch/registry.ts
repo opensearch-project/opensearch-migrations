@@ -11,6 +11,7 @@ import type { TransformRegistry } from './pipeline';
 import type { RequestContext, ResponseContext } from './context';
 
 import * as solrconfigDefaults from './features/solrconfig-defaults';
+import * as jsonRequest from './features/json-request';
 import * as selectUri from './features/select-uri';
 import * as queryQ from './features/query-q';
 import * as filterQueryFq from './features/filter-query-fq';
@@ -72,7 +73,8 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
   ],
   byEndpoint: {
     select: [
-      solrconfigDefaults.request, // Apply solrconfig.xml defaults/invariants — must be before all others
+      jsonRequest.request, // JSON body → URL params (before defaults so body values are visible)
+      solrconfigDefaults.request, // Apply solrconfig.xml defaults/invariants
       selectUri.request, // URI rewrite
       queryQ.request, // q=... → query DSL
       filterQueryFq.request, // fq=... → bool.filter (after query-q)
