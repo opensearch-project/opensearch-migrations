@@ -21,6 +21,8 @@ function ctxWithBodyFacet(obj: Record<string, any>): RequestContext {
     collection: 'testcollection',
     params: new URLSearchParams(),
     body,
+    emitMetric: () => {},
+    _metrics: new Map(),
   };
 }
 
@@ -36,6 +38,8 @@ function ctxWithParamFacet(obj: Record<string, any>): RequestContext {
     collection: 'testcollection',
     params: new URLSearchParams({ 'json.facet': facetJson }),
     body: new Map() as unknown as JavaMap,
+    emitMetric: () => {},
+    _metrics: new Map(),
   };
 }
 

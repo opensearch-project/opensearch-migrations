@@ -12,6 +12,7 @@ the root cause, and provides a workaround where one exists.
 |-------------------------------------------------|---------|
 | [TERMS-OFFSET](#terms-offset)                   | Terms facet `offset` not natively supported in OpenSearch |
 | [DATE-RANGE-GAP](#date-range-gap)               | Multi-unit date range gaps approximated as fixed intervals |
+| [RANGE-BOUNDARY](#range-boundary)               | Range facet boundary types not fully expressible in OpenSearch |
 | [CURSOR-UNIQUEKEY](#cursor-uniquekey)           | Cursor pagination assumes `id` as Solr's uniqueKey field |
 | [CURSOR-REPLAY](#cursor-replay)                 | Traffic replay with cursorMark not supported |
 | [SOLRCONFIG-REPLAYER](#solrconfig-replayer)     | Traffic replayer requires manual solrConfig in bindingsObject |
@@ -123,6 +124,47 @@ always use `fixed_interval` since they cannot be expressed as a single
 * **Compound gap drift** — Compound gaps combining calendar and fixed units
   (e.g. `+1MONTH+2DAYS`) accumulate approximation error from each calendar
   component.
+
+---
+
+## RANGE-BOUNDARY
+
+**Feature:** Range facet with non-default boundary inclusivity
+
+**Solr behaviour:**
+Solr's range facet syntax supports four bracket combinations to control
+boundary inclusivity on each range: `[from, to)` (default), `(from, to)`,
+`[from, to]`, and `(from, to]`. The JSON Facets API `range` type also
+accepts explicit `include` options (`lower`, `upper`, `edge`, `outer`, `all`)
+that fine-tune which boundaries are inclusive.
+
+**OpenSearch behaviour:**
+OpenSearch's `range` aggregation defines each bucket with `from` (inclusive)
+and `to` (exclusive). There is no per-bucket option to flip a boundary
+between inclusive and exclusive.
+
+**Cause:**
+The `range` aggregation hardcodes `[from, to)` semantics. A Solr range
+expressed as `(10, 20]` (exclusive start, inclusive end) cannot be
+represented exactly — the transformer would need to adjust the numeric
+boundary values, which requires knowledge of the field's precision and
+data type.
+
+**Current workaround (applied automatically by the transformer):**
+The transformer parses the bracket notation and emits a console warning
+when the boundaries differ from OpenSearch's default `[from, to)`. The
+`from` and `to` values are passed through as-is, so the resulting bucket
+boundaries are approximate.
+
+**Residual impact:**
+
+* **Off-by-one at boundaries** — Documents exactly at a boundary value may
+  be included or excluded differently than in Solr. For example, a Solr
+  range `(10, 20]` excludes 10 and includes 20, but OpenSearch's
+  `[10, 20)` includes 10 and excludes 20.
+* **Floating-point edge cases** — For decimal fields the mismatch is
+  typically negligible, but for integer fields a single-value difference
+  at the boundary can change bucket counts.
 
 ---
 
