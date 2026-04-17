@@ -19,14 +19,14 @@
  * This produces cleaner DSL matching what OpenSearch clients typically generate.
  */
 
-import type { ASTNode } from '../../ast/nodes';
+import type { ASTNode, BoolNode } from '../../ast/nodes';
 import type { TransformRuleFn, TransformChild } from '../types';
 
 export const boolRule: TransformRuleFn = (
   node: ASTNode,
   transformChild: TransformChild,
 ): Map<string, any> => {
-  const { and, or, not } = node;
+  const { and, or, not } = node as BoolNode;
   const boolMap = new Map<string, any>();
 
   // TODO: Flattening will help in query optimizations

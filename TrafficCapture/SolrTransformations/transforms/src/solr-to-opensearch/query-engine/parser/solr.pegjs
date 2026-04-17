@@ -71,10 +71,32 @@ unaryExpr
   = notOp _ expr:unaryExpr {
       return { type: 'bool', and: [], or: [], not: [expr] };
     }
-  / prefixExpr
+  / prefixSequence
 
 // NOT operator: "NOT" (requires trailing whitespace) or "!" (no whitespace needed)
 notOp = "NOT" __ / "!"
+
+// Prefix sequence: consecutive +/- prefixed terms form an AND relationship.
+// In Solr, `+A +B` means "A required AND B required", not "(+A) OR (+B)".
+// This rule directly builds a BoolNode with and/not arrays from the prefix operators.
+//
+// Examples:
+//   `+A +B` → BoolNode { and: [A, B], or: [], not: [] }
+//   `-A -B` → BoolNode { and: [], or: [], not: [A, B] }
+//   `+A -B` → BoolNode { and: [A], or: [], not: [B] }
+prefixSequence
+  = head:prefixWithType tail:(__ prefixWithType)+ {
+      const all = [head, ...tail.map(t => t[1])];
+      const and = all.filter(p => p.op === '+').map(p => p.expr);
+      const not = all.filter(p => p.op === '-').map(p => p.expr);
+      return { type: 'bool', and, or: [], not, implicit: false };
+    }
+  / prefixExpr
+
+// Returns { op: '+' or '-', expr: node } for use by prefixSequence
+prefixWithType
+  = "+" _ expr:primary { return { op: '+', expr }; }
+  / "-" _ expr:primary { return { op: '-', expr }; }
 
 // Prefix expressions: +term (required) and -term (prohibited)
 // `+title:java` → BoolNode { and: [FieldNode] } (must match)
