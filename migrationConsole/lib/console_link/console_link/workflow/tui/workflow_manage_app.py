@@ -20,12 +20,12 @@ from .log_manager import LogManager
 from .manage_injections import ArgoWorkflowInterface, PodScraperInterface, WaiterInterface
 from .pod_name_manager import PodNameManager
 from .tree_state_manager import TreeStateManager
+from ..tree_utils import is_approval_node
 
 TREE_ROOT_ANCHOR = "workflow-tree"
 
 # --- Constants ---
 NODE_TYPE_POD = "Pod"
-NODE_TYPE_SUSPEND = "Suspend"
 PHASE_RUNNING = "Running"
 PHASE_SUCCEEDED = "Succeeded"
 LOADING_ROOT_LABEL = "[yellow]⏳ Waiting for Workflow to be created...[/]"
@@ -214,7 +214,7 @@ class WorkflowTreeApp(App):
 
     def action_approve_step(self) -> None:
         node = self.current_node_data
-        if node and node.get('type') == NODE_TYPE_SUSPEND:
+        if node and is_approval_node(node):
             self.push_screen(ConfirmModal(f"Approve '{node.get('display_name')}'?"),
                              lambda confirmed: self._execute_approval(node) if confirmed else None)
 
@@ -249,17 +249,17 @@ class WorkflowTreeApp(App):
             return
         
         node_type = self.current_node_data.get('type')
-        if node_type == NODE_TYPE_POD:
-            node_id = self.current_node_data.get('id')
-            name = self._pods.get_name(node_id) if node_id else None
-            status_bar.update(f"Pod: [bold green]{name}[/]" if name else "Pod: (not available)")
-        elif node_type == NODE_TYPE_SUSPEND:
+        if is_approval_node(self.current_node_data):
             name_param = None
             for p in self.current_node_data.get('inputs', {}).get('parameters', []):
-                if p.get('name') == 'name':
+                if p.get('name') in ('resourceName', 'name'):
                     name_param = p.get('value')
                     break
             status_bar.update(f"Name: [bold cyan]{name_param}[/]" if name_param else "")
+        elif node_type == NODE_TYPE_POD:
+            node_id = self.current_node_data.get('id')
+            name = self._pods.get_name(node_id) if node_id else None
+            status_bar.update(f"Pod: [bold green]{name}[/]" if name else "Pod: (not available)")
         else:
             status_bar.update("")
 
@@ -279,12 +279,12 @@ class WorkflowTreeApp(App):
             ntype = node.get('type')
             pod_resolved = self._pods.get_name(node_id) is not None
 
-            if ntype == NODE_TYPE_POD and pod_resolved:
+            if ntype == NODE_TYPE_POD and pod_resolved and not is_approval_node(node):
                 self.bind("o", "view_logs", description="View Logs")
                 if node.get('phase') == PHASE_RUNNING:
                     self.bind("f", "follow_logs", description="Follow Logs")
                 self.bind("c", "copy_pod_name", description="Copy Pod Name")
-            elif ntype == NODE_TYPE_SUSPEND and node.get('phase') == PHASE_RUNNING:
+            elif is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
                 self.bind("a", "approve_step", description="Approve")
 
         self.refresh_bindings()

@@ -37,6 +37,14 @@ class WorkflowDisplayer:
         raise NotImplementedError
 
 
+def is_approval_node(node: Dict[str, Any]) -> bool:
+    """Check if a node is an approval gate wait step."""
+    if node.get('is_approval'):
+        return True
+    tref = node.get('templateRef') or node.get('template_ref')
+    return bool(tref and tref.get('template') == 'waitforapproval')
+
+
 def get_node_input_parameter(node: Dict[str, Any], param_name: str) -> Optional[str]:
     """Get a parameter value from a node's inputs."""
     inputs = node.get('inputs', {})
@@ -81,7 +89,8 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
             'inputs': node.get('inputs', {}),
             'outputs': node.get('outputs', {}),
             'started_at': node.get('startedAt'),
-            'finished_at': node.get('finishedAt')
+            'finished_at': node.get('finishedAt'),
+            **(({'template_ref': node['templateRef']} if 'templateRef' in node else {}))
         }
         if group_name:
             tree_node['group_name'] = group_name
@@ -223,21 +232,21 @@ def _collapse_retry_group(node: Dict[str, Any]) -> Dict[str, Any]:
     # If tryApply failed and waitForFix is running, show as waiting for approval
     if final_try.get('phase') == 'Failed' and final_wait and final_wait.get('phase') == 'Running':
         collapsed['phase'] = 'Running'
-        collapsed['type'] = 'Suspend'
+        collapsed['is_approval'] = True
 
     return collapsed
 
 
 def filter_tree_nodes(tree_nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Filter tree nodes: preserve Pod/Suspend/Skipped nodes and containers with groupName.
+    """Filter tree nodes: preserve Pod/Skipped/Approval nodes and containers with groupName.
 
     Collapse infrastructure retry nodes (bare leaf Pods) to a single logical step.
     Collapse *WithRetry retry groups (tryApply/waitForFix/retryLoop) to a single node.
     """
 
     def should_keep_by_type(node):
-        # Keep leaf nodes (actual work)
-        return node['type'] in ["Pod", "Suspend", "Skipped"]
+        # Keep leaf nodes (actual work) and approval gate nodes
+        return node['type'] in ["Pod", "Skipped"] or is_approval_node(node)
 
     def has_group_name(node):
         # Keep containers that have a groupName (meaningful grouping)
@@ -311,14 +320,14 @@ def get_step_status_output(workflow_data: Dict[str, Any], node_id: str) -> Optio
     return result
 
 
-def get_node_symbol(phase: str, node_type: str) -> str:
+def get_node_symbol(phase: str, node_type: str, approval: bool = False) -> str:
     """Get symbol for workflow node."""
     if phase == 'Succeeded':
         return "✓"
     elif phase in ('Failed', 'Error'):
         return "✗"
     elif phase == 'Running':
-        return "⟳" if node_type == 'Suspend' else "▶"
+        return "⟳" if approval else "▶"
     elif phase == 'Pending':
         return "○"
     elif phase == 'Skipped':
@@ -363,7 +372,7 @@ def get_step_rich_label(
     Args:
         node: WorkflowNode dictionary
         status_output: Additional status output to append
-        show_approval_name: Whether to show the approval name for Suspend nodes
+        show_approval_name: Whether to show the approval name for approval nodes
 
     Returns:
         Rich-formatted string with color and styling
@@ -371,7 +380,8 @@ def get_step_rich_label(
     step_name = node['display_name']
 
     # Clean up container node names (non-Pod types)
-    if node['type'] not in ['Pod', 'Suspend']:
+    approval = is_approval_node(node)
+    if node['type'] not in ['Pod'] and not approval:
         step_name = clean_display_name(step_name)
 
     if node.get('group_name'):
@@ -388,15 +398,13 @@ def get_step_rich_label(
     # Determine phase - prefer overriddenPhase output parameter over argo phase
     step_phase = get_node_phase(node)
 
-    step_type = node['type']
-
     # Color based on phase
     if step_phase == 'Succeeded':
         color = "green"
         symbol = "✓"
     elif step_phase == 'Running' or step_phase == 'Checked':
         color = "yellow"
-        symbol = "⟳" if step_type == 'Suspend' else "▶"
+        symbol = "⟳" if approval else "▶"
     elif step_phase in ('Failed', 'Error'):
         color = "red"
         symbol = "✗"
@@ -412,23 +420,23 @@ def get_step_rich_label(
 
     step_name_and_timestamp_str = f"{timestamp_str}: {step_name}"
 
-    # Extract 'name' input parameter for Suspend nodes (only if showing)
+    # Extract approval gate name for approval nodes (only if showing)
     approval_name = None
-    if show_approval_name and step_type == 'Suspend':
+    if show_approval_name and approval:
         for p in node.get('inputs', {}).get('parameters', []):
-            if p.get('name') == 'name':
+            if p.get('name') in ('resourceName', 'name'):
                 approval_name = p.get('value')
                 break
 
     full_unformatted_line = _construct_full_label_line(
-        step_name_and_timestamp_str, step_phase, step_type, approval_name
+        step_name_and_timestamp_str, step_phase, approval, approval_name
     )
     status_suffix = f': {status_output}' if status_output and isinstance(status_output, str) else ''
     return f"[{color}]{symbol} {full_unformatted_line}{status_suffix} [/{color}]"
 
 
-def _construct_full_label_line(step_name_and_timestamp_str, step_phase, step_type, approval_name=None):
-    if step_type == 'Suspend':
+def _construct_full_label_line(step_name_and_timestamp_str, step_phase, is_approval, approval_name=None):
+    if is_approval:
         if step_phase == 'Running':
             suffix = f" OF '{approval_name}'" if approval_name else ""
             return f"{step_name_and_timestamp_str} - WAITING FOR APPROVAL{suffix}"

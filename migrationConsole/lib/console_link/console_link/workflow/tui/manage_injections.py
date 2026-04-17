@@ -139,6 +139,8 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
                     "children": node.get("children", []),
                     "startedAt": node.get("startedAt"),
                     "finishedAt": node.get("finishedAt"),
+                    # Capture templateRef so tree_utils can identify approval nodes
+                    **({"templateRef": node["templateRef"]} if "templateRef" in node else {}),
                     # Only keep inputs/outputs if they contain specific UI keys
                     "inputs": {"parameters": [
                         p for p in node.get("inputs", {}).get("parameters", [])
