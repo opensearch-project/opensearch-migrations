@@ -41,39 +41,6 @@ function makeOwnerReferences(
     }];
 }
 
-function makeTrafficReplayManifest(
-    name: BaseExpression<string>,
-    dependsOn: BaseExpression<Serialized<string[]>>,
-    replayerOptions: BaseExpression<Serialized<z.infer<typeof ARGO_REPLAYER_OPTIONS>>>,
-) {
-    const opts = expr.deserializeRecord(replayerOptions);
-    const workflowSpecFields = expr.makeDict({
-        dependsOn: expr.deserializeRecord(dependsOn),
-        jvmArgs: expr.dig(opts, ["jvmArgs"], expr.literal("")),
-        loggingConfigurationOverrideConfigMap: expr.dig(
-            opts,
-            ["loggingConfigurationOverrideConfigMap"],
-            expr.literal("")
-        ),
-        podReplicas: expr.dig(opts, ["podReplicas"], 1),
-        resources: expr.get(opts, "resources"),
-    });
-    return {
-        apiVersion: "migrations.opensearch.org/v1alpha1",
-        kind: "TrafficReplay",
-        metadata: {
-            name: makeStringTypeProxy(name),
-            labels: {
-                "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
-            }
-        },
-        spec: makeDirectTypeProxy(expr.mergeDicts(
-            workflowSpecFields,
-            expr.omit(opts, ...ARGO_REPLAYER_WORKFLOW_OPTION_KEYS)
-        )),
-    };
-}
-
 function makeReplayerTargetParamDict(
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>
 ) {
@@ -298,69 +265,6 @@ export const Replayer = WorkflowBuilder.create({
 })
 
   .addParams(CommonWorkflowParameters)
-
-  .addTemplate("applyTrafficReplay", t => t
-      .addRequiredInput("name", typeToken<string>())
-      .addRequiredInput("dependsOn", typeToken<string[]>())
-      .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
-      .addResourceTask(b => b
-          .setDefinition({
-              action: "apply",
-              setOwnerReference: false,
-              manifest: makeTrafficReplayManifest(b.inputs.name, b.inputs.dependsOn, b.inputs.replayerOptions)
-          }))
-      .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-  )
-
-  .addTemplate("applyTrafficReplayWithRetry", t => t
-      .addRequiredInput("name", typeToken<string>())
-      .addRequiredInput("dependsOn", typeToken<string[]>())
-      .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
-      .addRequiredInput("retryGateName", typeToken<string>())
-      .addOptionalInput("retryGroupName_view", c => "Apply")
-
-      .addSteps(b => b
-          .addStep("tryApply", INTERNAL, "applyTrafficReplay", c =>
-              c.register({
-                  name: b.inputs.name,
-                  dependsOn: b.inputs.dependsOn,
-                  replayerOptions: b.inputs.replayerOptions,
-              }),
-              {continueOn: {failed: true}}
-          )
-          .addStep("waitForFix", ResourceManagement, "waitForApproval", c =>
-              c.register({
-                  resourceName: b.inputs.retryGateName,
-              }),
-              {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
-          )
-          .addStep("patchApproval", ResourceManagement, "patchApprovalAnnotation", c =>
-              c.register({
-                  resourceApiVersion: expr.literal("migrations.opensearch.org/v1alpha1"),
-                  resourceKind: expr.literal("TrafficReplay"),
-                  resourceName: b.inputs.name,
-              }),
-              {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
-          )
-          .addStep("resetGate", ResourceManagement, "patchApprovalGatePhase", c =>
-              c.register({
-                  resourceName: b.inputs.retryGateName,
-                  phase: expr.literal("Pending"),
-              }),
-              {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
-          )
-          .addStepToSelf("retryLoop", c =>
-              c.register({
-                  name: b.inputs.name,
-                  dependsOn: b.inputs.dependsOn,
-                  replayerOptions: b.inputs.replayerOptions,
-                  retryGateName: b.inputs.retryGateName,
-                  retryGroupName_view: b.inputs.retryGroupName_view,
-              }),
-              {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
-          )
-      )
-  )
 
   .addTemplate("createDeployment", (t) =>
     t

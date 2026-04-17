@@ -36,44 +36,6 @@ function getKafkaAuthType(config: BaseExpression<Serialized<KafkaConfig>>) {
     return expr.dig(expr.deserializeRecord(config), ["auth", "type"], "none");
 }
 
-function makeKafkaClusterManifest(
-    kafkaClusterConfig: BaseExpression<Serialized<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>>,
-) {
-    const kc = expr.deserializeRecord(kafkaClusterConfig);
-    const config = expr.get(kc, "config");
-    return {
-        apiVersion: "migrations.opensearch.org/v1alpha1",
-        kind: "KafkaCluster",
-        metadata: {
-            name: makeStringTypeProxy(expr.get(kc, "name")),
-            labels: {
-                "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
-            }
-        },
-        spec: {
-            dependsOn: [],
-            version: makeStringTypeProxy(expr.get(kc, "version")),
-            auth: {
-                type: makeStringTypeProxy(expr.dig(config, ["auth", "type"], "none")),
-            },
-            nodePool: {
-                replicas: makeDirectTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "replicas"], 1)),
-                roles: makeDirectTypeProxy(expr.dig(
-                    config,
-                    ["nodePoolSpecOverrides", "roles"],
-                    expr.literal(["controller", "broker"])
-                )),
-                storage: {
-                    size: makeStringTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "storage", "size"],
-                        expr.literal("5Gi"))),
-                    type: makeStringTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "storage", "type"],
-                        expr.literal("persistent-claim"))),
-                },
-            },
-        }
-    };
-}
-
 function makePlainListener() {
     return expr.makeDict({
         name: "plain",
@@ -261,62 +223,6 @@ export const SetupKafka = WorkflowBuilder.create({
     parallelism: 1
 })
     .addParams(CommonWorkflowParameters)
-
-    .addTemplate("applyKafkaClusterCr", t => t
-        .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "apply",
-                setOwnerReference: false,
-                manifest: makeKafkaClusterManifest(b.inputs.kafkaClusterConfig)
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-    .addTemplate("applyKafkaClusterCrWithRetry", t => t
-        .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
-        .addRequiredInput("retryGateName", typeToken<string>())
-        .addOptionalInput("retryGroupName_view", c => "Apply")
-
-        .addSteps(b => b
-            .addStep("tryApply", INTERNAL, "applyKafkaClusterCr", c =>
-                c.register({
-                    kafkaClusterConfig: b.inputs.kafkaClusterConfig,
-                }),
-                {continueOn: {failed: true}}
-            )
-            .addStep("waitForFix", ResourceManagement, "waitForApproval", c =>
-                c.register({
-                    resourceName: b.inputs.retryGateName,
-                }),
-                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
-            )
-            .addStep("patchApproval", ResourceManagement, "patchApprovalAnnotation", c =>
-                c.register({
-                    resourceApiVersion: expr.literal("migrations.opensearch.org/v1alpha1"),
-                    resourceKind: expr.literal("KafkaCluster"),
-                    resourceName: expr.jsonPathStrict(b.inputs.kafkaClusterConfig, "name"),
-                }),
-                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
-            )
-            .addStep("resetGate", ResourceManagement, "patchApprovalGatePhase", c =>
-                c.register({
-                    resourceName: b.inputs.retryGateName,
-                    phase: expr.literal("Pending"),
-                }),
-                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
-            )
-            .addStepToSelf("retryLoop", c =>
-                c.register({
-                    kafkaClusterConfig: b.inputs.kafkaClusterConfig,
-                    retryGateName: b.inputs.retryGateName,
-                    retryGroupName_view: b.inputs.retryGroupName_view,
-                }),
-                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
-            )
-        )
-    )
-
 
     // Leaf templates defined first so deployKafkaCluster can reference them via INTERNAL
 

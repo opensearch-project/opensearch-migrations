@@ -1,16 +1,29 @@
+import {z} from 'zod';
 import {
     AllowLiteralOrExpression,
+    BaseExpression,
     expr,
     INTERNAL,
     InputParamDef,
     InputParametersRecord,
+    makeDirectTypeProxy,
     makeStringTypeProxy,
     selectInputsForRegister,
+    Serialized,
     TemplateBuilder,
     typeToken,
     WorkflowAndTemplatesScope,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
+import {
+    ARGO_PROXY_WORKFLOW_OPTION_KEYS,
+    ARGO_REPLAYER_OPTIONS,
+    ARGO_REPLAYER_WORKFLOW_OPTION_KEYS,
+    DENORMALIZED_PROXY_CONFIG,
+    NAMED_KAFKA_CLUSTER_CONFIG,
+    PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
+    SNAPSHOT_MIGRATION_CONFIG,
+} from '@opensearch-migrations/schemas';
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
@@ -81,6 +94,182 @@ function buildPatchStatusTemplate<
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY);
 }
 
+function makeKafkaClusterManifest(
+    kafkaClusterConfig: BaseExpression<Serialized<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>>,
+) {
+    const kc = expr.deserializeRecord(kafkaClusterConfig);
+    const config = expr.get(kc, "config");
+    return {
+        apiVersion: CRD_API_VERSION,
+        kind: "KafkaCluster",
+        metadata: {
+            name: makeStringTypeProxy(expr.get(kc, "name")),
+            labels: {
+                "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
+            }
+        },
+        spec: {
+            dependsOn: [],
+            version: makeStringTypeProxy(expr.get(kc, "version")),
+            auth: {
+                type: makeStringTypeProxy(expr.dig(config, ["auth", "type"], "none")),
+            },
+            nodePool: {
+                replicas: makeDirectTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "replicas"], 1)),
+                roles: makeDirectTypeProxy(expr.dig(
+                    config,
+                    ["nodePoolSpecOverrides", "roles"],
+                    expr.literal(["controller", "broker"])
+                )),
+                storage: {
+                    size: makeStringTypeProxy(expr.dig(
+                        config,
+                        ["nodePoolSpecOverrides", "storage", "size"],
+                        expr.literal("5Gi"))
+                    ),
+                    type: makeStringTypeProxy(expr.dig(
+                        config,
+                        ["nodePoolSpecOverrides", "storage", "type"],
+                        expr.literal("persistent-claim"))
+                    ),
+                },
+            },
+        }
+    };
+}
+
+function makeCapturedTrafficManifest(
+    topicCrName: BaseExpression<string>,
+    kafkaClusterName: BaseExpression<string>,
+    kafkaTopicName: BaseExpression<string>,
+    partitions: BaseExpression<Serialized<number>>,
+    replicas: BaseExpression<Serialized<number>>,
+    topicConfig: BaseExpression<Serialized<Record<string, any>>>,
+) {
+    return {
+        apiVersion: CRD_API_VERSION,
+        kind: "CapturedTraffic",
+        metadata: {
+            name: makeStringTypeProxy(topicCrName),
+            labels: {
+                "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
+            }
+        },
+        spec: {
+            dependsOn: [makeStringTypeProxy(kafkaClusterName)],
+            kafkaClusterName: makeStringTypeProxy(kafkaClusterName),
+            topicName: makeStringTypeProxy(kafkaTopicName),
+            partitions: makeDirectTypeProxy(partitions),
+            replicas: makeDirectTypeProxy(replicas),
+            topicConfig: makeDirectTypeProxy(expr.deserializeRecord(topicConfig)),
+        }
+    };
+}
+
+function makeCaptureProxyManifest(
+    proxyConfig: BaseExpression<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>,
+    proxyName: BaseExpression<string>,
+    topicCrName: BaseExpression<string>,
+) {
+    const config = expr.deserializeRecord(proxyConfig);
+    const proxyOpts = expr.get(config, "proxyConfig");
+    const workflowSpecFields = expr.makeDict({
+        dependsOn: expr.toArray(topicCrName),
+        loggingConfigurationOverrideConfigMap: expr.dig(
+            proxyOpts,
+            ["loggingConfigurationOverrideConfigMap"],
+            expr.literal("")
+        ),
+        internetFacing: expr.dig(proxyOpts, ["internetFacing"], false),
+        podReplicas: expr.dig(proxyOpts, ["podReplicas"], 1),
+        resources: expr.get(proxyOpts, "resources"),
+        tls: expr.dig(proxyOpts, ["tls"], expr.makeDict({})),
+    });
+    return {
+        apiVersion: CRD_API_VERSION,
+        kind: "CaptureProxy",
+        metadata: {
+            name: makeStringTypeProxy(proxyName),
+            labels: {
+                "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
+            }
+        },
+        spec: makeDirectTypeProxy(expr.mergeDicts(
+            workflowSpecFields,
+            expr.omit(proxyOpts, ...ARGO_PROXY_WORKFLOW_OPTION_KEYS)
+        )),
+    };
+}
+
+function makeSnapshotMigrationManifest(
+    snapshotMigrationConfig: BaseExpression<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>,
+) {
+    const config = expr.deserializeRecord(snapshotMigrationConfig);
+    const targetConfig = expr.get(config, "targetConfig");
+    const snapshotNameResolution = expr.get(config, "snapshotNameResolution");
+    return {
+        apiVersion: CRD_API_VERSION,
+        kind: "SnapshotMigration",
+        metadata: {
+            name: makeStringTypeProxy(expr.concat(
+                expr.get(config, "sourceLabel"),
+                expr.literal("-"),
+                expr.get(targetConfig, "label"),
+                expr.literal("-"),
+                expr.get(config, "label"),
+            )),
+            labels: {
+                "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
+            }
+        },
+        spec: {
+            dependsOn: makeDirectTypeProxy(expr.ternary(
+                expr.hasKey(snapshotNameResolution, "dataSnapshotResourceName"),
+                expr.toArray(expr.getLoose(snapshotNameResolution, "dataSnapshotResourceName")),
+                expr.literal([])
+            )),
+            migrations: makeDirectTypeProxy(expr.get(config, "migrations")),
+            sourceVersion: makeStringTypeProxy(expr.get(config, "sourceVersion")),
+            sourceLabel: makeStringTypeProxy(expr.get(config, "sourceLabel")),
+            targetLabel: makeStringTypeProxy(expr.get(targetConfig, "label")),
+            snapshotLabel: makeStringTypeProxy(expr.dig(config, ["snapshotConfig", "label"], expr.literal(""))),
+        }
+    };
+}
+
+function makeTrafficReplayManifest(
+    name: BaseExpression<string>,
+    dependsOn: BaseExpression<Serialized<string[]>>,
+    replayerOptions: BaseExpression<Serialized<z.infer<typeof ARGO_REPLAYER_OPTIONS>>>,
+) {
+    const opts = expr.deserializeRecord(replayerOptions);
+    const workflowSpecFields = expr.makeDict({
+        dependsOn: expr.deserializeRecord(dependsOn),
+        jvmArgs: expr.dig(opts, ["jvmArgs"], expr.literal("")),
+        loggingConfigurationOverrideConfigMap: expr.dig(
+            opts,
+            ["loggingConfigurationOverrideConfigMap"],
+            expr.literal("")
+        ),
+        podReplicas: expr.dig(opts, ["podReplicas"], 1),
+        resources: expr.get(opts, "resources"),
+    });
+    return {
+        apiVersion: CRD_API_VERSION,
+        kind: "TrafficReplay",
+        metadata: {
+            name: makeStringTypeProxy(name),
+            labels: {
+                "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
+            }
+        },
+        spec: makeDirectTypeProxy(expr.mergeDicts(
+            workflowSpecFields,
+            expr.omit(opts, ...ARGO_REPLAYER_WORKFLOW_OPTION_KEYS)
+        )),
+    };
+}
+
 export const ResourceManagement = WorkflowBuilder.create({
     k8sResourceName: "resource-management",
     serviceAccountName: "argo-workflow-executor"
@@ -88,10 +277,456 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     .addParams(CommonWorkflowParameters)
 
-    .addTemplate("patchDataSnapshotCompleted", t => buildPatchStatusTemplate(t, "DataSnapshot", {
-        snapshotName: "",
-        configChecksum: "",
-        checksumForSnapshotMigration: ""
+    // ── Root resource mutations ──────────────────────────────────────────
+
+    .addTemplate("upsertKafkaClusterResource", t => t
+        .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: false,
+                manifest: makeKafkaClusterManifest(b.inputs.kafkaClusterConfig)
+            }))
+        .addJsonPathOutput("currentConfigChecksum", "{.status.configChecksum}", typeToken<string>())
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("upsertCapturedTrafficResource", t => t
+        .addRequiredInput("topicCrName", typeToken<string>())
+        .addRequiredInput("kafkaClusterName", typeToken<string>())
+        .addRequiredInput("kafkaTopicName", typeToken<string>())
+        .addRequiredInput("partitions", typeToken<number>())
+        .addRequiredInput("replicas", typeToken<number>())
+        .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: false,
+                manifest: makeCapturedTrafficManifest(
+                    b.inputs.topicCrName,
+                    b.inputs.kafkaClusterName,
+                    b.inputs.kafkaTopicName,
+                    b.inputs.partitions,
+                    b.inputs.replicas,
+                    b.inputs.topicConfig
+                )
+            }))
+        .addJsonPathOutput("currentConfigChecksum", "{.status.configChecksum}", typeToken<string>())
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("upsertCaptureProxyResource", t => t
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyName", typeToken<string>())
+        .addRequiredInput("topicCrName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: false,
+                manifest: makeCaptureProxyManifest(b.inputs.proxyConfig, b.inputs.proxyName, b.inputs.topicCrName)
+            }))
+        .addJsonPathOutput("currentConfigChecksum", "{.status.configChecksum}", typeToken<string>())
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("upsertDataSnapshotResource", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("snapshotItemConfig", typeToken<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>())
+        .addResourceTask(b => {
+            const snapshotItemConfig = expr.deserializeRecord(b.inputs.snapshotItemConfig);
+            const snapshotOptions = expr.get(snapshotItemConfig, "config");
+
+            return b.setDefinition({
+                action: "patch",
+                flags: ["--type", "merge"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "DataSnapshot",
+                    metadata: {
+                        name: b.inputs.resourceName,
+                        labels: {
+                            "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
+                        }
+                    },
+                    spec: {
+                        snapshotPrefix: makeStringTypeProxy(expr.get(snapshotItemConfig, "snapshotPrefix")),
+                        indexAllowlist: makeDirectTypeProxy(
+                            expr.dig(snapshotOptions, ["indexAllowlist"], expr.literal([])) as any
+                        ),
+                        maxSnapshotRateMbPerNode: makeDirectTypeProxy(
+                            expr.dig(snapshotOptions, ["maxSnapshotRateMbPerNode"], 0)
+                        ),
+                        jvmArgs: makeStringTypeProxy(expr.dig(snapshotOptions, ["jvmArgs"], expr.literal(""))),
+                        loggingConfigurationOverrideConfigMap: makeStringTypeProxy(
+                            expr.dig(snapshotOptions, ["loggingConfigurationOverrideConfigMap"], expr.literal(""))
+                        )
+                    }
+                }
+            });
+        })
+        .addJsonPathOutput("currentConfigChecksum", "{.status.configChecksum}", typeToken<string>())
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("upsertSnapshotMigrationResource", t => t
+        .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: false,
+                manifest: makeSnapshotMigrationManifest(b.inputs.snapshotMigrationConfig)
+            }))
+        .addJsonPathOutput("currentConfigChecksum", "{.status.configChecksum}", typeToken<string>())
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("upsertTrafficReplayResource", t => t
+        .addRequiredInput("name", typeToken<string>())
+        .addRequiredInput("dependsOn", typeToken<string[]>())
+        .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: false,
+                manifest: makeTrafficReplayManifest(b.inputs.name, b.inputs.dependsOn, b.inputs.replayerOptions)
+            }))
+        .addJsonPathOutput("currentConfigChecksum", "{.status.configChecksum}", typeToken<string>())
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    // ── Approval gate primitives ─────────────────────────────────────────
+
+    .addTemplate("waitForApproval", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addWaitForExistingResource(b => b
+            .setDefinition({
+                resource: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "ApprovalGate",
+                    name: b.inputs.resourceName
+                },
+                conditions: {successCondition: "status.phase == Approved"}
+            })
+        )
+    )
+
+    .addTemplate("patchApprovalAnnotation", t => t
+        .addRequiredInput("resourceApiVersion", typeToken<string>())
+        .addRequiredInput("resourceKind", typeToken<string>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge"],
+                manifest: {
+                    apiVersion: makeStringTypeProxy(b.inputs.resourceApiVersion),
+                    kind: makeStringTypeProxy(b.inputs.resourceKind),
+                    metadata: {
+                        name: b.inputs.resourceName,
+                        annotations: {
+                            "migrations.opensearch.org/approved-by-run":
+                                makeStringTypeProxy(expr.getWorkflowValue("uid"))
+                        }
+                    }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("patchApprovalGatePhase", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("phase", typeToken<string>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "patch",
+                flags: ["--type", "merge", "--subresource=status"],
+                manifest: {
+                    apiVersion: CRD_API_VERSION,
+                    kind: "ApprovalGate",
+                    metadata: { name: "{{inputs.parameters.resourceName}}" },
+                    status: { phase: "{{inputs.parameters.phase}}" }
+                }
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    // ── Root reconcile wrappers ──────────────────────────────────────────
+
+    .addTemplate("reconcileKafkaClusterResource", t => t
+        .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
+        .addRequiredInput("retryGateName", typeToken<string>())
+        .addOptionalInput("retryGroupName_view", c => "Apply")
+
+        .addSteps(b => b
+            .addStep("tryApply", INTERNAL, "upsertKafkaClusterResource", c =>
+                c.register({
+                    kafkaClusterConfig: b.inputs.kafkaClusterConfig,
+                }),
+                {continueOn: {failed: true}}
+            )
+            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
+            )
+            .addStep("patchApproval", INTERNAL, "patchApprovalAnnotation", c =>
+                c.register({
+                    resourceApiVersion: expr.literal(CRD_API_VERSION),
+                    resourceKind: expr.literal("KafkaCluster"),
+                    resourceName: expr.jsonPathStrict(b.inputs.kafkaClusterConfig, "name"),
+                }),
+                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
+            )
+            .addStep("resetGate", INTERNAL, "patchApprovalGatePhase", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
+            )
+            .addStepToSelf("retryLoop", c =>
+                c.register({
+                    kafkaClusterConfig: b.inputs.kafkaClusterConfig,
+                    retryGateName: b.inputs.retryGateName,
+                    retryGroupName_view: b.inputs.retryGroupName_view,
+                }),
+                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
+            )
+        )
+        .addExpressionOutput("currentConfigChecksum", c => c.steps.tryApply.outputs.currentConfigChecksum)
+    )
+
+    .addTemplate("reconcileCapturedTrafficResource", t => t
+        .addRequiredInput("topicCrName", typeToken<string>())
+        .addRequiredInput("kafkaClusterName", typeToken<string>())
+        .addRequiredInput("kafkaTopicName", typeToken<string>())
+        .addRequiredInput("partitions", typeToken<number>())
+        .addRequiredInput("replicas", typeToken<number>())
+        .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
+        .addRequiredInput("retryGateName", typeToken<string>())
+        .addOptionalInput("retryGroupName_view", c => "Apply")
+
+        .addSteps(b => b
+            .addStep("tryApply", INTERNAL, "upsertCapturedTrafficResource", c =>
+                c.register({
+                    topicCrName: b.inputs.topicCrName,
+                    kafkaClusterName: b.inputs.kafkaClusterName,
+                    kafkaTopicName: b.inputs.kafkaTopicName,
+                    partitions: b.inputs.partitions,
+                    replicas: b.inputs.replicas,
+                    topicConfig: b.inputs.topicConfig,
+                }),
+                {continueOn: {failed: true}}
+            )
+            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
+            )
+            .addStep("patchApproval", INTERNAL, "patchApprovalAnnotation", c =>
+                c.register({
+                    resourceApiVersion: expr.literal(CRD_API_VERSION),
+                    resourceKind: expr.literal("CapturedTraffic"),
+                    resourceName: b.inputs.topicCrName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
+            )
+            .addStep("resetGate", INTERNAL, "patchApprovalGatePhase", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
+            )
+            .addStepToSelf("retryLoop", c =>
+                c.register({
+                    topicCrName: b.inputs.topicCrName,
+                    kafkaClusterName: b.inputs.kafkaClusterName,
+                    kafkaTopicName: b.inputs.kafkaTopicName,
+                    partitions: b.inputs.partitions,
+                    replicas: b.inputs.replicas,
+                    topicConfig: b.inputs.topicConfig,
+                    retryGateName: b.inputs.retryGateName,
+                    retryGroupName_view: b.inputs.retryGroupName_view,
+                }),
+                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
+            )
+        )
+        .addExpressionOutput("currentConfigChecksum", c => c.steps.tryApply.outputs.currentConfigChecksum)
+    )
+
+    .addTemplate("reconcileCaptureProxyResource", t => t
+        .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
+        .addRequiredInput("proxyName", typeToken<string>())
+        .addRequiredInput("topicCrName", typeToken<string>())
+        .addRequiredInput("retryGateName", typeToken<string>())
+        .addOptionalInput("retryGroupName_view", c => "Apply")
+
+        .addSteps(b => b
+            .addStep("tryApply", INTERNAL, "upsertCaptureProxyResource", c =>
+                c.register({
+                    proxyConfig: b.inputs.proxyConfig,
+                    proxyName: b.inputs.proxyName,
+                    topicCrName: b.inputs.topicCrName,
+                }),
+                {continueOn: {failed: true}}
+            )
+            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
+            )
+            .addStep("patchApproval", INTERNAL, "patchApprovalAnnotation", c =>
+                c.register({
+                    resourceApiVersion: expr.literal(CRD_API_VERSION),
+                    resourceKind: expr.literal("CaptureProxy"),
+                    resourceName: b.inputs.proxyName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
+            )
+            .addStep("resetGate", INTERNAL, "patchApprovalGatePhase", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
+            )
+            .addStepToSelf("retryLoop", c =>
+                c.register({
+                    proxyConfig: b.inputs.proxyConfig,
+                    proxyName: b.inputs.proxyName,
+                    topicCrName: b.inputs.topicCrName,
+                    retryGateName: b.inputs.retryGateName,
+                    retryGroupName_view: b.inputs.retryGroupName_view,
+                }),
+                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
+            )
+        )
+        .addExpressionOutput("currentConfigChecksum", c => c.steps.tryApply.outputs.currentConfigChecksum)
+    )
+
+    .addTemplate("reconcileDataSnapshotResource", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("snapshotItemConfig", typeToken<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>())
+        .addOptionalInput("retryGroupName_view", c => "Apply")
+
+        .addSteps(b => b
+            .addStep("tryApply", INTERNAL, "upsertDataSnapshotResource", c =>
+                c.register({
+                    resourceName: b.inputs.resourceName,
+                    snapshotItemConfig: b.inputs.snapshotItemConfig,
+                }),
+                {continueOn: {failed: true}}
+            )
+        )
+        .addExpressionOutput("currentConfigChecksum", c => c.steps.tryApply.outputs.currentConfigChecksum)
+    )
+
+    .addTemplate("reconcileSnapshotMigrationResource", t => t
+        .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("retryGateName", typeToken<string>())
+        .addOptionalInput("retryGroupName_view", c => "Apply")
+
+        .addSteps(b => b
+            .addStep("tryApply", INTERNAL, "upsertSnapshotMigrationResource", c =>
+                c.register({
+                    snapshotMigrationConfig: b.inputs.snapshotMigrationConfig,
+                }),
+                {continueOn: {failed: true}}
+            )
+            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
+            )
+            .addStep("patchApproval", INTERNAL, "patchApprovalAnnotation", c =>
+                c.register({
+                    resourceApiVersion: expr.literal(CRD_API_VERSION),
+                    resourceKind: expr.literal("SnapshotMigration"),
+                    resourceName: b.inputs.resourceName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
+            )
+            .addStep("resetGate", INTERNAL, "patchApprovalGatePhase", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
+            )
+            .addStepToSelf("retryLoop", c =>
+                c.register({
+                    snapshotMigrationConfig: b.inputs.snapshotMigrationConfig,
+                    resourceName: b.inputs.resourceName,
+                    retryGateName: b.inputs.retryGateName,
+                    retryGroupName_view: b.inputs.retryGroupName_view,
+                }),
+                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
+            )
+        )
+        .addExpressionOutput("currentConfigChecksum", c => c.steps.tryApply.outputs.currentConfigChecksum)
+    )
+
+    .addTemplate("reconcileTrafficReplayResource", t => t
+        .addRequiredInput("name", typeToken<string>())
+        .addRequiredInput("dependsOn", typeToken<string[]>())
+        .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
+        .addRequiredInput("retryGateName", typeToken<string>())
+        .addOptionalInput("retryGroupName_view", c => "Apply")
+
+        .addSteps(b => b
+            .addStep("tryApply", INTERNAL, "upsertTrafficReplayResource", c =>
+                c.register({
+                    name: b.inputs.name,
+                    dependsOn: b.inputs.dependsOn,
+                    replayerOptions: b.inputs.replayerOptions,
+                }),
+                {continueOn: {failed: true}}
+            )
+            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
+            )
+            .addStep("patchApproval", INTERNAL, "patchApprovalAnnotation", c =>
+                c.register({
+                    resourceApiVersion: expr.literal(CRD_API_VERSION),
+                    resourceKind: expr.literal("TrafficReplay"),
+                    resourceName: b.inputs.name,
+                }),
+                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
+            )
+            .addStep("resetGate", INTERNAL, "patchApprovalGatePhase", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
+            )
+            .addStepToSelf("retryLoop", c =>
+                c.register({
+                    name: b.inputs.name,
+                    dependsOn: b.inputs.dependsOn,
+                    replayerOptions: b.inputs.replayerOptions,
+                    retryGateName: b.inputs.retryGateName,
+                    retryGroupName_view: b.inputs.retryGroupName_view,
+                }),
+                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
+            )
+        )
+        .addExpressionOutput("currentConfigChecksum", c => c.steps.tryApply.outputs.currentConfigChecksum)
+    )
+
+    // ── Status updates ───────────────────────────────────────────────────
+
+    .addTemplate("patchKafkaClusterReady", t => buildPatchStatusTemplate(t, "KafkaCluster", {
+        configChecksum: ""
     }))
     .addTemplate("patchCapturedTrafficRunning", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
     .addTemplate("patchCapturedTrafficReady", t => buildPatchStatusTemplate(t, "CapturedTraffic", {
@@ -105,14 +740,17 @@ export const ResourceManagement = WorkflowBuilder.create({
         configChecksum: ""
     }))
     .addTemplate("patchCaptureProxyError", t => buildPatchStatusTemplate(t, "CaptureProxy", {}))
+    .addTemplate("patchDataSnapshotRunning", t => buildPatchStatusTemplate(t, "DataSnapshot", {}))
+    .addTemplate("patchDataSnapshotCompleted", t => buildPatchStatusTemplate(t, "DataSnapshot", {
+        snapshotName: "",
+        configChecksum: "",
+        checksumForSnapshotMigration: ""
+    }))
     .addTemplate("patchSnapshotMigrationCompleted", t => buildPatchStatusTemplate(t, "SnapshotMigration", {
         configChecksum: "",
         checksumForReplayer: ""
     }))
     .addTemplate("patchTrafficReplayReady", t => buildPatchStatusTemplate(t, "TrafficReplay", {
-        configChecksum: ""
-    }))
-    .addTemplate("patchKafkaClusterReady", t => buildPatchStatusTemplate(t, "KafkaCluster", {
         configChecksum: ""
     }))
 
@@ -137,7 +775,6 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     .addTemplate("waitForKafkaClusterReady", t => t
         .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("configChecksum", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addWaitForExistingResource(b => b
             .setDefinition({
@@ -147,10 +784,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     name: b.inputs.resourceName
                 },
                 conditions: {
-                    successCondition: expr.concat(
-                        expr.literal("status.listeners, metadata.annotations.migration-configChecksum == "),
-                        b.inputs.configChecksum
-                    )
+                    successCondition: expr.literal("status.listeners")
                 }
             })
             .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -160,14 +794,13 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     .addTemplate("waitForKafkaCluster", t => t
         .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("configChecksum", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addSteps(b => b
             .addStep("waitForCreation", INTERNAL, "waitForKafkaClusterCreated", c =>
                 c.register({...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName})
             )
             .addStep("waitForReady", INTERNAL, "waitForKafkaClusterReady", c =>
-                c.register({...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName, configChecksum: b.inputs.configChecksum})
+                c.register({...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName})
             )
         )
     )
@@ -313,38 +946,6 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
-    .addTemplate("waitForApproval", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addWaitForExistingResource(b => b
-            .setDefinition({
-                resource: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: "ApprovalGate",
-                    name: b.inputs.resourceName
-                },
-                conditions: {successCondition: "status.phase == Approved"}
-            })
-        )
-    )
-
-    .addTemplate("patchApprovalGatePhase", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("phase", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "patch",
-                flags: ["--type", "merge", "--subresource=status"],
-                manifest: {
-                    apiVersion: CRD_API_VERSION,
-                    kind: "ApprovalGate",
-                    metadata: { name: "{{inputs.parameters.resourceName}}" },
-                    status: { phase: "{{inputs.parameters.phase}}" }
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
     .addTemplate("readResourcePhase", t => t
         .addRequiredInput("resourceKind", typeToken<string>())
         .addRequiredInput("resourceName", typeToken<string>())
@@ -377,58 +978,5 @@ export const ResourceManagement = WorkflowBuilder.create({
             .addJsonPathOutput("uid", "{.metadata.uid}", typeToken<string>()))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
-
-
-    // ── Config checksum annotation patch (for resources we don't own) ────
-
-    .addTemplate("patchConfigChecksumAnnotation", t => t
-        .addRequiredInput("resourceApiVersion", typeToken<string>())
-        .addRequiredInput("resourceKind", typeToken<string>())
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addRequiredInput("configChecksum", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "patch",
-                flags: ["--type", "merge"],
-                manifest: {
-                    apiVersion: makeStringTypeProxy(b.inputs.resourceApiVersion),
-                    kind: makeStringTypeProxy(b.inputs.resourceKind),
-                    metadata: {
-                        name: b.inputs.resourceName,
-                        annotations: {
-                            "migration-configChecksum": makeStringTypeProxy(b.inputs.configChecksum)
-                        }
-                    }
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
-
-    // ── Workflow UID approval annotation patch ───────────────────────────
-
-    .addTemplate("patchApprovalAnnotation", t => t
-        .addRequiredInput("resourceApiVersion", typeToken<string>())
-        .addRequiredInput("resourceKind", typeToken<string>())
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "patch",
-                flags: ["--type", "merge"],
-                manifest: {
-                    apiVersion: makeStringTypeProxy(b.inputs.resourceApiVersion),
-                    kind: makeStringTypeProxy(b.inputs.resourceKind),
-                    metadata: {
-                        name: b.inputs.resourceName,
-                        annotations: {
-                            "migrations.opensearch.org/approved-by-run":
-                                makeStringTypeProxy(expr.getWorkflowValue("uid"))
-                        }
-                    }
-                }
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-    )
-
 
     .getFullScope();

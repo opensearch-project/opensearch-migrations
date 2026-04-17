@@ -46,7 +46,7 @@ The resource types are:
 
 ## Architecture Overview: The ApprovalGate Retry Model
 
-When a gated change is attempted on a specific resource, the workflow relies on a "Catch, Wait, Auto-Patch, and Retry" loop orchestrated by Argo Workflows plus `ApprovalGate` CRs.
+When a gated or otherwise user-intervention-requiring change is attempted on a specific resource, the workflow relies on a `tryApply -> waitForFix -> patchApproval -> resetGate -> retryLoop` loop orchestrated by Argo Workflows plus `ApprovalGate` CRs.
 
 ```mermaid
 flowchart TB
@@ -57,21 +57,86 @@ flowchart TB
     end
 
     subgraph Workflow["Argo Workflow"]
-        Start(( )) --> A
-        A[Submit kubectl apply] -.->|request| API
-        VAP -->|allowed| R[Apply Succeeds]
-        VAP -->|"403 Forbidden"| C{Parse Error}
-        R --> B[Wait for Ready/Complete]
-        C -->|"Gated Change"| D[Wait on ApprovalGate]
-        C -->|"Impossible / Lock Violation"| E[Fail workflow - unrecoverable]
-        C -->|"Other Error"| F[Fail - real error]
-        
-        D -->|"User approves gate / retries"| G[Auto-Patch Resource with Workflow UID]
-        G --> A
+        Start([Upsert K8s Migration Resource]) --> B[tryApply]
+        B -.->|request| API
+        VAP -->|allowed| R[CR spec accepted]
+        VAP -->|"rejected / blocked"| D[waitForFix on ApprovalGate]
+        R --> C{checksum matches desired?}
+        C -->|yes| S[skip later convergence steps]
+        C -->|no| T[descend into later convergence steps]
+        T --> U[patch status after convergence]
+        D --> E[patchApproval]
+        E --> F[resetGate]
+        F --> G[retryLoop]
+        G --> B
     end
 ```
 
-**Key Concept: The API Rejection is Absolute.** If a VAP rejects a change, the `kubectl apply` request for that resource is aborted. The existing resource, including its state and status, remains 100% unchanged.
+**Key Concept: The API Rejection is Absolute.** If a VAP rejects a change, the `kubectl apply` request for that resource is aborted. The existing resource, including its state and status, remains unchanged. The workflow does not descend into the child subtree until `tryApply` has successfully written the new root contract.
+
+In practice, the workflow uses three layers around a managed root resource:
+
+1. **Leaf resource apply template**
+   - a non-steps `resource` template that performs the actual `kubectl apply`
+   - this is the only layer that can naturally expose fields from the applied object via `jsonPath` outputs
+2. **Retry / approval wrapper**
+   - a `steps` template that runs:
+     - `tryApply`
+     - `waitForFix`
+     - `patchApproval`
+     - `resetGate`
+     - `retryLoop`
+   - if `tryApply` succeeds, this wrapper bubbles the applied-object outputs up to the parent
+   - if `tryApply` fails, this wrapper owns the approval/manual-fix loop and retries
+3. **Parent lifecycle/orchestration steps**
+   - compare the returned checksum to the desired checksum for the run
+   - if it matches, skip the subtree
+   - if it differs, descend into child-resource reconciliation
+   - after convergence, patch final success state in the root CR
+
+The individual child step names have stable roles:
+
+* **`tryApply`** — the actual root CR apply attempt
+* **`waitForFix`** — waits on the `ApprovalGate` when the apply failed and user action is required
+* **`patchApproval`** — patches the workflow UID approval annotation onto the target resource
+* **`resetGate`** — resets the gate back to `Pending` so it can be used again on the next retry
+* **`retryLoop`** — recursively re-enters the retry wrapper
+
+After child convergence, some resources may also have a small finalization wrapper that groups together the last bookkeeping actions. For example, Kafka finalization includes both stamping the checksum annotation on the underlying Strimzi `Kafka` resource and patching `KafkaCluster.status` to `Ready` with the new checksum.
+
+### Materializing this into Argo Workflows
+
+Generally, boilerplate is grouped together with 'business logic' coming right after.
+
+* **inside the reconcile wrapper**
+  * steps that are about getting the **root CR spec accepted**
+  * examples:
+    * `tryApply`
+    * `waitForFix`
+    * `patchApproval`
+    * `resetGate`
+    * `retryLoop`
+* **outside the reconcile wrapper**
+  * steps that are about **child-resource convergence**, e.g. `patchKafkaClusterReady`
+  * plus the final patch that records successful convergence in the root CR status
+
+So, in the current model:
+
+1. the reconcile wrapper proves that the new root contract is acceptable
+2. later workflow steps decide whether to skip or continue based on the returned checksum
+3. if work is still needed, later steps perform child-resource convergence
+4. only after that succeeds does the workflow patch the final success state in the root CR
+
+"Descend" in this design means:
+
+* continue into the **later convergence steps**
+* not necessarily recurse into a nested subtree template
+
+The important distinction is stage, not whether the next operation happens in the same template or a child template:
+
+* **reconcile wrapper** = accept and retry the root contract
+* **later convergence steps** = perform the actual infrastructure work if the returned checksum says it is still needed
+* **final status patch** = record that the contract has now been successfully realized
 
 ---
 
@@ -284,7 +349,7 @@ Migration CRD resources follow a common lifecycle tracked natively in the `.stat
 | `Completed` | A finite task has finished successfully. The output is immutable. | **Terminal** (Snapshots) |
 | `Error` | Execution failed. The resource is "poisoned". | All |
 
-Empty placeholder resources are created during the migration initialization step (before the Argo workflow starts) so that downstream `waitFor` steps can find them. The initializer creates each CRD resource with an empty `spec: {}` and `status.phase: Initialized`. The workflow's first apply populates the spec with real parameters.
+Bootstrap placeholder resources are created during the migration initialization step (before the Argo workflow starts) so that downstream `waitFor` steps can find them. The initializer creates each CRD resource with only the minimal bootstrap fields needed up front, plus `status.phase: Initialized` and an empty `status.configChecksum`. The workflow's first successful `tryApply` writes the real desired spec contract.
 
 ### The "Fail Forward / Poison Resource" Principle
 
@@ -331,13 +396,14 @@ We tie approvals directly to the specific Argo Workflow execution requesting the
 
 **The Flow:**
 
-1. **Try Apply:** Argo attempts the update. The incoming manifest natively includes an Argo label: `workflows.argoproj.io/run-uid: {{workflow.uid}}`.
-2. **The Block:** The VAP sees a Gated change, looks for a matching approval annotation, doesn't find it, and returns a `403 Forbidden`.
-3. **The Suspend:** Argo catches the 403 and enters a `Suspend` node with a UI message: *"Gated changes detected. Review and click Resume to approve."*
-4. **Auto-Patch:** When the user clicks Resume, the very next step in Argo runs a targeted patch:
+1. **`tryApply`:** Argo attempts the update. The incoming manifest includes an Argo label: `workflows.argoproj.io/run-uid: {{workflow.uid}}`.
+2. **The Block:** The VAP sees a gated change, looks for a matching approval annotation, does not find it, and rejects the update.
+3. **`waitForFix`:** The workflow waits on the corresponding `ApprovalGate` resource instead of using an Argo suspend node.
+4. **`patchApproval`:** After the user approves the gate, the workflow patches the target resource:
    `kubectl patch <resource> <name> --type=merge -p '{"metadata":{"annotations":{"migrations.opensearch.org/approved-by-run": "{{workflow.uid}}"}}}'`
-5. **The Retry:** The workflow loops back and attempts the exact same `kubectl apply`.
-6. **The Pass:** The VAP sees the gated change, but evaluates `object.metadata.annotations['...approved-by-run'] == object.metadata.labels['workflows.argoproj.io/run-uid']`. The change is allowed.
+5. **`resetGate`:** The workflow sets the `ApprovalGate` phase back to `Pending`.
+6. **`retryLoop`:** The workflow loops back and attempts the exact same `kubectl apply`.
+7. **The Pass:** The VAP sees the gated change, and evaluates `object.metadata.annotations['...approved-by-run'] == object.metadata.labels['workflows.argoproj.io/run-uid']`. The change is allowed.
 
 **CEL Implementation Example** *(abbreviated — full policy covers all Gated fields from the classification table)*:
 
@@ -353,7 +419,7 @@ validations:
        has(object.metadata.annotations['migrations.opensearch.org/approved-by-run']) &&
        has(object.metadata.labels['workflows.argoproj.io/run-uid']) &&
        object.metadata.annotations['migrations.opensearch.org/approved-by-run'] == object.metadata.labels['workflows.argoproj.io/run-uid'])
-    message: "Gated changes detected. Workflow UI approval is required to proceed."
+    message: "Gated changes detected. Approve the corresponding ApprovalGate."
 
 ```
 
@@ -429,9 +495,9 @@ If the Kafka cluster config changes, its checksum changes, which cascades throug
 **Runtime flow:**
 
 1. Config processor computes all checksums and includes them in the workflow config
-2. The initializer creates placeholder CRDs with `status.phase: Initialized` and an empty `status.configChecksum`
+2. The initializer creates placeholder CRDs with `status.phase: Initialized`, an empty `status.configChecksum`, and only the minimal bootstrap fields needed before the workflow starts
 3. The initializer also emits helper scripts because CRD status must be patched through the `/status` subresource separately from the initial create/apply
-4. Lifecycle templates update `status.phase` early for execution-state visibility, but only stamp the final success state and the new `status.configChecksum` after the child-resource subtree succeeds
+4. Lifecycle templates only stamp the final success state and the new `status.configChecksum` after the child-resource subtree succeeds
 5. Waiters compare both lifecycle state and checksum for CRDs, and compare Strimzi readiness plus a checksum annotation for Kafka
 
 **Re-run scenarios:**
@@ -447,8 +513,8 @@ If the Kafka cluster config changes, its checksum changes, which cascades throug
 
 ```
 checkPhase
-  → if not already terminal/ready for this run:
-      applyCRD → markRunning → deploy → markReady/markError
+  → if checksum differs for this run:
+      tryApply → descend into child subtree → patch*Ready/patch*Completed
 ```
 
 The "already done" check is checksum-based:
@@ -559,7 +625,7 @@ For terminal resources, also add them to the `lock-on-complete-policy` resource 
 
 ### 5. Add initializer placeholder
 
-In `migrationInitializer.ts`, create the resource with its initial `spec` contract and `status: { phase: "Initialized", configChecksum: "" }` during the initialization step. This lets downstream `waitFor` steps find the resource before the workflow populates the child subtree and stamps the final checksum.
+In `migrationInitializer.ts`, create the resource with only the minimal bootstrap fields it needs before workflow execution (for example, dependency links or identity fields needed by waiters), plus `status: { phase: "Initialized", configChecksum: "" }`. Do **not** duplicate the full desired spec contract in the initializer; the workflow-owned `tryApply` step is the canonical place that writes the full root spec.
 
 If the resource is a CRD with a status subresource, make sure the initializer also emits the corresponding status patch handling in the generated resource handler script.
 
@@ -608,24 +674,28 @@ For external resources whose status we do not own, store the checksum in metadat
 
 The `run-uid` label is required for the Workflow UID Approval Pattern.
 
-### 7. Add apply + retry templates
+### 9. Add apply + retry templates
 
 Three templates, layered:
 
-1. **Leaf apply** — `action: "apply"` with the manifest. Includes `K8S_RESOURCE_RETRY_STRATEGY`.
-2. **Retry wrapper** — catches VAP rejections with `continueOn: {failed: true}`, suspends for user review, auto-patches the UID approval annotation via `patchApprovalAnnotation`, then recursively retries via `addStepToSelf`.
-3. **Lifecycle wrapper** — calls the retry template, then transitions phases:
-   * `patchResourcePhase("Running")` after the CRD spec is accepted
-   * Deploy the actual infrastructure
-   * `patchResourcePhase("Ready")` on success, `patchResourcePhase("Error")` on failure
+1. **Leaf apply** — `action: "apply"` with the manifest. In current templates this is usually the `apply<Resource>` or `apply<Resource>Cr` template. Includes `K8S_RESOURCE_RETRY_STRATEGY`.
+2. **Retry wrapper** — catches apply failures with `continueOn: {failed: true}`, then runs the current step sequence:
+   * `tryApply`
+   * `waitForFix`
+   * `patchApproval`
+   * `resetGate`
+   * `retryLoop`
+3. **Lifecycle wrapper** — calls the retry template, then descends into the child-resource subtree and finally patches the terminal success state:
+   * `patch<Resource>Ready`
+   * or `patch<Resource>Completed`
 
-Use `continueOn: {failed: true}` on the deploy step so the workflow can still mark `Error` on failure (Fail Forward / Poison Resource principle).
+The current workflow does not use Argo suspend/resume nodes for approval. It uses `ApprovalGate` resources and the named steps above.
 
-### 8. Wire into the parent workflow
+### 10. Wire into the parent workflow
 
 Call the lifecycle template from `fullMigration.ts` (or the appropriate orchestration template). The parent workflow should not manage phases — that's encapsulated in the lifecycle template.
 
-### 9. Add a Helm test
+### 11. Add a Helm test
 
 Create a test pod in `templates/tests/` modeled on `test-vap-kafka.yaml`. The test should:
 
