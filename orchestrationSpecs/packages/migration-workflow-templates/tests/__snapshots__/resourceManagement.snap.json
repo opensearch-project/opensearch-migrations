@@ -227,6 +227,83 @@
         }
       },
       {
+        "name": "checkkafkaexists",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/bin/sh",
+            "-c"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "args": [
+            "set -e\nRESOURCE_NAME='{{inputs.parameters.resourceName}}'\nOUTPUT=$(kubectl get kafka \"$RESOURCE_NAME\" -o json 2>&1) && RC=0 || RC=$?\nif [ $RC -eq 0 ]; then\n  BOOTSTRAP=$(echo \"$OUTPUT\" | jq -r '.status.listeners[0].bootstrapServers // \"\"')\n  if [ -n \"$BOOTSTRAP\" ]; then\n    echo -n \"true\" > /tmp/exists.txt\n    echo -n \"$BOOTSTRAP\" > /tmp/bootstrap.txt\n    echo \"$OUTPUT\" | jq -r '.status.listeners[0].name // \"\"' | tr -d '\\n' > /tmp/listener.txt\n    echo \"$OUTPUT\" | jq -r '.spec.kafka.listeners[0].authentication.type // \"\"' | tr -d '\\n' > /tmp/authtype.txt\n  else\n    echo -n \"false\" > /tmp/exists.txt\n    echo -n \"\" > /tmp/bootstrap.txt\n    echo -n \"\" > /tmp/listener.txt\n    echo -n \"\" > /tmp/authtype.txt\n  fi\n  echo -n \"Succeeded\" > /tmp/phase.txt\nelif echo \"$OUTPUT\" | grep -q \"NotFound\"; then\n  echo -n \"false\" > /tmp/exists.txt\n  echo -n \"\" > /tmp/bootstrap.txt\n  echo -n \"\" > /tmp/listener.txt\n  echo -n \"\" > /tmp/authtype.txt\n  echo -n \"Checked\" > /tmp/phase.txt\nelse\n  echo \"kubectl get kafka failed: $OUTPUT\" >&2\n  exit 1\nfi"
+          ]
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "exists",
+              "valueFrom": {
+                "path": "/tmp/exists.txt"
+              }
+            },
+            {
+              "name": "bootstrapServers",
+              "valueFrom": {
+                "path": "/tmp/bootstrap.txt"
+              }
+            },
+            {
+              "name": "listenerName",
+              "valueFrom": {
+                "path": "/tmp/listener.txt"
+              }
+            },
+            {
+              "name": "authType",
+              "valueFrom": {
+                "path": "/tmp/authtype.txt"
+              }
+            },
+            {
+              "name": "overriddenPhase",
+              "valueFrom": {
+                "path": "/tmp/phase.txt"
+              }
+            }
+          ]
+        }
+      },
+      {
         "name": "waitforkafkatopic",
         "inputs": {
           "parameters": [

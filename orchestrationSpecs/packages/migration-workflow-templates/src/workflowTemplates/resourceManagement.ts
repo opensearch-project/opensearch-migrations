@@ -9,6 +9,7 @@ import {
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {DEFAULT_RESOURCES} from "@opensearch-migrations/schemas";
 
 const SECONDS_IN_DAYS = 24 * 3600;
 const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
@@ -93,6 +94,52 @@ export const ResourceManagement = WorkflowBuilder.create({
             .addJsonPathOutput("listenerName", "{.status.listeners[0].name}", typeToken<string>())
             .addJsonPathOutput("authType", "{.spec.kafka.listeners[0].authentication.type}", typeToken<string>()))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("checkKafkaExists", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addContainer(c => c
+            .addImageInfo(c.inputs.imageMigrationConsoleLocation, c.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["/bin/sh", "-c"])
+            .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
+            .addArgs([expr.fillTemplate(
+                `set -e
+RESOURCE_NAME='{{resourceName}}'
+OUTPUT=$(kubectl get kafka "$RESOURCE_NAME" -o json 2>&1) && RC=0 || RC=$?
+if [ $RC -eq 0 ]; then
+  BOOTSTRAP=$(echo "$OUTPUT" | jq -r '.status.listeners[0].bootstrapServers // ""')
+  if [ -n "$BOOTSTRAP" ]; then
+    echo -n "true" > /tmp/exists.txt
+    echo -n "$BOOTSTRAP" > /tmp/bootstrap.txt
+    echo "$OUTPUT" | jq -r '.status.listeners[0].name // ""' | tr -d '\\n' > /tmp/listener.txt
+    echo "$OUTPUT" | jq -r '.spec.kafka.listeners[0].authentication.type // ""' | tr -d '\\n' > /tmp/authtype.txt
+  else
+    echo -n "false" > /tmp/exists.txt
+    echo -n "" > /tmp/bootstrap.txt
+    echo -n "" > /tmp/listener.txt
+    echo -n "" > /tmp/authtype.txt
+  fi
+  echo -n "Succeeded" > /tmp/phase.txt
+elif echo "$OUTPUT" | grep -q "NotFound"; then
+  echo -n "false" > /tmp/exists.txt
+  echo -n "" > /tmp/bootstrap.txt
+  echo -n "" > /tmp/listener.txt
+  echo -n "" > /tmp/authtype.txt
+  echo -n "Checked" > /tmp/phase.txt
+else
+  echo "kubectl get kafka failed: $OUTPUT" >&2
+  exit 1
+fi`,
+                { "resourceName": c.inputs.resourceName }
+            )])
+        )
+        .addPathOutput("exists", "/tmp/exists.txt", typeToken<string>())
+        .addPathOutput("bootstrapServers", "/tmp/bootstrap.txt", typeToken<string>())
+        .addPathOutput("listenerName", "/tmp/listener.txt", typeToken<string>())
+        .addPathOutput("authType", "/tmp/authtype.txt", typeToken<string>())
+        .addPathOutput("overriddenPhase", "/tmp/phase.txt", typeToken<string>())
     )
 
 

@@ -99,10 +99,12 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("configChecksum", typeToken<string>())
         .addOptionalInput("groupName_view", c => "Kafka Cluster")
         .addOptionalInput("sortOrder_view", c => 999)
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
             .addStep("deployCluster", SetupKafka, "deployKafkaClusterWithRetry", c =>
                 c.register({
+                    ...selectInputsForRegister(b, c),
                     clusterName: b.inputs.clusterName,
                     version: b.inputs.version,
                     clusterConfig: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "config"),
@@ -586,6 +588,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(g => g
             .addStep("createKafka", INTERNAL, "setupSingleKafkaCluster", c =>
                 c.register({
+                    ...selectInputsForRegister(b, c),
                     kafkaClusterConfig: expr.serialize(expr.makeDict({
                         name: expr.get(c.item, "name"),
                         version: expr.get(c.item, "version"),

@@ -828,6 +828,12 @@
             },
             {
               "name": "clusterConfig"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
             }
           ]
         },
@@ -835,7 +841,7 @@
           [
             {
               "templateRef": {
-                "template": "readkafkaconnectionprofile",
+                "template": "checkkafkaexists",
                 "name": "resource-management"
               },
               "arguments": {
@@ -843,19 +849,24 @@
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   }
                 ]
               },
-              "name": "checkExisting",
-              "continueOn": {
-                "failed": true
-              }
+              "name": "checkExisting"
             }
           ],
           [
             {
               "template": "deploykafkanodepoolwithretry",
-              "when": "{{=!(steps.checkExisting.status == 'Succeeded')}}",
+              "when": "{{=!(steps.checkExisting.outputs.parameters.exists == 'true')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -878,7 +889,7 @@
           [
             {
               "template": "deploykafkaclusterkraftwithretry",
-              "when": "{{=!(steps.checkExisting.status == 'Succeeded')}}",
+              "when": "{{=!(steps.checkExisting.outputs.parameters.exists == 'true')}}",
               "arguments": {
                 "parameters": [
                   {
@@ -905,7 +916,7 @@
           [
             {
               "template": "createkafkauserwithretry",
-              "when": "{{=!(steps.checkExisting.status == 'Succeeded') && sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512'}}",
+              "when": "{{=!(steps.checkExisting.outputs.parameters.exists == 'true') && sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -931,7 +942,7 @@
             {
               "name": "bootstrapServers",
               "valueFrom": {
-                "expression": "((steps.checkExisting.status == 'Succeeded') ? (steps.checkExisting.outputs.parameters.bootstrapServers) : (steps.deployCluster.outputs.parameters.brokers))"
+                "expression": "((steps.checkExisting.outputs.parameters.exists == 'true') ? (steps.checkExisting.outputs.parameters.bootstrapServers) : (steps.deployCluster.outputs.parameters.brokers))"
               }
             }
           ]

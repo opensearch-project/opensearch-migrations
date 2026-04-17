@@ -4,6 +4,7 @@ import {
     INTERNAL,
     makeDirectTypeProxy,
     makeStringTypeProxy,
+    selectInputsForRegister,
     Serialized,
     typeToken,
     WorkflowBuilder
@@ -13,6 +14,7 @@ import {KAFKA_CLUSTER_CREATION_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 
 type KafkaConfig = z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>;
 
@@ -542,13 +544,14 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("version", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
-            .addStep("checkExisting", ResourceManagement, "readKafkaConnectionProfile", c =>
+            .addStep("checkExisting", ResourceManagement, "checkKafkaExists", c =>
                 c.register({
                     resourceName: b.inputs.clusterName,
+                    ...selectInputsForRegister(b, c),
                 }),
-                {continueOn: {failed: true}}
             )
             .addStep("deployPool", INTERNAL, "deployKafkaNodePoolWithRetry", c =>
                 c.register({
@@ -556,7 +559,7 @@ export const SetupKafka = WorkflowBuilder.create({
                     clusterConfig: b.inputs.clusterConfig,
                     retryGroupName_view: expr.concat(expr.literal("KafkaNodePool: "), b.inputs.clusterName),
                 }),
-                {when: c => ({templateExp: expr.not(expr.equals(c.checkExisting.status, "Succeeded"))})}
+                {when: c => ({templateExp: expr.not(expr.equals(c.checkExisting.outputs.exists, "true"))})}
             )
             .addStep("deployCluster", INTERNAL, "deployKafkaClusterKraftWithRetry", c =>
                 c.register({
@@ -565,7 +568,7 @@ export const SetupKafka = WorkflowBuilder.create({
                     clusterConfig: b.inputs.clusterConfig,
                     retryGroupName_view: expr.concat(expr.literal("KafkaCluster: "), b.inputs.clusterName),
                 }),
-                {when: c => ({templateExp: expr.not(expr.equals(c.checkExisting.status, "Succeeded"))})}
+                {when: c => ({templateExp: expr.not(expr.equals(c.checkExisting.outputs.exists, "true"))})}
             )
             .addStep("createKafkaUser", INTERNAL, "createKafkaUserWithRetry", c =>
                 c.register({
@@ -574,13 +577,13 @@ export const SetupKafka = WorkflowBuilder.create({
                     retryGroupName_view: expr.concat(expr.literal("KafkaUser: "), b.inputs.clusterName),
                 }),
                 {when: c => ({templateExp: expr.and(
-                    expr.not(expr.equals(c.checkExisting.status, "Succeeded")),
+                    expr.not(expr.equals(c.checkExisting.outputs.exists, "true")),
                     shouldCreateManagedKafkaUser(b.inputs.clusterConfig)
                 )})}
             )
         )
         .addExpressionOutput("bootstrapServers", c => expr.ternary(
-            expr.equals(c.steps.checkExisting.status, "Succeeded"),
+            expr.equals(c.steps.checkExisting.outputs.exists, "true"),
             c.steps.checkExisting.outputs.bootstrapServers,
             c.steps.deployCluster.outputs.brokers
         ))

@@ -60,6 +60,12 @@
             {
               "name": "sortOrder_view",
               "value": "999"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
             }
           ]
         },
@@ -79,6 +85,14 @@
                   {
                     "name": "version",
                     "value": "{{inputs.parameters.version}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
                     "name": "clusterConfig",
@@ -1413,6 +1427,14 @@
               "when": "{{='kafkaClusters' in fromJSON(inputs.parameters.config)}}",
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
                   {
                     "name": "kafkaClusterConfig",
                     "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"version\", item['version'], \"config\", fromJSON(item['config']), \"topics\", fromJSON(item['topics']), \"configChecksum\", item['configChecksum']))}}"
