@@ -31,6 +31,16 @@ type StatusPatchableResource = {
     status?: Record<string, unknown>;
 };
 
+const CRD_KIND_TO_PLURAL: Record<string, string> = {
+    ApprovalGate: 'approvalgates',
+    CaptureProxy: 'captureproxies',
+    CapturedTraffic: 'capturedtraffics',
+    DataSnapshot: 'datasnapshots',
+    KafkaCluster: 'kafkaclusters',
+    SnapshotMigration: 'snapshotmigrations',
+    TrafficReplay: 'trafficreplays',
+};
+
 export class MigrationInitializer {
     readonly loader: StreamSchemaParser<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
     readonly transformer: MigrationConfigTransformer;
@@ -163,6 +173,9 @@ export class MigrationInitializer {
             lines.push('');
         }
 
+        lines.push('pids=""');
+        lines.push('');
+
         for (const entry of entries) {
             const statusItem = allItems.find((item: any) =>
                 item.kind === entry.kind && item.metadata.name === entry.name);
@@ -170,41 +183,62 @@ export class MigrationInitializer {
                 ? this.makeStatusPatchCommand(statusItem)
                 : null;
 
+            const errFile = `/tmp/k8s-handler-${entry.kind}-${entry.name}.$$`;
+
             if (entry.category === 'approvalgate') {
                 lines.push(`# ApprovalGate: ${entry.name}`);
-                lines.push(`kubectl create -f "$RESOURCES_DIR/${entry.file}"`);
-                if (statusPatchCmd) lines.push(statusPatchCmd);
-                lines.push(`echo "RESULT ApprovalGate ${entry.name} CREATED"`);
+                lines.push('(');
+                lines.push(`  kubectl create -f "$RESOURCES_DIR/${entry.file}"`);
+                if (statusPatchCmd) lines.push(`  ${statusPatchCmd}`);
+                lines.push(`  echo "RESULT ApprovalGate ${entry.name} CREATED"`);
+                lines.push(') &');
+                lines.push('pids="$pids $!"');
 
             } else if (entry.category === 'rootcr') {
                 lines.push(`# Root CR: ${entry.kind} ${entry.name}`);
-                lines.push(`if kubectl create -f "$RESOURCES_DIR/${entry.file}" 2>/tmp/k8s-handler-err.$$; then`);
-                if (statusPatchCmd) lines.push(`  ${statusPatchCmd}`);
-                lines.push(`  echo "RESULT ${entry.kind} ${entry.name} CREATED"`);
-                lines.push(`elif grep -q 'AlreadyExists' /tmp/k8s-handler-err.$$; then`);
-                lines.push(`  echo "RESULT ${entry.kind} ${entry.name} ALREADY_EXISTS"`);
-                lines.push(`else`);
-                lines.push(`  cat /tmp/k8s-handler-err.$$ >&2`);
-                lines.push(`  echo "RESULT ${entry.kind} ${entry.name} FAILED" >&2`);
-                lines.push(`  rm -f /tmp/k8s-handler-err.$$`);
-                lines.push(`  exit 1`);
-                lines.push(`fi`);
-                lines.push(`rm -f /tmp/k8s-handler-err.$$`);
+                lines.push('(');
+                lines.push(`  err_file="${errFile}"`);
+                lines.push(`  if kubectl create -f "$RESOURCES_DIR/${entry.file}" 2>"$err_file"; then`);
+                if (statusPatchCmd) lines.push(`    ${statusPatchCmd}`);
+                lines.push(`    echo "RESULT ${entry.kind} ${entry.name} CREATED"`);
+                lines.push(`  elif grep -q 'AlreadyExists' "$err_file"; then`);
+                lines.push(`    echo "RESULT ${entry.kind} ${entry.name} ALREADY_EXISTS"`);
+                lines.push(`  else`);
+                lines.push(`    cat "$err_file" >&2`);
+                lines.push(`    echo "RESULT ${entry.kind} ${entry.name} FAILED" >&2`);
+                lines.push(`    rm -f "$err_file"`);
+                lines.push(`    exit 1`);
+                lines.push(`  fi`);
+                lines.push(`  rm -f "$err_file"`);
+                lines.push(') &');
+                lines.push('pids="$pids $!"');
 
             } else if (entry.category === 'configmap') {
                 lines.push(`# ConfigMap: ${entry.name}`);
-                lines.push(`kubectl apply -f "$RESOURCES_DIR/${entry.file}"`);
-                lines.push(`echo "RESULT ${entry.kind} ${entry.name} APPLIED"`);
+                lines.push('(');
+                lines.push(`  kubectl apply -f "$RESOURCES_DIR/${entry.file}"`);
+                lines.push(`  echo "RESULT ${entry.kind} ${entry.name} APPLIED"`);
+                lines.push(') &');
+                lines.push('pids="$pids $!"');
             }
             lines.push('');
         }
+
+        lines.push('for pid in $pids; do');
+        lines.push('  wait "$pid"');
+        lines.push('done');
+        lines.push('');
 
         return lines.join('\n');
     }
 
     private makeStatusPatchCommand(item: StatusPatchableResource): string {
         const group = item.apiVersion.split('/')[0];
-        const plural = item.kind.toLowerCase() + 's.' + group;
+        const pluralName = CRD_KIND_TO_PLURAL[item.kind];
+        if (!pluralName) {
+            throw new Error(`No plural mapping defined for CRD kind: ${item.kind}`);
+        }
+        const plural = `${pluralName}.${group}`;
         const patch = JSON.stringify({ status: item.status });
         return `kubectl patch ${plural}/${item.metadata.name} --subresource=status --type=merge -p '${patch}'`;
     }

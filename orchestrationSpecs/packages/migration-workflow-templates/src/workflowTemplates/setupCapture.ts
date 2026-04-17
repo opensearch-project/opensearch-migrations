@@ -6,7 +6,6 @@ import {
     makeStringTypeProxy,
     Serialized,
     selectInputsForRegister,
-    SimpleExpression,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
@@ -148,10 +147,10 @@ function makeKafkaClientPropertiesConfigMap(name: BaseExpression<string>) {
 }
 
 function checksumNotDone(
-    actualChecksum: SimpleExpression<string>,
-    desiredChecksum: SimpleExpression<string>,
-): SimpleExpression<boolean> {
-    return expr.not(expr.equals(actualChecksum, desiredChecksum));
+    actualChecksum: BaseExpression<string>,
+    desiredChecksum: BaseExpression<string>,
+): BaseExpression<boolean, "complicatedExpression"> {
+    return expr.and(expr.literal(true), expr.not(expr.equals(actualChecksum, desiredChecksum)));
 }
 
 function makeCapturedTrafficManifest(
@@ -864,10 +863,10 @@ export const SetupCapture = WorkflowBuilder.create({
                     retryGateName: expr.concat(b.inputs.topicCrName, expr.literal(".capturedtraffic.vapretry")),
                     retryGroupName_view: expr.concat(expr.literal("CapturedTraffic: "), b.inputs.topicCrName),
                 }),
-                { when: c => checksumNotDone(
+                { when: c => ({templateExp: checksumNotDone(
                     c.checkTopicPhase.outputs.configChecksum,
                     b.inputs.topicConfigChecksum
-                ) }
+                )}) }
             )
             .addStep("createKafkaTopic", SetupKafka, "createKafkaTopicWithRetry", c =>
                 c.register({
@@ -893,10 +892,10 @@ export const SetupCapture = WorkflowBuilder.create({
                     checksumForSnapshot: b.inputs.checksumForSnapshot,
                     checksumForReplayer: b.inputs.checksumForReplayer,
                 }),
-                { when: c => checksumNotDone(
+                { when: c => ({templateExp: checksumNotDone(
                     c.checkTopicPhase.outputs.configChecksum,
                     b.inputs.topicConfigChecksum
-                ) }
+                )}) }
             )
 
             // ── Phase 2: Proxy / CaptureProxy flow ─────────────────────
@@ -918,20 +917,20 @@ export const SetupCapture = WorkflowBuilder.create({
                     retryGateName: expr.concat(b.inputs.proxyName, expr.literal(".captureproxy.vapretry")),
                     retryGroupName_view: expr.concat(expr.literal("CaptureProxy: "), b.inputs.proxyName),
                 }),
-                { when: c => checksumNotDone(
+                { when: c => ({templateExp: checksumNotDone(
                     c.checkProxyPhase.outputs.configChecksum,
                     b.inputs.configChecksum
-                ) }
+                )}) }
             )
             .addStep("patchCaptureProxyRunning", ResourceManagement, "patchCaptureProxyRunning", c =>
                 c.register({
                     resourceName: b.inputs.proxyName,
                     phase: expr.literal("Running"),
                 }),
-                { when: c => checksumNotDone(
+                { when: c => ({templateExp: checksumNotDone(
                     c.checkProxyPhase.outputs.configChecksum,
                     b.inputs.configChecksum
-                ) }
+                )}) }
             )
             .addStep("setupProxy", INTERNAL, "setupProxy", c =>
                 c.register({
