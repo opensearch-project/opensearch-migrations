@@ -127,6 +127,8 @@ spec:
       app: migration-console
   template:
     metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: console
       labels:
         app: migration-console
         env: v1
