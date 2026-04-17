@@ -303,8 +303,8 @@ export class MigrationInitializer {
                 apiVersion: CRD_API_VERSION,
                 kind: 'KafkaCluster',
                 metadata: { name: kafkaCluster.name },
-                spec: { dependsOn: [] },
-                status: { phase: 'Initialized', configChecksum: kafkaCluster.configChecksum }
+                spec: {},
+                status: { phase: 'Initialized', configChecksum: '' }
             });
 
             // VAP retry gates for kafka sub-operations
@@ -331,7 +331,7 @@ export class MigrationInitializer {
                 kind: 'CapturedTraffic',
                 metadata: { name: topicCrName },
                 spec: { dependsOn: [proxy.kafkaConfig.label] },
-                status: { phase: 'Initialized', configChecksum: proxy.topicConfigChecksum }
+                status: { phase: 'Initialized', configChecksum: '' }
             });
 
             // CaptureProxy: proxy deployment contract
@@ -340,7 +340,7 @@ export class MigrationInitializer {
                 kind: 'CaptureProxy',
                 metadata: { name: proxy.name },
                 spec: { dependsOn: [topicCrName] },
-                status: { phase: 'Initialized', configChecksum: proxy.configChecksum }
+                status: { phase: 'Initialized', configChecksum: '' }
             });
 
             // VAP retry gates
@@ -358,7 +358,7 @@ export class MigrationInitializer {
                     kind: 'DataSnapshot',
                     metadata: { name: this.makeCrdName(snapshot.sourceConfig.label, item.label) },
                     spec: { dependsOn: (item.dependsOnProxySetups ?? []).map(dep => dep.name) },
-                    status: { phase: 'Initialized', configChecksum: item.configChecksum }
+                    status: { phase: 'Initialized', configChecksum: '' }
                 });
             }
         }
@@ -374,8 +374,12 @@ export class MigrationInitializer {
                         ? [migration.snapshotNameResolution.dataSnapshotResourceName]
                         : []
                 },
-                status: { phase: 'Initialized', configChecksum: migration.configChecksum }
+                status: { phase: 'Initialized', configChecksum: '' }
             });
+
+            // VAP retry gate for the root SnapshotMigration CR reconcile
+            items.push(this.makeApprovalGateResource(
+                [this.makeCrdName(migration.sourceLabel, migration.targetConfig.label, migration.label), 'vapretry'], gateLabel));
 
             for (const migrationItem of migration.migrations as SnapshotMigrationItemConfig[]) {
                 const approvalNameParts = [
@@ -404,7 +408,7 @@ export class MigrationInitializer {
                             this.makeCrdName(dep.source, replay.toTarget.label, dep.snapshot))
                     ]
                 },
-                status: { phase: 'Initialized', configChecksum: replay.configChecksum }
+                status: { phase: 'Initialized', configChecksum: '' }
             });
 
             // VAP retry gate for replay

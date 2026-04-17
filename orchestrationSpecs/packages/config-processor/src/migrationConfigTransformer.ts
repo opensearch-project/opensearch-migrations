@@ -413,6 +413,12 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
         const replaysWithChecksums = trafficReplays.map(r => ({
             ...r,
+            dependsOn: [
+                r.fromProxy,
+                ...((r.dependsOnSnapshotMigrations ?? []).map(dep =>
+                    [dep.source, r.toTarget.label, dep.snapshot].join('-')
+                ))
+            ],
             kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
             fromProxyConfigChecksum: proxyChecksumForReplayer.get(r.fromProxy) ?? '',
             configChecksum: cs(r.replayerConfig, r.toTarget, proxyChecksumForReplayer.get(r.fromProxy)),

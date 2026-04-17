@@ -43,6 +43,7 @@ function makeOwnerReferences(
 
 function makeTrafficReplayManifest(
     name: BaseExpression<string>,
+    dependsOn: BaseExpression<Serialized<string[]>>,
     replayerOptions: BaseExpression<Serialized<z.infer<typeof ARGO_REPLAYER_OPTIONS>>>,
 ) {
     const opts = expr.deserializeRecord(replayerOptions) as any;
@@ -56,6 +57,7 @@ function makeTrafficReplayManifest(
             }
         },
         spec: {
+            dependsOn: makeDirectTypeProxy(expr.deserializeRecord(dependsOn)),
             // Deployment-level fields
             jvmArgs: makeStringTypeProxy(expr.dig(opts, ["jvmArgs"], expr.literal(""))),
             loggingConfigurationOverrideConfigMap: makeStringTypeProxy(
@@ -317,18 +319,20 @@ export const Replayer = WorkflowBuilder.create({
 
   .addTemplate("applyTrafficReplay", t => t
       .addRequiredInput("name", typeToken<string>())
+      .addRequiredInput("dependsOn", typeToken<string[]>())
       .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
       .addResourceTask(b => b
           .setDefinition({
               action: "apply",
               setOwnerReference: false,
-              manifest: makeTrafficReplayManifest(b.inputs.name, b.inputs.replayerOptions)
+              manifest: makeTrafficReplayManifest(b.inputs.name, b.inputs.dependsOn, b.inputs.replayerOptions)
           }))
       .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
   )
 
   .addTemplate("applyTrafficReplayWithRetry", t => t
       .addRequiredInput("name", typeToken<string>())
+      .addRequiredInput("dependsOn", typeToken<string[]>())
       .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
       .addRequiredInput("retryGateName", typeToken<string>())
       .addOptionalInput("retryGroupName_view", c => "Apply")
@@ -337,6 +341,7 @@ export const Replayer = WorkflowBuilder.create({
           .addStep("tryApply", INTERNAL, "applyTrafficReplay", c =>
               c.register({
                   name: b.inputs.name,
+                  dependsOn: b.inputs.dependsOn,
                   replayerOptions: b.inputs.replayerOptions,
               }),
               {continueOn: {failed: true}}
@@ -365,6 +370,7 @@ export const Replayer = WorkflowBuilder.create({
           .addStepToSelf("retryLoop", c =>
               c.register({
                   name: b.inputs.name,
+                  dependsOn: b.inputs.dependsOn,
                   replayerOptions: b.inputs.replayerOptions,
                   retryGateName: b.inputs.retryGateName,
                   retryGroupName_view: b.inputs.retryGroupName_view,

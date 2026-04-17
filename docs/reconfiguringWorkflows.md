@@ -12,29 +12,41 @@ The migration workflow currently operates in an "always create" mode using `kube
 
 **Implementation Targets:**
 
-* Phase 1 (Completed): Kafka cluster (`Kafka`), `KafkaNodePool`, and `KafkaTopic` from Strimzi.
-* Phase 2 (Current): `CapturedTraffic` (long-lived) and `DataSnapshot` / `SnapshotMigration` (finite/terminal).
+* Phase 1 (Completed): Kafka cluster infrastructure via `KafkaCluster` plus underlying Strimzi resources.
+* Phase 2 (Current): `CapturedTraffic`, `CaptureProxy`, `DataSnapshot`, `SnapshotMigration`, and `TrafficReplay`.
 
 ### CRD Design
 
-Each migration component is represented by a single CRD that holds both the desired configuration (`.spec`) and the lifecycle state (`.status.phase`). This follows the standard Kubernetes pattern — there are no separate "config" and "resource" CRDs. The three resource types are:
+Each migration component is represented by a single CRD that holds both the desired configuration (`.spec`) and the lifecycle state (`.status.phase`). This follows the standard Kubernetes pattern — there are no separate "config" and "resource" CRDs.
 
-* **`CapturedTraffic`** — capture proxy configuration and lifecycle (long-lived, transitions to `Ready`)
+The key contract is:
+
+* `.spec` is the desired configuration for the resource.
+* `.status.phase` and `.status.configChecksum` describe the last configuration that the workflow actually finished applying.
+
+This means a workflow run must update the CRD `spec` before descending into child-resource reconciliation, but it must only restamp the CRD `status` after the child resources have successfully converged. Waiters and skip logic key off `status`, not just `spec`.
+
+The resource types are:
+
+* **`KafkaCluster`** — workflow-managed Kafka cluster infrastructure (long-lived, transitions to `Ready`)
+* **`CapturedTraffic`** — capture stream / Kafka topic contract (long-lived, transitions to `Ready`)
+* **`CaptureProxy`** — live capture proxy deployment and serving configuration (long-lived, transitions to `Ready`)
 * **`DataSnapshot`** — snapshot operation parameters and lifecycle (terminal, transitions to `Completed`)
 * **`SnapshotMigration`** — metadata migration + document backfill (RFS) config and lifecycle (terminal, transitions to `Completed`)
+* **`TrafficReplay`** — replay deployment and runtime configuration (long-lived, transitions to `Ready`)
 
 ### Goals
 
 * Use Kubernetes ValidatingAdmissionPolicies (CEL) to enforce change rules at the API level.
-* Route policy rejections to a suspend gate in the Argo UI, allowing users to safely approve changes without dropping into a CLI.
+* Route policy rejections to `ApprovalGate` checkpoints so users can approve and retry safely.
 * Retain native K8s behavior for "stacked rollouts" on long-lived infrastructure.
 * Ensure strict provenance: the parameters in a CRD's `.spec` must *always* perfectly match the actual deployed infrastructure or historical artifact.
 
 ---
 
-## Architecture Overview: The Argo Retry Model
+## Architecture Overview: The ApprovalGate Retry Model
 
-hen a gated change is attempted on a specific resource, the workflow relies on a "Catch, Suspend, Auto-Patch, and Retry" loop orchestrated entirely within Argo Workflows.
+When a gated change is attempted on a specific resource, the workflow relies on a "Catch, Wait, Auto-Patch, and Retry" loop orchestrated by Argo Workflows plus `ApprovalGate` CRs.
 
 ```mermaid
 flowchart TB
@@ -50,11 +62,11 @@ flowchart TB
         VAP -->|allowed| R[Apply Succeeds]
         VAP -->|"403 Forbidden"| C{Parse Error}
         R --> B[Wait for Ready/Complete]
-        C -->|"Gated Change"| D[Suspend & Wait in Argo-Workflows]
+        C -->|"Gated Change"| D[Wait on ApprovalGate]
         C -->|"Impossible / Lock Violation"| E[Fail workflow - unrecoverable]
         C -->|"Other Error"| F[Fail - real error]
         
-        D -->|"User clicks 'Resume/Approve'"| G[Auto-Patch Resource with Workflow UID]
+        D -->|"User approves gate / retries"| G[Auto-Patch Resource with Workflow UID]
         G --> A
     end
 ```
@@ -141,7 +153,7 @@ successCondition: status.phase == Ready, status.checksumForReplayer == <expected
 
 This means a change to `podReplicas` (not in any `checksumFor`) changes the self-checksum (triggering a re-deploy of the proxy) but does **not** change the downstream checksums — so the snapshot and replayer waiters are unaffected and don't re-run.
 
-### CaptureProxy (`migrations.opensearch.org/CapturedTraffic`)
+### CaptureProxy (`migrations.opensearch.org/CaptureProxy`)
 
 Downstream dependencies that consume the proxy's checksum:
 - **Snapshot** — waits for the proxy to be Ready before creating a snapshot of the source cluster
@@ -278,6 +290,39 @@ Empty placeholder resources are created during the migration initialization step
 
 If infrastructure deployment fails, **we do not attempt a rollback**. The workflow simply updates the CRD's `.status.phase` to `Error` and halts. The resource is considered "poisoned." It is the user's responsibility to push a new, valid configuration through the workflow to overwrite the poisoned state. This guarantees the CRD `.spec` is never artificially manipulated behind the scenes, ensuring strict provenance.
 
+### The "Spec First, Status After Convergence" Principle
+
+For managed CRDs, the workflow uses the following order:
+
+1. Reconcile the CRD `.spec` to the new desired configuration.
+2. If that succeeds, descend into the child-resource subtree.
+3. Only after the child-resource subtree succeeds, patch:
+   * `.status.phase`
+   * `.status.configChecksum`
+   * any other readiness/completion status fields used by waiters
+
+This keeps the meaning of status precise:
+
+* `.spec` says what the workflow is trying to make true.
+* `.status` says what configuration the workflow most recently finished making true.
+
+That distinction is what makes checksum-based skip logic meaningful.
+
+This is important even though reconciliation is still driven by the workflow rather than by a controller watching the CR.
+
+The main reason to write `spec` first is durability of intent:
+
+* VAP evaluates the real requested root-CR change, not just workflow-local inputs.
+* once a safe change is accepted, or a gated change is approved and accepted, that desired contract is durably recorded in the CR immediately
+* if the workflow is deleted or replaced while child resources are still converging, the accepted desired change is not lost
+* the next workflow run can resume from:
+  * `.spec` = the desired, already-approved contract
+  * `.status` = the last successfully applied contract
+
+That means a restarted workflow does not need to rediscover or reinterpret the user's approved intent. It only needs to compare the desired contract in `.spec` to the last applied contract in `.status` and continue reconciling the child subtree.
+
+If the workflow waited to update `spec` until after child convergence, the CR would only be a placeholder during reconciliation. Approval could be consumed, child deployment could start, and then a workflow teardown could lose the durable record of what change had already been accepted.
+
 ---
 
 ## The Workflow UID Approval Pattern
@@ -374,8 +419,9 @@ Each resource carries a `status.configChecksum` — a SHA-256 hash of its effect
 
 ```
 KafkaCluster checksum = sha256(kafkaClusterSpec)
-CapturedTraffic checksum = sha256(proxySpec + KafkaCluster.checksum)
-TrafficReplay checksum = sha256(replayerSpec + CapturedTraffic.checksum)
+CapturedTraffic checksum = sha256(topicSpec + KafkaCluster.checksum)
+CaptureProxy checksum = sha256(proxySpec + CapturedTraffic.checksum)
+TrafficReplay checksum = sha256(replayerSpec + CaptureProxy.checksum)
 ```
 
 If the Kafka cluster config changes, its checksum changes, which cascades through the proxy and replayer checksums — even if their own spec fields didn't change.
@@ -383,16 +429,16 @@ If the Kafka cluster config changes, its checksum changes, which cascades throug
 **Runtime flow:**
 
 1. Config processor computes all checksums and includes them in the workflow config
-2. The initializer creates placeholder CRDs with `status.phase: Initialized` and `status.configChecksum` already set
-3. The initializer also emits a `patchCrdStatus.sh` helper because CRD status must be patched through the `/status` subresource separately from the initial create/apply
-4. Lifecycle templates update `status.phase` and, on success, restamp `status.configChecksum`
+2. The initializer creates placeholder CRDs with `status.phase: Initialized` and an empty `status.configChecksum`
+3. The initializer also emits helper scripts because CRD status must be patched through the `/status` subresource separately from the initial create/apply
+4. Lifecycle templates update `status.phase` early for execution-state visibility, but only stamp the final success state and the new `status.configChecksum` after the child-resource subtree succeeds
 5. Waiters compare both lifecycle state and checksum for CRDs, and compare Strimzi readiness plus a checksum annotation for Kafka
 
 **Re-run scenarios:**
 
 | Scenario | What happens |
 |----------|-------------|
-| Nothing changed | All checksums match from prior run. Waiters resolve instantly. Lifecycle templates skip via `checkPhase`. |
+| Nothing changed | The stored `status.configChecksum` already matches the desired checksum for this run. Waiters resolve instantly and lifecycle templates skip subtree work. |
 | Proxy config changed | Proxy checksum changes → replayer expected checksum changes. Replayer waiter blocks until proxy lifecycle completes and stamps new checksum. |
 | Kafka config changed | Kafka checksum changes → proxy checksum changes → replayer checksum changes. Full cascade, all waiters block until upstream completes. |
 | Only replayer config changed | Proxy/Kafka checksums unchanged, waiters resolve instantly. Only replayer lifecycle runs. |
@@ -405,7 +451,12 @@ checkPhase
       applyCRD → markRunning → deploy → markReady/markError
 ```
 
-For CRDs we own, the checksum is carried in `status.configChecksum` and is written alongside the phase transition to `Ready` / `Completed`.
+The "already done" check is checksum-based:
+
+* if `status.configChecksum == <desired-checksum>`, the workflow treats that resource as already done and skips the subtree
+* if the checksum is empty, missing, or different, the workflow descends and reconciles the subtree
+
+For CRDs we own, the checksum is carried in `status.configChecksum` and is written only when the resource has successfully reached `Ready` / `Completed` for the new desired configuration.
 
 For Kafka, we do not own the `status` subresource, so the workflow patches `metadata.annotations["migration-configChecksum"]` after the Strimzi resource has been applied.
 
@@ -423,6 +474,19 @@ successCondition: status.listeners, metadata.annotations.migration-configChecksu
 ```
 
 The checksum is not used alone in the CRD waiters; it is paired with the expected terminal lifecycle state so the workflow still distinguishes "not done yet" from "done with the wrong config."
+
+### Accepted Risk: Drift Without a Controller
+
+This model intentionally accepts one limitation:
+
+* if a child resource drifts or is deleted outside the workflow, but the root CRD still carries the old successful checksum, a rerun may skip that subtree
+
+That risk is acceptable for now. The checksum in `status` is treated as the workflow's durable record of the last successfully applied contract, not as a continuously reconciled proof of real-time child-resource health. If the project later needs stronger guarantees, that would require either:
+
+* a controller continuously reconciling child resources from the root CR, or
+* an additional child-state proof before skip
+
+The current workflow design deliberately does not require either of those before using checksum-based skip behavior.
 
 
 
@@ -486,7 +550,7 @@ Pattern for Gated fields (all share a single UID check):
      'workflows.argoproj.io/run-uid' in object.metadata.labels &&
      object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
        object.metadata.labels['workflows.argoproj.io/run-uid'])
-  message: "Gated changes detected. Approve via the Argo Workflow UI."
+  message: "Gated changes detected. Approve the corresponding ApprovalGate."
 ```
 
 Use `has()` on every field to handle CRD upgrades where the field didn't previously exist.
@@ -495,9 +559,9 @@ For terminal resources, also add them to the `lock-on-complete-policy` resource 
 
 ### 5. Add initializer placeholder
 
-In `migrationInitializer.ts`, create the resource with `spec: {}` and `status: { phase: "Initialized", configChecksum: "<precomputed>" }` during the initialization step. This lets downstream `waitFor` steps find the resource before the workflow populates it.
+In `migrationInitializer.ts`, create the resource with its initial `spec` contract and `status: { phase: "Initialized", configChecksum: "" }` during the initialization step. This lets downstream `waitFor` steps find the resource before the workflow populates the child subtree and stamps the final checksum.
 
-If the resource is a CRD with a status subresource, make sure the initializer also emits the corresponding status patch command into `patchCrdStatus.sh`.
+If the resource is a CRD with a status subresource, make sure the initializer also emits the corresponding status patch handling in the generated resource handler script.
 
 ### 6. Build the manifest builder function
 

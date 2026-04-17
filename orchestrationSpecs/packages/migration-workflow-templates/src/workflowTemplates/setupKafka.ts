@@ -51,6 +51,7 @@ function makeKafkaClusterManifest(
             }
         },
         spec: {
+            dependsOn: [],
             version: makeStringTypeProxy(expr.get(kc, "version") as any),
             auth: {
                 type: makeStringTypeProxy(expr.dig(config, ["auth", "type"], "none")),

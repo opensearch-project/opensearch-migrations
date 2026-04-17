@@ -19,6 +19,7 @@ import {
 } from '@opensearch-migrations/schemas'
 import {
     AllowLiteralOrExpression,
+    BaseExpression,
     configMapKey,
     defineParam,
     expr,
@@ -29,6 +30,7 @@ import {
     selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister,
     Serialized,
+    SimpleExpression,
     typeToken,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
@@ -76,6 +78,13 @@ function defaultImagesMap(imageConfigMapName: AllowLiteralOrExpression<string>) 
 
 const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
 
+function checksumNotDone(
+    actualChecksum: SimpleExpression<string>,
+    desiredChecksum: SimpleExpression<string>,
+): SimpleExpression<boolean> {
+    return expr.not(expr.equals(actualChecksum, desiredChecksum));
+}
+
 export const FullMigration = WorkflowBuilder.create({
     k8sResourceName: "full-migration",
     parallelism: 100,
@@ -102,60 +111,49 @@ export const FullMigration = WorkflowBuilder.create({
         .addOptionalInput("groupName_view", c => "Kafka Cluster")
         .addOptionalInput("sortOrder_view", c => 999)
 
-        .addSteps(b => b
-            .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
-                c.register({
-                    resourceKind: expr.literal("KafkaCluster"),
-                    resourceName: b.inputs.clusterName,
-                })
-            )
-            .addStep("reconcileKafkaCluster", SetupKafka, "applyKafkaClusterCrWithRetry", c =>
-                c.register({
-                    kafkaClusterConfig: b.inputs.kafkaClusterConfig,
-                    retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".vapretry")),
-                    retryGroupName_view: expr.concat(expr.literal("KafkaCluster: "), b.inputs.clusterName),
-                }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
-            )
-            .addStep("deployCluster", SetupKafka, "deployKafkaClusterAndTopicsWithRetry", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    version: b.inputs.version,
-                    clusterConfig: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "config"),
-                    ownerUid: b.inputs.resourceUid,
-                }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
-            )
-            .addStep("stampChecksum", ResourceManagement, "patchConfigChecksumAnnotation", c =>
-                c.register({
-                    resourceApiVersion: expr.literal("kafka.strimzi.io/v1"),
-                    resourceKind: expr.literal("Kafka"),
-                    resourceName: b.inputs.clusterName,
-                    configChecksum: b.inputs.configChecksum,
-                }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
-            )
-            .addStep("patchKafkaClusterReady", ResourceManagement, "patchKafkaClusterReady", c =>
-                c.register({
-                    resourceName: b.inputs.clusterName,
-                    phase: expr.literal("Ready"),
-                    configChecksum: b.inputs.configChecksum,
-                }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
-            )
-        )
+        .addSteps(b => {
+            return b
+                .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
+                    c.register({
+                        resourceKind: expr.literal("KafkaCluster"),
+                        resourceName: b.inputs.clusterName,
+                    })
+                )
+                .addStep("reconcileKafkaCluster", SetupKafka, "applyKafkaClusterCrWithRetry", c =>
+                    c.register({
+                        kafkaClusterConfig: b.inputs.kafkaClusterConfig,
+                        retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".vapretry")),
+                        retryGroupName_view: expr.concat(expr.literal("KafkaCluster: "), b.inputs.clusterName),
+                    }),
+                    {when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)}
+                )
+                .addStep("deployCluster", SetupKafka, "deployKafkaClusterAndTopicsWithRetry", c =>
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        version: b.inputs.version,
+                        clusterConfig: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "config"),
+                        ownerUid: b.inputs.resourceUid,
+                    }),
+                    {when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)}
+                )
+                .addStep("stampChecksum", ResourceManagement, "patchConfigChecksumAnnotation", c =>
+                    c.register({
+                        resourceApiVersion: expr.literal("kafka.strimzi.io/v1"),
+                        resourceKind: expr.literal("Kafka"),
+                        resourceName: b.inputs.clusterName,
+                        configChecksum: b.inputs.configChecksum,
+                    }),
+                    {when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)}
+                )
+                .addStep("patchKafkaClusterReady", ResourceManagement, "patchKafkaClusterReady", c =>
+                    c.register({
+                        resourceName: b.inputs.clusterName,
+                        phase: expr.literal("Ready"),
+                        configChecksum: b.inputs.configChecksum,
+                    }),
+                    {when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)}
+                );
+        })
     )
 
 
@@ -218,7 +216,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
-        .addSteps(b => b
+        .addSteps(b => {
+            return b
             .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
                 c.register({
                     resourceKind: expr.literal("DataSnapshot"),
@@ -234,10 +233,7 @@ export const FullMigration = WorkflowBuilder.create({
                     }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "dependsOnProxySetups")),
-                    when: c => ({templateExp: expr.not(expr.and(
-                        expr.equals(c.checkPhase.outputs.phase, "Completed"),
-                        expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                    ))}),
+                    when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum),
                 }
             )
             .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot", c =>
@@ -266,12 +262,9 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.deserializeRecord(b.inputs.snapshotItemConfig), "semaphoreKey"),
                     configChecksum: b.inputs.configChecksum,
                 }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Completed"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
+                {when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)}
             )
-        )
+        })
     )
 
 
@@ -380,12 +373,22 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
-        .addSteps(b => b
+        .addSteps(b => {
+            return b
             .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
                 c.register({
                     resourceKind: expr.literal("SnapshotMigration"),
                     resourceName: b.inputs.resourceName,
                 })
+            )
+            .addStep("reconcileSnapshotMigration", DocumentBulkLoad, "applySnapshotMigrationWithRetry", c =>
+                c.register({
+                    snapshotMigrationConfig: b.inputs.snapshotMigrationConfig,
+                    resourceName: b.inputs.resourceName,
+                    retryGateName: expr.concat(b.inputs.resourceName, expr.literal(".vapretry")),
+                    retryGroupName_view: expr.concat(expr.literal("SnapshotMigration: "), b.inputs.resourceName),
+                }),
+                {when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)}
             )
             .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c => {
                 const config = expr.deserializeRecord(b.inputs.snapshotMigrationConfig);
@@ -401,10 +404,7 @@ export const FullMigration = WorkflowBuilder.create({
                 });
             }, {
                     when: c => ({templateExp: expr.and(
-                        expr.not(expr.and(
-                            expr.equals(c.checkPhase.outputs.phase, "Completed"),
-                            expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                        )),
+                        checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum),
                         expr.hasKey(
                             expr.get(
                                 expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
@@ -426,10 +426,7 @@ export const FullMigration = WorkflowBuilder.create({
                     });
                 }, {
                     when: c => ({templateExp: expr.and(
-                        expr.not(expr.and(
-                            expr.equals(c.checkPhase.outputs.phase, "Completed"),
-                            expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                        )),
+                        checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum),
                         expr.hasKey(
                             expr.get(
                                 expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
@@ -470,10 +467,7 @@ export const FullMigration = WorkflowBuilder.create({
                 }, {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "migrations")),
-                    when: c => ({templateExp: expr.not(expr.and(
-                        expr.equals(c.checkPhase.outputs.phase, "Completed"),
-                        expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                    ))}),
+                    when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum),
                 }
             )
             .addStep("patchSnapshotMigrationCompleted", ResourceManagement, "patchSnapshotMigrationCompleted",
@@ -486,12 +480,9 @@ export const FullMigration = WorkflowBuilder.create({
                         ["checksumForReplayer"], ""
                     ),
                 }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Completed"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
+                {when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)}
             )
-        )
+        })
     )
 
 
@@ -507,13 +498,15 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("name", typeToken<string>())
         .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("dependsOn", typeToken<string[]>())
         .addOptionalInput("groupName_view", c => "Traffic Replay")
         .addOptionalInput("sortOrder_view", c => 999)
         .addRequiredInput("dependsOnSnapshotMigrations", typeToken<z.infer<typeof ENRICHED_SNAPSHOT_MIGRATION_FILTER>[]>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "TrafficReplayer"]))
 
-        .addSteps(b => b
+        .addSteps(b => {
+            return b
             .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
                 c.register({
                     resourceKind: expr.literal("TrafficReplay"),
@@ -540,10 +533,7 @@ export const FullMigration = WorkflowBuilder.create({
                 }, {
                     loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.dependsOnSnapshotMigrations)),
                     when: c => ({templateExp: expr.and(
-                        expr.not(expr.and(
-                            expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                            expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                        )),
+                        checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum),
                         expr.not(expr.isEmpty(expr.deserializeRecord(b.inputs.dependsOnSnapshotMigrations)))
                     )}),
                 }
@@ -555,10 +545,7 @@ export const FullMigration = WorkflowBuilder.create({
                     configChecksum: b.inputs.fromProxyConfigChecksum,
                     checksumField: expr.literal("checksumForReplayer"),
                 }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
+                {when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)}
             )
             .addStep("waitForKafkaCluster", ResourceManagement, "waitForKafkaCluster", c =>
                 c.register({
@@ -572,10 +559,7 @@ export const FullMigration = WorkflowBuilder.create({
                 })
             , {
                 when: c => ({templateExp: expr.and(
-                    expr.not(expr.and(
-                        expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                        expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                    )),
+                    checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum),
                     expr.dig(
                         expr.deserializeRecord(b.inputs.kafkaConfig),
                         ["managedByWorkflow"],
@@ -590,10 +574,7 @@ export const FullMigration = WorkflowBuilder.create({
                 })
             , {
                 when: c => ({templateExp: expr.and(
-                    expr.not(expr.and(
-                        expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                        expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                    )),
+                    checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum),
                     expr.dig(
                         expr.deserializeRecord(b.inputs.kafkaConfig),
                         ["managedByWorkflow"],
@@ -605,14 +586,12 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("reconcileTrafficReplay", Replayer, "applyTrafficReplayWithRetry", c =>
                 c.register({
                     name: b.inputs.name,
+                    dependsOn: b.inputs.dependsOn,
                     replayerOptions: b.inputs.replayerOptions,
                     retryGateName: expr.concat(b.inputs.name, expr.literal(".trafficreplay.vapretry")),
                     retryGroupName_view: expr.concat(expr.literal("TrafficReplay: "), b.inputs.name),
                 }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
+                {when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)}
             )
 
             .addStep("deployReplayer", Replayer, "setupReplayer", c =>
@@ -626,10 +605,7 @@ export const FullMigration = WorkflowBuilder.create({
                     name: b.inputs.name,
                     ownerUid: b.inputs.resourceUid,
                 }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
+                {when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)}
             )
             .addStep("patchTrafficReplayReady", ResourceManagement, "patchTrafficReplayReady",
                 c => c.register({
@@ -637,12 +613,9 @@ export const FullMigration = WorkflowBuilder.create({
                     phase: expr.literal("Ready"),
                     configChecksum: b.inputs.configChecksum,
                 }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
+                {when: c => checksumNotDone(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)}
             )
-        )
+        })
     )
 
 

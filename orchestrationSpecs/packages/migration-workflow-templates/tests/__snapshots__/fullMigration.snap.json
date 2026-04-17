@@ -998,6 +998,36 @@
           [
             {
               "templateRef": {
+                "template": "applysnapshotmigrationwithretry",
+                "name": "document-bulk-load"
+              },
+              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Completed' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "snapshotMigrationConfig",
+                    "value": "{{inputs.parameters.snapshotMigrationConfig}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.resourceName+'.vapretry'}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='SnapshotMigration: '+inputs.parameters.resourceName}}"
+                  }
+                ]
+              },
+              "name": "reconcileSnapshotMigration"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "waitfordatasnapshot",
                 "name": "resource-management"
               },

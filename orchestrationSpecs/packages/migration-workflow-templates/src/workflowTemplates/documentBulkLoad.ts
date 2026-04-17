@@ -7,6 +7,7 @@ import {
     ResourceRequirementsType,
     ARGO_RFS_OPTIONS,
     ARGO_RFS_WORKFLOW_OPTION_KEYS,
+    SNAPSHOT_MIGRATION_CONFIG,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 import {CONTAINER_NAMES} from "../containerNames";
@@ -36,6 +37,7 @@ import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCredsEnvVars, getCoordinatorHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
+import {ResourceManagement} from "./resourceManagement";
 
 function shouldCreateRfsWorkCoordinationCluster(
     documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>
@@ -266,12 +268,104 @@ END {
     return expr.fillTemplate(template, {"SESSION_NAME": sessionName});
 }
 
+function makeSnapshotMigrationManifest(
+    snapshotMigrationConfig: BaseExpression<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>,
+) {
+    const config = expr.deserializeRecord(snapshotMigrationConfig) as any;
+    const targetConfig = expr.get(config, "targetConfig") as any;
+    const snapshotNameResolution = expr.get(config, "snapshotNameResolution") as any;
+    return {
+        apiVersion: "migrations.opensearch.org/v1alpha1",
+        kind: "SnapshotMigration",
+        metadata: {
+            name: makeStringTypeProxy(expr.concat(
+                expr.get(config, "sourceLabel") as any,
+                expr.literal("-"),
+                expr.get(targetConfig, "label") as any,
+                expr.literal("-"),
+                expr.get(config, "label") as any,
+            )),
+            labels: {
+                "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
+            }
+        },
+        spec: {
+            dependsOn: makeDirectTypeProxy(expr.ternary(
+                expr.hasKey(snapshotNameResolution, "dataSnapshotResourceName"),
+                expr.toArray(expr.getLoose(snapshotNameResolution, "dataSnapshotResourceName")),
+                expr.literal([])
+            ) as any),
+            sourceVersion: makeStringTypeProxy(expr.get(config, "sourceVersion") as any),
+            sourceLabel: makeStringTypeProxy(expr.get(config, "sourceLabel") as any),
+            targetLabel: makeStringTypeProxy(expr.get(targetConfig, "label") as any),
+            snapshotLabel: makeStringTypeProxy(expr.dig(config, ["snapshotConfig", "label"], expr.literal(""))),
+        }
+    };
+}
+
 export const DocumentBulkLoad = WorkflowBuilder.create({
     k8sResourceName: "document-bulk-load",
     serviceAccountName: "argo-workflow-executor"
 })
 
     .addParams(CommonWorkflowParameters)
+
+    .addTemplate("applySnapshotMigration", t => t
+        .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: false,
+                manifest: makeSnapshotMigrationManifest(b.inputs.snapshotMigrationConfig)
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+    )
+
+    .addTemplate("applySnapshotMigrationWithRetry", t => t
+        .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("retryGateName", typeToken<string>())
+        .addOptionalInput("retryGroupName_view", c => "Apply")
+
+        .addSteps(b => b
+            .addStep("tryApply", INTERNAL, "applySnapshotMigration", c =>
+                c.register({
+                    snapshotMigrationConfig: b.inputs.snapshotMigrationConfig,
+                }),
+                {continueOn: {failed: true}}
+            )
+            .addStep("waitForFix", ResourceManagement, "waitForApproval", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
+            )
+            .addStep("patchApproval", ResourceManagement, "patchApprovalAnnotation", c =>
+                c.register({
+                    resourceApiVersion: expr.literal("migrations.opensearch.org/v1alpha1"),
+                    resourceKind: expr.literal("SnapshotMigration"),
+                    resourceName: b.inputs.resourceName,
+                }),
+                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
+            )
+            .addStep("resetGate", ResourceManagement, "patchApprovalGatePhase", c =>
+                c.register({
+                    resourceName: b.inputs.retryGateName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
+            )
+            .addStepToSelf("retryLoop", c =>
+                c.register({
+                    snapshotMigrationConfig: b.inputs.snapshotMigrationConfig,
+                    resourceName: b.inputs.resourceName,
+                    retryGateName: b.inputs.retryGateName,
+                    retryGroupName_view: b.inputs.retryGroupName_view,
+                }),
+                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
+            )
+        )
+    )
 
 
     .addTemplate("stopHistoricalBackfill", t => t

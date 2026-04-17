@@ -14,7 +14,7 @@
 # ─────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────
-# KafkaCluster Policy - version, nodePool, and topic changes
+# KafkaCluster Policy - cluster infrastructure fields
 # ─────────────────────────────────────────────────────────────
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -233,7 +233,7 @@ spec:
          'workflows.argoproj.io/run-uid' in object.metadata.labels &&
          object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
            object.metadata.labels['workflows.argoproj.io/run-uid'])
-      message: "Gated changes detected on CaptureProxy. Approve via the Argo Workflow UI to proceed."
+      message: "Gated changes detected on CaptureProxy. Approve the corresponding ApprovalGate to proceed."
 
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -304,7 +304,7 @@ spec:
          'workflows.argoproj.io/run-uid' in object.metadata.labels &&
          object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
            object.metadata.labels['workflows.argoproj.io/run-uid'])
-      message: "Gated changes detected on TrafficReplay. Approve via the Argo Workflow UI to proceed."
+      message: "Gated changes detected on TrafficReplay. Approve the corresponding ApprovalGate to proceed."
 
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -418,7 +418,7 @@ spec:
          'workflows.argoproj.io/run-uid' in object.metadata.labels &&
          object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
            object.metadata.labels['workflows.argoproj.io/run-uid'])
-      message: "Gated changes detected on SnapshotMigration backfill config. Approve via the Argo Workflow UI to proceed."
+      message: "Gated changes detected on SnapshotMigration backfill config. Approve the corresponding ApprovalGate to proceed."
 
 ---
 apiVersion: admissionregistration.k8s.io/v1
