@@ -87,11 +87,14 @@ class SolrOperationsLibrary(DefaultOperationsLibrary):
         if self._is_solr_cloud(cluster):
             # SolrCloud: create a collection with specified topology.
             # Uses the _default configset that ships with Solr.
+            # maxShardsPerNode must be >= num_shards/num_nodes in Solr 8.x, otherwise
+            # creation fails on single-node clusters when num_shards > 1.
             url = (
                 f"{cluster.endpoint}/solr/admin/collections?action=CREATE"
                 f"&name={index_name}"
                 f"&numShards={num_shards}"
                 f"&replicationFactor={replication_factor}"
+                f"&maxShardsPerNode={max(num_shards, replication_factor)}"
                 f"&wt=json"
             )
             # Retry loop — collection creation is occasionally flaky while ZK settles.
