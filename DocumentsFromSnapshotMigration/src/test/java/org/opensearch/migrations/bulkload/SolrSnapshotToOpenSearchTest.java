@@ -336,7 +336,7 @@ public class SolrSnapshotToOpenSearchTest {
             var containerBackupDir = backupLocation + "/multi_shard_backup/" + collection;
             copyDirectoryFromContainer(solr, containerBackupDir, backupRoot.resolve(collection));
 
-            // Fetch schema from the backup's zk_backup_0
+            // Fetch schema from the backup's latest zk_backup_N directory
             var schema = SolrSchemaXmlParser.findAndParse(backupRoot.resolve(collection));
 
             // Set up coordinator-based migration

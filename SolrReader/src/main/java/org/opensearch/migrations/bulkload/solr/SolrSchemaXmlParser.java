@@ -98,10 +98,16 @@ public class SolrSchemaXmlParser {
 
     /**
      * Find and parse the managed-schema.xml from a Solr backup collection directory.
-     * Looks in zk_backup_0/configs/<configName>/managed-schema.xml
+     * Looks in the latest zk_backup_N/configs/&lt;configName&gt;/managed-schema.xml,
+     * where N is the highest revision from successive backups to the same location.
      */
     public static JsonNode findAndParse(Path collectionDir) {
-        var zkBackup = collectionDir.resolve("zk_backup_0").resolve("configs");
+        var latestZkBackup = SolrBackupLayout.findLatestZkBackup(collectionDir);
+        if (latestZkBackup == null) {
+            log.warn("No ZK config backup found under {}, using empty schema", collectionDir);
+            return MAPPER.createObjectNode();
+        }
+        var zkBackup = latestZkBackup.resolve("configs");
         if (!Files.isDirectory(zkBackup)) {
             log.warn("No ZK config backup found at {}, using empty schema", zkBackup);
             return MAPPER.createObjectNode();

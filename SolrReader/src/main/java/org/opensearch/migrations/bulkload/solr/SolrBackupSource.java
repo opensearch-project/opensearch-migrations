@@ -120,12 +120,13 @@ public class SolrBackupSource implements DocumentSource {
         if (!Files.isDirectory(metadataDir)) {
             return null;
         }
-        try (var mdFiles = Files.list(metadataDir)) {
-            var files = mdFiles.filter(p -> p.getFileName().toString().endsWith(".json")).toList();
-            if (files.isEmpty()) return null;
+        try {
+            // Use SolrBackupLayout to find only the latest metadata file per shard
+            var latestFiles = SolrBackupLayout.findLatestShardMetadataFiles(metadataDir);
+            if (latestFiles.isEmpty()) return null;
 
             var result = new LinkedHashMap<String, Map<String, String>>();
-            for (var mdFile : files) {
+            for (var mdFile : latestFiles) {
                 // md_shard1_0.json → shard1
                 var mdName = mdFile.getFileName().toString();
                 var shardName = mdName.replaceFirst("^md_", "").replaceFirst("_\\d+\\.json$", "");

@@ -33,6 +33,7 @@ import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
 import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
 import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
+import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
 import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
 import org.opensearch.migrations.bulkload.solr.SolrShardPartition;
 import org.opensearch.migrations.bulkload.solr.SolrSnapshotReader;
@@ -963,7 +964,14 @@ public class RfsMigrateDocuments {
                         collections.retainAll(arguments.indexAllowlist);
                     }
                     for (var collection : collections) {
-                        s3Repo.downloadPrefix(collection + "/zk_backup_0");
+                        // Find latest zk_backup_N in S3 by listing subdirectories under collection
+                        var subDirs = s3Repo.listSubDirectories(collection);
+                        var latestZkBackup = SolrBackupLayout.findLatestZkBackupName(subDirs);
+                        if (latestZkBackup != null) {
+                            s3Repo.downloadPrefix(collection + "/" + latestZkBackup);
+                        } else {
+                            log.warn("No zk_backup directories found for collection '{}' in S3", collection);
+                        }
                         schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
                     }
                 } else {

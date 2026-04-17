@@ -15,6 +15,7 @@ import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
 import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
 import org.opensearch.migrations.bulkload.solr.SolrSnapshotReader;
 import org.opensearch.migrations.cluster.ClusterReader;
@@ -105,7 +106,14 @@ public class ClusterReaderExtractor {
             backupDir = s3Repo.getRepoRootDir();
             collectionNames = s3Repo.listTopLevelDirectories();
             for (var collection : collectionNames) {
-                s3Repo.downloadPrefix(collection + "/zk_backup_0");
+                // Find latest zk_backup_N in S3 by listing subdirectories under collection
+                var subDirs = s3Repo.listSubDirectories(collection);
+                var latestZkBackup = SolrBackupLayout.findLatestZkBackupName(subDirs);
+                if (latestZkBackup != null) {
+                    s3Repo.downloadPrefix(collection + "/" + latestZkBackup);
+                } else {
+                    log.warn("No zk_backup directories found for collection '{}' in S3", collection);
+                }
             }
         } else {
             throw new ParameterException("Solr snapshot requires --file-system-repo-path or S3 args");

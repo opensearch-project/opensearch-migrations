@@ -71,7 +71,7 @@ class SolrMetadataMigrationTest {
 
             // Build backup directory structure expected by ClusterReaderExtractor:
             //   <backupRoot>/<collection>/backup_0.properties  (marker for discoverCollections)
-            //   <backupRoot>/<collection>/zk_backup_0/configs/<configName>/managed-schema.xml
+            //   <backupRoot>/<collection>/zk_backup_0/configs/<configName>/managed-schema.xml  (latest zk_backup_N)
             var backupRoot = tempDir.toPath().resolve("solr_backup");
             var collectionDir = backupRoot.resolve(COLLECTION);
             Files.createDirectories(collectionDir);

@@ -579,7 +579,7 @@ public class SolrToOpenSearchEndToEndTest {
             var containerBackupDir = backupLocation + "/cloud_backup/" + collection;
             copyDirectoryFromContainer(solr, containerBackupDir, localBackupRoot.resolve(collection));
 
-            // Parse schema from the backup's zk_backup_0 directory
+            // Parse schema from the backup's latest zk_backup_N directory
             var schema = SolrSchemaXmlParser.findAndParse(localBackupRoot.resolve(collection));
 
             // Verify shard discovery — should find 2 shards
@@ -603,7 +603,7 @@ public class SolrToOpenSearchEndToEndTest {
     }
 
     /**
-     * E2E: SolrCloud metadata migration — verifies schema from backup's zk_backup_0
+     * E2E: SolrCloud metadata migration — verifies schema from backup's latest zk_backup_N
      * is correctly converted to OpenSearch mappings.
      */
     @ParameterizedTest(name = "solrcloud metadata: {0} → {1}")
@@ -656,7 +656,7 @@ public class SolrToOpenSearchEndToEndTest {
                 backupLocation + "/meta_backup/" + collection,
                 localBackupRoot.resolve(collection));
 
-            // Parse schema from zk_backup_0 in the backup
+            // Parse schema from the latest zk_backup_N in the backup
             var schema = SolrSchemaXmlParser.findAndParse(localBackupRoot.resolve(collection));
             var schemaNode = schema.path("schema");
 
