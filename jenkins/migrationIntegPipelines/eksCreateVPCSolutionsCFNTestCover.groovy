@@ -23,6 +23,5 @@ eksSolutionsCFNTest(defaultGitBranch: gitBranch,
     vpcMode: 'create',
     defaultStage: 'ekscvpc',
     defaultGitUrl: 'https://github.com/opensearch-project/opensearch-migrations.git',
-    defaultGitBranch: 'main',
     jobName: jobNameOverride ?: null
 )
