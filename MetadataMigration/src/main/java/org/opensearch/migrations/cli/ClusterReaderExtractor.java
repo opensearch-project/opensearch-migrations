@@ -92,15 +92,9 @@ public class ClusterReaderExtractor {
             // Solr's BACKUP API writes to <location>/<snapshotName>/ where <location> is
             // the path portion of s3RepoUri (or / when no subpath is configured).
             var repoUri = new S3Uri(arguments.s3RepoUri);
-            String backupS3Uri;
-            if (arguments.snapshotName != null) {
-                var prefix = repoUri.key == null || repoUri.key.isEmpty()
-                    ? ""
-                    : (repoUri.key.endsWith("/") ? repoUri.key : repoUri.key + "/");
-                backupS3Uri = "s3://" + repoUri.bucketName + "/" + prefix + arguments.snapshotName;
-            } else {
-                backupS3Uri = arguments.s3RepoUri;
-            }
+            var backupS3Uri = arguments.snapshotName != null
+                ? buildBackupS3Uri(repoUri, arguments.snapshotName)
+                : arguments.s3RepoUri;
             var s3Repo = S3Repo.createRaw(
                 Path.of(arguments.s3LocalDirPath),
                 new S3Uri(backupS3Uri),
@@ -137,5 +131,20 @@ public class ClusterReaderExtractor {
 
     ClusterReader getSnapshotReader(Version sourceVersion, SourceRepo repo) {
         return SnapshotReaderRegistry.getSnapshotReader(sourceVersion, repo, arguments.versionStrictness.allowLooseVersionMatches);
+    }
+
+    /**
+     * Build the S3 URI where Solr wrote the backup: s3://bucket/[subpath/]snapshotName.
+     * Mirrors the path the CreateSnapshot step used when invoking Solr's BACKUP API.
+     */
+    private static String buildBackupS3Uri(S3Uri repoUri, String snapshotName) {
+        var prefix = (repoUri.key == null || repoUri.key.isEmpty())
+            ? ""
+            : appendSlashIfMissing(repoUri.key);
+        return "s3://" + repoUri.bucketName + "/" + prefix + snapshotName;
+    }
+
+    private static String appendSlashIfMissing(String key) {
+        return key.endsWith("/") ? key : key + "/";
     }
 }

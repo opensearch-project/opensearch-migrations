@@ -91,6 +91,20 @@ public class RfsMigrateDocuments {
     private static final double DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.025;
     private static final double INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.1;
 
+    /**
+     * Normalize an S3 key into a prefix: empty → "", otherwise ensure trailing "/".
+     * Used to construct backup S3 URIs from an s3RepoUri that may or may not include a subpath.
+     */
+    static String toKeyPrefix(String key) {
+        if (key == null || key.isEmpty()) {
+            return "";
+        }
+        if (key.endsWith("/")) {
+            return key;
+        }
+        return key + "/";
+    }
+
     public static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = "[" +
             "  {" +
             "    \"JsonTransformerForDocumentTypeRemovalProvider\":\"\"" +
@@ -924,9 +938,7 @@ public class RfsMigrateDocuments {
                     // the path portion of s3RepoUri (or / when no subpath is configured).
                     // Mirror the path-extraction logic so reader & writer land on the same URI.
                     var repoUri = new S3Uri(arguments.s3RepoUri);
-                    var prefix = repoUri.key == null || repoUri.key.isEmpty()
-                        ? ""
-                        : (repoUri.key.endsWith("/") ? repoUri.key : repoUri.key + "/");
+                    var prefix = toKeyPrefix(repoUri.key);
                     var backupS3Uri = "s3://" + repoUri.bucketName + "/" + prefix + arguments.snapshotName;
                     log.atInfo().setMessage("Downloading Solr backup metadata from S3: {}").addArgument(backupS3Uri).log();
                     s3Repo = S3Repo.createRaw(

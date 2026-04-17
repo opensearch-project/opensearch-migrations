@@ -205,32 +205,39 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         var dirKey = repoUri.key.endsWith("/") ? repoUri.key : repoUri.key + "/";
         log.info("Ensuring S3 directory marker exists: s3://{}/{}", repoUri.bucketName, dirKey);
 
-        var s3ClientBuilder = S3Client.builder().region(Region.of(region));
-        if (endpoint != null && !endpoint.isEmpty()) {
-            var endpointUri = endpoint.contains("://") ? endpoint : "http://" + endpoint;
-            s3ClientBuilder.endpointOverride(URI.create(endpointUri));
-            s3ClientBuilder.forcePathStyle(true);
-            log.info("Using custom S3 endpoint: {} (path-style)", endpointUri);
-        }
-        try (var s3Client = s3ClientBuilder.build()) {
-            if (s3DirectoryMarkerExists(s3Client, repoUri.bucketName, dirKey)) {
-                log.info("S3 directory marker already exists");
-                return;
-            }
-
-            s3Client.putObject(
-                PutObjectRequest.builder()
-                    .bucket(repoUri.bucketName)
-                    .key(dirKey)
-                    .contentType("application/x-directory")
-                    .build(),
-                RequestBody.empty());
-            log.info("Created S3 directory marker: s3://{}/{}", repoUri.bucketName, dirKey);
+        try (var s3Client = buildS3Client(region, endpoint)) {
+            createDirectoryMarkerIfMissing(s3Client, repoUri.bucketName, dirKey);
         } catch (Exception e) {
             log.warn("Failed to ensure S3 directory marker at s3://{}/{}: {} — continuing; "
                 + "backup may still succeed if Solr's S3BackupRepository creates it implicitly.",
                 repoUri.bucketName, dirKey, e.getMessage());
         }
+    }
+
+    private static S3Client buildS3Client(String region, String endpoint) {
+        var builder = S3Client.builder().region(Region.of(region));
+        if (endpoint != null && !endpoint.isEmpty()) {
+            var endpointUri = endpoint.contains("://") ? endpoint : "http://" + endpoint;
+            builder.endpointOverride(URI.create(endpointUri));
+            builder.forcePathStyle(true);
+            log.info("Using custom S3 endpoint: {} (path-style)", endpointUri);
+        }
+        return builder.build();
+    }
+
+    private void createDirectoryMarkerIfMissing(S3Client s3Client, String bucket, String dirKey) {
+        if (s3DirectoryMarkerExists(s3Client, bucket, dirKey)) {
+            log.info("S3 directory marker already exists");
+            return;
+        }
+        s3Client.putObject(
+            PutObjectRequest.builder()
+                .bucket(bucket)
+                .key(dirKey)
+                .contentType("application/x-directory")
+                .build(),
+            RequestBody.empty());
+        log.info("Created S3 directory marker: s3://{}/{}", bucket, dirKey);
     }
 
     private boolean s3DirectoryMarkerExists(S3Client s3Client, String bucket, String key) {
@@ -243,8 +250,6 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         } catch (NoSuchKeyException e) {
             return false;
         } catch (S3Exception e) {
-            // Treat 404 (not found) the same as NoSuchKeyException — localstack sometimes returns
-            // this form. Any other status code is unexpected and should bubble up to the caller.
             if (e.statusCode() == 404) {
                 return false;
             }
