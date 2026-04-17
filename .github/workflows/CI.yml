@@ -323,6 +323,7 @@ jobs:
           - ./deployment/cdk/opensearch-service-migration
           - ./deployment/migration-assistant-solution
           - ./TrafficCapture/SolrTransformations/transforms
+          - ./orchestrationSpecs
     defaults:
       run:
         working-directory: ${{ matrix.npm-project }}
@@ -332,30 +333,6 @@ jobs:
       - name: Install NPM dependencies
         run: npm ci
       - name: Run CDK Jest Tests (using mocked images)
-        run: npm run test
-      - name: Upload coverage to Codecov
-        if: always()
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
-        with:
-          fail_ci_if_error: true
-          flags: node
-          skip_validation: true
-          token: ${{ secrets.CODECOV_TOKEN }}
-          verbose: true
-
-  orchestration-specs-tests:
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        working-directory: ./orchestrationSpecs
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-env
-      - name: Install NPM dependencies
-        run: npm ci
-      - name: Type check
-        run: npm run type-check
-      - name: Build and run tests
         run: npm run test
       - name: Upload coverage to Codecov
         if: always()
@@ -505,7 +482,6 @@ jobs:
       - gradle-tests
       - link-checker
       - node-tests
-      - orchestration-specs-tests
       - python-e2e-tests
       - python-lint
       - gradle-extended-check

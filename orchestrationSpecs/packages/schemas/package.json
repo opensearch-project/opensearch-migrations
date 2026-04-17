@@ -18,7 +18,7 @@
     "schema": "tsx src/showUserSchema.ts",
     "argo-schema": "tsx src/showArgoSchema.ts",
     "make-sample": "tsx src/makeSample.ts",
-    "test": "jest"
+    "test": "jest --coverage"
   },
   "dependencies": {
     "ajv": "^8.17.1",
