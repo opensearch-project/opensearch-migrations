@@ -89,11 +89,18 @@ public class ClusterReaderExtractor {
                 throw new ParameterException("Failed to list backup directory: " + backupDir + ": " + e.getMessage());
             }
         } else if (arguments.s3LocalDirPath != null) {
-            // Solr's BACKUP API writes to s3://<bucket>/<backupName>/ (location=/ at repo root).
+            // Solr's BACKUP API writes to <location>/<snapshotName>/ where <location> is
+            // the path portion of s3RepoUri (or / when no subpath is configured).
             var repoUri = new S3Uri(arguments.s3RepoUri);
-            String backupS3Uri = arguments.snapshotName != null
-                ? "s3://" + repoUri.bucketName + "/" + arguments.snapshotName
-                : arguments.s3RepoUri;
+            String backupS3Uri;
+            if (arguments.snapshotName != null) {
+                var prefix = repoUri.key == null || repoUri.key.isEmpty()
+                    ? ""
+                    : (repoUri.key.endsWith("/") ? repoUri.key : repoUri.key + "/");
+                backupS3Uri = "s3://" + repoUri.bucketName + "/" + prefix + arguments.snapshotName;
+            } else {
+                backupS3Uri = arguments.s3RepoUri;
+            }
             var s3Repo = S3Repo.createRaw(
                 Path.of(arguments.s3LocalDirPath),
                 new S3Uri(backupS3Uri),

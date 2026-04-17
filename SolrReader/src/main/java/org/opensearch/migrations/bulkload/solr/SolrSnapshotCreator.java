@@ -65,11 +65,11 @@ public class SolrSnapshotCreator {
                 solrBaseUrl, backupName, collection, asyncId
             ));
             if (backupLocation != null && backupLocation.startsWith("s3://") && repositoryName != null) {
-                // Solr's S3BackupRepository uses the bucket configured in solr.xml; backups are
-                // written to s3://<bucket>/<backupName>/ when location=/ is used. We don't use
-                // the path portion of s3RepoUri here — the RFS reader also reads from the bucket
-                // root to match.
-                urlBuilder.append("&repository=").append(repositoryName).append("&location=/");
+                // For S3 backups, Solr's S3BackupRepository writes under the configured bucket
+                // (in solr.xml) using `location` as the prefix path. Extract the path portion
+                // from s3://<bucket>/<path> — e.g. s3://bucket/foo → /foo (or / if no subpath).
+                urlBuilder.append("&repository=").append(repositoryName)
+                    .append("&location=").append(extractS3Path(backupLocation));
             } else if (backupLocation != null) {
                 urlBuilder.append("&location=").append(backupLocation);
             }
@@ -116,6 +116,28 @@ public class SolrSnapshotCreator {
     public static class SolrBackupFailed extends RuntimeException {
         public SolrBackupFailed(String message) {
             super(message);
+        }
+    }
+
+    /**
+     * Extract the path portion of an S3 URI for use as Solr's `location` parameter.
+     * Returns "/" for bucket-root URIs, or a leading-slash path like "/foo/bar" when a
+     * subpath is present. Solr's BACKUP API requires a leading slash on the location.
+     */
+    static String extractS3Path(String s3Uri) {
+        try {
+            var path = java.net.URI.create(s3Uri).getPath();
+            if (path == null || path.isEmpty() || "/".equals(path)) {
+                return "/";
+            }
+            // Trim trailing slash so Solr doesn't produce double-slashes when appending backup name.
+            while (path.length() > 1 && path.endsWith("/")) {
+                path = path.substring(0, path.length() - 1);
+            }
+            return path.startsWith("/") ? path : "/" + path;
+        } catch (IllegalArgumentException e) {
+            log.warn("Failed to parse S3 URI '{}', falling back to location=/: {}", s3Uri, e.getMessage());
+            return "/";
         }
     }
 
