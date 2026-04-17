@@ -227,7 +227,7 @@ jobs:
           jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
           job_timeout_minutes: "180"
 
-  eks-cdc-full-e2e-generate-test:
+  eks-cdc-full-e2e-test:
     if: |
       contains(github.event.pull_request.labels.*.name, 'run-cdc-tests')
     needs: [get-require-approval, sanitize-input]
@@ -235,7 +235,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 180
     concurrency:
-      group: ${{ github.workflow }}-eks-cdc-full-e2e-generate-test-${{ github.event.pull_request.number || github.run_id }}
+      group: ${{ github.workflow }}-eks-cdc-full-e2e-test-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name != 'push' }}
     steps:
       - uses: actions/checkout@v6
@@ -243,7 +243,7 @@ jobs:
         uses: ./.github/actions/jenkins-trigger
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
-          job_name: ${{ github.event_name == 'push' && 'main-eks-cdc-full-e2e-generate-test' || 'pr-eks-cdc-full-e2e-generate-test' }}
+          job_name: ${{ github.event_name == 'push' && 'main-eks-cdc-full-e2e-test' || 'pr-eks-cdc-full-e2e-test' }}
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
@@ -355,7 +355,7 @@ jobs:
       - eks-aoss-vector-integ-test
       - eks-byos-integ-test
       - eks-cdc-only-integ-test
-      - eks-cdc-full-e2e-generate-test
+      - eks-cdc-full-e2e-test
       - eks-cdc-only-aoss-test
       - eks-cdc-aoss-e2e-test
       - eks-cfn-create-vpc-test
