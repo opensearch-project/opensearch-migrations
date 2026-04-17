@@ -271,19 +271,19 @@ END {
 function makeSnapshotMigrationManifest(
     snapshotMigrationConfig: BaseExpression<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>,
 ) {
-    const config = expr.deserializeRecord(snapshotMigrationConfig) as any;
-    const targetConfig = expr.get(config, "targetConfig") as any;
-    const snapshotNameResolution = expr.get(config, "snapshotNameResolution") as any;
+    const config = expr.deserializeRecord(snapshotMigrationConfig);
+    const targetConfig = expr.get(config, "targetConfig");
+    const snapshotNameResolution = expr.get(config, "snapshotNameResolution");
     return {
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "SnapshotMigration",
         metadata: {
             name: makeStringTypeProxy(expr.concat(
-                expr.get(config, "sourceLabel") as any,
+                expr.get(config, "sourceLabel"),
                 expr.literal("-"),
-                expr.get(targetConfig, "label") as any,
+                expr.get(targetConfig, "label"),
                 expr.literal("-"),
-                expr.get(config, "label") as any,
+                expr.get(config, "label"),
             )),
             labels: {
                 "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
@@ -294,10 +294,11 @@ function makeSnapshotMigrationManifest(
                 expr.hasKey(snapshotNameResolution, "dataSnapshotResourceName"),
                 expr.toArray(expr.getLoose(snapshotNameResolution, "dataSnapshotResourceName")),
                 expr.literal([])
-            ) as any),
-            sourceVersion: makeStringTypeProxy(expr.get(config, "sourceVersion") as any),
-            sourceLabel: makeStringTypeProxy(expr.get(config, "sourceLabel") as any),
-            targetLabel: makeStringTypeProxy(expr.get(targetConfig, "label") as any),
+            )),
+            migrations: makeDirectTypeProxy(expr.get(config, "migrations")),
+            sourceVersion: makeStringTypeProxy(expr.get(config, "sourceVersion")),
+            sourceLabel: makeStringTypeProxy(expr.get(config, "sourceLabel")),
+            targetLabel: makeStringTypeProxy(expr.get(targetConfig, "label")),
             snapshotLabel: makeStringTypeProxy(expr.dig(config, ["snapshotConfig", "label"], expr.literal(""))),
         }
     };

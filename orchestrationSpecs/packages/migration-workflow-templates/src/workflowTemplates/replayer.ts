@@ -46,7 +46,18 @@ function makeTrafficReplayManifest(
     dependsOn: BaseExpression<Serialized<string[]>>,
     replayerOptions: BaseExpression<Serialized<z.infer<typeof ARGO_REPLAYER_OPTIONS>>>,
 ) {
-    const opts = expr.deserializeRecord(replayerOptions) as any;
+    const opts = expr.deserializeRecord(replayerOptions);
+    const workflowSpecFields = expr.makeDict({
+        dependsOn: expr.deserializeRecord(dependsOn),
+        jvmArgs: expr.dig(opts, ["jvmArgs"], expr.literal("")),
+        loggingConfigurationOverrideConfigMap: expr.dig(
+            opts,
+            ["loggingConfigurationOverrideConfigMap"],
+            expr.literal("")
+        ),
+        podReplicas: expr.dig(opts, ["podReplicas"], 1),
+        resources: expr.get(opts, "resources"),
+    });
     return {
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "TrafficReplay",
@@ -56,39 +67,10 @@ function makeTrafficReplayManifest(
                 "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
             }
         },
-        spec: {
-            dependsOn: makeDirectTypeProxy(expr.deserializeRecord(dependsOn)),
-            // Deployment-level fields
-            jvmArgs: makeStringTypeProxy(expr.dig(opts, ["jvmArgs"], expr.literal(""))),
-            loggingConfigurationOverrideConfigMap: makeStringTypeProxy(
-                expr.dig(opts, ["loggingConfigurationOverrideConfigMap"], expr.literal(""))
-            ),
-            podReplicas: makeDirectTypeProxy(expr.dig(opts, ["podReplicas"], 1) as any),
-            resources: makeDirectTypeProxy(expr.get(opts, "resources") as any),
-            // Replayer CLI params
-            kafkaTrafficEnableMSKAuth: makeDirectTypeProxy(expr.dig(opts, ["kafkaTrafficEnableMSKAuth"], false) as any),
-            kafkaTrafficPropertyFile: makeStringTypeProxy(expr.dig(opts, ["kafkaTrafficPropertyFile"], expr.literal(""))),
-            lookaheadTimeSeconds: makeDirectTypeProxy(expr.dig(opts, ["lookaheadTimeSeconds"], 400) as any),
-            maxConcurrentRequests: makeDirectTypeProxy(expr.dig(opts, ["maxConcurrentRequests"], 10000) as any),
-            numClientThreads: makeDirectTypeProxy(expr.dig(opts, ["numClientThreads"], 0) as any),
-            observedPacketConnectionTimeout: makeDirectTypeProxy(expr.dig(opts, ["observedPacketConnectionTimeout"], 360) as any),
-            otelCollectorEndpoint: makeStringTypeProxy(
-                expr.dig(opts, ["otelCollectorEndpoint"], expr.literal("http://otel-collector:4317"))
-            ),
-            quiescentPeriodMs: makeDirectTypeProxy(expr.dig(opts, ["quiescentPeriodMs"], 5000) as any),
-            removeAuthHeader: makeDirectTypeProxy(expr.dig(opts, ["removeAuthHeader"], false) as any),
-            speedupFactor: makeDirectTypeProxy(expr.dig(opts, ["speedupFactor"], 1.1) as any),
-            targetServerResponseTimeoutSeconds: makeDirectTypeProxy(
-                expr.dig(opts, ["targetServerResponseTimeoutSeconds"], 150) as any
-            ),
-            transformerConfig: makeStringTypeProxy(expr.dig(opts, ["transformerConfig"], expr.literal(""))),
-            transformerConfigEncoded: makeStringTypeProxy(expr.dig(opts, ["transformerConfigEncoded"], expr.literal(""))),
-            transformerConfigFile: makeStringTypeProxy(expr.dig(opts, ["transformerConfigFile"], expr.literal(""))),
-            tupleTransformerConfig: makeStringTypeProxy(expr.dig(opts, ["tupleTransformerConfig"], expr.literal(""))),
-            tupleTransformerConfigBase64: makeStringTypeProxy(expr.dig(opts, ["tupleTransformerConfigBase64"], expr.literal(""))),
-            tupleTransformerConfigFile: makeStringTypeProxy(expr.dig(opts, ["tupleTransformerConfigFile"], expr.literal(""))),
-            userAgent: makeStringTypeProxy(expr.dig(opts, ["userAgent"], expr.literal(""))),
-        }
+        spec: makeDirectTypeProxy(expr.mergeDicts(
+            workflowSpecFields,
+            expr.omit(opts, ...ARGO_REPLAYER_WORKFLOW_OPTION_KEYS)
+        )),
     };
 }
 

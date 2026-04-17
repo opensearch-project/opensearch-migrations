@@ -235,42 +235,27 @@ spec:
                   type: array
                   items:
                     type: string
-                documentBackfillConfig:
-                  type: object
-                  properties:
-                    indexAllowlist:
-                      type: array
-                      items:
+                migrations:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      label:
                         type: string
-                    podReplicas:
-                      type: integer
-                      minimum: 0
-                    jvmArgs:
-                      type: string
-                    loggingConfigurationOverrideConfigMap:
-                      type: string
-                    allowLooseVersionMatching:
-                      type: boolean
-                    docTransformerConfigBase64:
-                      type: string
-                    documentsPerBulkRequest:
-                      type: integer
-                    initialLeaseDuration:
-                      type: string
-                    maxConnections:
-                      type: integer
-                    maxShardSizeBytes:
-                      type: integer
-                    otelCollectorEndpoint:
-                      type: string
-                    useTargetClusterForWorkCoordination:
-                      type: boolean
-                    resources:
-                      type: object
-                      x-kubernetes-preserve-unknown-fields: true
-                metadataMigrationConfig:
-                  type: object
-                  x-kubernetes-preserve-unknown-fields: true
+                      metadataMigrationConfig:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      documentBackfillConfig:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                sourceVersion:
+                  type: string
+                sourceLabel:
+                  type: string
+                targetLabel:
+                  type: string
+                snapshotLabel:
+                  type: string
             status:
               type: object
               properties:

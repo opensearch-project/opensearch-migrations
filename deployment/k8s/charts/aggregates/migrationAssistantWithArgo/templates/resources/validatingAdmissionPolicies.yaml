@@ -376,49 +376,28 @@ spec:
       operations: ["UPDATE"]
       resources: ["snapshotmigrations"]
   validations:
-    # Impossible: entire metadataMigrationConfig block
+    # Impossible: migration identity fields
     - expression: |
-        !has(oldObject.spec.metadataMigrationConfig) ||
-        !has(object.spec.metadataMigrationConfig) ||
-        object.spec.metadataMigrationConfig == oldObject.spec.metadataMigrationConfig
-      message: "Impossible: Metadata migration configuration cannot be changed. Delete and recreate to use different parameters."
-    # Impossible: RFS data-defining fields
+        (!has(oldObject.spec.sourceVersion) || !has(object.spec.sourceVersion) ||
+         object.spec.sourceVersion == oldObject.spec.sourceVersion) &&
+        (!has(oldObject.spec.sourceLabel) || !has(object.spec.sourceLabel) ||
+         object.spec.sourceLabel == oldObject.spec.sourceLabel) &&
+        (!has(oldObject.spec.targetLabel) || !has(object.spec.targetLabel) ||
+         object.spec.targetLabel == oldObject.spec.targetLabel) &&
+        (!has(oldObject.spec.snapshotLabel) || !has(object.spec.snapshotLabel) ||
+         object.spec.snapshotLabel == oldObject.spec.snapshotLabel)
+      message: "Impossible: SnapshotMigration identity fields cannot be changed. Delete and recreate."
+    # Gated: per-migration contract changes
     - expression: |
-        (!has(oldObject.spec.documentBackfillConfig) || !has(object.spec.documentBackfillConfig) ||
-         (
-           (!has(object.spec.documentBackfillConfig.indexAllowlist) ||
-            !has(oldObject.spec.documentBackfillConfig.indexAllowlist) ||
-            object.spec.documentBackfillConfig.indexAllowlist == oldObject.spec.documentBackfillConfig.indexAllowlist) &&
-           (!has(object.spec.documentBackfillConfig.allowLooseVersionMatching) ||
-            !has(oldObject.spec.documentBackfillConfig.allowLooseVersionMatching) ||
-            object.spec.documentBackfillConfig.allowLooseVersionMatching == oldObject.spec.documentBackfillConfig.allowLooseVersionMatching) &&
-           (!has(object.spec.documentBackfillConfig.docTransformerConfigBase64) ||
-            !has(oldObject.spec.documentBackfillConfig.docTransformerConfigBase64) ||
-            object.spec.documentBackfillConfig.docTransformerConfigBase64 == oldObject.spec.documentBackfillConfig.docTransformerConfigBase64)
-         ))
-      message: "Impossible: Document backfill data-defining fields cannot be changed. Delete and recreate."
-    # Gated: RFS operational fields
-    - expression: |
-        (!has(oldObject.spec.documentBackfillConfig) || !has(object.spec.documentBackfillConfig) ||
-         (
-           (!has(object.spec.documentBackfillConfig.initialLeaseDuration) ||
-            !has(oldObject.spec.documentBackfillConfig.initialLeaseDuration) ||
-            object.spec.documentBackfillConfig.initialLeaseDuration == oldObject.spec.documentBackfillConfig.initialLeaseDuration) &&
-           (!has(object.spec.documentBackfillConfig.maxConnections) ||
-            !has(oldObject.spec.documentBackfillConfig.maxConnections) ||
-            object.spec.documentBackfillConfig.maxConnections == oldObject.spec.documentBackfillConfig.maxConnections) &&
-           (!has(object.spec.documentBackfillConfig.maxShardSizeBytes) ||
-            !has(oldObject.spec.documentBackfillConfig.maxShardSizeBytes) ||
-            object.spec.documentBackfillConfig.maxShardSizeBytes == oldObject.spec.documentBackfillConfig.maxShardSizeBytes)
-         ))
-        ||
+        !has(oldObject.spec.migrations) || !has(object.spec.migrations) ||
+        object.spec.migrations == oldObject.spec.migrations ||
         (has(object.metadata.annotations) &&
          'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
          has(object.metadata.labels) &&
          'workflows.argoproj.io/run-uid' in object.metadata.labels &&
          object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
            object.metadata.labels['workflows.argoproj.io/run-uid'])
-      message: "Gated changes detected on SnapshotMigration backfill config. Approve the corresponding ApprovalGate to proceed."
+      message: "Gated changes detected on SnapshotMigration migrations config. Approve the corresponding ApprovalGate to proceed."
 
 ---
 apiVersion: admissionregistration.k8s.io/v1

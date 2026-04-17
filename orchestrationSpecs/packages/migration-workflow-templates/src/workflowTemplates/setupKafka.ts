@@ -39,32 +39,35 @@ function getKafkaAuthType(config: BaseExpression<Serialized<KafkaConfig>>) {
 function makeKafkaClusterManifest(
     kafkaClusterConfig: BaseExpression<Serialized<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>>,
 ) {
-    const kc = expr.deserializeRecord(kafkaClusterConfig) as any;
-    const config = expr.get(kc, "config") as any;
+    const kc = expr.deserializeRecord(kafkaClusterConfig);
+    const config = expr.get(kc, "config");
     return {
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "KafkaCluster",
         metadata: {
-            name: makeStringTypeProxy(expr.get(kc, "name") as any),
+            name: makeStringTypeProxy(expr.get(kc, "name")),
             labels: {
                 "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
             }
         },
         spec: {
             dependsOn: [],
-            version: makeStringTypeProxy(expr.get(kc, "version") as any),
+            version: makeStringTypeProxy(expr.get(kc, "version")),
             auth: {
                 type: makeStringTypeProxy(expr.dig(config, ["auth", "type"], "none")),
             },
             nodePool: {
-                replicas: makeDirectTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "replicas"], 1) as any),
-                roles: makeDirectTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "roles"],
-                    expr.literal(["controller", "broker"])) as any),
+                replicas: makeDirectTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "replicas"], 1)),
+                roles: makeDirectTypeProxy(expr.dig(
+                    config,
+                    ["nodePoolSpecOverrides", "roles"],
+                    expr.literal(["controller", "broker"])
+                )),
                 storage: {
                     size: makeStringTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "storage", "size"],
-                        expr.literal("5Gi")) as any),
+                        expr.literal("5Gi"))),
                     type: makeStringTypeProxy(expr.dig(config, ["nodePoolSpecOverrides", "storage", "type"],
-                        expr.literal("persistent-claim")) as any),
+                        expr.literal("persistent-claim"))),
                 },
             },
         }
@@ -124,7 +127,7 @@ function makeManagedKafkaUserManifest(args: {
                 "workflows.argoproj.io/run-uid": makeStringTypeProxy(args.workflowUid)
             }
         },
-        spec: makeDirectTypeProxy(args.userSpec as any) as any
+        spec: makeDirectTypeProxy(expr.deserializeRecord(args.userSpec))
     };
 }
 
@@ -145,7 +148,7 @@ function makeDeployKafkaNodePool(args: {
                 "workflows.argoproj.io/run-uid": makeStringTypeProxy(args.workflowUid)
             }
         },
-        spec: makeDirectTypeProxy(args.nodePoolSpec as any) as any
+        spec: makeDirectTypeProxy(expr.deserializeRecord(args.nodePoolSpec))
     };
 }
 
@@ -212,7 +215,7 @@ function makeDeployKafkaClusterKraftManifest(args: {
             }
         },
         spec: {
-            kafka: makeDirectTypeProxy(args.kafkaSpec as any) as any,
+            kafka: makeDirectTypeProxy(expr.deserializeRecord(args.kafkaSpec)),
             entityOperator: {topicOperator: {}, userOperator: {}}
         }
     };
@@ -245,7 +248,7 @@ function makeKafkaTopicManifest(args: {
         spec: {
             partitions: makeDirectTypeProxy(args.partitions),
             replicas: makeDirectTypeProxy(args.replicas),
-            config: makeDirectTypeProxy(args.topicConfig as any) as any,
+            config: makeDirectTypeProxy(expr.deserializeRecord(args.topicConfig)),
         }
     };
 }

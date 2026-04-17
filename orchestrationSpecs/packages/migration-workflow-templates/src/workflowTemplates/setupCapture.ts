@@ -188,7 +188,19 @@ function makeCaptureProxyManifest(
     topicCrName: BaseExpression<string>,
 ) {
     const config = expr.deserializeRecord(proxyConfig);
-    const proxyOpts = expr.get(config, "proxyConfig") as any;
+    const proxyOpts = expr.get(config, "proxyConfig");
+    const workflowSpecFields = expr.makeDict({
+        dependsOn: expr.toArray(topicCrName),
+        loggingConfigurationOverrideConfigMap: expr.dig(
+            proxyOpts,
+            ["loggingConfigurationOverrideConfigMap"],
+            expr.literal("")
+        ),
+        internetFacing: expr.dig(proxyOpts, ["internetFacing"], false),
+        podReplicas: expr.dig(proxyOpts, ["podReplicas"], 1),
+        resources: expr.get(proxyOpts, "resources"),
+        tls: expr.dig(proxyOpts, ["tls"], expr.makeDict({})),
+    });
     return {
         apiVersion: "migrations.opensearch.org/v1alpha1",
         kind: "CaptureProxy",
@@ -198,47 +210,10 @@ function makeCaptureProxyManifest(
                 "workflows.argoproj.io/run-uid": makeStringTypeProxy(expr.getWorkflowValue("uid"))
             }
         },
-        spec: {
-            dependsOn: [makeStringTypeProxy(topicCrName)],
-            loggingConfigurationOverrideConfigMap: makeStringTypeProxy(
-                expr.dig(proxyOpts, ["loggingConfigurationOverrideConfigMap"], expr.literal(""))
-            ),
-            internetFacing: makeDirectTypeProxy(expr.dig(proxyOpts, ["internetFacing"], false)),
-            podReplicas: makeDirectTypeProxy(expr.dig(proxyOpts, ["podReplicas"], 1)),
-            resources: makeDirectTypeProxy(expr.get(proxyOpts, "resources") as any),
-            otelCollectorEndpoint: makeStringTypeProxy(
-                expr.dig(proxyOpts, ["otelCollectorEndpoint"], expr.literal("http://otel-collector:4317"))
-            ),
-            setHeader: makeDirectTypeProxy(expr.dig(proxyOpts, ["setHeader"], expr.literal([])) as any),
-            destinationConnectionPoolSize: makeDirectTypeProxy(
-                expr.dig(proxyOpts, ["destinationConnectionPoolSize"], 0)
-            ),
-            destinationConnectionPoolTimeout: makeStringTypeProxy(
-                expr.dig(proxyOpts, ["destinationConnectionPoolTimeout"], expr.literal("PT30S"))
-            ),
-            kafkaClientId: makeStringTypeProxy(
-                expr.dig(proxyOpts, ["kafkaClientId"], expr.literal("HttpCaptureProxyProducer"))
-            ),
-            listenPort: makeDirectTypeProxy(expr.get(proxyOpts, "listenPort") as any),
-            maxTrafficBufferSize: makeDirectTypeProxy(expr.dig(proxyOpts, ["maxTrafficBufferSize"], 1048576)),
-            noCapture: makeDirectTypeProxy(expr.dig(proxyOpts, ["noCapture"], false)),
-            numThreads: makeDirectTypeProxy(expr.dig(proxyOpts, ["numThreads"], 1)),
-            sslConfigFile: makeStringTypeProxy(expr.dig(proxyOpts, ["sslConfigFile"], expr.literal(""))),
-            tls: makeDirectTypeProxy(expr.dig(proxyOpts, ["tls"], expr.makeDict({})) as any),
-            enableMSKAuth: makeDirectTypeProxy(expr.dig(proxyOpts, ["enableMSKAuth"], false)),
-            suppressCaptureForHeaderMatch: makeDirectTypeProxy(
-                expr.dig(proxyOpts, ["suppressCaptureForHeaderMatch"], expr.literal([])) as any
-            ),
-            suppressCaptureForMethod: makeStringTypeProxy(
-                expr.dig(proxyOpts, ["suppressCaptureForMethod"], expr.literal(""))
-            ),
-            suppressCaptureForUriPath: makeStringTypeProxy(
-                expr.dig(proxyOpts, ["suppressCaptureForUriPath"], expr.literal(""))
-            ),
-            suppressMethodAndPath: makeStringTypeProxy(
-                expr.dig(proxyOpts, ["suppressMethodAndPath"], expr.literal(""))
-            ),
-        }
+        spec: makeDirectTypeProxy(expr.mergeDicts(
+            workflowSpecFields,
+            expr.omit(proxyOpts, ...ARGO_PROXY_WORKFLOW_OPTION_KEYS)
+        )),
     };
 }
 
