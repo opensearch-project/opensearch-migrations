@@ -28,7 +28,6 @@ public class ItemsTest {
     @Test
     void testEmpty() throws Exception {
         var items = createEmptyItemsBuilder()
-            .succeedOnEmpty(false)
             .build();
 
         // Test String Output
@@ -55,15 +54,14 @@ public class ItemsTest {
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("indexes"), is(true));
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("aliases"), is(true));
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("errors"), is(true));
-        // Empty items should produce an error when succeedOnEmpty is explicitly false
-        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").size(), equalTo(1));
-        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").get(0).asText(), containsString("No migration items found"));
+        // Default succeedOnEmpty=true: empty items should NOT produce an error
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").size(), equalTo(0));
     }
 
     @Test
-    void testEmptyWithSucceedOnEmpty() throws Exception {
+    void testEmptyWithSucceedOnEmptyFalse() throws Exception {
         var items = createEmptyItemsBuilder()
-            .succeedOnEmpty(true)
+            .succeedOnEmpty(false)
             .build();
 
         // Test String Output
@@ -77,9 +75,10 @@ public class ItemsTest {
         assertThat(stringOutput, containsStringCount(Items.NONE_FOUND_MARKER, 4));
         assertThat(stringOutput, hasLineCount(12));
         
-        // JSON output assertions — no errors when succeedOnEmpty is true
+        // JSON output assertions — strict mode (succeedOnEmpty=false) should produce an error
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("errors"), is(true));
-        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").size(), equalTo(0));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").size(), equalTo(1));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").get(0).asText(), containsString("No migration items found"));
     }
 
     @Test

@@ -29,7 +29,7 @@ public class Items implements JsonOutput {
     static final String NONE_FOUND_MARKER = "<NONE FOUND>";
     static final String EMPTY_ITEMS_ERROR = "No migration items found (0 index templates, 0 component templates, "
         + "0 indexes, 0 aliases). This usually indicates a configuration problem such as an incorrect snapshot, "
-        + "wrong allowlist, or missing source data. Use --succeed-on-empty to bypass this check.";
+        + "wrong allowlist, or missing source data.";
     private final boolean dryRun;
     @NonNull
     private final List<CreationResult> indexTemplates;
