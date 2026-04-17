@@ -22,6 +22,7 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 
 /**
  * Backup strategy for Solr sources. Handles both SolrCloud (Collections API)
@@ -241,7 +242,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
             return true;
         } catch (NoSuchKeyException e) {
             return false;
-        } catch (software.amazon.awssdk.services.s3.model.S3Exception e) {
+        } catch (S3Exception e) {
             // Treat 404 (not found) the same as NoSuchKeyException — localstack sometimes returns
             // this form. Any other status code is unexpected and should bubble up to the caller.
             if (e.statusCode() == 404) {
