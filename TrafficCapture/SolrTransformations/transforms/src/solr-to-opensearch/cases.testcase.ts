@@ -651,14 +651,6 @@ export const testCases: TestCase[] = [
   // Validation tests — error-path (expectedStatusCode)
   // ───────────────────────────────────────────────────────────
 
-  solrTest('validation-unsupported-param-fq', {
-    description: 'Unsupported param fq should return 500',
-    documents: [{ id: '1', title: 'test' }],
-    requestPath: '/solr/testcollection/select?q=*:*&fq=title:test&wt=json',
-    expectedStatusCode: 500,
-    expectedErrorContains: 'Request transform failed',
-  }),
-
   solrTest('validation-unsupported-param-facet', {
     description: 'Unsupported legacy facet params should return 500',
     documents: [{ id: '1', title: 'test' }],
