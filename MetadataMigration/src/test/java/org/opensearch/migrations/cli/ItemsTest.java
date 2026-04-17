@@ -28,6 +28,7 @@ public class ItemsTest {
     @Test
     void testEmpty() throws Exception {
         var items = createEmptyItemsBuilder()
+            .succeedOnEmpty(false)
             .build();
 
         // Test String Output
@@ -54,7 +55,7 @@ public class ItemsTest {
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("indexes"), is(true));
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("aliases"), is(true));
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("errors"), is(true));
-        // Empty items should produce an error when succeedOnEmpty is false (default)
+        // Empty items should produce an error when succeedOnEmpty is explicitly false
         assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").size(), equalTo(1));
         assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").get(0).asText(), containsString("No migration items found"));
     }

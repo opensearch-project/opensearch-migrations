@@ -802,10 +802,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": "string",
                             "default": ""
                           },
-                          "succeedOnEmpty": {
-                            "type": "boolean",
-                            "default": false
-                          },
                           "componentTemplateAllowlist": {
                             "type": "array",
                             "items": {
@@ -2210,11 +2206,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "boolean",
                         "default": false,
                         "description": "When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster."
-                      },
-                      "succeedOnEmpty": {
-                        "type": "boolean",
-                        "default": false,
-                        "description": "When true, metadata migration/evaluation will succeed even if no migration items (index templates, component templates, indexes, aliases) are found. By default, finding 0 items is treated as a failure to catch configuration problems early (such as an incorrect snapshot or wrong allowlist)."
                       },
                       "componentTemplateAllowlist": {
                         "type": "array",
