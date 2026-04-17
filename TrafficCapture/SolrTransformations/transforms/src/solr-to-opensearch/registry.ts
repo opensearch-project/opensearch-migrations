@@ -13,6 +13,7 @@ import type { RequestContext, ResponseContext } from './context';
 import * as solrconfigDefaults from './features/solrconfig-defaults';
 import * as selectUri from './features/select-uri';
 import * as queryQ from './features/query-q';
+import * as filterQueryFq from './features/filter-query-fq';
 import * as cursorPagination from './features/cursor-pagination';
 import * as fieldList from './features/field-list';
 import * as sort from './features/sort';
@@ -27,7 +28,7 @@ import { initValidation } from './features/validation';
 import type { ParamRule } from './features/validation';
 
 /** Shape of a feature module that declares supported params for validation. */
-interface FeatureModule {
+export interface FeatureModule {
   params?: string[];
   paramPrefixes?: string[];
   paramRules?: ParamRule[];
@@ -39,7 +40,7 @@ interface FeatureModule {
  * params, so they don't need to be listed here for validation discovery.
  */
 const FEATURE_MODULES: FeatureModule[] = [
-  selectUri, queryQ, cursorPagination, fieldList,
+  selectUri, queryQ, filterQueryFq, cursorPagination, fieldList,
   sort, jsonFacets, highlighting,
 ];
 
@@ -74,6 +75,7 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
       solrconfigDefaults.request, // Apply solrconfig.xml defaults/invariants — must be before all others
       selectUri.request, // URI rewrite
       queryQ.request, // q=... → query DSL
+      filterQueryFq.request, // fq=... → bool.filter (after query-q)
       cursorPagination.request, // cursorMark → search_after (after query-q sets from)
       jsonFacets.request, // json.facet → aggs
       fieldList.request, // fl=... → _source

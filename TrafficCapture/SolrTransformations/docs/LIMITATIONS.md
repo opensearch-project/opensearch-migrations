@@ -8,14 +8,16 @@ the root cause, and provides a workaround where one exists.
 
 ## Limitation Index
 
-| Shortcode | Summary |
-|-----------|---------|
-| [TERMS-OFFSET](#terms-offset) | Terms facet `offset` not natively supported in OpenSearch |
-| [DATE-RANGE-GAP](#date-range-gap) | Multi-unit date range gaps approximated as fixed intervals |
-| [CURSOR-UNIQUEKEY](#cursor-uniquekey) | Cursor pagination assumes `id` as Solr's uniqueKey field |
-| [CURSOR-REPLAY](#cursor-replay) | Traffic replay with cursorMark not supported |
-| [SOLRCONFIG-REPLAYER](#solrconfig-replayer) | Traffic replayer requires manual solrConfig in bindingsObject |
-| [COMMITWITHIN](#commitwithin) | `commitWithin=N` translated to immediate refresh |
+| Shortcode                                       | Summary |
+|-------------------------------------------------|---------|
+| [TERMS-OFFSET](#terms-offset)                   | Terms facet `offset` not natively supported in OpenSearch |
+| [DATE-RANGE-GAP](#date-range-gap)               | Multi-unit date range gaps approximated as fixed intervals |
+| [CURSOR-UNIQUEKEY](#cursor-uniquekey)           | Cursor pagination assumes `id` as Solr's uniqueKey field |
+| [CURSOR-REPLAY](#cursor-replay)                 | Traffic replay with cursorMark not supported |
+| [SOLRCONFIG-REPLAYER](#solrconfig-replayer)     | Traffic replayer requires manual solrConfig in bindingsObject |
+| [COMMITWITHIN](#commitwithin)                   | `commitWithin=N` translated to immediate refresh |
+| [FQ-LOCAL-PARAMS](#filter-queries-local-params) | Filter query local params (`cache`, `cost`) and post filters not supported |
+| [FQ-CACHING](#fq-caching)                       | Filter query caching granularity differs between Solr and OpenSearch |
 
 ---
 
@@ -243,3 +245,126 @@ but is more aggressive than Solr's batched approach.
 * **Behavioral difference** — Solr batches commits for efficiency; OpenSearch
   refreshes per-request. Applications that relied on `commitWithin` for
   batching will see higher refresh overhead.
+
+
+---
+
+## Filter Queries Local Params
+
+**Feature:** Filter query local parameters (`cache`, `cost`) and post filters
+
+**Solr behaviour:**
+Solr's `fq` parameter supports local parameters that control caching and
+evaluation order:
+
+* **`cache`** — Boolean that controls whether filter results are cached
+  (default: `true`). Example: `fq={!geofilt cache=false}...`
+* **`cost`** — Numeric hint for evaluation order of non-cached filters.
+  Lower cost filters run first. Example: `fq={!frange cost=200 l=0}...`
+* **Post filters** — When `cache=false` and `cost>=100`, filters implementing
+  the `PostFilter` interface run as collectors after the main query and other
+  filters have matched. This is efficient for expensive filters.
+
+Example from Solr docs:
+```
+fq={!cache=false}quantity_in_stock:[5 TO *]
+fq={!frange cache=false l=10 u=100}mul(popularity,price)
+fq={!frange cache=false cost=200 l=0}pow(mul(sum(1, query('tag:smartphone')), div(1,avg_rating)), 2.3)
+```
+
+**OpenSearch behaviour:**
+OpenSearch's `bool.filter` clause does not expose caching controls or
+evaluation order hints. All filters are evaluated by the query engine
+with its own internal optimization strategies.
+
+**Cause:**
+OpenSearch manages filter caching internally and does not provide
+user-facing parameters to control it. There is no equivalent to Solr's
+`cost` parameter or post-filter mechanism.
+
+**Current workaround:**
+The transformer ignores `cache` and `cost` local parameters. The filter
+query content is still translated and added to `bool.filter`, but the
+caching and ordering hints are silently dropped.
+
+**Residual impact:**
+
+* **No caching control** — Filters that were intentionally uncached in Solr
+  (e.g., highly variable geospatial queries) will use OpenSearch's default
+  caching behavior.
+* **No evaluation ordering** — Expensive filters that relied on high `cost`
+  values to run last will execute in OpenSearch's default order, potentially
+  impacting query performance.
+* **No post-filter optimization** — Filters designed as post-filters in Solr
+  will run as regular filters in OpenSearch, which may be less efficient for
+  certain query patterns.
+
+---
+
+## FQ-CACHING
+
+**Feature:** Independent caching of multiple filter queries
+
+**Solr behaviour:**
+In Apache Solr, each `fq` parameter is cached independently in the filter
+cache. The document set (bitset) for each filter is stored as a separate
+cache entry. This allows frequently-used filters to be reused across
+different queries.
+
+From the Solr documentation:
+> The document sets from each filter query are cached independently. Thus,
+> use a single fq containing two mandatory clauses if those clauses appear
+> together often, and use two separate fq parameters if they are relatively
+> independent.
+
+Example optimization in Solr:
+```
+# Two separate fq params — each cached independently for reuse
+fq=category:books&fq=inStock:true
+
+# Single fq with combined clauses — cached as one unit
+fq=category:books AND inStock:true
+```
+
+**OpenSearch behaviour:**
+In OpenSearch, filters in the `bool.filter` clause are executed in filter
+context (no scoring) and may be cached automatically by the engine.
+
+From the OpenSearch documentation:
+> To improve performance, OpenSearch caches frequently used filters.
+
+When using a `bool` query with multiple filters in the `filter` clause,
+OpenSearch may cache individual filter clauses, but this is heuristic-driven
+and depends on factors such as query frequency, selectivity, and segment
+lifecycle.
+
+**Cause:**
+Both systems use Lucene-level bitsets for filter execution. However:
+
+- Solr provides explicit, per-`fq` cache entries
+- OpenSearch uses adaptive caching, where filters are cached only when
+  deemed beneficial
+
+As a result, while the query structure maps cleanly (`fq` → `bool.filter`),
+caching behavior is not strictly equivalent.
+
+**Current behaviour:**
+The transformer maps multiple `fq` parameters to multiple entries in
+`bool.filter`, preserving the logical separation of filters.
+
+However, unlike Solr, OpenSearch does not guarantee that each filter will
+be cached independently. Cache reuse depends on runtime behavior and
+internal heuristics.
+
+**Residual impact:**
+
+* **Less predictable cache reuse** — Frequently-used filters in Solr may not
+  consistently benefit from caching in OpenSearch.
+* **Heuristic-based caching** — Filter caching depends on usage patterns,
+  cardinality, and segment changes rather than explicit configuration.
+* **No explicit cache control** — Solr's `{!cache=false}` local param is not
+  supported; caching decisions are automatic.
+* **Different warm-up characteristics** — Solr supports cache warming;
+  OpenSearch caches warm up through live traffic.
+* **Potential performance variance** — Workloads relying heavily on repeated
+  `fq` reuse may observe different latency characteristics after migration.
