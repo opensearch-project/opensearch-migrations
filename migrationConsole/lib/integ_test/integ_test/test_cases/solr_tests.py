@@ -151,13 +151,19 @@ class TestSolr0001SingleDocumentBackfill(MATestBase):
 
     def _assert_target_count(self, collection: str, expected: int, regression_hint: str = ""):
         # Retry a few times — bulk migration may not be fully flushed to the target yet.
-        # Uses get_all_index_details which is supported by the OpenSearch ops library.
+        # Uses a direct _count API call per collection rather than get_all_index_details
+        # (which crashes when called without index_prefix_ignore_list).
         import time
+        from ..common_utils import execute_api_call
         actual = 0
         for attempt in range(1, 31):
-            details = self.target_operations.get_all_index_details(cluster=self.target_cluster)
-            entry = details.get(collection)
-            actual = int(entry["count"]) if entry and entry.get("count", "").isdigit() else 0
+            try:
+                count_response = execute_api_call(
+                    cluster=self.target_cluster,
+                    path=f"/{collection}/_count?format=json")
+                actual = count_response.json().get("count", 0)
+            except Exception:
+                actual = 0
             if actual == expected:
                 logger.info(f"Verified target collection '{collection}': {actual} docs OK")
                 return
