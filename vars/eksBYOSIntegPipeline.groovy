@@ -15,6 +15,7 @@ import groovy.json.JsonOutput
 
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksbyos"
+    def gitBranchDefault = config.gitBranchDefault ?: 'main'
     def jobName = config.jobName ?: "eks-byos-integ-test"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
     def clusterContextFilePath = "tmp/cluster-context-byos-${currentBuild.number}.json"
@@ -55,7 +56,7 @@ def call(Map config = [:]) {
 <b>custom</b> — uses the parameter fields below as-is'''
             )
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_BRANCH', defaultValue: gitBranchDefault, description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill (podReplicas)')
