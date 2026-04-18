@@ -101,7 +101,7 @@ describe('migration initializer CRD resource generation', () => {
         expect(byKind('CapturedTraffic')).toContain('source-proxy-topic');
         expect(byKind('CaptureProxy')).toContain('source-proxy');
         expect(byKind('DataSnapshot')).toContain('source-snap1');
-        expect(byKind('SnapshotMigration')).toContain('source-target-snap1');
+        expect(byKind('SnapshotMigration')).toContain('source-target-snap1-migration-0');
         expect(byKind('TrafficReplay')).toContain('source-proxy-target-target-replay');
         expect(byKind('ApprovalGate')).toEqual(expect.arrayContaining([
             'source.target.snap1.migration-0.evaluatemetadata',
@@ -120,22 +120,22 @@ describe('migration initializer CRD resource generation', () => {
             'source-proxy-target-target-replay.trafficreplay.vapretry',
         ]));
 
-        expect(getResource('KafkaCluster', 'default')?.spec.dependsOn).toEqual([]);
+        expect(getResource('KafkaCluster', 'default')?.spec.dependsOn).toBeUndefined();
         expect(getResource('CapturedTraffic', 'source-proxy-topic')?.spec.dependsOn).toEqual(['default']);
         expect(getResource('CaptureProxy', 'source-proxy')?.spec.dependsOn).toEqual(['source-proxy-topic']);
         expect(getResource('DataSnapshot', 'source-snap1')?.spec.dependsOn).toEqual(['source-proxy']);
-        expect(getResource('SnapshotMigration', 'source-target-snap1')?.spec.dependsOn).toEqual(['source-snap1']);
+        expect(getResource('SnapshotMigration', 'source-target-snap1-migration-0')?.spec.dependsOn).toBeUndefined();
         expect(getResource('TrafficReplay', 'source-proxy-target-target-replay')?.spec.dependsOn).toEqual(['source-proxy']);
         expect(getResource('ApprovalGate', 'source.target.snap1.migration-0.evaluateMetadata')?.spec.dependsOn).toBeUndefined();
         expect(getResource('ApprovalGate', 'source.target.snap1.migration-0.migrateMetadata')?.spec.dependsOn).toBeUndefined();
 
         expect(enrichScript).toContain(
-            "snapshot_migration_source_target_snap1=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1 -o jsonpath='{.metadata.uid}')\""
+            "snapshot_migration_source_target_snap1_migration_0=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
         );
         expect(enrichScript).toContain('snapshotMigrations: {');
-        expect(enrichScript).toContain('"source-target-snap1": $snapshot_migration_source_target_snap1');
+        expect(enrichScript).toContain('"source-target-snap1-migration-0": $snapshot_migration_source_target_snap1_migration_0');
         expect(enrichScript).toContain(
-            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + "-" + .targetConfig.label + "-" + .label)]}))'
+            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
         );
     });
 

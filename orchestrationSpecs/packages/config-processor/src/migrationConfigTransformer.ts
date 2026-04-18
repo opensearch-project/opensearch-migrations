@@ -391,41 +391,52 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }
 
         const migrationsWithChecksums = snapshotMigrations.map(m => {
-            // Extract replayer-material fields from each migration's documentBackfillConfig
-            const replayerMaterialParts = m.migrations.map((mig: any) =>
-                mig.documentBackfillConfig
-                    ? csDep(RFS_SCHEMA, mig.documentBackfillConfig as Record<string, unknown>, 'replayer')
-                    : ''
-            );
+            const replayerMaterialPart = m.documentBackfillConfig
+                ? csDep(RFS_SCHEMA, m.documentBackfillConfig as Record<string, unknown>, 'replayer')
+                : '';
             return {
                 ...m,
                 snapshotConfigChecksum: snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '',
-                configChecksum: cs(m.migrations, m.targetConfig, snapshotChecksums.get([m.sourceLabel, m.label].join('-'))),
-                checksumForReplayer: cs(m.targetConfig, ...replayerMaterialParts),
+                configChecksum: cs(
+                    m.metadataMigrationConfig ?? {},
+                    m.documentBackfillConfig ?? {},
+                    m.targetConfig,
+                    snapshotChecksums.get([m.sourceLabel, m.label].join('-'))
+                ),
+                checksumForReplayer: cs(m.targetConfig, replayerMaterialPart),
             };
         });
-        const migrationChecksums = new Map(migrationsWithChecksums.map(m =>
-            [[m.sourceLabel, m.label].join('-'), m.configChecksum]
-        ));
-        const migrationChecksumForReplayer = new Map(migrationsWithChecksums.map(m =>
-            [[m.sourceLabel, m.targetConfig.label, m.label].join('-'), m.checksumForReplayer]
-        ));
 
         const replaysWithChecksums = trafficReplays.map(r => ({
             ...r,
             dependsOn: [
                 r.fromProxy,
-                ...((r.dependsOnSnapshotMigrations ?? []).map(dep =>
-                    [dep.source, r.toTarget.label, dep.snapshot].join('-')
+                ...((r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
+                    migrationsWithChecksums
+                        .filter(m =>
+                            m.sourceLabel === dep.source &&
+                            m.targetConfig.label === r.toTarget.label &&
+                            m.label === dep.snapshot
+                        )
+                        .map(m => [m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel].join('-'))
                 ))
             ],
             kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
             fromProxyConfigChecksum: proxyChecksumForReplayer.get(r.fromProxy) ?? '',
             configChecksum: cs(r.replayerConfig, r.toTarget, proxyChecksumForReplayer.get(r.fromProxy)),
-            dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).map(dep => ({
-                ...dep,
-                configChecksum: migrationChecksumForReplayer.get([dep.source, r.toTarget.label, dep.snapshot].join('-')) ?? '',
-            })),
+            dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
+                migrationsWithChecksums
+                    .filter(m =>
+                        m.sourceLabel === dep.source &&
+                        m.targetConfig.label === r.toTarget.label &&
+                        m.label === dep.snapshot
+                    )
+                    .map(m => ({
+                        ...dep,
+                        migrationLabel: m.migrationLabel,
+                        configChecksum: m.checksumForReplayer,
+                    }))
+            ),
         }));
 
         const kafkasWithChecksums = kafkaClusters.map(k => ({
@@ -621,24 +632,28 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     ? { externalSnapshotName: (snapshotDef.config as z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT>).externallyManagedSnapshotName }
                     : { dataSnapshotResourceName: globallyUniqueSnapshotName };
 
-                results.push({
-                    label: snapshotName,
-                    snapshotNameResolution,
-                    snapshotConfigChecksum: '',
-                    migrations: autoLabelMigrations(migrations),
-                    sourceVersion: sourceCluster.version || "",
-                    sourceLabel: fromSource,
-                    targetConfig: { ...targetCluster, label: toTarget },
-                    snapshotConfig: {
+                for (const migration of autoLabelMigrations(migrations)) {
+                    results.push({
                         label: snapshotName,
-                        ...(repoConfig ? {
-                            repoConfig: {
-                                ...repoConfig,
-                                repoName: snapshotDef.repoName
-                            }
-                        } : {})
-                    }
-                });
+                        migrationLabel: migration.label,
+                        snapshotNameResolution,
+                        snapshotConfigChecksum: '',
+                        metadataMigrationConfig: migration.metadataMigrationConfig,
+                        documentBackfillConfig: migration.documentBackfillConfig,
+                        sourceVersion: sourceCluster.version || "",
+                        sourceLabel: fromSource,
+                        targetConfig: { ...targetCluster, label: toTarget },
+                        snapshotConfig: {
+                            label: snapshotName,
+                            ...(repoConfig ? {
+                                repoConfig: {
+                                    ...repoConfig,
+                                    repoName: snapshotDef.repoName
+                                }
+                            } : {})
+                        }
+                    });
+                }
             }
         }
         return results;

@@ -17,7 +17,6 @@ type ProxyConfig = WorkflowConfig["proxies"][number];
 type SnapshotConfig = WorkflowConfig["snapshots"][number];
 type SnapshotItemConfig = SnapshotConfig["createSnapshotConfig"][number];
 type SnapshotMigrationConfig = WorkflowConfig["snapshotMigrations"][number];
-type SnapshotMigrationItemConfig = SnapshotMigrationConfig["migrations"][number];
 type ReplayConfig = WorkflowConfig["trafficReplays"][number];
 
 // const a: KafkaClusterConfig = { vers };
@@ -402,31 +401,33 @@ export class MigrationInitializer {
             items.push({
                 apiVersion: CRD_API_VERSION,
                 kind: 'SnapshotMigration',
-                metadata: { name: this.makeCrdName(migration.sourceLabel, migration.targetConfig.label, migration.label) },
+                metadata: {
+                    name: this.makeCrdName(
+                        migration.sourceLabel,
+                        migration.targetConfig.label,
+                        migration.label,
+                        migration.migrationLabel
+                    )
+                },
                 spec: {
-                    dependsOn: "dataSnapshotResourceName" in migration.snapshotNameResolution
-                        ? [migration.snapshotNameResolution.dataSnapshotResourceName]
-                        : []
                 },
                 status: { phase: 'Initialized', configChecksum: '' }
             });
 
             // VAP retry gate for the root SnapshotMigration CR reconcile
             items.push(this.makeApprovalGateResource(
-                [this.makeCrdName(migration.sourceLabel, migration.targetConfig.label, migration.label), 'vapretry'], gateLabel));
+                [this.makeCrdName(migration.sourceLabel, migration.targetConfig.label, migration.label, migration.migrationLabel), 'vapretry'], gateLabel));
 
-            for (const migrationItem of migration.migrations as SnapshotMigrationItemConfig[]) {
-                const approvalNameParts = [
-                    migration.sourceLabel,
-                    migration.targetConfig.label,
-                    migration.snapshotConfig.label,
-                    migrationItem.label,
-                ];
-                items.push(this.makeApprovalGateResource(
-                    [...approvalNameParts, 'evaluateMetadata'], gateLabel));
-                items.push(this.makeApprovalGateResource(
-                    [...approvalNameParts, 'migrateMetadata'], gateLabel));
-            }
+            const approvalNameParts = [
+                migration.sourceLabel,
+                migration.targetConfig.label,
+                migration.snapshotConfig.label,
+                migration.migrationLabel,
+            ];
+            items.push(this.makeApprovalGateResource(
+                [...approvalNameParts, 'evaluateMetadata'], gateLabel));
+            items.push(this.makeApprovalGateResource(
+                [...approvalNameParts, 'migrateMetadata'], gateLabel));
         }
 
         // TrafficReplay resources from trafficReplays
@@ -439,7 +440,7 @@ export class MigrationInitializer {
                     dependsOn: [
                         replay.fromProxy,
                         ...((replay.dependsOnSnapshotMigrations ?? []) as ReplayConfig["dependsOnSnapshotMigrations"]).map(dep =>
-                            this.makeCrdName(dep.source, replay.toTarget.label, dep.snapshot))
+                            this.makeCrdName(dep.source, replay.toTarget.label, dep.snapshot, dep.migrationLabel))
                     ]
                 },
                 status: { phase: 'Initialized', configChecksum: '' }
@@ -491,7 +492,8 @@ export class MigrationInitializer {
             name: this.makeCrdName(
                 migration.sourceLabel,
                 migration.targetConfig.label,
-                migration.label
+                migration.label,
+                migration.migrationLabel
             )
         }));
         if (kafkaClusters.length === 0 && proxies.length === 0 && trafficReplays.length === 0) {
@@ -578,7 +580,7 @@ export class MigrationInitializer {
             "jq --argjson uids \"$uid_map_json\" '",
             "  .kafkaClusters |= ((. // []) | map(. + {resourceUid: $uids.kafkaClusters[.name]}))",
             "  | .proxies |= ((. // []) | map(. + {resourceUid: $uids.proxies[.name]} | .kafkaConfig += {clusterResourceUid: $uids.kafkaClusters[.kafkaConfig.label]}))",
-            "  | .snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + \"-\" + .targetConfig.label + \"-\" + .label)]}))",
+            "  | .snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + \"-\" + .targetConfig.label + \"-\" + .label + \"-\" + .migrationLabel)]}))",
             "  | .trafficReplays |= ((. // []) | map(. + {resourceUid: $uids.trafficReplays[.name]}))",
             "' \"$CONFIG_PATH\" > \"$tmp_file\"",
             "",

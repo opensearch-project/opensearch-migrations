@@ -643,16 +643,15 @@ export const SetupCapture = WorkflowBuilder.create({
                     managedByWorkflow
                 )}) }
             )
-            .addStep("createKafkaTopic", SetupKafka, "createKafkaTopicWithRetry", c =>
+            .addStep("createKafkaTopic", SetupKafka, "createKafkaTopic", c =>
                 c.register({
                     clusterName: b.inputs.kafkaClusterName,
                     topicName: b.inputs.kafkaTopicName,
+                    workflowUid: expr.getWorkflowValue("uid"),
                     ownerUid: b.inputs.kafkaClusterOwnerUid,
                     partitions: b.inputs.topicPartitions,
                     replicas: b.inputs.topicReplicas,
                     topicConfig: b.inputs.topicConfig,
-                    retryGateName: expr.concat(b.inputs.kafkaClusterName, expr.literal(".kafkatopic."), b.inputs.kafkaTopicName, expr.literal(".vapretry")),
-                    retryGroupName_view: expr.concat(expr.literal("KafkaTopic: "), b.inputs.kafkaTopicName),
                 }),
                 { when: c => ({templateExp: expr.and(
                     checksumNotDone(c.reconcileCapturedTrafficResource.outputs.currentConfigChecksum, b.inputs.topicConfigChecksum),
@@ -747,6 +746,8 @@ export const SetupCapture = WorkflowBuilder.create({
                     resourceName: b.inputs.proxyName,
                     phase: expr.literal("Ready"),
                     configChecksum: b.inputs.configChecksum,
+                    checksumForSnapshot: b.inputs.checksumForSnapshot,
+                    checksumForReplayer: b.inputs.checksumForReplayer,
                 }),
                 {when: c => ({templateExp: expr.or(
                     expr.equals(c.setupProxy.status, "Succeeded"),

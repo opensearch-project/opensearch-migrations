@@ -381,334 +381,45 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
-
-    // ── Reconciliation templates with VAP-aware recursive retry ──────────
-    // These templates handle VAP rejections by:
-    //   1. Attempting the apply (with continueOn.failed)
-    //   2. If failed, suspend for user to fix issues
-    //   3. After resume, recursively call self until success
-    // If VAP blocked the change, user must either:
-    //   - Fix their config to match deployed state, OR
-    //   - Add approval annotation (e.g., approved-replicas=<value>)
-    // Then click Resume in Argo UI.
-
-    .addTemplate("deployKafkaNodePoolWithRetry", t => t
-        .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
-        .addRequiredInput("ownerUid", typeToken<string>())
-        .addRequiredInput("retryGateName", typeToken<string>())
-        .addOptionalInput("retryGroupName_view", c => "Apply")
-
-        .addSteps(b => b
-            .addStep("tryApply", INTERNAL, "deployKafkaNodePool", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    nodePoolSpec: expr.recordToString(expr.dig(
-                        expr.deserializeRecord(b.inputs.clusterConfig),
-                        ["nodePoolSpecOverrides"],
-                        expr.makeDict({})
-                    )),
-                    workflowUid: expr.getWorkflowValue("uid"),
-                    ownerUid: b.inputs.ownerUid,
-                }),
-                {continueOn: {failed: true}}
-            )
-            .addStep("waitForFix", ResourceManagement, "waitForApproval", c =>
-                c.register({
-                    resourceName: b.inputs.retryGateName,
-                }),
-                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
-            )
-            .addStep("patchApproval", ResourceManagement, "patchApprovalAnnotation", c =>
-                c.register({
-                    resourceApiVersion: expr.literal("kafka.strimzi.io/v1"),
-                    resourceKind: expr.literal("KafkaNodePool"),
-                    resourceName: expr.literal("dual-role"),
-                }),
-                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
-            )
-            .addStep("resetGate", ResourceManagement, "patchApprovalGatePhase", c =>
-                c.register({
-                    resourceName: b.inputs.retryGateName,
-                    phase: expr.literal("Pending"),
-                }),
-                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
-            )
-            .addStepToSelf("retryLoop", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    clusterConfig: b.inputs.clusterConfig,
-                    ownerUid: b.inputs.ownerUid,
-                    retryGateName: b.inputs.retryGateName,
-                    retryGroupName_view: b.inputs.retryGroupName_view,
-                }),
-                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
-            )
-        )
-    )
-
-    .addTemplate("deployKafkaClusterKraftWithRetry", t => t
+    .addTemplate("deployKafkaClusterAndTopics", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("version", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
         .addRequiredInput("ownerUid", typeToken<string>())
-        .addRequiredInput("retryGateName", typeToken<string>())
-        .addOptionalInput("retryGroupName_view", c => "Apply")
-
-        .addSteps(b => b
-            .addStep("tryApply", INTERNAL, "deployKafkaCluster", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    version: b.inputs.version,
-                    clusterConfig: b.inputs.clusterConfig,
-                    workflowUid: expr.getWorkflowValue("uid"),
-                    ownerUid: b.inputs.ownerUid,
-                }),
-                {continueOn: {failed: true}}
-            )
-            .addStep("waitForFix", ResourceManagement, "waitForApproval", c =>
-                c.register({
-                    resourceName: b.inputs.retryGateName,
-                }),
-                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
-            )
-            .addStep("patchApproval", ResourceManagement, "patchApprovalAnnotation", c =>
-                c.register({
-                    resourceApiVersion: expr.literal("kafka.strimzi.io/v1"),
-                    resourceKind: expr.literal("Kafka"),
-                    resourceName: b.inputs.clusterName,
-                }),
-                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
-            )
-            .addStep("resetGate", ResourceManagement, "patchApprovalGatePhase", c =>
-                c.register({
-                    resourceName: b.inputs.retryGateName,
-                    phase: expr.literal("Pending"),
-                }),
-                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
-            )
-            .addStepToSelf("retryLoop", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    version: b.inputs.version,
-                    clusterConfig: b.inputs.clusterConfig,
-                    ownerUid: b.inputs.ownerUid,
-                    retryGateName: b.inputs.retryGateName,
-                    retryGroupName_view: b.inputs.retryGroupName_view,
-                }),
-                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
-            )
-        )
-        .addExpressionOutput("brokers", c => c.steps.tryApply.outputs.bootstrapServers)
-    )
-
-    .addTemplate("createKafkaTopicWithRetry", t => t
-        .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("topicName", typeToken<string>())
-        .addRequiredInput("ownerUid", typeToken<string>())
-        .addRequiredInput("partitions", typeToken<number>())
-        .addRequiredInput("replicas", typeToken<number>())
-        .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
-        .addRequiredInput("retryGateName", typeToken<string>())
-        .addOptionalInput("retryGroupName_view", c => "Apply")
-
-        .addSteps(b => b
-            .addStep("tryApply", INTERNAL, "createKafkaTopic", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    topicName: b.inputs.topicName,
-                    workflowUid: expr.getWorkflowValue("uid"),
-                    ownerUid: b.inputs.ownerUid,
-                    partitions: b.inputs.partitions,
-                    replicas: b.inputs.replicas,
-                    topicConfig: b.inputs.topicConfig,
-                }),
-                {continueOn: {failed: true}}
-            )
-            .addStep("waitForFix", ResourceManagement, "waitForApproval", c =>
-                c.register({
-                    resourceName: b.inputs.retryGateName,
-                }),
-                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
-            )
-            .addStep("patchApproval", ResourceManagement, "patchApprovalAnnotation", c =>
-                c.register({
-                    resourceApiVersion: expr.literal("kafka.strimzi.io/v1"),
-                    resourceKind: expr.literal("KafkaTopic"),
-                    resourceName: b.inputs.topicName,
-                }),
-                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
-            )
-            .addStep("resetGate", ResourceManagement, "patchApprovalGatePhase", c =>
-                c.register({
-                    resourceName: b.inputs.retryGateName,
-                    phase: expr.literal("Pending"),
-                }),
-                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
-            )
-            .addStepToSelf("retryLoop", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    topicName: b.inputs.topicName,
-                    ownerUid: b.inputs.ownerUid,
-                    partitions: b.inputs.partitions,
-                    replicas: b.inputs.replicas,
-                    topicConfig: b.inputs.topicConfig,
-                    retryGateName: b.inputs.retryGateName,
-                    retryGroupName_view: b.inputs.retryGroupName_view,
-                }),
-                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
-            )
-        )
-        .addExpressionOutput("topicName", c => c.steps.tryApply.outputs.topicName)
-    )
-
-    .addTemplate("createKafkaUserWithRetry", t => t
-        .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
-        .addRequiredInput("ownerUid", typeToken<string>())
-        .addRequiredInput("retryGateName", typeToken<string>())
-        .addOptionalInput("retryGroupName_view", c => "Apply")
-
-        .addSteps(b => b
-            .addStep("tryApply", INTERNAL, "createKafkaUser", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    userSpec: expr.recordToString(makeManagedKafkaUserSpec(b.inputs.clusterConfig)),
-                    workflowUid: expr.getWorkflowValue("uid"),
-                    ownerUid: b.inputs.ownerUid,
-                }),
-                {continueOn: {failed: true}}
-            )
-            .addStep("waitForFix", ResourceManagement, "waitForApproval", c =>
-                c.register({
-                    resourceName: b.inputs.retryGateName,
-                }),
-                {when: c => ({templateExp: expr.equals(c.tryApply.status, "Failed")})}
-            )
-            .addStep("patchApproval", ResourceManagement, "patchApprovalAnnotation", c =>
-                c.register({
-                    resourceApiVersion: expr.literal("kafka.strimzi.io/v1"),
-                    resourceKind: expr.literal("KafkaUser"),
-                    resourceName: expr.concat(b.inputs.clusterName, expr.literal("-migration-app")),
-                }),
-                {when: c => ({templateExp: expr.equals(c.waitForFix.status, "Succeeded")})}
-            )
-            .addStep("resetGate", ResourceManagement, "patchApprovalGatePhase", c =>
-                c.register({
-                    resourceName: b.inputs.retryGateName,
-                    phase: expr.literal("Pending"),
-                }),
-                {when: c => ({templateExp: expr.equals(c.patchApproval.status, "Succeeded")})}
-            )
-            .addStepToSelf("retryLoop", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    clusterConfig: b.inputs.clusterConfig,
-                    ownerUid: b.inputs.ownerUid,
-                    retryGateName: b.inputs.retryGateName,
-                    retryGroupName_view: b.inputs.retryGroupName_view,
-                }),
-                {when: c => ({templateExp: expr.equals(c.resetGate.status, "Succeeded")})}
-            )
-        )
-    )
-
-    .addTemplate("deployKafkaClusterAndTopicsWithRetry", t => t
-        .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("version", typeToken<string>())
-        .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
-        .addRequiredInput("ownerUid", typeToken<string>())
-        .addOptionalInput("retryGroupName_view", c => "Apply")
 
         .addSteps(b => {
             return b
-                .addStep("deployNodePool", INTERNAL, "deployKafkaNodePoolWithRetry", c =>
+                .addStep("deployNodePool", INTERNAL, "deployKafkaNodePool", c =>
                     c.register({
                         clusterName: b.inputs.clusterName,
-                        clusterConfig: b.inputs.clusterConfig,
+                        nodePoolSpec: expr.recordToString(expr.dig(
+                            expr.deserializeRecord(b.inputs.clusterConfig),
+                            ["nodePoolSpecOverrides"],
+                            expr.makeDict({})
+                        )),
+                        workflowUid: expr.getWorkflowValue("uid"),
                         ownerUid: b.inputs.ownerUid,
-                        retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".kafkanodepool.vapretry")),
-                        retryGroupName_view: b.inputs.retryGroupName_view,
                     })
                 )
-                .addStep("deployCluster", INTERNAL, "deployKafkaClusterKraftWithRetry", c =>
+                .addStep("deployCluster", INTERNAL, "deployKafkaCluster", c =>
                     c.register({
                         clusterName: b.inputs.clusterName,
                         version: b.inputs.version,
                         clusterConfig: b.inputs.clusterConfig,
+                        workflowUid: expr.getWorkflowValue("uid"),
                         ownerUid: b.inputs.ownerUid,
-                        retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".kafkacluster.vapretry")),
-                        retryGroupName_view: b.inputs.retryGroupName_view,
                     })
                 )
-                .addStep("deployKafkaUser", INTERNAL, "createKafkaUserWithRetry", c =>
+                .addStep("deployKafkaUser", INTERNAL, "createKafkaUser", c =>
                     c.register({
                         clusterName: b.inputs.clusterName,
-                        clusterConfig: b.inputs.clusterConfig,
+                        userSpec: expr.recordToString(makeManagedKafkaUserSpec(b.inputs.clusterConfig)),
+                        workflowUid: expr.getWorkflowValue("uid"),
                         ownerUid: b.inputs.ownerUid,
-                        retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".kafkauser.vapretry")),
-                        retryGroupName_view: expr.concat(expr.literal("KafkaUser: "), b.inputs.clusterName),
                     }),
                     {when: c => ({templateExp: shouldCreateManagedKafkaUser(b.inputs.clusterConfig)})}
                 );
         })
-    )
-
-    // Combined retry template for full Kafka cluster deployment
-    .addTemplate("deployKafkaClusterWithRetry", t => t
-        .addRequiredInput("clusterName", typeToken<string>())
-        .addRequiredInput("version", typeToken<string>())
-        .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
-        .addRequiredInput("ownerUid", typeToken<string>())
-
-        .addSteps(b => b
-            .addStep("checkExisting", ResourceManagement, "readKafkaConnectionProfile", c =>
-                c.register({
-                    resourceName: b.inputs.clusterName,
-                }),
-                {continueOn: {failed: true}}
-            )
-            .addStep("deployPool", INTERNAL, "deployKafkaNodePoolWithRetry", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    clusterConfig: b.inputs.clusterConfig,
-                    ownerUid: b.inputs.ownerUid,
-                    retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".kafkanodepool.vapretry")),
-                    retryGroupName_view: expr.concat(expr.literal("KafkaNodePool: "), b.inputs.clusterName),
-                }),
-                {when: c => ({templateExp: expr.not(expr.equals(c.checkExisting.status, "Succeeded"))})}
-            )
-            .addStep("deployCluster", INTERNAL, "deployKafkaClusterKraftWithRetry", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    version: b.inputs.version,
-                    clusterConfig: b.inputs.clusterConfig,
-                    ownerUid: b.inputs.ownerUid,
-                    retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".kafkacluster.vapretry")),
-                    retryGroupName_view: expr.concat(expr.literal("KafkaCluster: "), b.inputs.clusterName),
-                }),
-                {when: c => ({templateExp: expr.not(expr.equals(c.checkExisting.status, "Succeeded"))})}
-            )
-            .addStep("createKafkaUser", INTERNAL, "createKafkaUserWithRetry", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    clusterConfig: b.inputs.clusterConfig,
-                    ownerUid: b.inputs.ownerUid,
-                    retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".kafkauser.vapretry")),
-                    retryGroupName_view: expr.concat(expr.literal("KafkaUser: "), b.inputs.clusterName),
-                }),
-                {when: c => ({templateExp: expr.and(
-                    expr.not(expr.equals(c.checkExisting.status, "Succeeded")),
-                    shouldCreateManagedKafkaUser(b.inputs.clusterConfig)
-                )})}
-            )
-        )
-        .addExpressionOutput("bootstrapServers", c => expr.ternary(
-            expr.equals(c.steps.checkExisting.status, "Succeeded"),
-            c.steps.checkExisting.outputs.bootstrapServers,
-            c.steps.deployCluster.outputs.brokers
-        ))
     )
 
 

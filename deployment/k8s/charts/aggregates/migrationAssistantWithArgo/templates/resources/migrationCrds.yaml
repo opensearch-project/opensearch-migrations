@@ -230,24 +230,14 @@ spec:
           properties:
             spec:
               type: object
+              x-kubernetes-preserve-unknown-fields: true
               properties:
                 dependsOn:
                   type: array
                   items:
                     type: string
-                migrations:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      label:
-                        type: string
-                      metadataMigrationConfig:
-                        type: object
-                        x-kubernetes-preserve-unknown-fields: true
-                      documentBackfillConfig:
-                        type: object
-                        x-kubernetes-preserve-unknown-fields: true
+                migrationLabel:
+                  type: string
                 sourceVersion:
                   type: string
                 sourceLabel:
@@ -256,6 +246,92 @@ spec:
                   type: string
                 snapshotLabel:
                   type: string
+                metadataMigrationJvmArgs:
+                  type: string
+                metadataMigrationLoggingConfigurationOverrideConfigMap:
+                  type: string
+                metadataMigrationSkipEvaluateApproval:
+                  type: boolean
+                metadataMigrationSkipMigrateApproval:
+                  type: boolean
+                metadataMigrationComponentTemplateAllowlist:
+                  type: array
+                  items:
+                    type: string
+                metadataMigrationIndexAllowlist:
+                  type: array
+                  items:
+                    type: string
+                metadataMigrationIndexTemplateAllowlist:
+                  type: array
+                  items:
+                    type: string
+                metadataMigrationAllowLooseVersionMatching:
+                  type: boolean
+                metadataMigrationClusterAwarenessAttributes:
+                  type: integer
+                metadataMigrationMultiTypeBehavior:
+                  type: string
+                metadataMigrationOtelCollectorEndpoint:
+                  type: string
+                metadataMigrationOutput:
+                  type: string
+                metadataMigrationTransformerConfigBase64:
+                  type: string
+                metadataMigrationTransformerConfig:
+                  type: string
+                metadataMigrationTransformerConfigFile:
+                  type: string
+                documentBackfillPodReplicas:
+                  type: integer
+                  minimum: 0
+                documentBackfillJvmArgs:
+                  type: string
+                documentBackfillLoggingConfigurationOverrideConfigMap:
+                  type: string
+                documentBackfillSkipApproval:
+                  type: boolean
+                documentBackfillUseTargetClusterForWorkCoordination:
+                  type: boolean
+                documentBackfillResources:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                documentBackfillIndexAllowlist:
+                  type: array
+                  items:
+                    type: string
+                documentBackfillAllowLooseVersionMatching:
+                  type: boolean
+                documentBackfillDocTransformerConfigBase64:
+                  type: string
+                documentBackfillDocTransformerConfig:
+                  type: string
+                documentBackfillDocTransformerConfigFile:
+                  type: string
+                documentBackfillDocumentsPerBulkRequest:
+                  type: integer
+                documentBackfillDocumentsSizePerBulkRequest:
+                  type: integer
+                documentBackfillInitialLeaseDuration:
+                  type: string
+                documentBackfillMaxConnections:
+                  type: integer
+                documentBackfillMaxShardSizeBytes:
+                  type: integer
+                documentBackfillOtelCollectorEndpoint:
+                  type: string
+                documentBackfillServerGeneratedIds:
+                  type: string
+                documentBackfillAllowedDocExceptionTypes:
+                  type: array
+                  items:
+                    type: string
+                documentBackfillCoordinatorRetryMaxRetries:
+                  type: integer
+                documentBackfillCoordinatorRetryInitialDelayMs:
+                  type: integer
+                documentBackfillCoordinatorRetryMaxDelayMs:
+                  type: integer
             status:
               type: object
               properties:
@@ -297,6 +373,7 @@ spec:
           properties:
             spec:
               type: object
+              x-kubernetes-preserve-unknown-fields: true
               properties:
                 dependsOn:
                   type: array

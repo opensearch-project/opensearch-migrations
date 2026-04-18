@@ -203,9 +203,11 @@ export const SNAPSHOT_REPO_CONFIG = z.object({
 
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     label: z.string(), // from the record of the user config
+    migrationLabel: z.string(),
     snapshotNameResolution: SNAPSHOT_NAME_RESOLUTION,
     snapshotConfigChecksum: z.string(),
-    migrations: z.array(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG).min(1),
+    metadataMigrationConfig: ARGO_METADATA_OPTIONS.optional(),
+    documentBackfillConfig: ARGO_RFS_OPTIONS.optional(),
     sourceVersion: z.string(),
     sourceLabel: z.string(),
     targetConfig: NAMED_TARGET_CLUSTER_CONFIG,
@@ -259,6 +261,7 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
 });
 
 export const ENRICHED_SNAPSHOT_MIGRATION_FILTER = SNAPSHOT_MIGRATION_FILTER.extend({
+    migrationLabel: z.string(),
     configChecksum: z.string(),
 });
 
