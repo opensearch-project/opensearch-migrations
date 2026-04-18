@@ -97,6 +97,7 @@ public class SolrMultiCollectionSource implements DocumentSource {
 
     @Override
     public CollectionMetadata readCollectionMetadata(String collectionName) {
+        ensureCollectionPrepared(collectionName);
         return getSource(collectionName).readCollectionMetadata(collectionName);
     }
 

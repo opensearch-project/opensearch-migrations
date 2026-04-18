@@ -912,21 +912,10 @@ public class RfsMigrateDocuments {
                             context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
                     Clock.systemUTC())) {
 
-                // Early exit: if the work coordination index already exists and all items are complete,
-                // skip the expensive S3 downloads entirely. If the coordinator index does not yet
-                // exist (first worker to run), this will throw — in that case, work cannot be complete
-                // yet, so fall through to the normal setup path which creates the index.
-                try {
-                    if (!workCoordinator.workItemsNotYetComplete(
-                            context.getWorkCoordinationContext()::createItemsPendingContext)) {
-                        log.atInfo().setMessage("No pending Solr work items — skipping S3 download and exiting early").log();
-                        cleanShutdownCompleted.set(true);
-                        return;
-                    }
-                } catch (Exception e) {
-                    log.atInfo().setMessage("Coordinator index not yet initialized ({}); proceeding with normal Solr backup setup.")
-                        .addArgument(e.getClass().getSimpleName()).log();
-                }
+                // Work coordination will naturally short-circuit via ShardWorkPreparer.onAlreadyCompleted
+                // and prepareWorkCoordination will throw NoWorkLeftException if there's nothing to do.
+                // Both cases are handled below without any S3 schema downloads thanks to the lazy
+                // collectionPreparer wired into the factory/source.
 
                 // Work is available — now download metadata from S3 / local
                 Path backupDir;
@@ -955,43 +944,46 @@ public class RfsMigrateDocuments {
                     );
                 }
 
-                // Parse schemas from backup directory (no live Solr API access needed).
+                // Discover collection names (cheap: single S3 list-directories call or local dir scan).
+                // The schema XMLs themselves are fetched lazily by the collectionPreparer below -- only
+                // when ShardWorkPreparer actually needs to iterate shards for an uncompleted work item.
+                // If work-coordination already has everything marked complete, ShardWorkPreparer short-
+                // circuits via onAlreadyCompleted and no schema downloads happen at all.
                 var schemas = new java.util.LinkedHashMap<String, JsonNode>();
+                final List<String> collections;
                 if (s3Repo != null) {
-                    // List S3 to discover collection names, then download only schema metadata
-                    var collections = new java.util.ArrayList<>(s3Repo.listTopLevelDirectories());
-                    if (!arguments.indexAllowlist.isEmpty()) {
-                        collections.retainAll(arguments.indexAllowlist);
-                    }
-                    for (var collection : collections) {
-                        // Find latest zk_backup_N in S3 by listing subdirectories under collection
-                        var subDirs = s3Repo.listSubDirectories(collection);
+                    collections = new java.util.ArrayList<>(s3Repo.listTopLevelDirectories());
+                } else {
+                    collections = new java.util.ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
+                }
+                if (!arguments.indexAllowlist.isEmpty()) {
+                    collections.retainAll(arguments.indexAllowlist);
+                }
+                for (var collection : collections) {
+                    schemas.put(collection, null);  // placeholder; populated lazily by collectionPreparer
+                }
+
+                // collectionPreparer hydrates a collection on first access: downloads the latest
+                // zk_backup_N (S3 only) and the shard_backup_metadata, then parses the schema into
+                // the schemas map. Called from SolrBackupIndexMetadataFactory.fromRepo and
+                // SolrMultiCollectionSource.readDocuments, wrapped so it runs at most once per
+                // collection per process.
+                final S3Repo finalS3Repo = s3Repo;
+                final Path finalBackupDir = backupDir;
+                java.util.function.Consumer<String> collectionPreparer = collection -> {
+                    if (finalS3Repo != null) {
+                        var subDirs = finalS3Repo.listSubDirectories(collection);
                         var latestZkBackup = SolrBackupLayout.findLatestZkBackupName(subDirs);
                         if (latestZkBackup != null) {
-                            s3Repo.downloadPrefix(collection + "/" + latestZkBackup);
+                            finalS3Repo.downloadPrefix(collection + "/" + latestZkBackup);
                         } else {
                             log.warn("No zk_backup directories found for collection '{}' in S3", collection);
                         }
-                        schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
+                        log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
+                        finalS3Repo.downloadPrefix(collection + "/shard_backup_metadata");
                     }
-                } else {
-                    // Local filesystem: discover and parse schemas directly
-                    var collections = new java.util.ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
-                    if (!arguments.indexAllowlist.isEmpty()) {
-                        collections.retainAll(arguments.indexAllowlist);
-                    }
-                    for (var collection : collections) {
-                        schemas.put(collection, SolrSchemaXmlParser.findAndParse(backupDir.resolve(collection)));
-                    }
-                }
-
-                // For S3: download shard metadata at collection-prepare time (small),
-                // then download only the specific shard's index files when readDocuments is called.
-                final S3Repo finalS3Repo = s3Repo;
-                java.util.function.Consumer<String> collectionPreparer = (finalS3Repo != null) ? collection -> {
-                    log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
-                    finalS3Repo.downloadPrefix(collection + "/shard_backup_metadata");
-                } : null;
+                    schemas.put(collection, SolrSchemaXmlParser.findAndParse(finalBackupDir.resolve(collection)));
+                };
                 java.util.function.Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
                     var mapping = partition.fileNameMapping();
                     if (mapping != null) {

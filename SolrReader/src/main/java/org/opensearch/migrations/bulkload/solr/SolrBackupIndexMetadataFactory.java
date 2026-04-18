@@ -43,13 +43,15 @@ public class SolrBackupIndexMetadataFactory implements IndexMetadata.Factory {
 
     @Override
     public IndexMetadata fromRepo(String snapshotName, String indexName) {
-        var schema = schemas.get(indexName);
-        var schemaNode = schema != null ? schema.path("schema") : MAPPER.createObjectNode();
-
-        // Ensure shard metadata is available (e.g. downloaded from S3) before counting shards
+        // Run the preparer first so it can hydrate per-collection state (download the schema
+        // and shard_backup_metadata from S3 into the local map / filesystem). Only after the
+        // preparer runs is the schemas map guaranteed to contain the entry for indexName.
         if (collectionPreparer != null) {
             collectionPreparer.accept(indexName);
         }
+
+        var schema = schemas.get(indexName);
+        var schemaNode = schema != null ? schema.path("schema") : MAPPER.createObjectNode();
 
         // Discover shard count from backup directory
         var source = new SolrBackupSource(backupDir.resolve(indexName), indexName, schemaNode);
