@@ -90,7 +90,7 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
             'outputs': node.get('outputs', {}),
             'started_at': node.get('startedAt'),
             'finished_at': node.get('finishedAt'),
-            **(({'template_ref': node['templateRef']} if 'templateRef' in node else {}))
+            **({'template_ref': node['templateRef']} if 'templateRef' in node else {})
         }
         if group_name:
             tree_node['group_name'] = group_name
@@ -320,7 +320,7 @@ def get_step_status_output(workflow_data: Dict[str, Any], node_id: str) -> Optio
     return result
 
 
-def get_node_symbol(phase: str, node_type: str, approval: bool = False) -> str:
+def get_node_symbol(phase: str, approval: bool = False) -> str:
     """Get symbol for workflow node."""
     if phase == 'Succeeded':
         return "✓"

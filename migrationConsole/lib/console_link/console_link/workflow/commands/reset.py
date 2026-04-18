@@ -131,30 +131,34 @@ def _resolve_targets(namespace, path):
 #   label_key: select by label (value = CR name), or None to match by name directly.
 # Groups are processed in order. Within each group all matches are deleted and awaited.
 
+_STRIMZI_API = 'kafka.strimzi.io/v1'
+_STRIMZI_CLUSTER_LABEL = 'strimzi.io/cluster'
+_APPS_API = 'apps/v1'
+
 _OWNED_RESOURCE_CLEANUP = {
     'kafkaclusters': [
         # Topics/users first — Strimzi topic operator needs the cluster alive
-        ('kafka.strimzi.io/v1', 'kafkatopics', 'strimzi.io/cluster'),
-        ('kafka.strimzi.io/v1', 'kafkausers', 'strimzi.io/cluster'),
+        (_STRIMZI_API, 'kafkatopics', _STRIMZI_CLUSTER_LABEL),
+        (_STRIMZI_API, 'kafkausers', _STRIMZI_CLUSTER_LABEL),
         # Kafka CR next — Strimzi tears down brokers
-        ('kafka.strimzi.io/v1', 'kafkas', None),
+        (_STRIMZI_API, 'kafkas', None),
         # Nodepool last — Strimzi honors deleteClaim when it processes nodepool deletion
-        ('kafka.strimzi.io/v1', 'kafkanodepools', 'strimzi.io/cluster'),
+        (_STRIMZI_API, 'kafkanodepools', _STRIMZI_CLUSTER_LABEL),
     ],
     'captureproxies': [
         ('cert-manager.io/v1', 'certificates', None),
-        ('apps/v1', 'deployments', None),
+        (_APPS_API, 'deployments', None),
         ('v1', 'services', None),
     ],
     'snapshotmigrations': [
         # RFS workers before coordinator
-        ('apps/v1', 'deployments', 'migrations.opensearch.org/from-snapshot-migration'),
-        ('apps/v1', 'statefulsets', None),
+        (_APPS_API, 'deployments', 'migrations.opensearch.org/from-snapshot-migration'),
+        (_APPS_API, 'statefulsets', None),
         ('v1', 'services', None),
         ('v1', 'secrets', None),
     ],
     'trafficreplays': [
-        ('apps/v1', 'deployments', None),
+        (_APPS_API, 'deployments', None),
     ],
 }
 
@@ -236,29 +240,32 @@ def _strip_finalizers(namespace, api_gv, plural, name):
             pass
 
 
+def _wait_for_owned_deletion(namespace, api_gv, plural, label_key, cr_name, timeout=120):
+    """Poll until owned resources are gone, stripping stuck finalizers as fallback."""
+    group, _ = _parse_api_gv(api_gv)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        remaining = _find_owned(namespace, api_gv, plural, label_key, cr_name)
+        if not remaining:
+            return
+        if group:
+            for item in remaining:
+                if _item_finalizers(item):
+                    logger.info(f"Stripping finalizers from {plural}/{_item_name(item)}")
+                    _strip_finalizers(namespace, api_gv, plural, _item_name(item))
+        time.sleep(2)
+    remaining = _find_owned(namespace, api_gv, plural, label_key, cr_name)
+    if remaining:
+        names = ', '.join(_item_name(i) for i in remaining)
+        logger.warning(f"Timed out waiting for {plural} deletion: {names}")
+
+
 def _cleanup_owned_resources(namespace, cr_plural, cr_name):
     """Delete owned child resources in declared order before the parent migration CR."""
     for api_gv, plural, label_key in _OWNED_RESOURCE_CLEANUP.get(cr_plural, []):
         for item in _find_owned(namespace, api_gv, plural, label_key, cr_name):
             _delete_owned_resource(namespace, api_gv, plural, _item_name(item))
-
-        group, _ = _parse_api_gv(api_gv)
-        deadline = time.time() + 120
-        while time.time() < deadline:
-            remaining = _find_owned(namespace, api_gv, plural, label_key, cr_name)
-            if not remaining:
-                break
-            if group:
-                for item in remaining:
-                    if _item_finalizers(item):
-                        logger.info(f"Stripping finalizers from {plural}/{_item_name(item)}")
-                        _strip_finalizers(namespace, api_gv, plural, _item_name(item))
-            time.sleep(2)
-        else:
-            remaining = _find_owned(namespace, api_gv, plural, label_key, cr_name)
-            if remaining:
-                names = ', '.join(_item_name(i) for i in remaining)
-                logger.warning(f"Timed out waiting for {plural} deletion: {names}")
+        _wait_for_owned_deletion(namespace, api_gv, plural, label_key, cr_name)
 
 
 def _mark_deleting(namespace, plural, name):

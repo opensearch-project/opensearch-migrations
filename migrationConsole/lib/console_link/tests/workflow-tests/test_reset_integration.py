@@ -21,10 +21,10 @@ from kubernetes import client, config
 from kubernetes.client.rest import ApiException
 from testcontainers.k3s import K3SContainer
 
-from console_link.workflow.cli import workflow_cli
+from console_link.workflow.cli import workflow_cli  # noqa: F401
 from console_link.workflow.commands.approve import approve_gate
 from console_link.workflow.commands.crd_utils import CRD_GROUP, CRD_VERSION, list_migration_resources
-from console_link.workflow.commands.reset import _delete_crd, _get_resource_completions
+from console_link.workflow.commands.reset import _delete_crd, _get_resource_completions  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
