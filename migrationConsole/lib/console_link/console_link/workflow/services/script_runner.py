@@ -218,8 +218,24 @@ class ScriptRunner:
 
         try:
             logger.debug(f"Config file: {temp_file_path}")
-            output = self.run_script("createMigrationWorkflowFromUserConfiguration.sh", None,
-                                     *([temp_file_path] + args), direct_output=False)
+            script_path = self.script_dir / "createMigrationWorkflowFromUserConfiguration.sh"
+            if not script_path.exists():
+                raise FileNotFoundError(f"Script not found: {script_path}")
+
+            result = subprocess.run(
+                [str(script_path), temp_file_path] + args,
+                capture_output=True, text=True, check=True,
+                cwd=str(self.script_dir)
+            )
+            output = result.stdout.strip()
+
+            # Extract initialization warnings from stderr
+            stderr_text = result.stderr if isinstance(result.stderr, str) else ""
+            warnings = [
+                line.removeprefix("INIT_WARNING: ")
+                for line in stderr_text.splitlines()
+                if line.startswith("INIT_WARNING: ")
+            ]
 
             # Parse kubectl output to extract workflow information
             # The script should output workflow creation details
@@ -228,20 +244,12 @@ class ScriptRunner:
             # Try to parse as JSON first (if script returns JSON)
             try:
                 workflow_info = json.loads(output)
-                logger.info(f"Workflow submitted successfully: {workflow_info.get('workflow_name', 'unknown')}")
-                return workflow_info
             except json.JSONDecodeError:
-                # If not JSON, parse kubectl output format
-                # Expected format: "workflow.argoproj.io/<workflow-name> created"
-                # or similar kubectl output
-                workflow_name = self._parse_kubectl_output(output)
+                workflow_info = {'workflow_name': self._parse_kubectl_output(output)}
 
-                workflow_info = {
-                    'workflow_name': workflow_name
-                }
-
-                logger.info(f"Workflow submitted successfully: {workflow_name}")
-                return workflow_info
+            workflow_info['warnings'] = warnings
+            logger.info(f"Workflow submitted successfully: {workflow_info.get('workflow_name', 'unknown')}")
+            return workflow_info
 
         finally:
             # Clean up temporary file

@@ -125,8 +125,157 @@ def _resolve_targets(namespace, path):
     return [match] if match else []
 
 
+# --- Owned resource cleanup ---
+# Each migration CR type maps to an ordered list of child resource groups to delete
+# before the parent CR. Each entry: (api_group_version, plural, label_key_or_None)
+#   label_key: select by label (value = CR name), or None to match by name directly.
+# Groups are processed in order. Within each group all matches are deleted and awaited.
+
+_OWNED_RESOURCE_CLEANUP = {
+    'kafkaclusters': [
+        # Topics/users first — Strimzi topic operator needs the cluster alive
+        ('kafka.strimzi.io/v1', 'kafkatopics', 'strimzi.io/cluster'),
+        ('kafka.strimzi.io/v1', 'kafkausers', 'strimzi.io/cluster'),
+        # Kafka CR next — Strimzi tears down brokers
+        ('kafka.strimzi.io/v1', 'kafkas', None),
+        # Nodepool last — Strimzi honors deleteClaim when it processes nodepool deletion
+        ('kafka.strimzi.io/v1', 'kafkanodepools', 'strimzi.io/cluster'),
+    ],
+    'captureproxies': [
+        ('cert-manager.io/v1', 'certificates', None),
+        ('apps/v1', 'deployments', None),
+        ('v1', 'services', None),
+    ],
+    'snapshotmigrations': [
+        # RFS workers before coordinator
+        ('apps/v1', 'deployments', 'migrations.opensearch.org/from-snapshot-migration'),
+        ('apps/v1', 'statefulsets', None),
+        ('v1', 'services', None),
+        ('v1', 'secrets', None),
+    ],
+    'trafficreplays': [
+        ('apps/v1', 'deployments', None),
+    ],
+}
+
+
+def _parse_api_gv(api_gv):
+    if '/' in api_gv:
+        g, v = api_gv.rsplit('/', 1)
+        return g, v
+    return '', api_gv
+
+
+def _find_owned(namespace, api_gv, plural, label_key, cr_name):
+    """Find resources by label selector or by name."""
+    group, version = _parse_api_gv(api_gv)
+    try:
+        if group:
+            custom = client.CustomObjectsApi()
+            if label_key:
+                return custom.list_namespaced_custom_object(
+                    group=group, version=version, namespace=namespace,
+                    plural=plural, label_selector=f"{label_key}={cr_name}"
+                ).get('items', [])
+            return [custom.get_namespaced_custom_object(
+                group=group, version=version, namespace=namespace, plural=plural, name=cr_name)]
+        # Core/apps API
+        v1, apps = client.CoreV1Api(), client.AppsV1Api()
+        dispatch = {
+            'services': (v1.list_namespaced_service, v1.read_namespaced_service),
+            'secrets': (v1.list_namespaced_secret, v1.read_namespaced_secret),
+            'deployments': (apps.list_namespaced_deployment, apps.read_namespaced_deployment),
+            'statefulsets': (apps.list_namespaced_stateful_set, apps.read_namespaced_stateful_set),
+        }
+        list_fn, read_fn = dispatch[plural]
+        if label_key:
+            return list_fn(namespace, label_selector=f"{label_key}={cr_name}").items
+        return [read_fn(cr_name, namespace)]
+    except (ApiException, KeyError):
+        return []
+
+
+def _delete_owned_resource(namespace, api_gv, plural, name):
+    group, version = _parse_api_gv(api_gv)
+    try:
+        if group:
+            client.CustomObjectsApi().delete_namespaced_custom_object(
+                group=group, version=version, namespace=namespace, plural=plural, name=name)
+        else:
+            v1, apps = client.CoreV1Api(), client.AppsV1Api()
+            dispatch = {
+                'services': v1.delete_namespaced_service,
+                'secrets': v1.delete_namespaced_secret,
+                'deployments': apps.delete_namespaced_deployment,
+                'statefulsets': apps.delete_namespaced_stateful_set,
+            }
+            dispatch[plural](name, namespace)
+        logger.info(f"Deleted {plural}/{name}")
+    except ApiException as e:
+        if e.status != 404:
+            logger.warning(f"Failed to delete {plural}/{name}: {e}")
+
+
+def _item_name(item):
+    return item['metadata']['name'] if isinstance(item, dict) else item.metadata.name
+
+
+def _item_finalizers(item):
+    return (item.get('metadata', {}).get('finalizers', []) if isinstance(item, dict)
+            else item.metadata.finalizers or [])
+
+
+def _strip_finalizers(namespace, api_gv, plural, name):
+    group, version = _parse_api_gv(api_gv)
+    if group:
+        try:
+            client.CustomObjectsApi().patch_namespaced_custom_object(
+                group=group, version=version, namespace=namespace, plural=plural, name=name,
+                body={'metadata': {'finalizers': []}})
+        except ApiException:
+            pass
+
+
+def _cleanup_owned_resources(namespace, cr_plural, cr_name):
+    """Delete owned child resources in declared order before the parent migration CR."""
+    for api_gv, plural, label_key in _OWNED_RESOURCE_CLEANUP.get(cr_plural, []):
+        for item in _find_owned(namespace, api_gv, plural, label_key, cr_name):
+            _delete_owned_resource(namespace, api_gv, plural, _item_name(item))
+
+        group, _ = _parse_api_gv(api_gv)
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            remaining = _find_owned(namespace, api_gv, plural, label_key, cr_name)
+            if not remaining:
+                break
+            if group:
+                for item in remaining:
+                    if _item_finalizers(item):
+                        logger.info(f"Stripping finalizers from {plural}/{_item_name(item)}")
+                        _strip_finalizers(namespace, api_gv, plural, _item_name(item))
+            time.sleep(2)
+        else:
+            remaining = _find_owned(namespace, api_gv, plural, label_key, cr_name)
+            if remaining:
+                names = ', '.join(_item_name(i) for i in remaining)
+                logger.warning(f"Timed out waiting for {plural} deletion: {names}")
+
+
+def _mark_deleting(namespace, plural, name):
+    """Set status.phase to Deleting so VAPs block further updates."""
+    try:
+        client.CustomObjectsApi().patch_namespaced_custom_object_status(
+            group=CRD_GROUP, version=CRD_VERSION,
+            namespace=namespace, plural=plural, name=name,
+            body={'status': {'phase': 'Deleting'}})
+    except ApiException:
+        pass
+
+
 def _delete_and_wait(namespace, plural, name):
     """Delete a single CRD and poll until it is gone."""
+    _mark_deleting(namespace, plural, name)
+    _cleanup_owned_resources(namespace, plural, name)
     ok = _delete_crd(namespace, plural, name)
     if ok:
         _wait_until_gone(namespace, plural, [name])
@@ -293,7 +442,97 @@ def _prune_ancestors_of_protected_proxies(resources, include_proxies):
     return filtered, protected_proxy_names
 
 
-def _reset_by_path(ctx, path, namespace, cascade, include_proxies):
+def _find_kafka_pvcs(namespace, cluster_names):
+    """Find PVCs created by Strimzi for the given kafka cluster names."""
+    v1 = client.CoreV1Api()
+    pvcs = []
+    for name in cluster_names:
+        try:
+            result = v1.list_namespaced_persistent_volume_claim(
+                namespace=namespace,
+                label_selector=f"strimzi.io/cluster={name}"
+            )
+            pvcs.extend(result.items)
+        except ApiException:
+            pass
+    return pvcs
+
+
+def _delete_pvcs(pvcs):
+    """Delete a list of PVCs and their released PVs."""
+    v1 = client.CoreV1Api()
+    for pvc in pvcs:
+        ns = pvc.metadata.namespace
+        name = pvc.metadata.name
+        # Track the PV before deleting the PVC
+        pv_name = pvc.spec.volume_name
+        try:
+            v1.delete_namespaced_persistent_volume_claim(name, ns)
+            click.echo(f"  Deleted PVC {name}")
+        except ApiException as e:
+            if e.status != 404:
+                click.echo(f"  Failed to delete PVC {name}: {e}", err=True)
+        # Clean up released PV if reclaim policy is Retain
+        if pv_name:
+            try:
+                pv = v1.read_persistent_volume(pv_name)
+                if pv.status.phase == 'Released' or pv.spec.persistent_volume_reclaim_policy == 'Retain':
+                    v1.delete_persistent_volume(pv_name)
+                    click.echo(f"  Deleted PV {pv_name}")
+            except ApiException:
+                pass
+
+
+def _pvcs_at_risk(namespace, pvcs):
+    """Check if any PVCs will persist — deleteClaim is false or PV reclaim is Retain."""
+    v1 = client.CoreV1Api()
+    custom = client.CustomObjectsApi()
+    # Check if any nodepool has deleteClaim: false
+    try:
+        pools = custom.list_namespaced_custom_object(
+            group='kafka.strimzi.io', version='v1', namespace=namespace, plural='kafkanodepools'
+        ).get('items', [])
+        for pool in pools:
+            storage = pool.get('spec', {}).get('storage', {})
+            if not storage.get('deleteClaim', False):
+                return True
+    except ApiException:
+        pass
+    # Check if any PV has Retain reclaim policy
+    for pvc in pvcs:
+        pv_name = pvc.spec.volume_name
+        if pv_name:
+            try:
+                pv = v1.read_persistent_volume(pv_name)
+                if pv.spec.persistent_volume_reclaim_policy == 'Retain':
+                    return True
+            except ApiException:
+                pass
+    return False
+
+
+def _handle_kafka_storage(namespace, kafka_cluster_names, delete_storage):
+    """Warn about or delete Kafka PVCs during reset."""
+    if not kafka_cluster_names:
+        return
+    pvcs = _find_kafka_pvcs(namespace, kafka_cluster_names)
+    if not pvcs:
+        return
+    if delete_storage:
+        click.echo(f"Deleting {len(pvcs)} Kafka PVC(s)...")
+        _delete_pvcs(pvcs)
+    elif _pvcs_at_risk(namespace, pvcs):
+        pvc_names = ', '.join(p.metadata.name for p in pvcs[:5])
+        if len(pvcs) > 5:
+            pvc_names += f", ... ({len(pvcs)} total)"
+        click.echo(
+            f"\n⚠️  {len(pvcs)} Kafka PVC(s) will persist after reset: {pvc_names}\n"
+            f"   These may cause cluster ID conflicts on redeployment.\n"
+            f"   Use --delete-storage to remove them.\n"
+        )
+
+
+def _reset_by_path(ctx, path, namespace, cascade, include_proxies, delete_storage):
     """Handle reset for a specific resource path/pattern."""
     targets = _resolve_targets(namespace, path)
     if not targets:
@@ -303,6 +542,8 @@ def _reset_by_path(ctx, path, namespace, cascade, include_proxies):
     if targets is None:
         ctx.exit(ExitCode.FAILURE.value)
         return
+    kafka_names = [name for plural, name, _, _ in targets if plural == 'kafkaclusters']
+    _handle_kafka_storage(namespace, kafka_names, delete_storage)
     if not _delete_targets(targets, namespace):
         ctx.exit(ExitCode.FAILURE.value)
 
@@ -313,9 +554,11 @@ def _reset_by_path(ctx, path, namespace, cascade, include_proxies):
 @click.option('--cascade', is_flag=True, default=False, help='Also delete dependent resources')
 @click.option('--include-proxies', is_flag=True, default=False,
               help='Also delete capture proxies (they are protected by default)')
+@click.option('--delete-storage', is_flag=True, default=False,
+              help='Delete Kafka PVCs and orphaned PVs during reset')
 @click.option('--namespace', default='ma')
 @click.pass_context
-def reset_command(ctx, path, reset_all, cascade, include_proxies, namespace):
+def reset_command(ctx, path, reset_all, cascade, include_proxies, delete_storage, namespace):
     """Reset workflow resources by deleting CRDs.
 
     With no arguments, lists migration resources and their status.
@@ -326,7 +569,7 @@ def reset_command(ctx, path, reset_all, cascade, include_proxies, namespace):
         load_k8s_config()
 
         if path is not None:
-            _reset_by_path(ctx, path, namespace, cascade, include_proxies)
+            _reset_by_path(ctx, path, namespace, cascade, include_proxies, delete_storage)
             return
 
         resources = list_migration_resources(namespace)
@@ -346,6 +589,9 @@ def reset_command(ctx, path, reset_all, cascade, include_proxies, namespace):
             proxy_names = ", ".join(sorted(protected_proxy_names))
             click.echo(f"Keeping protected proxies alive: {proxy_names}")
             click.echo("Use --include-proxies to delete them.")
+
+        kafka_names = [name for plural, name, _, _ in delete_targets if plural == 'kafkaclusters']
+        _handle_kafka_storage(namespace, kafka_names, delete_storage)
 
         if delete_targets and not _delete_targets(delete_targets, namespace):
             ctx.exit(ExitCode.FAILURE.value)

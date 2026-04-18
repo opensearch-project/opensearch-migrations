@@ -69,12 +69,14 @@ export class MigrationInitializer {
         const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
         const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
         const crdResources = this.generateCRDResources(workflows, workflowName);
+        const warnings = this.generateWarnings(workflows);
         
         return {
             workflows,
             approvalConfigMaps,
             concurrencyConfigMaps,
-            crdResources
+            crdResources,
+            warnings
         };
     }
 
@@ -137,6 +139,11 @@ export class MigrationInitializer {
         if (enrichScript !== null) {
             const enrichPath = path.join(outputDir, 'enrichWorkflowConfigWithUids.sh');
             await fs.writeFile(enrichPath, enrichScript, { mode: 0o755 });
+        }
+
+        // 4. Write warnings file if any
+        if (bundle.warnings && bundle.warnings.length > 0) {
+            await fs.writeFile(path.join(outputDir, 'warnings.json'), JSON.stringify(bundle.warnings));
         }
     }
 
@@ -201,10 +208,10 @@ export class MigrationInitializer {
                 if (statusPatchCmd) lines.push(`    ${statusPatchCmd}`);
                 lines.push(`    echo "RESULT ${entry.kind} ${entry.name} CREATED"`);
                 lines.push(`  elif grep -q 'AlreadyExists' "$err_file"; then`);
-                lines.push(`    echo "RESULT ${entry.kind} ${entry.name} ALREADY_EXISTS"`);
+                lines.push(`    echo "RESULT ${entry.kind} ${entry.name} ALREADY_EXISTS - reusing existing resource"`);
                 lines.push(`  else`);
                 lines.push(`    cat "$err_file" >&2`);
-                lines.push(`    echo "RESULT ${entry.kind} ${entry.name} FAILED" >&2`);
+                lines.push(`    echo "RESULT ${entry.kind} ${entry.name} FAILED - check kubectl error output above" >&2`);
                 lines.push(`    rm -f "$err_file"`);
                 lines.push(`    exit 1`);
                 lines.push(`  fi`);
@@ -456,6 +463,21 @@ export class MigrationInitializer {
             kind: 'List',
             items
         };
+    }
+
+    private generateWarnings(workflows: WorkflowConfig): string[] {
+        const warnings: string[] = [];
+        for (const cluster of (workflows.kafkaClusters ?? []) as KafkaClusterConfig[]) {
+            const deleteClaim = (cluster as any).config?.nodePoolSpecOverrides?.storage?.deleteClaim;
+            if (deleteClaim === false || deleteClaim === undefined) {
+                warnings.push(
+                    `⚠️  Kafka cluster '${cluster.name}' has deleteClaim: ${deleteClaim ?? 'unset (defaults to false)'}. ` +
+                    `Persistent volumes will not be automatically cleaned up on reset. ` +
+                    `Use 'workflow reset --delete-storage' to avoid cluster ID conflicts on redeployment.`
+                );
+            }
+        }
+        return warnings;
     }
 
     generateApprovalGateCleanupScript(crdResources: { items: any[] }): string | null {

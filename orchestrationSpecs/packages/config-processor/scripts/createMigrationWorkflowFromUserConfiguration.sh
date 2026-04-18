@@ -51,6 +51,12 @@ if [ -x "$TEMP_DIR/enrichWorkflowConfigWithUids.sh" ]; then
 fi
 
 echo "Applying workflow to Kubernetes..."
+
+# Display any initialization warnings
+if [ -f "$TEMP_DIR/warnings.json" ]; then
+    "$NODEJS" -e "JSON.parse(require('fs').readFileSync('$TEMP_DIR/warnings.json','utf8')).forEach(w=>console.log('INIT_WARNING: '+w))" >&2
+fi
+
 cat <<EOF | kubectl create -f -
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow

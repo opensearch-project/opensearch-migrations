@@ -143,6 +143,9 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
             click.echo(f"  Name: {workflow_name}")
             click.echo(f"  Namespace: {namespace}")
 
+            for warning in submit_result.get('warnings', []):
+                click.echo(f"\n{warning}", err=True)
+
             logger.info(f"Workflow {workflow_name} submitted successfully with namespace {namespace}")
 
             if wait:

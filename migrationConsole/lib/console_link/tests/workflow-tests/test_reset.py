@@ -171,8 +171,9 @@ class TestResetCommandDelete:
     @patch('console_link.workflow.commands.reset._delete_targets')
     @patch('console_link.workflow.commands.reset.list_migration_resources')
     @patch('console_link.workflow.commands.reset._find_resource_by_name')
+    @patch('console_link.workflow.commands.reset._handle_kafka_storage')
     def test_delete_kafka_is_not_blocked_by_protected_proxy(
-        self, mock_find, mock_list, mock_delete_targets, _mock_k8s
+        self, _mock_storage, mock_find, mock_list, mock_delete_targets, _mock_k8s
     ):
         mock_find.return_value = ('kafkaclusters', 'kafka', 'Ready', [])
         mock_list.return_value = [('kafkaclusters', 'kafka', 'Ready', [])]
@@ -227,11 +228,12 @@ class TestResetCommandDelete:
 
 
 class TestResetAll:
+    @patch('console_link.workflow.commands.reset._handle_kafka_storage')
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._delete_targets')
     @patch('console_link.workflow.commands.reset.list_migration_resources')
     def test_reset_all_skips_only_proxies(
-        self, mock_list, mock_delete_targets, _mock_k8s
+        self, mock_list, mock_delete_targets, _mock_k8s, _mock_storage
     ):
         mock_list.return_value = [
             ('kafkaclusters', 'kafka', 'Ready', []),
@@ -256,11 +258,12 @@ class TestResetAll:
         assert 'Keeping protected proxies alive: source-proxy' in result.output
         assert 'Use --include-proxies to delete them.' in result.output
 
+    @patch('console_link.workflow.commands.reset._handle_kafka_storage')
     @patch('console_link.workflow.commands.reset.load_k8s_config')
     @patch('console_link.workflow.commands.reset._delete_targets')
     @patch('console_link.workflow.commands.reset.list_migration_resources')
     def test_reset_all_with_include_proxies_deletes_everything(
-        self, mock_list, mock_delete_targets, _mock_k8s
+        self, mock_list, mock_delete_targets, _mock_k8s, _mock_storage
     ):
         resources = [
             ('kafkaclusters', 'kafka', 'Ready', []),

@@ -483,4 +483,42 @@ spec:
         operator: In
         values: ["{{ .Release.Namespace }}"]
 
+# ─────────────────────────────────────────────────────────────
+# Deleting Phase Guard - blocks all updates to resources being torn down
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-deleting-phase-guard-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["kafkaclusters", "capturedtraffics", "captureproxies", "datasnapshots", "snapshotmigrations", "trafficreplays"]
+  validations:
+    - expression: |
+        !has(oldObject.status) ||
+        !has(oldObject.status.phase) ||
+        oldObject.status.phase != 'Deleting'
+      message: "This resource is being deleted. No updates are permitted during teardown."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-deleting-phase-guard-binding
+spec:
+  policyName: {{ .Release.Namespace }}-deleting-phase-guard-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
 {{- end }}
