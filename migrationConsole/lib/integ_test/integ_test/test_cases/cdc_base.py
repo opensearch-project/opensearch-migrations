@@ -24,7 +24,7 @@ KAFKA_CLUSTER_NAME = "default"
 TARGET_LABEL = "target1"
 REPLAYER_LABEL_SELECTOR = "app=replayer"
 PROXY_LABEL_SELECTOR = "migrations/proxy=capture-proxy"
-PROXY_ENDPOINT = "http://capture-proxy:9201"
+PROXY_ENDPOINT = "https://capture-proxy:9201"
 CDC_SOURCE_TARGET_COMBINATIONS = [
     (ElasticsearchV7_X, OpensearchV1_X),
     (ElasticsearchV7_X, OpensearchV2_X),
@@ -112,7 +112,8 @@ def wait_for_replayer_consuming(namespace: str, timeout_seconds: int = 120, inte
 
 def make_proxy_cluster(source_cluster):
     """Create a Cluster pointing at the capture-proxy endpoint, inheriting source auth."""
-    return Cluster(config={**source_cluster.config, "endpoint": PROXY_ENDPOINT})
+    return Cluster(config={**source_cluster.config, "endpoint": PROXY_ENDPOINT,
+                           "allow_insecure": True})
 
 
 def run_generate_data(cluster: str, index_name: str, num_docs: int):

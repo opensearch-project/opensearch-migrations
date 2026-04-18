@@ -326,7 +326,11 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
         secretName: z.string()
             .describe("Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/."),
     }).describe("Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."),
-]).describe("TLS configuration for the capture proxy. Determines how the proxy obtains or provisions its TLS certificate for HTTPS termination.");
+    z.object({
+        mode: z.literal("plaintext")
+            .describe("Explicitly disable TLS. The proxy will serve plaintext HTTP. Use this to opt out of the secure-by-default TLS behavior."),
+    }).describe("Explicitly disable TLS termination on the capture proxy."),
+]).describe("TLS configuration for the capture proxy. When omitted, a self-signed certificate is automatically provisioned via cert-manager. Specify mode 'plaintext' to opt out.");
 
 export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()

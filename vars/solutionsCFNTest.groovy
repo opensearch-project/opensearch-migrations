@@ -10,6 +10,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "sol-integ", description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
+            string(name: 'VERSION', defaultValue: '', description: 'Release version to deploy (e.g. "2.9.0"). When set, checks out the release tag instead of GIT_BRANCH.')
         }
 
         options {
@@ -38,7 +39,20 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
+                    script {
+                        def checkoutBranch = params.VERSION?.trim() ? params.VERSION : params.GIT_BRANCH
+                        echo """
+                            ================================================================
+                            Solutions CFN Test
+                            ================================================================
+                            Git:                    ${params.GIT_REPO_URL} @ ${checkoutBranch}
+                            Stage:                  ${params.STAGE}
+                            Region:                 ${params.REGION}
+                            Version:                ${params.VERSION ?: 'N/A (using GIT_BRANCH)'}
+                            ================================================================
+                        """
+                        checkoutStep(branch: checkoutBranch, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
+                    }
                 }
             }
 

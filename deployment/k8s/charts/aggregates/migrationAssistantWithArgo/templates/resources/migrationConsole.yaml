@@ -24,8 +24,7 @@ rules:
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: ["migrations.opensearch.org"]
     resources: ["approvalgates", "capturedtraffics", "captureproxies", "datasnapshots", "snapshotmigrations", "trafficreplays",
-                "approvalgates/status", "capturedtraffics/status", "captureproxies/status", "datasnapshots/status", "snapshotmigrations/status",
-                "trafficreplays/status"]
+                "approvalgates/status", "capturedtraffics/status", "captureproxies/status", "datasnapshots/status", "snapshotmigrations/status", "trafficreplays/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
 ---
@@ -128,6 +127,8 @@ spec:
       app: migration-console
   template:
     metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: console
       labels:
         app: migration-console
         env: v1
@@ -228,6 +229,14 @@ spec:
                 configMapKeyRef:
                   name: migrations-default-s3-config
                   key: ENDPOINT_HTTP
+                  optional: true
+            {{- end }}
+            {{- if index .Values.conditionalPackageInstalls "cert-manager" }}
+            - name: PROXY_DEFAULT_AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: AWS_REGION
                   optional: true
             {{- end }}
           {{- if .Values.defaultBucketConfiguration.create }}

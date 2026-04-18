@@ -19,6 +19,16 @@ def call(Map config = [:]) {
             sh "git remote set-url origin '${repoUrl}' || git remote add origin '${repoUrl}'"
             sh "git fetch origin '${branch}'"
             sh "git checkout '${commit}'"
+        } else if (branch.startsWith('refs/tags/') || branch ==~ /^\d+\.\d+\.\d+$/) {
+            // Tags cannot be resolved by the Jenkins git step (it only fetches refs/heads/*).
+            // Use git CLI to fetch tags and checkout the tag directly.
+            // Always fetch tags from the canonical repo since forks may not have them.
+            def tag = branch.startsWith('refs/tags/') ? branch.replaceFirst('refs/tags/', '') : branch
+            def canonicalRepo = 'https://github.com/opensearch-project/opensearch-migrations.git'
+            sh "git init"
+            sh "git remote set-url origin '${canonicalRepo}' || git remote add origin '${canonicalRepo}'"
+            sh "git fetch origin --tags"
+            sh "git checkout 'tags/${tag}'"
         } else {
             git branch: branch, url: repoUrl
         }

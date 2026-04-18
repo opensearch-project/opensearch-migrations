@@ -285,8 +285,8 @@ describe('MigrationConfigTransformer validation', () => {
             label: "source1",
             proxy: {
                 name: "proxy1",
-                endpoint: "http://proxy1:9201",
-                allowInsecure: false
+                endpoint: "https://proxy1:9201",
+                allowInsecure: true
             }
         });
     });

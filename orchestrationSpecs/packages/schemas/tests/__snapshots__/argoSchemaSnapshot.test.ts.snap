@@ -440,6 +440,22 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "secretName"
                           ],
                           "description": "Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "plaintext"
+                              ],
+                              "description": "Explicitly disable TLS. The proxy will serve plaintext HTTP. Use this to opt out of the secure-by-default TLS behavior."
+                            }
+                          },
+                          "required": [
+                            "mode"
+                          ],
+                          "description": "Explicitly disable TLS termination on the capture proxy."
                         }
                       ],
                       "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile.",
@@ -2801,6 +2817,22 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "secretName"
                         ],
                         "description": "Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "plaintext"
+                            ],
+                            "description": "Explicitly disable TLS. The proxy will serve plaintext HTTP. Use this to opt out of the secure-by-default TLS behavior."
+                          }
+                        },
+                        "required": [
+                          "mode"
+                        ],
+                        "description": "Explicitly disable TLS termination on the capture proxy."
                       }
                     ],
                     "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile.",
