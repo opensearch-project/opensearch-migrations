@@ -215,7 +215,11 @@ class WorkflowTreeApp(App):
     def action_approve_step(self) -> None:
         node = self.current_node_data
         if node and is_approval_node(node):
-            self.push_screen(ConfirmModal(f"Approve '{node.get('display_name')}'?"),
+            msg = f"Approve '{node.get('display_name')}'?"
+            reason = node.get('denial_reason')
+            if reason:
+                msg += f"\n\n{reason}"
+            self.push_screen(ConfirmModal(msg),
                              lambda confirmed: self._execute_approval(node) if confirmed else None)
 
     def _execute_approval(self, node_data: Dict) -> None:

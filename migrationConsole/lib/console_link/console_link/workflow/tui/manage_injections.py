@@ -131,7 +131,7 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
                 # Only keep what is actually rendered in tree_utils
                 slim_nodes[node_id] = {
                     "id": node_id,
-                    "displayName": clean_display_name(node.get("displayName") or node_id),
+                    "displayName": node.get("displayName") or node_id,
                     # no reason to keep the massive version
                     "phase": node.get("phase"),
                     "type": node.get("type"),
@@ -139,8 +139,10 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
                     "children": node.get("children", []),
                     "startedAt": node.get("startedAt"),
                     "finishedAt": node.get("finishedAt"),
-                    # Capture templateRef so tree_utils can identify approval nodes
+                    # Capture templateRef/templateName so tree_utils can identify approval nodes
                     **({"templateRef": node["templateRef"]} if "templateRef" in node else {}),
+                    **({"templateName": node["templateName"]} if "templateName" in node else {}),
+                    **({"message": node["message"]} if "message" in node else {}),
                     # Only keep inputs/outputs if they contain specific UI keys
                     "inputs": {"parameters": [
                         p for p in node.get("inputs", {}).get("parameters", [])

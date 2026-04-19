@@ -42,7 +42,10 @@ def is_approval_node(node: Dict[str, Any]) -> bool:
     if node.get('is_approval'):
         return True
     tref = node.get('templateRef') or node.get('template_ref')
-    return bool(tref and tref.get('template') == 'waitforapproval')
+    if tref and tref.get('template') == 'waitforapproval':
+        return True
+    tname = node.get('templateName') or node.get('template_name')
+    return tname == 'waitforapproval'
 
 
 def get_node_input_parameter(node: Dict[str, Any], param_name: str) -> Optional[str]:
@@ -90,7 +93,9 @@ def build_nested_workflow_tree(workflow_data: Dict[str, Any]) -> List[Dict[str, 
             'outputs': node.get('outputs', {}),
             'started_at': node.get('startedAt'),
             'finished_at': node.get('finishedAt'),
-            **({'template_ref': node['templateRef']} if 'templateRef' in node else {})
+            **({'template_ref': node['templateRef']} if 'templateRef' in node else {}),
+            **({'template_name': node['templateName']} if 'templateName' in node else {}),
+            **({'message': node['message']} if 'message' in node else {})
         }
         if group_name:
             tree_node['group_name'] = group_name
@@ -182,11 +187,30 @@ def _collapse_retry(node: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _is_retry_group(node: Dict[str, Any]) -> bool:
-    """Check if a node is a *WithRetry Steps node (tryApply/waitForFix/retryLoop pattern)."""
+    """Check if a node is a *WithRetry Steps node (tryApply/waitForFix pattern)."""
     if node.get('type') not in ('Steps',):
         return False
-    child_names = {c.get('display_name', '').split('(')[0] for c in node.get('children', [])}
+    # Children may be direct (tryApply, waitForFix) or wrapped in StepGroups
+    child_names = set()
+    for c in node.get('children', []):
+        name = c.get('display_name', '').split('(')[0]
+        child_names.add(name)
+        if c.get('type') == 'StepGroup':
+            for gc in c.get('children', []):
+                child_names.add(gc.get('display_name', '').split('(')[0])
     return 'tryApply' in child_names and 'waitForFix' in child_names
+
+
+def _extract_denial_reason(message: str) -> Optional[str]:
+    """Extract the human-readable denial reason from a VAP error message."""
+    if not message:
+        return None
+    # Look for "denied request: <reason>" or "message: <reason>"
+    for marker in ('denied request: ', 'message: '):
+        idx = message.find(marker)
+        if idx >= 0:
+            return message[idx + len(marker):].strip().rstrip('.')
+    return None
 
 
 def _collapse_retry_group(node: Dict[str, Any]) -> Dict[str, Any]:
@@ -196,6 +220,10 @@ def _collapse_retry_group(node: Dict[str, Any]) -> Dict[str, Any]:
     for c in children:
         base = c.get('display_name', '').split('(')[0]
         child_map[base] = c
+        # Also look through StepGroup wrappers
+        if c.get('type') == 'StepGroup':
+            for gc in c.get('children', []):
+                child_map[gc.get('display_name', '').split('(')[0]] = gc
 
     try_apply = child_map.get('tryApply')
     wait_for_fix = child_map.get('waitForFix')
@@ -213,6 +241,9 @@ def _collapse_retry_group(node: Dict[str, Any]) -> Dict[str, Any]:
         retry_child_map = {}
         for c in current_retry.get('children', []):
             retry_child_map[c.get('display_name', '').split('(')[0]] = c
+            if c.get('type') == 'StepGroup':
+                for gc in c.get('children', []):
+                    retry_child_map[gc.get('display_name', '').split('(')[0]] = gc
         next_try = retry_child_map.get('tryApply')
         if next_try:
             attempt += 1
@@ -229,10 +260,24 @@ def _collapse_retry_group(node: Dict[str, Any]) -> Dict[str, Any]:
     collapsed['display_name'] = display
     collapsed['children'] = []
 
-    # If tryApply failed and waitForFix is running, show as waiting for approval
+    # If tryApply failed and waitForFix is running, show as waiting for approval.
+    #
+    # The VAP denial message (e.g. "Gated changes detected on TrafficReplay
+    # fields: removeAuthHeader") lives on the tryApply node's 'message' field,
+    # set by the Argo controller when the k8s API rejects the resource update.
+    # We extract the human-readable reason and attach it to the collapsed node
+    # as 'denial_reason' so it can be shown in the tree label (via
+    # _construct_full_label_line) and in the approval confirmation dialog
+    # (via action_approve_step in workflow_manage_app.py).
+    #
+    # The waitForFix node's inputs carry 'resourceName' — the ApprovalGate
+    # CRD name needed to actually execute the approval. We copy those inputs
+    # onto the collapsed node so manage_injections.approve() can find it.
     if final_try.get('phase') == 'Failed' and final_wait and final_wait.get('phase') == 'Running':
         collapsed['phase'] = 'Running'
         collapsed['is_approval'] = True
+        collapsed['inputs'] = final_wait.get('inputs', {})
+        collapsed['denial_reason'] = _extract_denial_reason(final_try.get('message', ''))
 
     return collapsed
 
@@ -429,17 +474,23 @@ def get_step_rich_label(
                 break
 
     full_unformatted_line = _construct_full_label_line(
-        step_name_and_timestamp_str, step_phase, approval, approval_name
+        step_name_and_timestamp_str, step_phase, approval, approval_name,
+        node.get('denial_reason')
     )
     status_suffix = f': {status_output}' if status_output and isinstance(status_output, str) else ''
     return f"[{color}]{symbol} {full_unformatted_line}{status_suffix} [/{color}]"
 
 
-def _construct_full_label_line(step_name_and_timestamp_str, step_phase, is_approval, approval_name=None):
+def _construct_full_label_line(step_name_and_timestamp_str, step_phase, is_approval,
+                               approval_name=None, denial_reason=None):
     if is_approval:
         if step_phase == 'Running':
-            suffix = f" OF '{approval_name}'" if approval_name else ""
-            return f"{step_name_and_timestamp_str} - WAITING FOR APPROVAL{suffix}"
+            parts = [step_name_and_timestamp_str, '- WAITING FOR APPROVAL']
+            if denial_reason:
+                parts.append(f"({denial_reason})")
+            elif approval_name:
+                parts.append(f"OF '{approval_name}'")
+            return ' '.join(parts)
         elif step_phase == 'Succeeded':
             return f"{step_name_and_timestamp_str} (Approved)"
         else:
