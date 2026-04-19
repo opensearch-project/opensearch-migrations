@@ -12,7 +12,7 @@ from ..models.utils import ExitCode, load_k8s_config
 from ..models.workflow_config_store import WorkflowConfigStore
 from ..services.workflow_service import WorkflowService
 from ..services.script_runner import ScriptRunner
-from .argo_utils import workflow_exists, stop_workflow, delete_workflow
+from .argo_utils import workflow_exists, stop_workflow, delete_workflow, wait_until_workflow_deleted
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 
 logger = logging.getLogger(__name__)
@@ -62,6 +62,14 @@ def _remove_existing_workflow(workflow_name, namespace):
         click.echo("  Deleted")
     else:
         click.echo("  Could not delete")
+        return True
+
+    if wait_until_workflow_deleted(namespace, workflow_name):
+        pass
+    else:
+        raise click.ClickException(
+            f"Timed out waiting for workflow '{workflow_name}' to be deleted"
+        )
 
     return True
 
@@ -135,7 +143,10 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
 
         click.echo(f"Submitting workflow to namespace: {namespace}")
         try:
-            submit_result = runner.submit_workflow(config_yaml, [])
+            submit_result = runner.submit_workflow(
+                config_yaml,
+                ["--workflow-name", workflow_name],
+            )
 
             workflow_name = submit_result.get('workflow_name', 'unknown')
 
@@ -160,7 +171,7 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
         except subprocess.CalledProcessError as e:
             click.echo(f"Script failed with exit code {e.returncode}", err=True)
             if e.stderr:
-                logger.info(f"stderr: {e.stderr}")
+                click.echo(e.stderr, err=True)
             ctx.exit(ExitCode.FAILURE.value)
         except Exception as e:
             click.echo(f"Error submitting workflow: {str(e)}", err=True)

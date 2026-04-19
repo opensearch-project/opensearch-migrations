@@ -1,5 +1,6 @@
 """Shared utilities for Argo workflow lifecycle operations via k8s API."""
 
+import time
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
@@ -56,6 +57,16 @@ def delete_workflow(namespace, name):
         return True
     except ApiException as e:
         return e.status == 404
+
+
+def wait_until_workflow_deleted(namespace, name, timeout_seconds=30, interval_seconds=1):
+    """Poll until a workflow is gone, or time out."""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if not workflow_exists(namespace, name):
+            return True
+        time.sleep(interval_seconds)
+    return not workflow_exists(namespace, name)
 
 
 def get_workflow(namespace, name):

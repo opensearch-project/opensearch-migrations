@@ -53,6 +53,8 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         # Check for workflow name pattern from test scripts (test-workflow-<timestamp>)
         assert 'test-workflow-' in result.output
+        assert "--workflow-name" in mock_subprocess.call_args[0][0]
+        assert "migration-workflow" in mock_subprocess.call_args[0][0]
         mock_stop.assert_not_called()
         mock_delete.assert_not_called()
 
@@ -121,6 +123,7 @@ class TestWorkflowCLICommands:
         mock_delete.assert_not_called()
 
     @patch('console_link.workflow.commands.submit.delete_workflow')
+    @patch('console_link.workflow.commands.submit.wait_until_workflow_deleted')
     @patch('console_link.workflow.commands.submit.stop_workflow')
     @patch('console_link.workflow.commands.submit.workflow_exists')
     @patch('console_link.workflow.commands.submit.load_k8s_config')
@@ -133,6 +136,7 @@ class TestWorkflowCLICommands:
         _mock_k8s,
         mock_exists,
         mock_stop,
+        mock_wait_until_deleted,
         mock_delete,
     ):
         """Test submit replaces an existing workflow before resubmitting."""
@@ -143,6 +147,7 @@ class TestWorkflowCLICommands:
         mock_exists.return_value = True
         mock_stop.return_value = True
         mock_delete.return_value = True
+        mock_wait_until_deleted.return_value = True
 
         runner = CliRunner()
 
@@ -166,6 +171,7 @@ class TestWorkflowCLICommands:
         mock_exists.assert_called_once_with('ma', 'migration-workflow')
         mock_stop.assert_called_once_with('ma', 'migration-workflow')
         mock_delete.assert_called_once_with('ma', 'migration-workflow')
+        mock_wait_until_deleted.assert_called_once_with('ma', 'migration-workflow')
 
     @patch('console_link.workflow.commands.status.requests.get')
     @patch('console_link.workflow.commands.status.WorkflowService')
