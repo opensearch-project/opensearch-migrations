@@ -5,10 +5,11 @@
     "phase": "Running",
     "type": "Pod",
     "boundary_id": "retry-group",
-    "inputs": {},
+    "inputs": {"parameters": [{"name": "name", "value": "KafkaNodePool"}]},
     "outputs": {},
     "started_at": "2026-01-01T00:00:01Z",
     "is_approval": true,
+    "denial_reason": null,
     "children": []
   }
 ]

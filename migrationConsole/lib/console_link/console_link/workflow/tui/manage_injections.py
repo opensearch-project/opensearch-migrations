@@ -10,7 +10,6 @@ from typing import Any, Callable, Dict, List, Optional, TypedDict
 
 from console_link.workflow.commands.approve import approve_gate
 from console_link.workflow.services.workflow_service import logger, WorkflowService
-from console_link.workflow.tree_utils import clean_display_name
 
 
 class WorkflowApproveResult(TypedDict):
