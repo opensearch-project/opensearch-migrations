@@ -36,7 +36,7 @@
  */
 
 import type { ASTNode } from '../ast/nodes';
-import type { TransformRuleFn } from './types';
+import type { TransformRuleFn, FieldMappings } from './types';
 import { bareRule } from './rules/bareRule';
 import { boolRule } from './rules/boolRule';
 import { fieldRule } from './rules/fieldRule';
@@ -84,27 +84,14 @@ const rules: Record<string, TransformRuleFn> = {
  *         - passthrough-on-error: returns query_string passthrough + warning
  *         - partial: skips the node, adds a warning, continues translating
  */
-export function transformNode(node: ASTNode): Map<string, any> {
-  /**
-   * GroupNode represents parentheses in Solr syntax, used to override operator
-   * precedence. OpenSearch doesn't have an equivalent concept — precedence is
-   * handled by nesting bool queries. This rule simply unwraps the group and
-   * transforms its child.
-   *
-   * Example:
-   *   Input: GroupNode { child: BoolNode { or: [FieldNode, FieldNode] } }
-   *   Output: Map{"bool" → Map{"should" → [...]}}
-   *
-   * The GroupNode is transparent in the output — it doesn't produce any
-   * OpenSearch DSL structure of its own.
-   */
+export function transformNode(node: ASTNode, fieldMappings?: FieldMappings): Map<string, any> {
   if (node.type === 'group') {
-    return transformNode(node.child);
+    return transformNode(node.child, fieldMappings);
   }
 
   const rule = rules[node.type];
   if (!rule) {
     throw new Error(`No transform rule registered for node type: ${node.type}`);
   }
-  return rule(node, transformNode);
+  return rule(node, (child) => transformNode(child, fieldMappings), fieldMappings);
 }

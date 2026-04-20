@@ -42,6 +42,12 @@ export interface RequestContext {
    * Uses Record (plain object) because GraalVM exposes Java Maps as JS objects via allowMapAccess.
    */
   solrConfig?: Record<string, { defaults?: Record<string, string>; invariants?: Record<string, string>; appends?: Record<string, string> }>;
+  /**
+   * Field name → OpenSearch type mappings for query type selection.
+   * When provided, fieldRule uses term query for keyword fields and match for text fields.
+   * Injected from bindings at init.
+   */
+  fieldMappings?: ReadonlyMap<string, string>;
 }
 
 /** Parsed once from the bundled {request, response}. Shared across all response micro-transforms. */

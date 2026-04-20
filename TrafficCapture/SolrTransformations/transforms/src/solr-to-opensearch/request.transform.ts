@@ -16,11 +16,15 @@ declare const bindings: any;
 const solrConfig = (typeof bindings !== 'undefined' && bindings?.solrConfig) //NOSONAR — typeof required for undeclared closure var
   ? bindings.solrConfig
   : undefined;
+const fieldMappings = (typeof bindings !== 'undefined' && bindings?.fieldMappings) //NOSONAR
+  ? new Map(Object.entries(bindings.fieldMappings))
+  : undefined;
 
 export function transform(msg: JavaMap): JavaMap {
   const ctx = buildRequestContext(msg);
   if (ctx.endpoint === 'unknown') return msg;
   ctx.solrConfig = solrConfig;
+  ctx.fieldMappings = fieldMappings;
   runPipeline(requestRegistry, ctx);
   if (ctx.body.size > 0) {
     let payload = msg.get('payload');

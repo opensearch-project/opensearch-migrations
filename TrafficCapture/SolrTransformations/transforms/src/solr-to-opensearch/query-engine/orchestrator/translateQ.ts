@@ -26,6 +26,7 @@
 
 import { parseSolrQuery } from '../parser/parser';
 import { transformNode } from '../transformer/astToOpenSearch';
+import type { FieldMappings } from '../transformer/types';
 
 export interface TranslateResult {
   /**
@@ -87,6 +88,7 @@ function passthroughDsl(query: string): Map<string, any> {
 export function translateQ(
   params: ReadonlyMap<string, string>,
   mode: TranslationMode = 'fail-fast',
+  fieldMappings?: FieldMappings,
 ): TranslateResult {
   const query = params.get('q') || '*:*';
 
@@ -111,7 +113,7 @@ export function translateQ(
 
   // Stage 2: Transform
   try {
-    const dsl = transformNode(ast);
+    const dsl = transformNode(ast, fieldMappings);
     return { dsl, warnings: [] };
   } catch (err: unknown) {
     // Transform failure — unsupported node type or unexpected error
