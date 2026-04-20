@@ -3,7 +3,7 @@ kind: WorkflowTemplate
 metadata:
   name: cluster-templates
 spec:
-  serviceAccountName: argo-workflow-executor
+  serviceAccountName: argo-test-workflow-executor
   
   templates:
     - name: elasticsearch-1-5-single-node

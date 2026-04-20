@@ -39,4 +39,47 @@ roleRef:
   kind: Role
   name: workflow-test-console-role
   apiGroup: rbac.authorization.k8s.io
+---
+# The test SA also needs the full deployer permissions to stand up source/target
+# clusters, issue certs, etc. Reuse the production workflow-deployer-role rather
+# than duplicating its rules.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workflow-test-deployer-rolebinding
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: argo-test-workflow-executor
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: workflow-deployer-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-test-cert-issuer-manager-binding
+subjects:
+  - kind: ServiceAccount
+    name: argo-test-workflow-executor
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-cert-issuer-manager
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-test-vap-manager-binding
+subjects:
+  - kind: ServiceAccount
+    name: argo-test-workflow-executor
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-vap-manager
+  apiGroup: rbac.authorization.k8s.io
 {{ end }}
