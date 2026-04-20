@@ -6,7 +6,10 @@ from pathlib import Path
 import pytest
 import subprocess
 import re
+from kubernetes import config
 
+
+DEFAULT_WORKFLOW_TEST_KUBE_CONTEXT = "kind-console-link-test"
 
 @pytest.fixture(autouse=True)
 def set_config_processor_dir(monkeypatch):
@@ -86,3 +89,48 @@ def ensure_config_processor_dir():
         node_path = node_match.group(1).strip()
         os.environ["NODEJS"] = node_path
         print(f"NODEJS set to: {node_path}")
+
+
+def get_expected_workflow_test_kube_context():
+    return os.environ.get("WORKFLOW_TEST_KUBE_CONTEXT", DEFAULT_WORKFLOW_TEST_KUBE_CONTEXT)
+
+
+@pytest.fixture(scope="session")
+def required_workflow_test_kube_context():
+    """
+    Require the active kube context to be the dedicated workflow test context.
+
+    These workflow/reset integration tests intentionally run against a pre-created
+    local Kind cluster or the equivalent CI cluster. They should never silently
+    fall back to some unrelated local Kubernetes context.
+    """
+    expected_context = get_expected_workflow_test_kube_context()
+
+    try:
+        contexts, active_context = config.list_kube_config_contexts()
+    except config.ConfigException as exc:
+        pytest.fail(
+            "Unable to load kubeconfig for workflow integration tests. "
+            f"Expected active context {expected_context!r}. Underlying error: {exc}"
+        )
+
+    if not active_context:
+        pytest.fail(
+            "No active kube context is configured. "
+            f"Expected active context {expected_context!r}."
+        )
+
+    active_name = active_context.get("name")
+    if active_name != expected_context:
+        pytest.fail(
+            f"Refusing to run workflow integration tests against kube context {active_name!r}. "
+            f"Expected {expected_context!r}. "
+            "Run the local setup script first or switch contexts explicitly."
+        )
+
+    config.load_kube_config()
+    return {
+        "expected_context": expected_context,
+        "active_context": active_name,
+        "contexts": contexts,
+    }

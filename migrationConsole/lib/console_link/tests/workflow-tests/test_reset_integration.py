@@ -1,15 +1,14 @@
 """
 Integration tests for workflow reset and approve commands using real Kubernetes.
 
-Uses the same k3s/kind cluster infrastructure pattern as test_workflow_integration.py.
-Creates migration CRDs, then tests the full reset and approve CLI flows.
+These tests require the dedicated workflow test kube context and create migration
+CRDs plus namespaced resources inside that pre-created test cluster.
 """
 
 import logging
 import os
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
 import json
@@ -17,9 +16,8 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
-from kubernetes import client, config
+from kubernetes import client
 from kubernetes.client.rest import ApiException
-from testcontainers.k3s import K3SContainer
 
 from console_link.workflow.cli import workflow_cli  # noqa: F401
 from console_link.workflow.commands.approve import approve_gate
@@ -75,51 +73,13 @@ for _kind, _plural, _singular in [
         }
     })
 
-
-def _detect_existing_cluster():
-    if os.environ.get("USE_EXISTING_TEST_K8S") != "1":
-        return False
-    try:
-        config.load_kube_config()
-        client.CoreV1Api().list_namespace(timeout_seconds=5)
-        return True
-    except Exception:
-        return False
-
-
-def _configure_docker_host_for_testcontainers():
-    if os.environ.get("DOCKER_HOST"):
-        return
-
-    for socket_path in [
-        Path.home() / ".docker/run/docker.sock",
-        Path.home() / "Library/Containers/com.docker.docker/Data/docker-cli.sock",
-    ]:
-        if socket_path.exists():
-            os.environ["DOCKER_HOST"] = f"unix://{socket_path}"
-            return
-
-
 @pytest.fixture(scope="session")
-def k8s_cluster():
-    if _detect_existing_cluster():
-        logger.info("Using existing Kubernetes cluster")
-        yield
-    else:
-        logger.info("Starting k3s container...")
-        _configure_docker_host_for_testcontainers()
-        container = K3SContainer(image="rancher/k3s:latest")
-        container.start()
-        kubeconfig = container.config_yaml()
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-            f.write(kubeconfig)
-            kubeconfig_path = f.name
-        os.environ['KUBECONFIG'] = kubeconfig_path
-        config.load_kube_config(config_file=kubeconfig_path)
-        yield
-        container.stop()
-        os.unlink(kubeconfig_path)
-        del os.environ['KUBECONFIG']
+def k8s_cluster(required_workflow_test_kube_context):
+    logger.info(
+        "Using workflow test kube context: %s",
+        required_workflow_test_kube_context["active_context"],
+    )
+    return required_workflow_test_kube_context
 
 
 @pytest.fixture(scope="session")
