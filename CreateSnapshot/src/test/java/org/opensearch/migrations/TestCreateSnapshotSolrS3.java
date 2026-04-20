@@ -711,4 +711,194 @@ public class TestCreateSnapshotSolrS3 {
             }
         }
     }
+
+    // -- S3 helper branch-coverage tests --
+
+    /**
+     * Exercise the "endpoint without scheme" branch of {@link SolrBackupStrategy#buildS3Client}.
+     * Production code prefixes {@code http://} when the endpoint string has no {@code ://}.
+     * LocalStack gives us {@code http://host:port}; we strip the scheme before handing it to
+     * CreateSnapshot so buildS3Client has to re-add it. The rest of the path still runs
+     * end-to-end against the real Solr + LocalStack containers.
+     */
+    @Test
+    void cloudBackup_endpointWithoutScheme_succeeds() throws Exception {
+        String collName = "noscheme_coll";
+        createCollection(collName, 1);
+        indexDocs(collName, 4);
+
+        String subpath = "noscheme-endpoint";
+        String snapshotName = "backup_noscheme";
+        var args = makeArgs("s3://" + BUCKET_NAME + "/" + subpath, snapshotName);
+        args.solrCollections = List.of(collName);
+        // Strip the scheme so buildS3Client has to prefix "http://" itself.
+        String endpoint = localStackEndpoint();
+        int schemeIdx = endpoint.indexOf("://");
+        Assertions.assertTrue(schemeIdx > 0, "LocalStack endpoint should have a scheme");
+        args.s3Endpoint = endpoint.substring(schemeIdx + 3);
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+        try (var s3 = testS3Client()) {
+            Assertions.assertTrue(s3ObjectExists(s3, subpath + "/"),
+                "Parent marker should exist when endpoint passed without scheme");
+            Assertions.assertTrue(s3ObjectExists(s3, subpath + "/" + snapshotName + "/"),
+                "Per-snapshot marker should exist when endpoint passed without scheme");
+            var keys = listS3Keys(s3, subpath + "/" + snapshotName + "/" + collName + "/");
+            Assertions.assertFalse(keys.isEmpty(),
+                "Backup data should land when endpoint has no scheme; keys=" + keys);
+        }
+    }
+
+    /**
+     * Exercise the "both markers already exist" branches of
+     * {@link SolrBackupStrategy#createDirectoryMarkerIfMissing}. Pre-create the parent and
+     * the per-snapshot markers, then run backup. Neither put should happen for those keys.
+     * We verify via content-length: we pre-write 1 byte so a rogue overwrite to
+     * {@code application/x-directory} + 0 bytes would be detectable.
+     */
+    @Test
+    void cloudBackup_bothMarkersPreExist_idempotent() throws Exception {
+        String collName = "preexist_both_coll";
+        createCollection(collName, 1);
+        indexDocs(collName, 2);
+
+        String subpath = "preexist-both";
+        String snapshotName = "backup_preexist_both";
+        var args = makeArgs("s3://" + BUCKET_NAME + "/" + subpath, snapshotName);
+        args.solrCollections = List.of(collName);
+
+        // Pre-write BOTH markers with a 1-byte payload and a different content-type so we can
+        // detect if the production code overwrites them (it shouldn't — skip branch should hit).
+        byte[] sentinel = new byte[] { (byte) 0x42 };
+        try (var s3 = testS3Client()) {
+            s3.putObject(PutObjectRequest.builder()
+                    .bucket(BUCKET_NAME).key(subpath + "/")
+                    .contentType("text/plain").build(),
+                RequestBody.fromBytes(sentinel));
+            s3.putObject(PutObjectRequest.builder()
+                    .bucket(BUCKET_NAME).key(subpath + "/" + snapshotName + "/")
+                    .contentType("text/plain").build(),
+                RequestBody.fromBytes(sentinel));
+        }
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+        try (var s3 = testS3Client()) {
+            var parent = s3.headObject(HeadObjectRequest.builder()
+                .bucket(BUCKET_NAME).key(subpath + "/").build());
+            Assertions.assertEquals(1L, parent.contentLength(),
+                "Pre-existing parent marker must not be overwritten by the skip branch");
+            Assertions.assertEquals("text/plain", parent.contentType(),
+                "Pre-existing parent content-type must be preserved");
+
+            var snap = s3.headObject(HeadObjectRequest.builder()
+                .bucket(BUCKET_NAME).key(subpath + "/" + snapshotName + "/").build());
+            Assertions.assertEquals(1L, snap.contentLength(),
+                "Pre-existing snapshot marker must not be overwritten by the skip branch");
+            Assertions.assertEquals("text/plain", snap.contentType(),
+                "Pre-existing snapshot content-type must be preserved");
+
+            // Backup itself should still succeed — downstream data present.
+            var keys = listS3Keys(s3, subpath + "/" + snapshotName + "/" + collName + "/");
+            Assertions.assertFalse(keys.isEmpty(),
+                "Backup should succeed even when both markers already exist; keys=" + keys);
+        }
+    }
+
+    /**
+     * Contract test: the {@code backup_0.properties} file we assert exists in other tests must
+     * carry specific keys so downstream readers (MetadataMigration / RFS) can parse it. This
+     * fetches the object body and validates minimal required fields. It's the only test in
+     * this class that downloads snapshot content rather than just listing keys.
+     */
+    @Test
+    void cloudBackup_backupPropertiesFileHasExpectedKeys() throws Exception {
+        String collName = "props_coll";
+        createCollection(collName, 1);
+        indexDocs(collName, 2);
+
+        String subpath = "props-test";
+        String snapshotName = "backup_props";
+        var args = makeArgs("s3://" + BUCKET_NAME + "/" + subpath, snapshotName);
+        args.solrCollections = List.of(collName);
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+        String propsKey = subpath + "/" + snapshotName + "/" + collName + "/" + collName
+            + "/backup_0.properties";
+        String body;
+        try (var s3 = testS3Client();
+             var stream = s3.getObject(GetObjectRequest.builder()
+                 .bucket(BUCKET_NAME).key(propsKey).build())) {
+            body = new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        }
+        log.info("backup_0.properties contents for {}:\n{}", collName, body);
+
+        // The properties file is the collection-discovery marker. Downstream SolrBackupLayout
+        // parses it to find `collection` and `indexVersion` (Solr 8 incremental format).
+        Assertions.assertTrue(body.contains("collection=" + collName)
+                || body.contains("collection\\=" + collName),
+            "backup_0.properties must declare collection=" + collName + "; body=" + body);
+        Assertions.assertTrue(body.contains("indexVersion="),
+            "backup_0.properties must declare indexVersion=...; body=" + body);
+        // Solr 8 incremental backups tag the backup with a numeric id used for "backup_<n>.properties"
+        Assertions.assertTrue(body.contains("backupId=") || body.contains("startTime="),
+            "backup_0.properties must include backupId or startTime; body=" + body);
+    }
+
+    /**
+     * Contract test for the downstream reader's directory-listing path: the writer layout must
+     * produce S3 common prefixes that exactly match the collection set when listed with
+     * delimiter="/". This mirrors what the S3Repo / RfsMigrateDocuments code does when it
+     * enumerates collections under a snapshot root.
+     */
+    @Test
+    void cloudBackup_delimiterListingReturnsEachCollectionAsCommonPrefix() throws Exception {
+        String coll1 = "delim_coll_a";
+        String coll2 = "delim_coll_b";
+        String coll3 = "delim_coll_c";
+        createCollection(coll1, 1);
+        createCollection(coll2, 1);
+        createCollection(coll3, 2);
+        indexDocs(coll1, 3);
+        indexDocs(coll2, 4);
+        indexDocs(coll3, 5);
+
+        String subpath = "delim-listing";
+        String snapshotName = "backup_delim";
+        var args = makeArgs("s3://" + BUCKET_NAME + "/" + subpath, snapshotName);
+        args.solrCollections = List.of(coll1, coll2, coll3);
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+        String snapRoot = subpath + "/" + snapshotName + "/";
+        try (var s3 = testS3Client()) {
+            ListObjectsV2Response resp = s3.listObjectsV2(ListObjectsV2Request.builder()
+                .bucket(BUCKET_NAME)
+                .prefix(snapRoot)
+                .delimiter("/")
+                .build());
+            var commonPrefixes = resp.commonPrefixes().stream()
+                .map(p -> p.prefix())
+                .toList();
+            log.info("Common prefixes under '{}': {}", snapRoot, commonPrefixes);
+
+            // Each collection should appear exactly once as a child "directory" of the snapshot.
+            for (String coll : List.of(coll1, coll2, coll3)) {
+                String expected = snapRoot + coll + "/";
+                Assertions.assertTrue(commonPrefixes.contains(expected),
+                    "Delimiter listing must expose collection '" + coll
+                        + "' as common prefix '" + expected + "'; got=" + commonPrefixes);
+            }
+            // No extra top-level siblings — only the three collections.
+            Assertions.assertEquals(3, commonPrefixes.size(),
+                "Snapshot root should have exactly one common prefix per collection; got="
+                    + commonPrefixes);
+        }
+    }
 }
