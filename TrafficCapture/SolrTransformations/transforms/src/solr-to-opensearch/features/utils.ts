@@ -68,6 +68,8 @@ export interface DateGapInterval {
   type: 'calendar_interval' | 'fixed_interval';
   /** The interval value (e.g. "1M", "5m", "720h"). */
   value: string;
+  /** Set when a calendar unit was approximated as a fixed interval. */
+  approximation?: 'single' | 'compound';
 }
 
 /** Exact number of seconds in one fixed-duration Solr date math unit. */
@@ -146,7 +148,7 @@ function convertSimpleDateGap(gap: string, count: number, solrUnit: string): Dat
   console.warn(
     `[solr-date-gap] Solr gap "${gap}" approximated as fixed_interval "${value}" — bucket boundaries may not align with calendar ${solrUnit.toLowerCase()} boundaries.`,
   );
-  return { type: 'fixed_interval', value };
+  return { type: 'fixed_interval', value, approximation: 'single' };
 }
 
 /**
@@ -194,7 +196,7 @@ function convertCompoundDateGap(gap: string): DateGapInterval {
   console.warn(
     `[solr-date-gap] Compound Solr gap "${gap}" approximated as fixed_interval "${value}" — bucket boundaries may not align with calendar boundaries.`,
   );
-  return { type: 'fixed_interval', value };
+  return { type: 'fixed_interval', value, approximation: 'compound' };
 }
 
 // endregion
