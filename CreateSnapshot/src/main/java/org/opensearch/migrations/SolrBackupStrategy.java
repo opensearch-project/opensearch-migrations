@@ -202,7 +202,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
      * <p>This uses the SDK S3 client directly (not Solr's built-in client) so we can
      * apply the custom endpoint (e.g. localstack) and path-style access when needed.
      */
-    /* package */ void ensureS3LocationExists(String s3RepoUri, String snapshotName, String region, String endpoint) {
+    private void ensureS3LocationExists(String s3RepoUri, String snapshotName, String region, String endpoint) {
         var repoUri = new S3Uri(s3RepoUri);
         var parentKey = repoUri.key;
         var snapshotKey = (parentKey == null || parentKey.isEmpty())
@@ -228,7 +228,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         }
     }
 
-    /* package */ static S3Client buildS3Client(String region, String endpoint) {
+    private static S3Client buildS3Client(String region, String endpoint) {
         var builder = S3Client.builder().region(Region.of(region));
         if (endpoint != null && !endpoint.isEmpty()) {
             var endpointUri = endpoint.contains("://") ? endpoint : "http://" + endpoint;
@@ -239,7 +239,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         return builder.build();
     }
 
-    /* package */ void createDirectoryMarkerIfMissing(S3Client s3Client, String bucket, String dirKey) {
+    private void createDirectoryMarkerIfMissing(S3Client s3Client, String bucket, String dirKey) {
         if (s3DirectoryMarkerExists(s3Client, bucket, dirKey)) {
             log.info("S3 directory marker already exists");
             return;
@@ -254,7 +254,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         log.info("Created S3 directory marker: s3://{}/{}", bucket, dirKey);
     }
 
-    /* package */ boolean s3DirectoryMarkerExists(S3Client s3Client, String bucket, String key) {
+    private boolean s3DirectoryMarkerExists(S3Client s3Client, String bucket, String key) {
         try {
             s3Client.headObject(HeadObjectRequest.builder()
                 .bucket(bucket)
@@ -282,7 +282,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
      * Solr node. In containerized/remote setups the customer must ensure the path exists
      * inside the Solr container.
      */
-    /* package */ void ensureFileSystemLocationExists(String fileSystemRepoPath, String snapshotName) {
+    private void ensureFileSystemLocationExists(String fileSystemRepoPath, String snapshotName) {
         try {
             var snapshotDir = java.nio.file.Paths.get(fileSystemRepoPath, snapshotName);
             log.info("Ensuring filesystem backup directory: {}", snapshotDir);

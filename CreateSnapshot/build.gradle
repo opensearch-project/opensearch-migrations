@@ -19,6 +19,7 @@ dependencies {
     testImplementation testFixtures(project(":testHelperFixtures"))
     testImplementation testFixtures(project(":SolrReader"))
     testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.testcontainers.localstack
     testImplementation libs.hamcrest
     testImplementation libs.netty.all
 }
