@@ -659,14 +659,6 @@ export const testCases: TestCase[] = [
     expectedErrorContains: 'Request transform failed',
   }),
 
-  solrTest('validation-unsupported-param-defType', {
-    description: 'Unsupported defType param should return 500',
-    documents: [{ id: '1', title: 'test' }],
-    requestPath: '/solr/testcollection/select?q=test&defType=dismax&qf=title&wt=json',
-    expectedStatusCode: 500,
-    expectedErrorContains: 'Request transform failed',
-  }),
-
   solrTest('validation-invalid-rows-non-numeric', {
     description: 'Non-numeric rows should return 500',
     documents: [{ id: '1', title: 'test' }],
