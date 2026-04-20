@@ -122,6 +122,8 @@ describe('json-facets MicroTransform', () => {
         collection: 'testcollection',
         params: new URLSearchParams(),
         body: new Map() as unknown as JavaMap,
+        emitMetric: () => {},
+        _metrics: new Map(),
       };
       expect(request.match!(ctx)).toBe(false);
     });
@@ -929,6 +931,8 @@ describe('edge cases and warning paths', () => {
       collection: 'testcollection',
       params: new URLSearchParams(),
       body,
+      emitMetric: () => {},
+      _metrics: new Map(),
     };
     request.apply(ctx);
     const agg = ctx.body.get('aggs').get(FACET_NAME);
@@ -944,6 +948,8 @@ describe('edge cases and warning paths', () => {
       collection: 'testcollection',
       params: new URLSearchParams(),
       body,
+      emitMetric: () => {},
+      _metrics: new Map(),
     };
     request.apply(ctx);
     expect(ctx.body.has('aggs')).toBe(false);
@@ -1228,5 +1234,68 @@ describe('nested facets (sub-facets)', () => {
       expect(subAggs.get('brands').get('terms').get('field')).toBe('brand');
       expect(subAggs.get('brands').get('terms').get('size')).toBe(3);
     });
+  });
+});
+
+function ctxWithSpy(obj: Record<string, any>): { ctx: RequestContext; spy: ReturnType<typeof vi.fn> } {
+  const def = new Map(Object.entries(obj)) as unknown as JavaMap;
+  const jsonFacet = new Map([[FACET_NAME, def]]) as unknown as JavaMap;
+  const body = new Map([['json.facet', jsonFacet]]) as unknown as JavaMap;
+  const spy = vi.fn();
+  const ctx: RequestContext = {
+    msg: new Map() as unknown as JavaMap,
+    endpoint: 'select',
+    collection: 'testcollection',
+    params: new URLSearchParams(),
+    body,
+    emitMetric: spy,
+    _metrics: new Map(),
+  };
+  return { ctx, spy };
+}
+
+describe('limitation metrics emission', () => {
+
+  it('should emit terms_offset when offset > 0', () => {
+    const { ctx, spy } = ctxWithSpy({ type: 'terms', field: 'color', offset: 5 });
+    request.apply(ctx);
+    expect(spy).toHaveBeenCalledWith('terms_offset');
+  });
+
+  it('should not emit terms_offset when offset is 0', () => {
+    const { ctx, spy } = ctxWithSpy({ type: 'terms', field: 'color', offset: 0 });
+    request.apply(ctx);
+    expect(spy).not.toHaveBeenCalledWith('terms_offset');
+  });
+
+  it('should emit date_range_gap for approximated single-unit gap', () => {
+    const { ctx, spy } = ctxWithSpy({ type: 'range', field: 'date', start: '2020-01-01T00:00:00Z', end: '2021-01-01T00:00:00Z', gap: '+2MONTHS' });
+    request.apply(ctx);
+    expect(spy).toHaveBeenCalledWith('date_range_gap');
+  });
+
+  it('should emit date_range_gap_compound for compound gap', () => {
+    const { ctx, spy } = ctxWithSpy({ type: 'range', field: 'date', start: '2020-01-01T00:00:00Z', end: '2021-01-01T00:00:00Z', gap: '+1MONTH+2DAYS' });
+    request.apply(ctx);
+    expect(spy).toHaveBeenCalledWith('date_range_gap_compound');
+  });
+
+  it('should not emit date_range_gap for exact calendar_interval', () => {
+    const { ctx, spy } = ctxWithSpy({ type: 'range', field: 'date', start: '2020-01-01T00:00:00Z', end: '2021-01-01T00:00:00Z', gap: '+1MONTH' });
+    request.apply(ctx);
+    expect(spy).not.toHaveBeenCalledWith('date_range_gap');
+    expect(spy).not.toHaveBeenCalledWith('date_range_gap_compound');
+  });
+
+  it('should emit range_boundary for non-standard bracket semantics', () => {
+    const { ctx, spy } = ctxWithSpy({ type: 'range', field: 'price', ranges: ['(10,20]'] });
+    request.apply(ctx);
+    expect(spy).toHaveBeenCalledWith('range_boundary');
+  });
+
+  it('should not emit range_boundary for standard [from,to) brackets', () => {
+    const { ctx, spy } = ctxWithSpy({ type: 'range', field: 'price', ranges: ['[10,20)'] });
+    request.apply(ctx);
+    expect(spy).not.toHaveBeenCalledWith('range_boundary');
   });
 });
