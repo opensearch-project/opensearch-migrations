@@ -1,5 +1,6 @@
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "cdc-only"
+    def gitBranchDefault = config.gitBranchDefault ?: 'main'
     def jobName = config.jobName ?: "eks-cdc-integ-test"
     def defaultTestIds = config.defaultTestIds ?: "0030"
     def tlsMode = config.tlsMode ?: "none"
@@ -13,8 +14,8 @@ def call(Map config = [:]) {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         parameters {
-            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/jugal-chauhan/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'cdc-full-e2e-test', description: 'Git branch to use for repository')
+            string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
+            string(name: 'GIT_BRANCH', defaultValue: gitBranchDefault, description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'TEST_IDS', defaultValue: "${defaultTestIds}", description: 'Comma-separated test IDs to run (e.g. 0030)')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
@@ -71,7 +72,10 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout & Print Params') {
                 steps {
-                    script { env.maStageName = "${params.STAGE}-${currentBuild.number}" }
+                    script {
+                        def pool = jobName.startsWith("main-") ? "m" : jobName.startsWith("release-") ? "r" : "p"
+                        env.maStageName = "${params.STAGE ?: defaultStageId}-${pool}${currentBuild.number}"
+                    }
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     echo """
     ================================================================
@@ -95,18 +99,15 @@ def call(Map config = [:]) {
 
             stage('Test Caller Identity') {
                 steps {
-                    script {
-                        sh 'aws sts get-caller-identity'
-                    }
+                    sh 'aws sts get-caller-identity'
                 }
             }
 
             stage('Build') {
+                when { expression { !params.USE_RELEASE_BOOTSTRAP && (params.BUILD_IMAGES || params.BUILD_CHART_AND_DASHBOARDS) } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
-                        script {
-                            sh './gradlew clean build -x test --no-daemon --stacktrace'
-                        }
+                        sh './gradlew clean build -x test --no-daemon --stacktrace'
                     }
                 }
             }
@@ -126,7 +127,8 @@ def call(Map config = [:]) {
                                 buildImages: params.BUILD_IMAGES,
                                 buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
                                 skipTestImages: true,
-                                version: params.VERSION
+                                version: params.VERSION,
+                                useGeneralNodePool: true
                             )
 
                             parallel(
@@ -237,10 +239,10 @@ def call(Map config = [:]) {
                         def maStackName = env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
 
                         withMigrationsTestAccount(region: region, duration: 4500) { accountId ->
-                            if (env.eksClusterName) {
-                                sh "mkdir -p libraries/testAutomation/logs"
-                                archiveArtifacts artifacts: 'libraries/testAutomation/logs/**', allowEmptyArchive: true
+                            sh "mkdir -p libraries/testAutomation/logs"
+                            archiveArtifacts artifacts: 'libraries/testAutomation/logs/**', allowEmptyArchive: true
 
+                            if (env.eksClusterName) {
                                 cdcCleanupStep(kubeContext: env.eksKubeContext)
                                 eksCleanupStep(
                                     stackName: maStackName,
