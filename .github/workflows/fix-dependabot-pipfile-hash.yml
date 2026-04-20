@@ -1,0 +1,99 @@
+---
+name: Fix Dependabot Pipfile.lock hash
+
+# Dependabot generates Pipfile.lock hashes using plette's native method,
+# but our CI uses pipenv 2026.5.0 which computes hashes using PEP 503
+# canonicalized package names. This workflow detects the mismatch and
+# pushes a fixup commit so CI passes.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '**/Pipfile.lock'
+
+permissions:
+  contents: write
+
+jobs:
+  fix-pipfile-hash:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Find and fix Pipfile.lock hashes
+        id: fix-hashes
+        shell: python3 {0}
+        run: |
+          import hashlib, json, os, re, tomllib
+          from pathlib import Path
+
+          def canonicalize_name(name):
+              return re.sub(r"[-_.]+", "-", name).lower()
+
+          def normalize_section(section):
+              return {canonicalize_name(k): v for k, v in section.items()}
+
+          def compute_pipenv_hash(pipfile_path):
+              with open(pipfile_path, "rb") as f:
+                  pf = tomllib.load(f)
+              data = {
+                  "_meta": {
+                      "sources": pf.get("source", []),
+                      "requires": pf.get("requires", {}),
+                  },
+                  "default": normalize_section(pf.get("packages", {})),
+                  "develop": normalize_section(pf.get("dev-packages", {})),
+              }
+              content = json.dumps(data, sort_keys=True, separators=(",", ":"))
+              return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+          fixed = []
+          for lockfile in sorted(Path(".").rglob("Pipfile.lock")):
+              pipfile = lockfile.parent / "Pipfile"
+              if not pipfile.exists():
+                  continue
+
+              correct_hash = compute_pipenv_hash(pipfile)
+
+              with open(lockfile) as f:
+                  lock_data = json.load(f)
+              current_hash = lock_data["_meta"]["hash"]["sha256"]
+
+              if current_hash != correct_hash:
+                  # Surgical replacement to preserve file formatting
+                  text = lockfile.read_text()
+                  text = text.replace(current_hash, correct_hash, 1)
+                  lockfile.write_text(text)
+                  fixed.append(str(lockfile))
+                  print(f"Fixed {lockfile}: {current_hash[:12]}... -> {correct_hash[:12]}...")
+              else:
+                  print(f"OK    {lockfile}: hash already correct")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"fixed={'true' if fixed else 'false'}\n")
+
+      - name: Commit and push hash fix
+        if: steps.fix-hashes.outputs.fixed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -u '*.lock'
+          git commit -m "Fix Pipfile.lock _meta.hash for pipenv compatibility
+
+          Dependabot generates hashes using plette's native method, but CI
+          uses pipenv 2026.5.0 which applies PEP 503 name canonicalization
+          before hashing. This commit corrects the hash to match.
+
+          Signed-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          git push

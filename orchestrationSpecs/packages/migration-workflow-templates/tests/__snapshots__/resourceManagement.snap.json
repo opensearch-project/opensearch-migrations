@@ -94,8 +94,7 @@
         "resource": {
           "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
           "action": "get",
-          "successCondition": "{{='status.listeners, metadata.annotations.migration-configChecksum == '+inputs.parameters.configChecksum}}",
-          "failureCondition": "status.conditions.0.type == NotReady"
+          "successCondition": "{{='status.listeners, metadata.annotations.migration-configChecksum == '+inputs.parameters.configChecksum}}"
         },
         "retryStrategy": {
           "limit": "6",

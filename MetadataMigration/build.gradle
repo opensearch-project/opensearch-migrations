@@ -19,6 +19,7 @@ dependencies {
     implementation libs.jackson.databind
 
     testImplementation testFixtures(project(':RFS'))
+    testImplementation testFixtures(project(':SolrReader'))
     testImplementation testFixtures(project(':testHelperFixtures'))
     testImplementation project(":CreateSnapshot")
     testImplementation libs.log4j.slf4j2.impl

@@ -7,13 +7,14 @@ def call(Map config = [:]) {
     def sourceClusterType = config.sourceClusterType ?: ""
     def targetClusterType = config.targetClusterType ?: ""
     def testIds = config.testIds ?: "0001,0002"
+    def gitBranchDefault = config.gitBranchDefault ?: 'main'
     def clusterContextFilePath = "tmp/cluster-context-integ-${currentBuild.number}.json"
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_BRANCH', defaultValue: gitBranchDefault, description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             choice(
@@ -129,7 +130,8 @@ def call(Map config = [:]) {
                                 buildImages: params.BUILD_IMAGES,
                                 buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
                                 skipTestImages: true,
-                                version: params.VERSION
+                                version: params.VERSION,
+                                useGeneralNodePool: true
                             )
 
                             parallel(

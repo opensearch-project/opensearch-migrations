@@ -144,6 +144,7 @@ function resolveDefaultFields(node: ASTNode, df: string): void {
       break;
     case 'boost':
     case 'group':
+    case 'filter':
       resolveDefaultFields(node.child, df);
       break;
     case 'matchAll':
@@ -189,6 +190,7 @@ function applyDefaultOperator(node: ASTNode): void {
     }
     case 'boost':
     case 'group':
+    case 'filter':
       applyDefaultOperator(node.child);
       break;
     case 'bare':

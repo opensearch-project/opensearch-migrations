@@ -10,6 +10,7 @@ import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import shadow.lucene9.org.apache.lucene.index.DirectoryReader;
 import shadow.lucene9.org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
+import shadow.lucene9.org.apache.lucene.store.Directory;
 import shadow.lucene9.org.apache.lucene.store.FSDirectory;
 
 @AllArgsConstructor
@@ -22,16 +23,28 @@ public class IndexReader9 implements LuceneIndexReader {
 
     public LuceneDirectoryReader getReader(String segmentsFileName) throws IOException {
         try (var directory = FSDirectory.open(indexDirectoryPath)) {
-            var commits = DirectoryReader.listCommits(directory);
-            var relevantCommit = commits.stream()
-                .filter(commit -> segmentsFileName.equals(commit.getSegmentsFileName()))
-                .findAny()
-                .orElseThrow(() -> new IOException("No such commit with segments file: " + segmentsFileName));
-            var reader = DirectoryReader.open(relevantCommit, 0, null);
-            if (softDeletesPossible) {
-                reader = new SoftDeletesDirectoryReaderWrapper(reader, softDeletesField);
-            }
-            return new DirectoryReader9(reader, indexDirectoryPath);
+            return openReader(directory, segmentsFileName);
         }
+    }
+
+    /**
+     * Opens a reader using a pre-built Directory. Use this with {@link MappedDirectory}
+     * to read Solr backups where files have UUID names.
+     */
+    public LuceneDirectoryReader getReader(Directory directory, String segmentsFileName) throws IOException {
+        return openReader(directory, segmentsFileName);
+    }
+
+    private LuceneDirectoryReader openReader(Directory directory, String segmentsFileName) throws IOException {
+        var commits = DirectoryReader.listCommits(directory);
+        var relevantCommit = commits.stream()
+            .filter(commit -> segmentsFileName.equals(commit.getSegmentsFileName()))
+            .findAny()
+            .orElseThrow(() -> new IOException("No such commit with segments file: " + segmentsFileName));
+        var reader = DirectoryReader.open(relevantCommit, 0, null);
+        if (softDeletesPossible) {
+            reader = new SoftDeletesDirectoryReaderWrapper(reader, softDeletesField);
+        }
+        return new DirectoryReader9(reader, indexDirectoryPath);
     }
 }

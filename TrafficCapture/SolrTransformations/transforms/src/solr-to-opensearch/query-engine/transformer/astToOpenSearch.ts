@@ -40,6 +40,7 @@ import type { TransformRuleFn } from './types';
 import { bareRule } from './rules/bareRule';
 import { boolRule } from './rules/boolRule';
 import { fieldRule } from './rules/fieldRule';
+import { filterRule } from './rules/filterRule';
 import { matchAllRule } from './rules/matchAllRule';
 import { phraseRule } from './rules/phraseRule';
 import { boostRule } from './rules/boostRule';
@@ -61,6 +62,7 @@ const rules: Record<string, TransformRuleFn> = {
   bare: bareRule,
   bool: boolRule,
   field: fieldRule,
+  filter: filterRule,
   matchAll: matchAllRule,
   phrase: phraseRule,
   range: rangeRule,

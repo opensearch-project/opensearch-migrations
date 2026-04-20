@@ -14,6 +14,7 @@ import java.util.Set;
 
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.shim.netty.TransformException;
+import org.opensearch.migrations.transform.shim.reporting.ReportingSink;
 import org.opensearch.migrations.transform.shim.validation.DocCountValidator;
 import org.opensearch.migrations.transform.shim.validation.FieldIgnoringEquality;
 import org.opensearch.migrations.transform.shim.validation.Target;
@@ -43,6 +44,9 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 /**
  * Integration tests for the multi-target ShimProxy.
@@ -331,6 +335,35 @@ class ShimProxyTest {
             response.headers().set(HttpHeaderNames.CONNECTION, "close");
             ctx.writeAndFlush(response);
         }
+    }
+
+    // --- ReportingSink lifecycle ---
+
+    @Test
+    void stop_closesReportingSink() throws Exception {
+        var mockSink = mock(ReportingSink.class);
+        var targets = Map.of("a", new Target("a", URI.create("http://localhost:" + backendPortA)));
+        proxy = new ShimProxy(proxyPort, targets, "a", null, List.of(),
+            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH,
+            null, null, mockSink);
+        proxy.start();
+        proxy.stop();
+        proxy = null;
+        verify(mockSink).close();
+    }
+
+    @Test
+    void stop_handlesReportingSinkCloseException() throws Exception {
+        var mockSink = mock(ReportingSink.class);
+        doThrow(new RuntimeException("boom")).when(mockSink).close();
+        var targets = Map.of("a", new Target("a", URI.create("http://localhost:" + backendPortA)));
+        proxy = new ShimProxy(proxyPort, targets, "a", null, List.of(),
+            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH,
+            null, null, mockSink);
+        proxy.start();
+        proxy.stop();
+        proxy = null;
+        verify(mockSink).close();
     }
 
     // --- Helpers ---
