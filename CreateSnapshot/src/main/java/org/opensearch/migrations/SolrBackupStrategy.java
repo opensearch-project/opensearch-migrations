@@ -204,18 +204,15 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
      */
     private void ensureS3LocationExists(String s3RepoUri, String snapshotName, String region, String endpoint) {
         var repoUri = new S3Uri(s3RepoUri);
-        var parentKey = repoUri.key;
-        var snapshotKey = (parentKey == null || parentKey.isEmpty())
-            ? snapshotName + "/"
-            : (parentKey.endsWith("/") ? parentKey : parentKey + "/") + snapshotName + "/";
+        var parentPrefix = computeParentPrefix(repoUri.key);
+        var snapshotKey = parentPrefix + snapshotName + "/";
 
         try (var s3Client = buildS3Client(region, endpoint)) {
             // Create the parent prefix marker only when the URI has a subpath. Bucket root
             // needs no marker (HeadObject on "" is a no-op).
-            if (parentKey != null && !parentKey.isEmpty()) {
-                var parentDirKey = parentKey.endsWith("/") ? parentKey : parentKey + "/";
-                log.info("Ensuring S3 parent directory marker: s3://{}/{}", repoUri.bucketName, parentDirKey);
-                createDirectoryMarkerIfMissing(s3Client, repoUri.bucketName, parentDirKey);
+            if (!parentPrefix.isEmpty()) {
+                log.info("Ensuring S3 parent directory marker: s3://{}/{}", repoUri.bucketName, parentPrefix);
+                createDirectoryMarkerIfMissing(s3Client, repoUri.bucketName, parentPrefix);
             }
             // Always create the per-snapshot directory marker — Solr 8's S3BackupRepository
             // HeadObject-checks this exact path when backup `location` includes the snapshot name.
@@ -226,6 +223,22 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
                 + "backup may still succeed if Solr's S3BackupRepository creates them implicitly.",
                 repoUri.bucketName, snapshotKey, e.getMessage());
         }
+    }
+
+    /**
+     * Normalizes an S3 key prefix so callers can safely concatenate a suffix with "/" separators.
+     * Returns an empty string for null/empty input (bucket root) and ensures a trailing slash
+     * otherwise. Extracted from {@link #ensureS3LocationExists} to keep the caller clear of
+     * nested ternary logic that Sonar flags as a readability issue.
+     */
+    static String computeParentPrefix(String parentKey) {
+        if (parentKey == null || parentKey.isEmpty()) {
+            return "";
+        }
+        if (parentKey.endsWith("/")) {
+            return parentKey;
+        }
+        return parentKey + "/";
     }
 
     private static S3Client buildS3Client(String region, String endpoint) {
