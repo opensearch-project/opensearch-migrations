@@ -1,69 +1,69 @@
 /**
- * Transformation rule for FieldNode → OpenSearch `match` or `exists` query.
+ * Transformation rule for FieldNode → OpenSearch query.
  *
- * Maps Solr's field:value syntax to OpenSearch's match query.
- * Special case: field:* (existence search) maps to exists query.
+ * Maps Solr's field:value syntax to the appropriate OpenSearch query type:
+ *   - field:* (existence) → exists query
+ *   - field:roam~ / field:roam~2 (fuzzy) → fuzzy query
+ *   - field:te?t / field:test* (wildcard) → wildcard query
+ *   - field:value (plain) → match query
  *
- * We use `match` instead of `term` because Solr's standard query parser
+ * We use `match` for plain values because Solr's standard query parser
  * analyzes field values at query time, matching OpenSearch's match behavior.
- * Using `term` would require exact matches against the indexed tokens,
- * which could fail for analyzed fields (e.g., case differences).
  *
- * Output uses the expanded match query form with nested field object:
- *   `{"match": {"field": {"query": "value"}}}`
- * This allows boostRule to add boost inside the field object:
- *   `{"match": {"field": {"query": "value", "boost": 2}}}`
+ * All output uses the expanded form with nested field object to support
+ * boost injection by boostRule:
+ *   {"queryType": {"field": {"param": "value"}}}
  *
  * Examples:
- *   `title:java` → Map{"match" → Map{"title" → Map{"query" → "java"}}}
- *   `title:*` → Map{"exists" → Map{"field" → "title"}}
- *
- * Unsupported (throws error):
- *   - Wildcards (te?t, tes*) - throws error
- *   - Fuzzy searches (roam~, roam~1) - throws error
- *
- * Note: Boosts are handled separately by BoostNode.
+ *   `title:java`   → Map{"match" → Map{"title" → Map{"query" → "java"}}}
+ *   `title:*`      → Map{"exists" → Map{"field" → "title"}}
+ *   `title:te?t`   → Map{"wildcard" → Map{"title" → Map{"value" → "te?t"}}}
+ *   `title:test*`  → Map{"wildcard" → Map{"title" → Map{"value" → "test*"}}}
+ *   `title:roam~`  → Map{"fuzzy" → Map{"title" → Map{"value" → "roam"}}}
+ *   `title:roam~2` → Map{"fuzzy" → Map{"title" → Map{"value" → "roam", "fuzziness" → 2}}}
  */
 
 import type { ASTNode } from '../../ast/nodes';
 import type { TransformRuleFn } from '../types';
 
-/** Regex to detect wildcard patterns (contains * or ?) */
+/** Detects wildcard patterns: contains * or ? (but not sole *) */
 const WILDCARD_PATTERN = /[*?]/;
 
-/** Regex to detect fuzzy search patterns (term~ or term~N at end) */
-const FUZZY_PATTERN = /~\d?$/;
+/** Detects fuzzy search: term~ or term~N at end of value */
+const FUZZY_PATTERN = /^(.+?)~(\d?)$/;
 
 export const fieldRule: TransformRuleFn = (
   node: ASTNode,
-  // Field is a leaf node — transformChild not used
   _transformChild,
 ): Map<string, any> => {
   const { field, value } = node;
 
-  // Existence search (field:*) → exists query
-  // TODO: Add support for fuzzy queries
+  // Existence search: field:* → exists query
   if (value === '*') {
     return new Map([['exists', new Map([['field', field]])]]);
   }
 
-  // Detect unsupported fuzzy patterns (check before wildcard since ~ is more specific)
-  // TODO: Add support for wildcard queries
-  if (FUZZY_PATTERN.test(value)) {
-    const msg = `[fieldRule] Fuzzy queries aren't supported yet. Query: ${field}:${value}`;
-    console.error(msg);
-    throw new Error(msg);
+  // Fuzzy search: field:roam~ or field:roam~2 → fuzzy query
+  // Check fuzzy before wildcard since ~ is more specific
+  const fuzzyMatch = FUZZY_PATTERN.exec(value);
+  if (fuzzyMatch) {
+    const term = fuzzyMatch[1];
+    const distance = fuzzyMatch[2];
+    const fuzzyParams = new Map<string, any>([['value', term]]);
+    if (distance !== '') {
+      const fuzziness = Number.parseInt(distance, 10);
+      // Both Solr and OpenSearch only support fuzziness 0, 1, or 2.
+      // Clamp to 2 to match Solr's behavior (Solr silently caps at 2).
+      fuzzyParams.set('fuzziness', Math.min(fuzziness, 2));
+    }
+    return new Map([['fuzzy', new Map([[field, fuzzyParams]])]]);
   }
 
-  // Detect unsupported wildcard patterns
-  // TODO: Add support for wildcard queries
+  // Wildcard search: field:te?t or field:test* → wildcard query
   if (WILDCARD_PATTERN.test(value)) {
-    const msg = `[fieldRule] Wildcard queries aren't supported yet. Query: ${field}:${value}`;
-    console.error(msg);
-    throw new Error(msg);
+    return new Map([['wildcard', new Map([[field, new Map([['value', value]])]])]]);
   }
 
-  // Use expanded form: {"match": {"field": {"query": "value"}}}
-  // This allows boostRule to add boost inside the field object
+  // Plain value: field:value → match query (expanded form for boost compatibility)
   return new Map([['match', new Map([[field, new Map([['query', value]])]])]]);
 };

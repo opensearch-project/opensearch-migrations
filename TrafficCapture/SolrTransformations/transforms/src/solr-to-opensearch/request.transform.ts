@@ -9,6 +9,7 @@ import { buildRequestContext } from './context';
 import type { JavaMap } from './context';
 import { runPipeline } from './pipeline';
 import { requestRegistry } from './registry';
+import { flushMetrics } from './metrics';
 
 // Read solrConfig from bindings once at init (closure, not global mutable state).
 // bindings is injected by Java via JavascriptTransformer's bindingsObject.
@@ -30,5 +31,6 @@ export function transform(msg: JavaMap): JavaMap {
     }
     payload.set('inlinedJsonBody', ctx.body);
   }
+  flushMetrics(ctx._metrics, msg);
   return msg;
 }
