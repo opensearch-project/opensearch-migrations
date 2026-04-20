@@ -518,10 +518,6 @@ export class MigrationInitializer {
                 migration.migrationLabel
             )
         }));
-        if (kafkaClusters.length === 0 && proxies.length === 0 && trafficReplays.length === 0) {
-            return null;
-        }
-
         const shellVar = (prefix: string, name: string) =>
             `${prefix}_${name.replace(/[^A-Za-z0-9_]/g, "_")}`;
         const kubectlGetUid = (resource: string, name: string, varName: string) =>

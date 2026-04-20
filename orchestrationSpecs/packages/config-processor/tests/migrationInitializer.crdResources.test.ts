@@ -212,4 +212,76 @@ describe('migration initializer CRD resource generation', () => {
             );
         }
     });
+
+    it('generates snapshot migration UID enrichment script even without kafka, proxies, or replays', async () => {
+        const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
+            sourceClusters: {
+                source: {
+                    endpoint: "https://source.example.com",
+                    allowInsecure: true,
+                    version: "ES 7.10.2",
+                    authConfig: {
+                        basic: {
+                            secretName: "source-creds"
+                        }
+                    },
+                    snapshotInfo: {
+                        repos: {
+                            default: {
+                                awsRegion: "us-east-2",
+                                s3RepoPathUri: "s3://bucket/path"
+                            }
+                        },
+                        snapshots: {
+                            snap1: {
+                                repoName: "default",
+                                config: {
+                                    createSnapshotConfig: { snapshotPrefix: "snap1" }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            targetClusters: {
+                target: {
+                    endpoint: "https://target.example.com",
+                    allowInsecure: true,
+                    authConfig: {
+                        basic: {
+                            secretName: "target-creds"
+                        }
+                    }
+                }
+            },
+            snapshotMigrationConfigs: [
+                {
+                    fromSource: "source",
+                    toTarget: "target",
+                    perSnapshotConfig: {
+                        "snap1": [{
+                            metadataMigrationConfig: {
+                                skipEvaluateApproval: true,
+                                skipMigrateApproval: true
+                            }
+                        }]
+                    }
+                }
+            ]
+        };
+
+        const initializer = new MigrationInitializer();
+        const bundle = await initializer.generateMigrationBundle(config);
+        const enrichScript = (initializer as any).generateWorkflowUidEnrichmentScript(bundle.workflows);
+
+        expect(enrichScript).not.toBeNull();
+        expect(enrichScript).toContain(
+            "snapshot_migration_source_target_snap1_migration_0=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
+        );
+        expect(enrichScript).toContain('snapshotMigrations: {');
+        expect(enrichScript).toContain('"source-target-snap1-migration-0": $snapshot_migration_source_target_snap1_migration_0');
+        expect(enrichScript).toContain(
+            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
+        );
+    });
 });
