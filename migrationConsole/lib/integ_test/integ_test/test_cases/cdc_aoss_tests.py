@@ -13,6 +13,7 @@ Required environment variables (injected by Jenkins pipeline):
 """
 import logging
 import os
+import time
 
 from console_link.models.cluster import Cluster
 
@@ -106,11 +107,21 @@ class Test0034CdcOnlyAossTarget(MATestBase):
 
     def verify_clusters(self):
         logger.info("Verifying docs on AOSS target...")
-        self.target_operations.check_doc_counts_match(
-            cluster=self.target_cluster,
-            expected_index_details={self.cdc_index: {"count": self.CDC_NUM_DOCS}},
-            max_attempts=120, delay=10.0,
-        )
+        count = 0
+        for attempt in range(30):
+            try:
+                resp = self.target_cluster.call_api(f"/{self.cdc_index}/_count", raise_error=False)
+                if resp.status_code == 200:
+                    count = resp.json().get("count", 0)
+                    if count == self.CDC_NUM_DOCS:
+                        logger.info("AOSS target: %s has %d docs ✓", self.cdc_index, count)
+                        return
+                logger.info("Attempt %d: %s status=%d, count=%d/%d",
+                            attempt + 1, self.cdc_index, resp.status_code, count, self.CDC_NUM_DOCS)
+            except Exception as e:
+                logger.info("Attempt %d: %s", attempt + 1, e)
+            time.sleep(10)
+        raise AssertionError(f"{self.cdc_index}: expected {self.CDC_NUM_DOCS} docs, got {count}")
 
     def test_after(self):
         pass
@@ -201,15 +212,28 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
         # Pre-snapshot docs appear twice: once from RFS backfill, once from replayer.
         # generate-data uses auto-generated IDs, so replayed docs don't overwrite backfilled ones.
         expected_pre = self.PRE_SNAPSHOT_DOCS * 2
-        logger.info("Verifying both indices on AOSS target (pre-snapshot expects %d)...", expected_pre)
-        self.target_operations.check_doc_counts_match(
-            cluster=self.target_cluster,
-            expected_index_details={
-                self.idx_pre: {"count": expected_pre},
-                self.idx_post: {"count": self.POST_SNAPSHOT_DOCS},
-            },
-            max_attempts=120, delay=10.0,
-        )
+        logger.info("Verifying both indices on AOSS target...")
+        pre, post = 0, 0
+        for attempt in range(30):
+            try:
+                resp_pre = self.target_cluster.call_api(f"/{self.idx_pre}/_count", raise_error=False)
+                resp_post = self.target_cluster.call_api(f"/{self.idx_post}/_count", raise_error=False)
+                if resp_pre.status_code == 200:
+                    pre = resp_pre.json().get("count", 0)
+                if resp_post.status_code == 200:
+                    post = resp_post.json().get("count", 0)
+                if pre == expected_pre and post == self.POST_SNAPSHOT_DOCS:
+                    logger.info("AOSS target: %s=%d, %s=%d ✓", self.idx_pre, pre, self.idx_post, post)
+                    return
+                logger.info("Attempt %d: %s=%d/%d (status=%d), %s=%d/%d (status=%d)", attempt + 1,
+                            self.idx_pre, pre, expected_pre, resp_pre.status_code,
+                            self.idx_post, post, self.POST_SNAPSHOT_DOCS, resp_post.status_code)
+            except Exception as e:
+                logger.info("Attempt %d: %s", attempt + 1, e)
+            time.sleep(10)
+        raise AssertionError(
+            f"Expected {self.idx_pre}={expected_pre}, {self.idx_post}={self.POST_SNAPSHOT_DOCS}, "
+            f"got {self.idx_pre}={pre}, {self.idx_post}={post}")
 
     def test_after(self):
         pass

@@ -224,7 +224,7 @@ rangeVal
 // Note: + and - are special characters (prefix operators) and must be escaped
 // if used literally in values. They are NOT included here.
 valueChars
-  = $[a-zA-Z0-9._*#$@?/]+
+  = $[a-zA-Z0-9._*#$@?/~]+
 
 // Field name identifier: starts with a letter or underscore, followed by
 // alphanumeric and common special chars. More restrictive first character
