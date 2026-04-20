@@ -114,6 +114,10 @@ jobs:
           kubectl get nodes
           kubectl get namespaces
 
+      - name: Install workflow test cluster dependencies
+        if: matrix.py-project == 'migrationConsole/lib/console_link'
+        run: ./scripts/setupWorkflowTestCluster.sh
+
       - name: Install dependencies (Pipfile)
         if: matrix.py-project != 'AIAdvisor/skills/solr-opensearch-migration-advisor'
         run: |
