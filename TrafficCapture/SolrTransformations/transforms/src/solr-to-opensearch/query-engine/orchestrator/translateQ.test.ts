@@ -34,7 +34,7 @@ describe('translateQ', () => {
       const result = translateQ(params(['q', 'title:java'], ['df', 'content']));
 
       expect(mockParse).toHaveBeenCalledWith('title:java', params(['q', 'title:java'], ['df', 'content']));
-      expect(mockTransform).toHaveBeenCalledWith(fakeAst);
+      expect(mockTransform).toHaveBeenCalledWith(fakeAst, undefined);
       expect(result.dsl).toBe(fakeDsl);
       expect(result.warnings).toEqual([]);
     });
