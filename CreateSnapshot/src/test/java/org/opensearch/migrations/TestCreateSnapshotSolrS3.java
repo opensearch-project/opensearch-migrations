@@ -26,7 +26,9 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
@@ -501,6 +503,212 @@ public class TestCreateSnapshotSolrS3 {
             log.info("S3 keys after auto-discover backup: {}", keys);
             Assertions.assertFalse(keys.isEmpty(),
                 "Backup should succeed with auto-discovered collections");
+        }
+    }
+
+    // -- S3 directory marker metadata and downstream-reader layout verification --
+
+    @Test
+    void cloudBackup_directoryMarkerHasCorrectMetadata() throws Exception {
+        String collName = "marker_meta_coll";
+        createCollection(collName, 1);
+        indexDocs(collName, 3);
+
+        String subpath = "marker-meta-test";
+        String snapshotName = "backup_marker_meta";
+        var args = makeArgs("s3://" + BUCKET_NAME + "/" + subpath, snapshotName);
+        args.solrCollections = List.of(collName);
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+        // Verify the directory markers created by ensureS3LocationExists have the exact
+        // metadata that Solr's S3BackupRepository HeadObject checks expect.
+        try (var s3 = testS3Client()) {
+            // Parent marker: <subpath>/
+            HeadObjectResponse parentMarker = s3.headObject(HeadObjectRequest.builder()
+                .bucket(BUCKET_NAME).key(subpath + "/").build());
+            Assertions.assertEquals("application/x-directory", parentMarker.contentType(),
+                "Parent marker must have content-type application/x-directory");
+            Assertions.assertEquals(0L, parentMarker.contentLength(),
+                "Parent marker must be zero bytes");
+
+            // Per-snapshot marker: <subpath>/<snapshotName>/
+            HeadObjectResponse snapMarker = s3.headObject(HeadObjectRequest.builder()
+                .bucket(BUCKET_NAME).key(subpath + "/" + snapshotName + "/").build());
+            Assertions.assertEquals("application/x-directory", snapMarker.contentType(),
+                "Per-snapshot marker must have content-type application/x-directory");
+            Assertions.assertEquals(0L, snapMarker.contentLength(),
+                "Per-snapshot marker must be zero bytes");
+        }
+    }
+
+    @Test
+    void cloudBackup_producesExpectedLayoutForDownstreamReaders() throws Exception {
+        // Solr 8 incremental backup (name=<collection>, location=<base>/<snapshotName>) writes:
+        //   <base>/<snapshotName>/<collection>/<collection>/zk_backup_0/...
+        // The outer <collection> is the backup `name` directory; the inner one is Solr's
+        // per-collection data directory.  Downstream readers (SolrBackupLayout, S3Repo)
+        // must account for this two-level structure.
+        String collName = "layout_verify_coll";
+        createCollection(collName, 1);
+        indexDocs(collName, 5);
+
+        String subpath = "layout-verify";
+        String snapshotName = "backup_layout";
+        var args = makeArgs("s3://" + BUCKET_NAME + "/" + subpath, snapshotName);
+        args.solrCollections = List.of(collName);
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+        try (var s3 = testS3Client()) {
+            // Solr writes: <subpath>/<snap>/<name>/<collection>/files
+            // With name=collection this becomes <subpath>/<snap>/<coll>/<coll>/files
+            String backupNamePrefix = subpath + "/" + snapshotName + "/" + collName + "/";
+            String collDataPrefix = backupNamePrefix + collName + "/";
+            var keys = listS3Keys(s3, backupNamePrefix);
+            log.info("All keys under backup name '{}': {}", collName, keys);
+
+            // 1) zk_backup_0/ must exist (schema metadata for MetadataMigration)
+            Assertions.assertTrue(
+                keys.stream().anyMatch(k -> k.startsWith(collDataPrefix + "zk_backup_0/")),
+                "Backup must contain zk_backup_0/ for metadata migration; keys=" + keys);
+
+            // 2) shard_backup_metadata/ must exist (shard->file mappings for document backfill)
+            Assertions.assertTrue(
+                keys.stream().anyMatch(k -> k.startsWith(collDataPrefix + "shard_backup_metadata/")),
+                "Backup must contain shard_backup_metadata/ for document backfill; keys=" + keys);
+
+            // 3) backup_0.properties must exist (collection discovery marker)
+            Assertions.assertTrue(
+                keys.stream().anyMatch(k -> k.equals(collDataPrefix + "backup_0.properties")),
+                "Backup must contain backup_0.properties for collection discovery; keys=" + keys);
+
+            // 4) index/ must exist (the actual Lucene index files)
+            Assertions.assertTrue(
+                keys.stream().anyMatch(k -> k.startsWith(collDataPrefix + "index/")),
+                "Backup must contain index/ directory with Lucene files; keys=" + keys);
+        }
+    }
+
+    @Test
+    void cloudBackup_multiCollection_eachHasFullLayout() throws Exception {
+        // Verify the full layout is produced per-collection when backing up multiple
+        // collections — catches the old bug where name=<snapshotName> caused only the
+        // last collection's metadata to survive (Solr 8 incremental enforces one-collection-per-name).
+        // Layout: <subpath>/<snap>/<coll>/<coll>/files (name=collection doubling)
+        String coll1 = "layout_multi_a";
+        String coll2 = "layout_multi_b";
+        createCollection(coll1, 1);
+        createCollection(coll2, 2);
+        indexDocs(coll1, 4);
+        indexDocs(coll2, 7);
+
+        String subpath = "layout-multi";
+        String snapshotName = "backup_multi_layout";
+        var args = makeArgs("s3://" + BUCKET_NAME + "/" + subpath, snapshotName);
+        args.solrCollections = List.of(coll1, coll2);
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+        try (var s3 = testS3Client()) {
+            for (var coll : List.of(coll1, coll2)) {
+                String backupNamePrefix = subpath + "/" + snapshotName + "/" + coll + "/";
+                String collDataPrefix = backupNamePrefix + coll + "/";
+                var keys = listS3Keys(s3, backupNamePrefix);
+                log.info("Keys for collection '{}': {}", coll, keys);
+
+                Assertions.assertTrue(
+                    keys.stream().anyMatch(k -> k.startsWith(collDataPrefix + "zk_backup_0/")),
+                    coll + " must have zk_backup_0/; keys=" + keys);
+                Assertions.assertTrue(
+                    keys.stream().anyMatch(k -> k.startsWith(collDataPrefix + "shard_backup_metadata/")),
+                    coll + " must have shard_backup_metadata/; keys=" + keys);
+                Assertions.assertTrue(
+                    keys.stream().anyMatch(k -> k.equals(collDataPrefix + "backup_0.properties")),
+                    coll + " must have backup_0.properties; keys=" + keys);
+                Assertions.assertTrue(
+                    keys.stream().anyMatch(k -> k.startsWith(collDataPrefix + "index/")),
+                    coll + " must have index/; keys=" + keys);
+            }
+        }
+    }
+
+    @Test
+    void cloudBackup_bucketRoot_noParentMarkerCreated() throws Exception {
+        // When the URI is s3://bucket (no subpath), ensureS3LocationExists should skip the
+        // parent marker (key is empty/root) and only create the per-snapshot marker.
+        String collName = "bucket_root_marker_coll";
+        createCollection(collName, 1);
+        indexDocs(collName, 3);
+
+        String snapshotName = "backup_root_marker_check";
+        var args = makeArgs("s3://" + BUCKET_NAME, snapshotName);
+        args.solrCollections = List.of(collName);
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+        try (var s3 = testS3Client()) {
+            // Per-snapshot marker should exist
+            Assertions.assertTrue(s3ObjectExists(s3, snapshotName + "/"),
+                "Per-snapshot marker should exist at bucket root");
+
+            // No spurious "/" directory marker (bucket root = no parent key to mark)
+            Assertions.assertFalse(s3ObjectExists(s3, "/"),
+                "No directory marker should be created for bucket root path '/'");
+
+            // Verify actual backup data landed under <snap>/<coll>/<coll>/
+            String collDataPrefix = snapshotName + "/" + collName + "/" + collName + "/";
+            var keys = listS3Keys(s3, snapshotName + "/");
+            Assertions.assertTrue(
+                keys.stream().anyMatch(k -> k.startsWith(collDataPrefix + "zk_backup_0/")),
+                "Bucket root backup must contain collection data; keys=" + keys);
+        }
+    }
+
+    @Test
+    void cloudBackup_successiveSnapshots_bothHaveFullLayout() throws Exception {
+        // Take two snapshots to the same base path and verify both produce the full
+        // backup structure.  Layout: <subpath>/<snap>/<coll>/<coll>/files
+        String collName = "successive_layout_coll";
+        createCollection(collName, 1);
+        indexDocs(collName, 3);
+
+        String subpath = "successive-layout";
+
+        // First snapshot
+        var args1 = makeArgs("s3://" + BUCKET_NAME + "/" + subpath, "snap_first");
+        args1.solrCollections = List.of(collName);
+        var ctx1 = SnapshotTestContext.factory().noOtelTracking();
+        new CreateSnapshot(args1, ctx1.createSnapshotCreateContext()).run();
+
+        // Add more docs, second snapshot
+        indexDocs(collName, 5);
+        var args2 = makeArgs("s3://" + BUCKET_NAME + "/" + subpath, "snap_second");
+        args2.solrCollections = List.of(collName);
+        var ctx2 = SnapshotTestContext.factory().noOtelTracking();
+        new CreateSnapshot(args2, ctx2.createSnapshotCreateContext()).run();
+
+        try (var s3 = testS3Client()) {
+            for (var snap : List.of("snap_first", "snap_second")) {
+                String backupNamePrefix = subpath + "/" + snap + "/" + collName + "/";
+                String collDataPrefix = backupNamePrefix + collName + "/";
+                var keys = listS3Keys(s3, backupNamePrefix);
+                log.info("Keys for snapshot '{}': {}", snap, keys);
+
+                Assertions.assertTrue(
+                    keys.stream().anyMatch(k -> k.startsWith(collDataPrefix + "zk_backup_0/")),
+                    snap + " must have zk_backup_0/; keys=" + keys);
+                Assertions.assertTrue(
+                    keys.stream().anyMatch(k -> k.equals(collDataPrefix + "backup_0.properties")),
+                    snap + " must have backup_0.properties; keys=" + keys);
+                Assertions.assertTrue(
+                    keys.stream().anyMatch(k -> k.startsWith(collDataPrefix + "index/")),
+                    snap + " must have index/; keys=" + keys);
+            }
         }
     }
 }
