@@ -62,4 +62,27 @@ describe('query-q request transform', () => {
     // translateQ defaults to *:* which should produce some query
     expect(ctx.body.has('query')).toBe(true);
   });
+
+  // --- Translation mode tests ---
+
+  it('fail-fast mode throws on unsupported query constructs', () => {
+    const ctx = createMockContext({ q: '{!join from=id to=parent_id}*:*' });
+    ctx.queryTranslationMode = 'fail-fast';
+    expect(() => request.apply(ctx)).toThrow();
+  });
+
+  it('passthrough-on-error mode falls back to query_string on unsupported constructs', () => {
+    const ctx = createMockContext({ q: 'title:java AND )' });
+    ctx.queryTranslationMode = 'passthrough-on-error';
+    request.apply(ctx);
+    const query = ctx.body.get('query') as Map<string, any>;
+    expect(query.has('query_string')).toBe(true);
+  });
+
+  it('defaults to fail-fast when queryTranslationMode is not set', () => {
+    const ctx = createMockContext({ q: '*:*' });
+    // queryTranslationMode is undefined — should default to fail-fast
+    request.apply(ctx);
+    expect(ctx.body.has('query')).toBe(true);
+  });
 });

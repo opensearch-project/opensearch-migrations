@@ -42,6 +42,13 @@ export interface RequestContext {
    * Uses Record (plain object) because GraalVM exposes Java Maps as JS objects via allowMapAccess.
    */
   solrConfig?: Record<string, { defaults?: Record<string, string>; invariants?: Record<string, string>; appends?: Record<string, string> }>;
+  /**
+   * Query translation mode — controls behavior when query translation fails.
+   * 'fail-fast': throws on unsupported constructs (default).
+   * 'passthrough-on-error': falls back to query_string passthrough.
+   * Injected from bindings at init.
+   */
+  queryTranslationMode?: 'fail-fast' | 'passthrough-on-error';
 }
 
 /** Parsed once from the bundled {request, response}. Shared across all response micro-transforms. */
