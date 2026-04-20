@@ -7,7 +7,6 @@ test context and will fail fast otherwise.
 """
 
 import logging
-import os
 import pytest
 import subprocess
 import time

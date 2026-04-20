@@ -9,6 +9,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 import json
@@ -72,6 +73,7 @@ for _kind, _plural, _singular in [
             }]
         }
     })
+
 
 @pytest.fixture(scope="session")
 def k8s_cluster(required_workflow_test_kube_context):

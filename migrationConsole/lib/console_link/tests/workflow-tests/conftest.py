@@ -11,6 +11,7 @@ from kubernetes import config
 
 DEFAULT_WORKFLOW_TEST_KUBE_CONTEXT = "kind-console-link-test"
 
+
 @pytest.fixture(autouse=True)
 def set_config_processor_dir(monkeypatch):
     # Set required ETCD environment variables for tests
