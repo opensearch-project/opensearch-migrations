@@ -18,7 +18,7 @@ import {configureAndSubmitScript, monitorScript} from "../testResourceLoader";
 export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
     k8sResourceName: "full-migration-with-workflow-cli",
     parallelism: 1,
-    serviceAccountName: "argo-workflow-executor"
+    serviceAccountName: "argo-test-workflow-executor"
 })
 
     .addParams(CommonWorkflowParameters)

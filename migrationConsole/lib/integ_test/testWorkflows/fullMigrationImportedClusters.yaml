@@ -10,7 +10,7 @@ kind: WorkflowTemplate
 metadata:
   name: full-migration-imported-clusters
 spec:
-  serviceAccountName: argo-workflow-executor
+  serviceAccountName: argo-test-workflow-executor
   entrypoint: main
   parallelism: 100
 

@@ -6,7 +6,7 @@ kind: WorkflowTemplate
 metadata:
   name: cdc-full-e2e-imported-clusters
 spec:
-  serviceAccountName: argo-workflow-executor
+  serviceAccountName: argo-test-workflow-executor
   entrypoint: main
   parallelism: 100
 

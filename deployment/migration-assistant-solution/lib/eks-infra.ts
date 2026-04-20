@@ -25,6 +25,7 @@ export interface EKSInfraProps {
     migrationsServiceAccountName?: string;
     migrationConsoleServiceAccountName?: string;
     otelCollectorServiceAccountName?: string;
+    argoTestWorkflowServiceAccountName?: string;
     enablePCA?: boolean;
     enableACKPCA?: boolean;
     enableACKCloudWatch?: boolean;
@@ -44,6 +45,7 @@ export class EKSInfra extends Construct {
         const migrationsServiceAccountName = props.migrationsServiceAccountName ?? 'migrations-service-account';
         const migrationConsoleServiceAccountName = props.migrationConsoleServiceAccountName ?? 'migration-console-access-role';
         const otelCollectorServiceAccountName = props.otelCollectorServiceAccountName ?? 'otel-collector';
+        const argoTestWorkflowServiceAccountName = props.argoTestWorkflowServiceAccountName ?? 'argo-test-workflow-executor';
 
         this.ecrRepo = new Repository(this, 'MigrationsECRRepository', {
             repositoryName: props.ecrRepoName,
@@ -128,11 +130,18 @@ export class EKSInfra extends Construct {
             serviceAccount: otelCollectorServiceAccountName,
             roleArn: podIdentityRole.roleArn,
         });
+        const argoTestWorkflowIdentityAssociation = new CfnPodIdentityAssociation(this, 'ArgoTestWorkflowPodIdentityAssociation', {
+            clusterName: props.clusterName,
+            namespace: namespace,
+            serviceAccount: argoTestWorkflowServiceAccountName,
+            roleArn: podIdentityRole.roleArn,
+        });
         buildImagesPodIdentityAssociation.node.addDependency(this.cluster)
         argoWorkflowIdentityAssociation.node.addDependency(this.cluster)
         migrationsPodIdentityAssociation.node.addDependency(this.cluster)
         migrationConsolePodIdentityAssociation.node.addDependency(this.cluster)
         otelCollectorPodIdentityAssociation.node.addDependency(this.cluster)
+        argoTestWorkflowIdentityAssociation.node.addDependency(this.cluster)
 
         // PCA Pod Identity Associations — conditional on enablePCA/enableACKPCA
         if (props.enablePCA) {
