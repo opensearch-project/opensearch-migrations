@@ -12,7 +12,13 @@
  */
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext } from '../context';
+import type { ParamRule } from './validation';
 
+/** Solr query params this feature handles. */
+export const params = ['fl'];
+export const paramRules: ParamRule[] = [
+  { name: 'fl', type: 'rejectPattern', pattern: String.raw`\{!`, reason: 'Local params ({!...}) syntax in fl is not supported' },
+];
 // Pseudo-fields that don't exist in _source (standalone * means all fields)
 const PSEUDO_FIELDS = new Set(['score', '*']);
 

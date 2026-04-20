@@ -1,7 +1,17 @@
 {{- if get .Values.conditionalPackageInstalls "argo-workflows" }}
-# ValidatingAdmissionPolicies for Kafka resources
-# Prevents accidental major changes without explicit approval
-# Each policy check has its own distinct approval annotation
+# ValidatingAdmissionPolicies for migration resources
+# Enforces Impossible (hard block), Gated (UID approval), and Lock-on-Complete rules
+# See docs/reconfiguringWorkflows.md for the design
+
+# ─────────────────────────────────────────────────────────────
+# Shared UID approval CEL fragment (used by all Gated checks):
+#   has(object.metadata.annotations) &&
+#   'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+#   has(object.metadata.labels) &&
+#   'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+#   object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+#     object.metadata.labels['workflows.argoproj.io/run-uid']
+# ─────────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────────
 # KafkaNodePool Policy - replicas, storage size, storage type, roles
@@ -20,38 +30,41 @@ spec:
       operations: ["UPDATE"]
       resources: ["kafkanodepools"]
   validations:
-    # Major change: replica scaling requires approval with target value
-    # Annotation value must match the target replica count to prevent race conditions
+    # Gated: replica scaling
     - expression: |
         object.spec.replicas == oldObject.spec.replicas ||
         (has(object.metadata.annotations) &&
-         'migrations.opensearch.org/approved-replicas' in object.metadata.annotations &&
-         object.metadata.annotations['migrations.opensearch.org/approved-replicas'] == string(object.spec.replicas))
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
       messageExpression: |
-        "Major Change Blocked [replicas]: NodePool scaling from " +
+        "Gated Change [replicas]: NodePool scaling from " +
         string(oldObject.spec.replicas) + " to " + string(object.spec.replicas) +
-        ". To proceed: kubectl annotate kafkanodepool/" + object.metadata.name +
-        " migrations.opensearch.org/approved-replicas=" + string(object.spec.replicas) + " --overwrite"
-    # Major change: storage size requires approval with target value
+        ". Approve via the Argo Workflow UI to proceed."
+    # Gated: storage size
     - expression: |
         !has(object.spec.storage.size) || !has(oldObject.spec.storage.size) ||
         object.spec.storage.size == oldObject.spec.storage.size ||
         (has(object.metadata.annotations) &&
-         'migrations.opensearch.org/approved-storage-size' in object.metadata.annotations &&
-         object.metadata.annotations['migrations.opensearch.org/approved-storage-size'] == object.spec.storage.size)
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
       messageExpression: |
-        "Major Change Blocked [storage.size]: Storage resize from " +
+        "Gated Change [storage.size]: Storage resize from " +
         oldObject.spec.storage.size + " to " + object.spec.storage.size +
-        ". To proceed: kubectl annotate kafkanodepool/" + object.metadata.name +
-        " migrations.opensearch.org/approved-storage-size=" + object.spec.storage.size + " --overwrite"
-    # Immutable: storage type cannot change after creation
+        ". Approve via the Argo Workflow UI to proceed."
+    # Impossible: storage type
     - expression: |
         object.spec.storage.type == oldObject.spec.storage.type
-      message: "Immutable: Storage type cannot be changed after creation"
-    # Immutable: node pool roles cannot change after creation
+      message: "Impossible: Storage type cannot be changed after creation. Delete and recreate."
+    # Impossible: roles
     - expression: |
         object.spec.roles == oldObject.spec.roles
-      message: "Immutable: Node pool roles cannot be changed after creation"
+      message: "Impossible: Node pool roles cannot be changed after creation. Delete and recreate."
 
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -62,7 +75,6 @@ spec:
   policyName: {{ .Release.Namespace }}-kafkanodepool-policy
   validationActions: [Deny]
   matchResources:
-    # Uses built-in namespace name label (available since K8s 1.21)
     namespaceSelector:
       matchExpressions:
       - key: kubernetes.io/metadata.name
@@ -86,17 +98,19 @@ spec:
       operations: ["UPDATE"]
       resources: ["kafkas"]
   validations:
-    # Major change: Kafka version change requires approval with target value
+    # Gated: Kafka version change
     - expression: |
         object.spec.kafka.version == oldObject.spec.kafka.version ||
         (has(object.metadata.annotations) &&
-         'migrations.opensearch.org/approved-version' in object.metadata.annotations &&
-         object.metadata.annotations['migrations.opensearch.org/approved-version'] == object.spec.kafka.version)
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
       messageExpression: |
-        "Major Change Blocked [version]: Kafka version change from '" +
+        "Gated Change [version]: Kafka version change from '" +
         oldObject.spec.kafka.version + "' to '" + object.spec.kafka.version +
-        "'. To proceed: kubectl annotate kafka/" + object.metadata.name +
-        " migrations.opensearch.org/approved-version=" + object.spec.kafka.version + " --overwrite"
+        "'. Approve via the Argo Workflow UI to proceed."
 
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -114,7 +128,7 @@ spec:
         values: ["{{ .Release.Namespace }}"]
 
 # ─────────────────────────────────────────────────────────────
-# KafkaTopic Policy - partition decrease (blocked), replica change
+# KafkaTopic Policy - partition decrease, replica change
 # ─────────────────────────────────────────────────────────────
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -130,29 +144,31 @@ spec:
       operations: ["UPDATE"]
       resources: ["kafkatopics"]
   validations:
-    # Blocked: partition decrease (Kafka limitation - cannot be overridden)
+    # Impossible: partition decrease (Kafka limitation)
     - expression: |
         object.spec.partitions >= oldObject.spec.partitions
       messageExpression: |
-        "Blocked: Partition count cannot decrease (Kafka limitation). " +
+        "Impossible: Partition count cannot decrease (Kafka limitation). " +
         "Current: " + string(oldObject.spec.partitions) + ", Requested: " + string(object.spec.partitions)
-    # Major change: topic replication factor change requires approval with target value
+    # Gated: topic replication factor
     - expression: |
         object.spec.replicas == oldObject.spec.replicas ||
         (has(object.metadata.annotations) &&
-         'migrations.opensearch.org/approved-topic-replicas' in object.metadata.annotations &&
-         object.metadata.annotations['migrations.opensearch.org/approved-topic-replicas'] == string(object.spec.replicas))
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
       messageExpression: |
-        "Major Change Blocked [replicas]: Topic replication factor change from " +
+        "Gated Change [replicas]: Topic replication factor change from " +
         string(oldObject.spec.replicas) + " to " + string(object.spec.replicas) +
-        ". To proceed: kubectl annotate kafkatopic/" + object.metadata.name +
-        " migrations.opensearch.org/approved-topic-replicas=" + string(object.spec.replicas) + " --overwrite"
-    # Immutable: cluster assignment cannot change
+        ". Approve via the Argo Workflow UI to proceed."
+    # Impossible: cluster assignment
     - expression: |
         !has(oldObject.metadata.labels) ||
         !('strimzi.io/cluster' in oldObject.metadata.labels) ||
         object.metadata.labels['strimzi.io/cluster'] == oldObject.metadata.labels['strimzi.io/cluster']
-      message: "Immutable: Topic cannot be moved to a different cluster"
+      message: "Impossible: Topic cannot be moved to a different cluster."
 
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -170,8 +186,303 @@ spec:
         values: ["{{ .Release.Namespace }}"]
 
 # ─────────────────────────────────────────────────────────────
+# CapturedTraffic Policy - impossible + gated proxy config fields
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-capturedtraffic-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["capturedtraffics"]
+  validations:
+    # Impossible: listenPort
+    - expression: |
+        !has(oldObject.spec.listenPort) || !has(object.spec.listenPort) ||
+        object.spec.listenPort == oldObject.spec.listenPort
+      message: "Impossible: listenPort cannot be changed. Delete and recreate the proxy."
+    # Impossible: internetFacing
+    - expression: |
+        !has(oldObject.spec.internetFacing) || !has(object.spec.internetFacing) ||
+        object.spec.internetFacing == oldObject.spec.internetFacing
+      message: "Impossible: internetFacing cannot be changed. Delete and recreate the proxy."
+    # Gated: noCapture, enableMSKAuth, tls, kafkaClusterName, kafkaTopicName, suppressCapture* fields
+    - expression: |
+        (
+          (!has(object.spec.noCapture) || !has(oldObject.spec.noCapture) ||
+           object.spec.noCapture == oldObject.spec.noCapture) &&
+          (!has(object.spec.enableMSKAuth) || !has(oldObject.spec.enableMSKAuth) ||
+           object.spec.enableMSKAuth == oldObject.spec.enableMSKAuth) &&
+          (!has(object.spec.tls) || !has(oldObject.spec.tls) ||
+           object.spec.tls == oldObject.spec.tls) &&
+          (!has(object.spec.kafkaClusterName) || !has(oldObject.spec.kafkaClusterName) ||
+           object.spec.kafkaClusterName == oldObject.spec.kafkaClusterName) &&
+          (!has(object.spec.kafkaTopicName) || !has(oldObject.spec.kafkaTopicName) ||
+           object.spec.kafkaTopicName == oldObject.spec.kafkaTopicName) &&
+          (!has(object.spec.suppressCaptureForHeaderMatch) || !has(oldObject.spec.suppressCaptureForHeaderMatch) ||
+           object.spec.suppressCaptureForHeaderMatch == oldObject.spec.suppressCaptureForHeaderMatch) &&
+          (!has(object.spec.suppressCaptureForMethod) || !has(oldObject.spec.suppressCaptureForMethod) ||
+           object.spec.suppressCaptureForMethod == oldObject.spec.suppressCaptureForMethod) &&
+          (!has(object.spec.suppressCaptureForUriPath) || !has(oldObject.spec.suppressCaptureForUriPath) ||
+           object.spec.suppressCaptureForUriPath == oldObject.spec.suppressCaptureForUriPath) &&
+          (!has(object.spec.suppressMethodAndPath) || !has(oldObject.spec.suppressMethodAndPath) ||
+           object.spec.suppressMethodAndPath == oldObject.spec.suppressMethodAndPath)
+        ) ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
+      message: "Gated changes detected on CapturedTraffic. Approve via the Argo Workflow UI to proceed."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-capturedtraffic-binding
+spec:
+  policyName: {{ .Release.Namespace }}-capturedtraffic-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+
+# ─────────────────────────────────────────────────────────────
+# TrafficReplay Policy - impossible + gated replayer fields
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-trafficreplay-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["trafficreplays"]
+  validations:
+    # Impossible: kafkaTrafficEnableMSKAuth
+    - expression: |
+        !has(oldObject.spec.kafkaTrafficEnableMSKAuth) || !has(object.spec.kafkaTrafficEnableMSKAuth) ||
+        object.spec.kafkaTrafficEnableMSKAuth == oldObject.spec.kafkaTrafficEnableMSKAuth
+      message: "Impossible: kafkaTrafficEnableMSKAuth cannot be changed. Delete and recreate the replayer."
+    # Impossible: kafkaTrafficPropertyFile
+    - expression: |
+        !has(oldObject.spec.kafkaTrafficPropertyFile) || !has(object.spec.kafkaTrafficPropertyFile) ||
+        object.spec.kafkaTrafficPropertyFile == oldObject.spec.kafkaTrafficPropertyFile
+      message: "Impossible: kafkaTrafficPropertyFile cannot be changed. Delete and recreate the replayer."
+    # Gated: auth, transformer, and tuple transformer fields
+    - expression: |
+        (
+          (!has(object.spec.authHeaderValue) || !has(oldObject.spec.authHeaderValue) ||
+           object.spec.authHeaderValue == oldObject.spec.authHeaderValue) &&
+          (!has(object.spec.removeAuthHeader) || !has(oldObject.spec.removeAuthHeader) ||
+           object.spec.removeAuthHeader == oldObject.spec.removeAuthHeader) &&
+          (!has(object.spec.transformerConfig) || !has(oldObject.spec.transformerConfig) ||
+           object.spec.transformerConfig == oldObject.spec.transformerConfig) &&
+          (!has(object.spec.transformerConfigEncoded) || !has(oldObject.spec.transformerConfigEncoded) ||
+           object.spec.transformerConfigEncoded == oldObject.spec.transformerConfigEncoded) &&
+          (!has(object.spec.transformerConfigFile) || !has(oldObject.spec.transformerConfigFile) ||
+           object.spec.transformerConfigFile == oldObject.spec.transformerConfigFile) &&
+          (!has(object.spec.tupleTransformerConfig) || !has(oldObject.spec.tupleTransformerConfig) ||
+           object.spec.tupleTransformerConfig == oldObject.spec.tupleTransformerConfig) &&
+          (!has(object.spec.tupleTransformerConfigBase64) || !has(oldObject.spec.tupleTransformerConfigBase64) ||
+           object.spec.tupleTransformerConfigBase64 == oldObject.spec.tupleTransformerConfigBase64) &&
+          (!has(object.spec.tupleTransformerConfigFile) || !has(oldObject.spec.tupleTransformerConfigFile) ||
+           object.spec.tupleTransformerConfigFile == oldObject.spec.tupleTransformerConfigFile)
+        ) ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
+      message: "Gated changes detected on TrafficReplay. Approve via the Argo Workflow UI to proceed."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-trafficreplay-binding
+spec:
+  policyName: {{ .Release.Namespace }}-trafficreplay-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+# ─────────────────────────────────────────────────────────────
+# DataSnapshot Policy - all fields impossible after initial apply
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-datasnapshot-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["datasnapshots"]
+  validations:
+    - expression: |
+        !has(oldObject.status) ||
+        !has(oldObject.status.phase) ||
+        oldObject.status.phase == 'Initialized' ||
+        (object.spec == oldObject.spec)
+      message: "Impossible: DataSnapshot spec cannot be changed after initial apply. Delete and recreate to use different parameters."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-datasnapshot-binding
+spec:
+  policyName: {{ .Release.Namespace }}-datasnapshot-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+# ─────────────────────────────────────────────────────────────
+# SnapshotMigration Policy - impossible + gated fields
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-snapshotmigration-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["snapshotmigrations"]
+  validations:
+    # Impossible: entire metadataMigrationConfig block
+    - expression: |
+        !has(oldObject.spec.metadataMigrationConfig) ||
+        !has(object.spec.metadataMigrationConfig) ||
+        object.spec.metadataMigrationConfig == oldObject.spec.metadataMigrationConfig
+      message: "Impossible: Metadata migration configuration cannot be changed. Delete and recreate to use different parameters."
+    # Impossible: RFS data-defining fields
+    - expression: |
+        (!has(oldObject.spec.documentBackfillConfig) || !has(object.spec.documentBackfillConfig) ||
+         (
+           (!has(object.spec.documentBackfillConfig.indexAllowlist) ||
+            !has(oldObject.spec.documentBackfillConfig.indexAllowlist) ||
+            object.spec.documentBackfillConfig.indexAllowlist == oldObject.spec.documentBackfillConfig.indexAllowlist) &&
+           (!has(object.spec.documentBackfillConfig.allowLooseVersionMatching) ||
+            !has(oldObject.spec.documentBackfillConfig.allowLooseVersionMatching) ||
+            object.spec.documentBackfillConfig.allowLooseVersionMatching == oldObject.spec.documentBackfillConfig.allowLooseVersionMatching) &&
+           (!has(object.spec.documentBackfillConfig.docTransformerConfigBase64) ||
+            !has(oldObject.spec.documentBackfillConfig.docTransformerConfigBase64) ||
+            object.spec.documentBackfillConfig.docTransformerConfigBase64 == oldObject.spec.documentBackfillConfig.docTransformerConfigBase64)
+         ))
+      message: "Impossible: Document backfill data-defining fields cannot be changed. Delete and recreate."
+    # Gated: RFS operational fields
+    - expression: |
+        (!has(oldObject.spec.documentBackfillConfig) || !has(object.spec.documentBackfillConfig) ||
+         (
+           (!has(object.spec.documentBackfillConfig.initialLeaseDuration) ||
+            !has(oldObject.spec.documentBackfillConfig.initialLeaseDuration) ||
+            object.spec.documentBackfillConfig.initialLeaseDuration == oldObject.spec.documentBackfillConfig.initialLeaseDuration) &&
+           (!has(object.spec.documentBackfillConfig.maxConnections) ||
+            !has(oldObject.spec.documentBackfillConfig.maxConnections) ||
+            object.spec.documentBackfillConfig.maxConnections == oldObject.spec.documentBackfillConfig.maxConnections) &&
+           (!has(object.spec.documentBackfillConfig.maxShardSizeBytes) ||
+            !has(oldObject.spec.documentBackfillConfig.maxShardSizeBytes) ||
+            object.spec.documentBackfillConfig.maxShardSizeBytes == oldObject.spec.documentBackfillConfig.maxShardSizeBytes)
+         ))
+        ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
+      message: "Gated changes detected on SnapshotMigration backfill config. Approve via the Argo Workflow UI to proceed."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-snapshotmigration-binding
+spec:
+  policyName: {{ .Release.Namespace }}-snapshotmigration-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+# ─────────────────────────────────────────────────────────────
+# Lock-on-Complete - freezes spec for terminal resources
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-lock-on-complete-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["datasnapshots", "snapshotmigrations"]
+  validations:
+    - expression: |
+        !has(oldObject.status) ||
+        !has(oldObject.status.phase) ||
+        oldObject.status.phase != 'Completed' ||
+        (object.spec == oldObject.spec)
+      message: "Consistency Guard: This resource is 'Completed'. The specification is permanently sealed to maintain provenance. Delete the resource to run a new job with these parameters."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-lock-on-complete-binding
+spec:
+  policyName: {{ .Release.Namespace }}-lock-on-complete-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+# ─────────────────────────────────────────────────────────────
 # Managed Deployment Policy - blocks direct edits to workflow-managed Deployments
-# Edit the corresponding CRD instead (ProxyConfig, ReplayerConfig, etc.)
 # ─────────────────────────────────────────────────────────────
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -187,13 +498,11 @@ spec:
       operations: ["UPDATE"]
       resources: ["deployments"]
   matchConditions:
-    # Only apply to Deployments with managed-by annotation
     - name: is-managed
       expression: |
         has(object.metadata.annotations) &&
         'migrations.opensearch.org/managed-by' in object.metadata.annotations
   validations:
-    # Block direct edits unless override annotation is set
     - expression: |
         has(object.metadata.annotations) &&
         'migrations.opensearch.org/allow-direct-edit' in object.metadata.annotations &&

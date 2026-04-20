@@ -93,13 +93,29 @@ prefixExpr
 // The smallest building blocks. Order matters in PEG — first match wins.
 // matchAll (*:*) must come before fieldExpr to prevent `*` being consumed
 // as a field name.
+// filterFunc must come before bareValue to prevent `filter` being consumed
+// as a bare term.
 
 primary
   = group
   / matchAll
+  / filterFunc
   / fieldExpr
   / barePhrase
   / bareValue
+
+// FilterNode: filter(subquery) — Solr's inline filter caching syntax.
+// `filter(inStock:true)` → FilterNode { child: FieldNode }
+// The inner clause is cached in Solr's filter cache and executed as a
+// constant-score (non-scoring) clause. In OpenSearch, this maps to
+// bool.filter for equivalent non-scoring behavior.
+// See: https://solr.apache.org/guide/solr/latest/query-guide/standard-query-parser.html
+filterFunc
+  = "filter(" _ expr:query _ ")" boost:boost? {
+      const node = { type: 'filter', child: expr };
+      if (boost !== null) return { type: 'boost', child: node, value: boost };
+      return node;
+    }
 
 // GroupNode: parenthesized sub-expression that overrides operator precedence.
 // `(a OR b) AND c` → GroupNode wrapping BoolNode.

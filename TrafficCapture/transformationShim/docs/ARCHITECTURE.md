@@ -86,7 +86,9 @@ Production traffic continues to be served by Solr. The shim silently forwards ev
 --target solr=http://solr:8983 \
 --target opensearch=https://os:9200 \
 --primary solr \
---targetTransform opensearch=request:req.js,response:resp.js \
+--transformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/path/to/request.js","bindingsObject":"{}"}}]' \
+--responseTransformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/path/to/response.js","bindingsObject":"{}"}}]' \
+--transformTarget opensearch \
 --validator field-equality:solr,opensearch:ignore=responseHeader.QTime \
 --validator doc-count:solr,opensearch:assert=solr==opensearch
 ```
@@ -107,7 +109,9 @@ Flip `--primary` to `opensearch`. The client now gets OpenSearch responses, but 
 --target solr=http://solr:8983 \
 --target opensearch=https://os:9200 \
 --primary opensearch \
---targetTransform opensearch=request:req.js,response:resp.js \
+--transformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/path/to/request.js","bindingsObject":"{}"}}]' \
+--responseTransformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/path/to/response.js","bindingsObject":"{}"}}]' \
+--transformTarget opensearch \
 --validator field-equality:solr,opensearch:ignore=responseHeader.QTime \
 --validator doc-count:solr,opensearch:assert=solr==opensearch
 ```
@@ -121,7 +125,8 @@ Once validation passes consistently, remove Solr from the target list. The shim 
 ```bash
 --target opensearch=https://os:9200 \
 --primary opensearch \
---targetTransform opensearch=request:req.js,response:resp.js
+--transformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/path/to/request.js","bindingsObject":"{}"}}]' \
+--responseTransformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/path/to/response.js","bindingsObject":"{}"}}]'
 ```
 
 ### Validation Strategies
@@ -654,8 +659,10 @@ Required:
 
 Optional:
   --active <name,name,...>      Active targets (default: all)
-  --targetTransform <spec>      Per-target transforms (repeatable)
-                                Format: name=request:file.js,response:file.js
+  --transformerConfig <json>    Request transformer config JSON array
+                                (same format as traffic replayer)
+  --responseTransformerConfig   Response transformer config JSON array
+  --transformTarget <name>      Target to apply transforms to (default: first non-primary)
   --targetAuth <spec>           Per-target auth (repeatable)
                                 Formats: name=sigv4:service,region
                                          name=basic:user:pass
@@ -681,27 +688,35 @@ Optional:
 **Single-target with transforms:**
 ```bash
 --target opensearch=https://os:9200 --primary opensearch \
---targetTransform opensearch=request:req.js,response:resp.js
+--transformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/path/to/request.js","bindingsObject":"{}"}}]' \
+--responseTransformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/path/to/response.js","bindingsObject":"{}"}}]'
 ```
 
 **Dual-target validation (Solr primary):**
 ```bash
 --target solr=http://solr:8983 \
 --target opensearch=https://os:9200 \
---targetTransform opensearch=request:req.js,response:resp.js \
+--transformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/path/to/request.js","bindingsObject":"{}"}}]' \
+--responseTransformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/path/to/response.js","bindingsObject":"{}"}}]' \
+--transformTarget opensearch \
 --targetAuth opensearch=sigv4:es,us-east-1 \
 --primary solr \
 --validator field-equality:solr,opensearch:ignore=responseHeader.QTime \
 --validator doc-count:solr,opensearch:assert=solr==opensearch
 ```
 
+**Note:** The current `--transformTarget` accepts a single target name. To apply
+transforms to multiple targets independently, run separate shim instances or use
+a composite transformer config. Example with a single transform target:
+
 **Three targets (comparing two OpenSearch clusters):**
 ```bash
 --target solr=http://solr:8983 \
 --target os-v1=https://os-v1:9200 \
 --target os-v2=https://os-v2:9200 \
---targetTransform os-v1=request:req.js,response:resp.js \
---targetTransform os-v2=request:req-v2.js,response:resp-v2.js \
+--transformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/path/to/request.js","bindingsObject":"{}"}}]' \
+--responseTransformerConfig '[{"SolrTransformerProvider":{"initializationScriptFile":"/path/to/response.js","bindingsObject":"{}"}}]' \
+--transformTarget os-v1 \
 --primary solr \
 --validator field-equality:solr,os-v1 \
 --validator field-equality:solr,os-v2 \

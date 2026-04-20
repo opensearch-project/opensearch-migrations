@@ -24,7 +24,7 @@ spec:
     - -c
     - |
       set -e
-      echo "=== VAP Test: KafkaNodePool replica scaling ==="
+      echo "=== VAP Test: KafkaNodePool replica scaling (UID approval) ==="
 
       TEST_POOL="vap-test-pool-$(date +%s)"
       NAMESPACE="{{ .Release.Namespace }}"
@@ -61,18 +61,23 @@ spec:
       fi
       echo "PASS: Scaling was correctly blocked"
 
-      echo "Step 3: Try with WRONG approval value (should fail)"
+      echo "Step 3: Try with MISMATCHED UID (should fail)"
+      kubectl label kafkanodepool "$TEST_POOL" -n "$NAMESPACE" \
+        workflows.argoproj.io/run-uid=uid-aaa --overwrite
       kubectl annotate kafkanodepool "$TEST_POOL" -n "$NAMESPACE" \
-        migrations.opensearch.org/approved-replicas=99 --overwrite
+        migrations.opensearch.org/approved-by-run=uid-bbb --overwrite
       if kubectl patch kafkanodepool "$TEST_POOL" -n "$NAMESPACE" --type=merge -p '{"spec":{"replicas":2}}' 2>&1; then
-        echo "ERROR: Scaling with wrong approval value should have been blocked!"
+        echo "ERROR: Mismatched UID should have been blocked!"
         exit 1
       fi
-      echo "PASS: Wrong approval value was correctly rejected"
+      echo "PASS: Mismatched UID was correctly rejected"
 
-      echo "Step 4: Add CORRECT approval value and scale (should succeed)"
+      echo "Step 4: Add MATCHING UID and scale (should succeed)"
+      TEST_UID="test-uid-$(date +%s)"
+      kubectl label kafkanodepool "$TEST_POOL" -n "$NAMESPACE" \
+        workflows.argoproj.io/run-uid="$TEST_UID" --overwrite
       kubectl annotate kafkanodepool "$TEST_POOL" -n "$NAMESPACE" \
-        migrations.opensearch.org/approved-replicas=2 --overwrite
+        migrations.opensearch.org/approved-by-run="$TEST_UID" --overwrite
       kubectl patch kafkanodepool "$TEST_POOL" -n "$NAMESPACE" --type=merge -p '{"spec":{"replicas":2}}'
 
       REPLICAS=$(kubectl get kafkanodepool "$TEST_POOL" -n "$NAMESPACE" -o jsonpath='{.spec.replicas}')
@@ -80,14 +85,14 @@ spec:
         echo "ERROR: Expected replicas=2, got replicas=$REPLICAS"
         exit 1
       fi
-      echo "PASS: Scaling with correct approval succeeded"
+      echo "PASS: Scaling with matching UID succeeded"
 
-      echo "Step 5: Verify auto-reset (old approval shouldn't allow new value)"
+      echo "Step 5: Verify old UID doesn't approve new changes"
       if kubectl patch kafkanodepool "$TEST_POOL" -n "$NAMESPACE" --type=merge -p '{"spec":{"replicas":5}}' 2>&1; then
-        echo "ERROR: Old approval value should not allow different target!"
+        echo "ERROR: Old UID approval should not allow different target!"
         exit 1
       fi
-      echo "PASS: Auto-reset working - old approval rejected for new value"
+      echo "PASS: Old UID correctly rejected for new change"
 
       echo ""
       echo "=== All VAP tests passed! ==="

@@ -1432,5 +1432,92 @@
     "category": "pagination_edge",
     "description": "rows=1 single doc",
     "path": "/solr/testharness/select?q=product_title:wireless&rows=1&sort=id+asc&wt=json"
+  },
+  {
+    "id": "solrconfig_default-001",
+    "category": "solrconfig_default",
+    "description": "Bare term query relying on df=product_title from solrconfig defaults",
+    "path": "/solr/testharness/select?q=headphones&rows=5&fl=id,product_title&wt=json",
+    "params": {
+      "q": "headphones",
+      "rows": "5",
+      "fl": "id,product_title",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "solrconfig_default-002",
+    "category": "solrconfig_default",
+    "description": "Multi-term bare query relying on df from solrconfig defaults",
+    "path": "/solr/testharness/select?q=portable+speaker&rows=5&fl=id,product_title&wt=json",
+    "params": {
+      "q": "portable speaker",
+      "rows": "5",
+      "fl": "id,product_title",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "solrconfig_default-003",
+    "category": "solrconfig_default",
+    "description": "Bare phrase query relying on df from solrconfig defaults",
+    "path": "/solr/testharness/select?q=%22wireless+headphones%22&rows=5&fl=id,product_title&wt=json",
+    "params": {
+      "q": "\"wireless headphones\"",
+      "rows": "5",
+      "fl": "id,product_title",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "solrconfig_default-004",
+    "category": "solrconfig_default",
+    "description": "Explicit df overrides solrconfig default df",
+    "path": "/solr/testharness/select?q=laptop&df=review_body&rows=5&fl=id,product_title&wt=json",
+    "params": {
+      "q": "laptop",
+      "df": "review_body",
+      "rows": "5",
+      "fl": "id,product_title",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "solrconfig_default-005",
+    "category": "solrconfig_default",
+    "description": "Bare term with no results verifies df is applied correctly",
+    "path": "/solr/testharness/select?q=nonexistentword&fl=id&wt=json",
+    "params": {
+      "q": "nonexistentword",
+      "fl": "id",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "solrconfig_default-006",
+    "category": "solrconfig_default",
+    "description": "Bare term with pagination using df from solrconfig defaults",
+    "path": "/solr/testharness/select?q=Cable&start=10&rows=2&fl=id,product_title&wt=json",
+    "params": {
+      "q": "Cable",
+      "start": "10",
+      "rows": "2",
+      "fl": "id,product_title",
+      "wt": "json"
+    }
+  },
+  {
+    "id": "solrconfig_default-007",
+    "category": "solrconfig_default",
+    "description": "Bare term with highlighting using df from solrconfig defaults",
+    "path": "/solr/testharness/select?q=Cable&hl=true&hl.fl=product_title&rows=2&fl=id,product_title&wt=json",
+    "params": {
+      "q": "Cable",
+      "hl": "true",
+      "hl.fl": "product_title",
+      "rows": "2",
+      "fl": "id,product_title",
+      "wt": "json"
+    }
   }
 ]

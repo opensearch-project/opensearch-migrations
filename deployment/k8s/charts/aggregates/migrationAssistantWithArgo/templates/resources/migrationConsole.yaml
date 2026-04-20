@@ -23,8 +23,8 @@ rules:
     resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: ["migrations.opensearch.org"]
-    resources: ["capturedtraffics", "datasnapshots", "snapshotmigrations",
-                "capturedtraffics/status", "datasnapshots/status", "snapshotmigrations/status"]
+    resources: ["capturedtraffics", "datasnapshots", "snapshotmigrations", "trafficreplays",
+                "capturedtraffics/status", "datasnapshots/status", "snapshotmigrations/status", "trafficreplays/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
 ---
@@ -77,10 +77,13 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   # Limits on the TOTAL aggregate size of the pool.
-  # The Migration Console is intended only to be a very small control-plane
+  # The Migration Console is intended only to be a very small control-plane.
+  # Memory limit is set to 8Gi to allow scheduling on instances with up to
+  # 8 GiB RAM (e.g. t3.large). Daemonsets (fluent-bit, otel-collector) are
+  # excluded from this node via nodeAffinity to keep overhead minimal.
   limits:
     cpu: 4000m
-    memory: 4Gi
+    memory: 8Gi
   disruption:
     consolidationPolicy: WhenEmpty
     consolidateAfter: 5m  # No reason to wait long if the console exits
@@ -124,6 +127,8 @@ spec:
       app: migration-console
   template:
     metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: console
       labels:
         app: migration-console
         env: v1
@@ -196,11 +201,11 @@ spec:
           resources:
             requests:
               cpu: 1500m
-              memory: 2.5Gi
+              memory: 2Gi
             limits:
               cpu: 1500m
               memory:
-                2.5Gi
+                2Gi
           env:
             - name: MIGRATIONS_CLI_CONSOLE_DISABLE_LEGACY_COMMANDS
               value: "true"
@@ -208,6 +213,39 @@ spec:
               value: "/root/schema/workflowMigration.schema.json"
             - name: MIGRATION_SAMPLE_CONFIG_PATH
               value: "/root/schema/sample.yaml"
+            {{- if .Values.defaultBucketConfiguration.create }}
+            - name: S3_ARTIFACTS_BUCKET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: BUCKET_NAME
+            - name: S3_ARTIFACTS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: AWS_REGION
+            - name: S3_ARTIFACTS_ENDPOINT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: ENDPOINT_HTTP
+                  optional: true
+            {{- end }}
+            {{- if index .Values.conditionalPackageInstalls "cert-manager" }}
+            - name: PROXY_DEFAULT_AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: AWS_REGION
+                  optional: true
+            {{- end }}
+          {{- if .Values.defaultBucketConfiguration.create }}
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - SYS_ADMIN
+          {{- end }}
           command:
             - "/bin/sh"
             - "-c"

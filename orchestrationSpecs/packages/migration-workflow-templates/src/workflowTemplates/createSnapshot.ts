@@ -203,6 +203,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("targetLabel", typeToken<string>())
         .addRequiredInput("semaphoreConfigMapName", typeToken<string>())
         .addRequiredInput("semaphoreKey", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
@@ -235,7 +236,8 @@ export const CreateSnapshot = WorkflowBuilder.create({
                         expr.literal("-"),
                         expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
                     ),
-                    snapshotName: expr.jsonPathStrict(b.inputs.snapshotConfig, "snapshotName")
+                    snapshotName: expr.jsonPathStrict(b.inputs.snapshotConfig, "snapshotName"),
+                    configChecksum: b.inputs.configChecksum,
                 }))
         )
         .addSynchronization(c => ({

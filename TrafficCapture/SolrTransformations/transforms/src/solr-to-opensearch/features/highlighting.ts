@@ -15,7 +15,19 @@
  */
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext, ResponseContext, JavaMap } from '../context';
+import type { ParamRule } from './validation';
 import { parseSolrQuery } from './query-q';
+
+/** Solr query params this feature handles. */
+export const params = ['hl'];
+export const paramPrefixes = ['hl.'];
+export const paramRules: ParamRule[] = [
+  { name: 'hl', type: 'boolean' },
+  { name: 'hl.snippets', type: 'integer' },
+  { name: 'hl.fragsize', type: 'integer' },
+  { name: 'hl.maxAnalyzedChars', type: 'integer' },
+  { name: 'hl.requireFieldMatch', type: 'boolean' },
+];
 
 // Solr hl params with no OpenSearch equivalent — warn and skip
 const UNSUPPORTED_PARAMS = [

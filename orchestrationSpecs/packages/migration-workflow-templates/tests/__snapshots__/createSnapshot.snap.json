@@ -299,6 +299,9 @@
               "name": "semaphoreKey"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -419,6 +422,10 @@
                   {
                     "name": "snapshotName",
                     "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.snapshotName')}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
                   }
                 ]
               },

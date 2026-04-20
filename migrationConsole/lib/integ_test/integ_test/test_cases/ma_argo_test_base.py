@@ -23,13 +23,16 @@ class ClusterVersionCombinationUnsupported(Exception):
 
 class MATestUserArguments:
     def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool,
-                 target_type: str = "OS", image_registry_prefix: str = ""):
+                 target_type: str = "OS", image_registry_prefix: str = "",
+                 speedup_factor: int = 20, observed_packet_timeout: int = 30):
         self.source_version = source_version
         self.target_version = target_version
         self.target_type = target_type
         self.unique_id = unique_id
         self.reuse_clusters = reuse_clusters
         self.image_registry_prefix = image_registry_prefix
+        self.speedup_factor = speedup_factor
+        self.observed_packet_timeout = observed_packet_timeout
 
 
 class MATestBase:
@@ -77,6 +80,8 @@ class MATestBase:
 
         self.parameters = {}
         self.image_registry_prefix = user_args.image_registry_prefix
+        self.speedup_factor = user_args.speedup_factor
+        self.observed_packet_timeout = user_args.observed_packet_timeout
         self.workflow_template = "full-migration-with-clusters"
         self.workflow_snapshot_and_migration_config = None
         self.source_operations = get_operations_library_by_version(self.source_version)
@@ -167,6 +172,8 @@ class MATestBase:
             self.parameters["source-configs"] = source_configs
             self.parameters["target-config"] = self.target_cluster.config
             self.parameters["keepMigrationWorkflow"] = "true" if keep_workflows else "false"
+            self.parameters["speedup-factor"] = str(self.speedup_factor)
+            self.parameters["observed-packet-timeout"] = str(self.observed_packet_timeout)
         else:
             self.parameters["snapshot-and-migration-configs"] = self.workflow_snapshot_and_migration_config
             self.parameters["source-cluster-template"] = self.source_argo_cluster_template
@@ -219,6 +226,16 @@ class MATestBase:
         else:
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
             self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=timeout_seconds)
+
+    def post_migration_actions(self):
+        """Hook for actions after migration completes but before verification.
+        CDC tests override this to send traffic through the capture proxy."""
+        pass
+
+    def cleanup(self):
+        """Hook for test-specific resource cleanup after teardown.
+        CDC tests override this to delete Kafka, proxy, and replayer resources."""
+        pass
 
     def display_final_cluster_state(self):
         source_response = cat_indices(cluster=self.source_cluster, refresh=True).decode("utf-8")

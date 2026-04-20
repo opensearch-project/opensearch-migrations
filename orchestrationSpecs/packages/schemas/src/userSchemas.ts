@@ -1,6 +1,34 @@
 import {z} from "zod";
 import { DEFAULT_RESOURCES, parseK8sQuantity } from "./schemaUtilities";
 
+// ── Schema field metadata ────────────────────────────────────────────
+// Downstream dependency names used in checksumFor annotations.
+export type ChecksumDependency = 'snapshot' | 'snapshotMigration' | 'replayer';
+
+export interface FieldMeta {
+    /** Which downstream dependencies include this field in their checksum. */
+    checksumFor?: ChecksumDependency[];
+    /** Change restriction category for VAP generation. Omit for 'safe'. */
+    changeRestriction?: 'impossible' | 'gated';
+}
+
+declare module "zod" {
+    interface ZodType {
+        checksumFor(...deps: ChecksumDependency[]): this;
+        changeRestriction(restriction: 'impossible' | 'gated'): this;
+    }
+}
+
+z.ZodType.prototype.checksumFor = function(...deps: ChecksumDependency[]) {
+    const existing = (this.meta() ?? {}) as FieldMeta;
+    return this.meta({ ...existing, checksumFor: deps });
+};
+
+z.ZodType.prototype.changeRestriction = function(restriction: 'impossible' | 'gated') {
+    const existing = (this.meta() ?? {}) as FieldMeta;
+    return this.meta({ ...existing, changeRestriction: restriction });
+};
+
 const REQUEST_TRANSFORMER_SUFFIX = " Request transformers modify each captured HTTP request before it is replayed to the target cluster.";
 const TUPLE_TRANSFORMER_SUFFIX = " Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.";
 const METADATA_TRANSFORMER_SUFFIX = " Metadata transformers modify index mappings and settings during migration.";
@@ -298,13 +326,18 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
         secretName: z.string()
             .describe("Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/."),
     }).describe("Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."),
-]).describe("TLS configuration for the capture proxy. Determines how the proxy obtains or provisions its TLS certificate for HTTPS termination.");
+    z.object({
+        mode: z.literal("plaintext")
+            .describe("Explicitly disable TLS. The proxy will serve plaintext HTTP. Use this to opt out of the secure-by-default TLS behavior."),
+    }).describe("Explicitly disable TLS termination on the capture proxy."),
+]).describe("TLS configuration for the capture proxy. When omitted, a self-signed certificate is automatically provisioned via cert-manager. Specify mode 'plaintext' to opt out.");
 
 export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
     internetFacing: z.boolean().default(false).optional()
-        .describe("When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC."),
+        .describe("When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.")
+        .changeRestriction('impossible'),
     podReplicas: z.number().default(1).optional()
         .describe("Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."),
     resources: z.preprocess((v) => deepmerge(DEFAULT_RESOURCES.PROXY, (v ?? {})), RESOURCE_REQUIREMENTS)
@@ -318,7 +351,9 @@ export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
 export const USER_PROXY_PROCESS_OPTIONS = z.object({
     otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
     setHeader: z.array(z.string()).optional()
-        .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format."),
+        .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format.")
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('gated'),
     destinationConnectionPoolSize: z.number().default(0).optional()
         .describe("Maximum number of persistent connections to the destination (source) cluster. 0 means unlimited connection pooling."),
     destinationConnectionPoolTimeout: z.string()
@@ -328,27 +363,42 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
     kafkaClientId: z.string().default("HttpCaptureProxyProducer").optional()
         .describe("Kafka producer client ID used when publishing captured traffic to Kafka. Useful for identifying this proxy in Kafka broker logs and metrics."),
     listenPort: z.number()
-        .describe("TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL."),
+        .describe("TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL.")
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('impossible'),
     maxTrafficBufferSize: z.number().min(1).max(1048576).default(1048576).optional()
-        .describe("Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka."),
+        .describe("Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka.")
+        .changeRestriction('gated'),
     noCapture: z.boolean().default(false).optional()
-        .describe("When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording."),
+        .describe("When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording.")
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('gated'),
     numThreads: z.number().default(1).optional()
         .describe("Number of Netty worker threads for the proxy to handle concurrent connections."),
     sslConfigFile: z.string().optional()
         .describe("[Expert] Path to a YAML file with OpenSearch security SSL configuration (plugins.security.ssl.http.* keys). The file must be mounted into the container by the user. For Kubernetes deployments, prefer the 'tls' option instead."),
     tls: PROXY_TLS_CONFIG.optional()
-        .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile."),
+        .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile.")
+        .changeRestriction('gated'),
     enableMSKAuth: z.boolean().default(false).optional()
-        .describe("Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity."),
+        .describe("Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
+        .changeRestriction('gated'),
     suppressCaptureForHeaderMatch: z.array(z.string()).default([]).optional()
-        .describe("List of header patterns. Requests matching any of these header patterns will be forwarded but not captured to Kafka."),
+        .describe("List of header patterns. Requests matching any of these header patterns will be forwarded but not captured to Kafka.")
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('gated'),
     suppressCaptureForMethod: z.string().default("").optional()
-        .describe("HTTP method to suppress from capture (e.g. 'HEAD'). Requests with this method are forwarded but not recorded."),
+        .describe("HTTP method to suppress from capture (e.g. 'HEAD'). Requests with this method are forwarded but not recorded.")
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('gated'),
     suppressCaptureForUriPath: z.string().default("").optional()
-        .describe("URI path pattern to suppress from capture. Requests matching this path are forwarded but not recorded."),
+        .describe("URI path pattern to suppress from capture. Requests matching this path are forwarded but not recorded.")
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('gated'),
     suppressMethodAndPath: z.string().default("").optional()
-        .describe("Combined method and path pattern for capture suppression in 'METHOD /path' format."),
+        .describe("Combined method and path pattern for capture suppression in 'METHOD /path' format.")
+        .checksumFor('snapshot', 'replayer')
+        .changeRestriction('gated'),
 }).describe("Process-level configuration options for the capture proxy application. These are passed as command-line arguments to the proxy container.");
 
 export const USER_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(USER_PROXY_WORKFLOW_OPTIONS);
@@ -383,38 +433,62 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
-        .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity."),
+        .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
+        .changeRestriction('impossible'),
     kafkaTrafficPropertyFile: z.string().optional()
-        .describe("[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."),
+        .describe("[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.")
+        .changeRestriction('impossible'),
     lookaheadTimeSeconds: z.number().default(400).optional()
         .describe("Number of seconds of captured traffic to buffer ahead of the current replay position. Must be strictly greater than observedPacketConnectionTimeout. Larger values improve throughput but increase memory usage."),
     maxConcurrentRequests: z.number().default(10000).optional()
         .describe("Maximum number of HTTP requests that can be in-flight simultaneously to the target cluster. Limits concurrency to prevent overwhelming the target."),
     numClientThreads: z.number().default(0).optional()
         .describe("Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."),
+    nonRetryableDocExceptionTypes: z.array(z.string()).optional()
+        .describe("List of document-level exception types that should not be retried during bulk replay. " +
+            "These errors still count as failures in the output but are not retried because they are " +
+            "deterministic client or mapping errors that will produce the same result on every attempt. " +
+            "When omitted, defaults to a built-in set including version_conflict_engine_exception, " +
+            "mapper_parsing_exception, strict_dynamic_mapping_exception, and others. " +
+            "Set explicitly to override the defaults entirely (not additive). " +
+            "Common values: version_conflict_engine_exception, mapper_parsing_exception, " +
+            "illegal_argument_exception, resource_already_exists_exception."),
     observedPacketConnectionTimeout: z.number().default(360).optional()
         .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
     otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
     quiescentPeriodMs: z.number().default(5000).optional()
         .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."),
     removeAuthHeader: z.boolean().default(false).optional()
-        .describe("Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately."),
+        .describe("Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately.")
+        .changeRestriction('gated'),
     speedupFactor: z.number().default(1.1).optional()
         .describe("Multiplier to accelerate replay timing relative to the original captured traffic. 1.0 = real-time, 2.0 = double speed."),
     targetServerResponseTimeoutSeconds: z.number().default(150).optional()
         .describe("Maximum seconds to wait for a response from the target cluster before timing out a replayed request."),
     transformerConfig: z.string().optional()
-        .describe("Inline request transformer configuration as a JSON string." + REQUEST_TRANSFORMER_SUFFIX),
+        .describe("Inline request transformer configuration as a JSON string." + REQUEST_TRANSFORMER_SUFFIX)
+        .changeRestriction('gated'),
     transformerConfigEncoded: z.string().optional()
-        .describe("Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field." + REQUEST_TRANSFORMER_SUFFIX),
+        .describe("Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field." + REQUEST_TRANSFORMER_SUFFIX)
+        .changeRestriction('gated'),
     transformerConfigFile: z.string().optional()
-        .describe("Path to a JSON file containing request transformer configuration." + REQUEST_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
+        .describe("Path to a JSON file containing request transformer configuration." + REQUEST_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
+        .changeRestriction('gated'),
     tupleTransformerConfig: z.string().optional()
-        .describe("Inline tuple transformer configuration as a JSON string." + TUPLE_TRANSFORMER_SUFFIX),
+        .describe("Inline tuple transformer configuration as a JSON string." + TUPLE_TRANSFORMER_SUFFIX)
+        .changeRestriction('gated'),
     tupleTransformerConfigBase64: z.string().optional()
-        .describe("Base64-encoded tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX),
+        .describe("Base64-encoded tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX)
+        .changeRestriction('gated'),
     tupleTransformerConfigFile: z.string().optional()
-        .describe("Path to a JSON file containing tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
+        .describe("Path to a JSON file containing tuple transformer configuration." + TUPLE_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
+        .changeRestriction('gated'),
+    tupleMaxBufferSeconds: z.number().default(60).optional()
+        .describe("Maximum seconds before rotating/uploading a tuple file to S3.")
+        .changeRestriction('gated'),
+    tupleMaxFileSizeMb: z.number().default(256).optional()
+        .describe("Maximum uncompressed size in MB before rotating a tuple file to S3.")
+        .changeRestriction('gated'),
     userAgent: z.string().optional()
         .describe("String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."),
 }).describe("Process-level configuration options for the traffic replayer application. These control how captured traffic is read from Kafka and replayed to the target cluster.");
@@ -556,16 +630,26 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("List of index names to include in the document backfill. " +
             "Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). " +
-            "An empty list includes all non-system indices from the snapshot."),
+            "An empty list includes all non-system indices from the snapshot.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     allowLooseVersionMatching: z.boolean().default(true).optional()
         .describe("[Expert] Allows document migration between clusters with non-exact version compatibility. " +
-            "Only disable if snapshot parsing issues require strict version matching."),
+            "Only disable if snapshot parsing issues require strict version matching.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     docTransformerConfigBase64: z.string().default("").optional()
-        .describe("Base64-encoded JSON transformer configuration." + DOC_TRANSFORMER_SUFFIX),
+        .describe("Base64-encoded JSON transformer configuration." + DOC_TRANSFORMER_SUFFIX)
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     docTransformerConfig: z.string().optional()
-        .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + DOC_TRANSFORMER_SUFFIX),
+        .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + DOC_TRANSFORMER_SUFFIX)
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     docTransformerConfigFile: z.string().optional()
-        .describe("Path to a JSON file containing transformer configuration." + DOC_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
+        .describe("Path to a JSON file containing transformer configuration." + DOC_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     documentsPerBulkRequest: z.number().default(0x7fffffff).optional()
         .describe("Maximum number of documents per bulk indexing request to the target cluster. Lower values reduce per-request latency but increase overhead."),
     documentsSizePerBulkRequest: z.number().default(10*1024*1024).optional()
@@ -575,11 +659,14 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .default("PT1H").optional()
         .describe("ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). " +
             "If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. " +
-            "Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration."),
+            "Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration.")
+        .changeRestriction('gated'),
     maxConnections: z.number().default(10).optional()
-        .describe("Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing."),
+        .describe("Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing.")
+        .changeRestriction('gated'),
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
-        .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."),
+        .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.")
+        .changeRestriction('gated'),
     otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
     serverGeneratedIds: z.enum(["AUTO", "ALWAYS", "NEVER"]).default("AUTO").optional()
         .describe("Controls document ID generation on the target. " +
@@ -587,9 +674,13 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "'ALWAYS': always use server-generated IDs (discards source IDs). " +
             "'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."),
     allowedDocExceptionTypes: z.array(z.string()).default([]).optional()
-        .describe("List of document-level exception types to treat as non-fatal during bulk migration. " +
-            "For example, set to ['version_conflict_engine_exception'] when migrating into a data stream, " +
-            "where backing index writes may conflict with existing documents."),
+        .describe("List of document-level exception types to treat as successful operations during bulk migration. " +
+            "Documents that fail with these errors are not retried and not counted as failures — they are silently accepted. " +
+            "Use this for idempotent migrations where certain errors are expected and harmless. " +
+            "For example, set to ['version_conflict_engine_exception'] when migrating into a data stream " +
+            "where backing index writes may conflict with existing documents. " +
+            "Defaults to empty (all errors are treated as failures). " +
+            "See BulkDocErrorTypes for common OpenSearch exception type strings."),
     coordinatorRetryMaxRetries: z.number().default(7).optional()
         .describe("[Expert] Maximum number of retries when marking work items as completed on the coordinator."),
     coordinatorRetryInitialDelayMs: z.number().default(1000).optional()

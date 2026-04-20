@@ -6,11 +6,15 @@ import {
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
-    GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT,
+    GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT, PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
+    FieldMeta, ChecksumDependency,
+    USER_PROXY_PROCESS_OPTIONS, USER_PROXY_WORKFLOW_OPTIONS,
+    USER_RFS_PROCESS_OPTIONS,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
 import {promises as dns} from "dns";
+import {createHash} from "crypto";
 import { generateSemaphoreKey } from './semaphoreUtils';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 
@@ -193,6 +197,28 @@ function normalizeKafkaClusterConfig(
     };
 }
 
+function defaultProxyTlsConfig(proxyName: string) {
+    const awsRegion = process.env.PROXY_DEFAULT_AWS_REGION;
+    const dnsNames = [
+        proxyName,
+        `${proxyName}.ma`,
+        `${proxyName}.ma.svc.cluster.local`,
+    ];
+    if (awsRegion) {
+        dnsNames.push(`*.elb.${awsRegion}.amazonaws.com`);
+    }
+    return {
+        mode: "certManager" as const,
+        issuerRef: {
+            name: "migrations-ca",
+            kind: "ClusterIssuer" as const,
+        },
+        dnsNames,
+        duration: "2160h",
+        renewBefore: "360h",
+    };
+}
+
 function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["traffic"] {
     // Drop user-schema sentinel placeholders that are equivalent to omission so
     // AJV validates the canonical user config rather than Zod's empty-string defaults.
@@ -202,9 +228,32 @@ function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["t
 
     const normalizedProxies: NonNullable<InputConfig["traffic"]>["proxies"] = {};
     for (const [key, proxy] of Object.entries(traffic.proxies ?? {})) {
-        normalizedProxies[key] = proxy.kafkaTopic === ""
+        let normalized = proxy.kafkaTopic === ""
             ? (({kafkaTopic, ...rest}) => rest)(proxy)
             : proxy;
+
+        // Secure-by-default: inject self-signed TLS when no TLS config is specified
+        // and no legacy sslConfigFile is in use. Users can opt out with tls.mode: "plaintext".
+        if (!normalized.proxyConfig?.tls && !normalized.proxyConfig?.sslConfigFile) {
+            console.info(`TLS was auto-configured for '${key}' (secure-by-default). Use tls.mode: "plaintext" to opt out.`);
+            normalized = {
+                ...normalized,
+                proxyConfig: {
+                    ...normalized.proxyConfig,
+                    tls: defaultProxyTlsConfig(key),
+                },
+            };
+        }
+
+        // Strip plaintext mode so Argo sees no TLS. This preserves existing HTTP behavior.
+        if (normalized.proxyConfig?.tls &&
+            'mode' in normalized.proxyConfig.tls &&
+            normalized.proxyConfig.tls.mode === "plaintext") {
+            const {tls: _, ...proxyConfigWithoutTls} = normalized.proxyConfig;
+            normalized = {...normalized, proxyConfig: proxyConfigWithoutTls};
+        }
+
+        normalizedProxies[key] = normalized;
     }
 
     return {
@@ -346,12 +395,88 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const snapshotMigrations = await this.buildSnapshotMigrations(userConfig);
         const trafficReplays = this.buildTrafficReplays(userConfig);
 
+        // Compute config checksums with dependency chaining
+        const cs = MigrationConfigTransformer.configChecksum;
+        const csDep = MigrationConfigTransformer.checksumForDependency;
+        const PROXY_SCHEMA = z.object({...USER_PROXY_WORKFLOW_OPTIONS.shape, ...USER_PROXY_PROCESS_OPTIONS.shape});
+        const RFS_SCHEMA = USER_RFS_PROCESS_OPTIONS;
+        const kafkaChecksums = new Map(kafkaClusters.map(k => [k.name, cs(k)]));
+
+        const proxiesWithChecksums = proxies.map(p => ({
+            ...p,
+            kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksums.get(p.kafkaConfig.label) ?? '' },
+            configChecksum: cs(p.proxyConfig, kafkaChecksums.get(p.kafkaConfig.label)),
+            checksumForSnapshot: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'snapshot', kafkaChecksums.get(p.kafkaConfig.label)),
+            checksumForReplayer: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'replayer', kafkaChecksums.get(p.kafkaConfig.label)),
+        }));
+        const proxyChecksums = new Map(proxiesWithChecksums.map(p => [p.name, p.configChecksum]));
+        const proxyChecksumForSnapshot = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForSnapshot]));
+        const proxyChecksumForReplayer = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForReplayer]));
+
+        const snapshotsWithChecksums = snapshots.map(s => ({
+            ...s,
+            createSnapshotConfig: s.createSnapshotConfig.map((item: z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>) => {
+                const enrichedDeps = (item.dependsOnProxySetups ?? []).map((dep: {name: string}) => ({
+                    ...dep,
+                    configChecksum: proxyChecksumForSnapshot.get(dep.name) ?? '',
+                }));
+                return {
+                    ...item,
+                    dependsOnProxySetups: enrichedDeps,
+                    configChecksum: cs(item.config, item.repo, ...enrichedDeps.map(d => d.configChecksum)),
+                };
+            }),
+        }));
+        const snapshotChecksums = new Map<string, string>();
+        for (const s of snapshotsWithChecksums) {
+            for (const item of s.createSnapshotConfig) {
+                snapshotChecksums.set([s.sourceConfig.label, item.label].join('-'), item.configChecksum!);
+            }
+        }
+
+        const migrationsWithChecksums = snapshotMigrations.map(m => {
+            // Extract replayer-material fields from each migration's documentBackfillConfig
+            const replayerMaterialParts = m.migrations.map((mig: any) =>
+                mig.documentBackfillConfig
+                    ? csDep(RFS_SCHEMA, mig.documentBackfillConfig as Record<string, unknown>, 'replayer')
+                    : ''
+            );
+            return {
+                ...m,
+                snapshotConfigChecksum: snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '',
+                configChecksum: cs(m.migrations, m.targetConfig, snapshotChecksums.get([m.sourceLabel, m.label].join('-'))),
+                checksumForReplayer: cs(m.targetConfig, ...replayerMaterialParts),
+            };
+        });
+        const migrationChecksums = new Map(migrationsWithChecksums.map(m =>
+            [[m.sourceLabel, m.label].join('-'), m.configChecksum]
+        ));
+        const migrationChecksumForReplayer = new Map(migrationsWithChecksums.map(m =>
+            [[m.sourceLabel, m.label].join('-'), m.checksumForReplayer]
+        ));
+
+        const replaysWithChecksums = trafficReplays.map(r => ({
+            ...r,
+            kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
+            fromProxyConfigChecksum: proxyChecksumForReplayer.get(r.fromProxy) ?? '',
+            configChecksum: cs(r.replayerConfig, r.toTarget, proxyChecksumForReplayer.get(r.fromProxy)),
+            dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).map(dep => ({
+                ...dep,
+                configChecksum: migrationChecksumForReplayer.get([dep.source, dep.snapshot].join('-')) ?? '',
+            })),
+        }));
+
+        const kafkasWithChecksums = kafkaClusters.map(k => ({
+            ...k,
+            configChecksum: kafkaChecksums.get(k.name),
+        }));
+
         const output = {
-            ...(kafkaClusters.length > 0 ? { kafkaClusters } : {}),
-            ...(proxies.length > 0 ? { proxies } : {}),
-            ...(snapshots.length > 0 ? { snapshots } : {}),
-            ...(snapshotMigrations.length > 0 ? { snapshotMigrations } : {}),
-            ...(trafficReplays.length > 0 ? { trafficReplays } : {})
+            ...(kafkasWithChecksums.length > 0 ? { kafkaClusters: kafkasWithChecksums } : {}),
+            ...(proxiesWithChecksums.length > 0 ? { proxies: proxiesWithChecksums } : {}),
+            ...(snapshotsWithChecksums.length > 0 ? { snapshots: snapshotsWithChecksums } : {}),
+            ...(migrationsWithChecksums.length > 0 ? { snapshotMigrations: migrationsWithChecksums } : {}),
+            ...(replaysWithChecksums.length > 0 ? { trafficReplays: replaysWithChecksums } : {})
         };
 
         try {
@@ -464,7 +589,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     },
                     repo: repoConfig,
                     ...semaphore,
-                    ...{dependsOnProxySetups: proxyDeps ?? []}
+                    ...{dependsOnProxySetups: (proxyDeps ?? []).map(name => ({
+                        name,
+                        configChecksum: ''
+                    }))}
                 });
             }
 
@@ -534,6 +662,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 results.push({
                     label: snapshotName,
                     snapshotNameResolution,
+                    snapshotConfigChecksum: '',
                     migrations: autoLabelMigrations(migrations),
                     sourceVersion: sourceCluster.version || "",
                     sourceLabel: fromSource,
@@ -558,7 +687,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const kafkaClusters = resolveKafkaClusters(userConfig);
         const proxies = userConfig.traffic?.proxies;
 
-        return Object.entries(userConfig.traffic?.replayers || {}).map(([_name, replayer]) => {
+        return Object.entries(userConfig.traffic?.replayers || {}).map(([name, replayer]) => {
             const proxy = proxies?.[replayer.fromProxy];
             if (!proxy) {
                 throw new Error(`Replayer references unknown proxy '${replayer.fromProxy}'`);
@@ -573,6 +702,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const replayerConfig = ARGO_REPLAYER_OPTIONS.parse(replayer.replayerConfig ?? {});
 
             return {
+                name: [replayer.fromProxy, replayer.toTarget, name].join('-'),
                 fromProxy: replayer.fromProxy,
                 kafkaClusterName: proxy.kafka ?? "default",
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
@@ -588,5 +718,32 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             semaphoreConfigMapName: 'concurrency-config',
             semaphoreKey: generateSemaphoreKey(sourceVersion, sourceName, snapshotName)
         };
+    }
+
+    /**
+     * Pick only the fields from `data` whose schema annotation includes `dep` in checksumFor,
+     * then hash them (plus any extra upstream checksums).
+     */
+    static checksumForDependency(
+        schema: z.ZodObject<any>,
+        data: Record<string, unknown>,
+        dep: ChecksumDependency,
+        ...upstreamChecksums: (string | undefined)[]
+    ): string {
+        const picked: Record<string, unknown> = {};
+        for (const [key, fieldSchema] of Object.entries(schema.shape)) {
+            const meta = (fieldSchema as z.ZodType).meta() as FieldMeta | undefined;
+            if (meta?.checksumFor?.includes(dep)) {
+                picked[key] = data[key];
+            }
+        }
+        return MigrationConfigTransformer.configChecksum(picked, ...upstreamChecksums);
+    }
+
+    static configChecksum(...parts: unknown[]): string {
+        return createHash('sha256')
+            .update(JSON.stringify(parts))
+            .digest('hex')
+            .slice(0, 16);
     }
 }

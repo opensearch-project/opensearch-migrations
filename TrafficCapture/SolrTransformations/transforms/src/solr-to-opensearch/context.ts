@@ -36,6 +36,12 @@ export interface RequestContext {
   targetName?: string;
   /** Routing mode — 'single' or 'dual'. Set by the shim proxy. */
   mode?: string;
+  /**
+   * Solr requestHandler config (defaults/invariants/appends) from solrconfig.xml.
+   * Injected from bindings at init, set per-context so transforms access it via ctx.
+   * Uses Record (plain object) because GraalVM exposes Java Maps as JS objects via allowMapAccess.
+   */
+  solrConfig?: Record<string, { defaults?: Record<string, string>; invariants?: Record<string, string>; appends?: Record<string, string> }>;
 }
 
 /** Parsed once from the bundled {request, response}. Shared across all response micro-transforms. */

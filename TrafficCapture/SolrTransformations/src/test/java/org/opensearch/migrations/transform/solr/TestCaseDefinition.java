@@ -36,7 +36,10 @@ record TestCaseDefinition(
     Map<String, Object> solrSchema,
     Map<String, Object> opensearchMapping,
     List<String> solrVersions,
-    List<String> plugins
+    List<String> plugins,
+    Map<String, Object> transformBindings,
+    Integer expectedStatusCode,
+    String expectedErrorContains
 ) {
     /** A per-path assertion rule controlling how diffs are handled. */
     @JsonIgnoreProperties(ignoreUnknown = true)

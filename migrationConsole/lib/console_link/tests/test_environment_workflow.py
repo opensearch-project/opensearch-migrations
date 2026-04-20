@@ -108,7 +108,7 @@ def test_get_source_cluster_from_workflow_config_attaches_proxy():
 
     assert isinstance(cluster, SourceCluster)
     assert cluster.proxy is not None
-    assert cluster.proxy.endpoint == "http://capture-proxy:9201"
+    assert cluster.proxy.endpoint == "https://capture-proxy:9201"
 
 
 def test_get_kafka_from_workflow_config_autocreate_default_cluster():

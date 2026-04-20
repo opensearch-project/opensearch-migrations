@@ -183,12 +183,6 @@ class Environment:
         instance.metadata = None
         instance.backfill = None
         instance.snapshot = None
-        if (source_cluster and isinstance(source_cluster.version, str) and
-                source_cluster.version.upper().startswith("SOLR") and target_cluster):
-            from console_link.models.solr_metadata import SolrMetadata
-            from console_link.models.solr_backfill import SolrBackfill
-            instance.metadata = SolrMetadata(source_cluster, target_cluster)
-            instance.backfill = SolrBackfill(source_cluster, target_cluster)
 
         return instance
 
@@ -239,7 +233,8 @@ class Environment:
         if listen_port is None:
             raise ValueError(f"Proxy '{proxy_name}' is missing proxyConfig.listenPort")
 
-        has_tls = proxy_options.get("tls") is not None
+        tls = proxy_options.get("tls")
+        has_tls = not (isinstance(tls, dict) and tls.get("mode") == "plaintext")
         return {
             "name": proxy_name,
             "endpoint": f"{'https' if has_tls else 'http'}://{proxy_name}:{listen_port}",

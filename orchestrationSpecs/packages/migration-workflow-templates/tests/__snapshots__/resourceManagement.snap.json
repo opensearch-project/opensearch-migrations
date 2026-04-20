@@ -81,6 +81,9 @@
               "name": "resourceName"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -91,11 +94,11 @@
         "resource": {
           "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
           "action": "get",
-          "successCondition": "status.listeners"
+          "successCondition": "{{='status.listeners, metadata.annotations.migration-configChecksum == '+inputs.parameters.configChecksum}}"
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -112,6 +115,9 @@
           "parameters": [
             {
               "name": "resourceName"
+            },
+            {
+              "name": "configChecksum"
             },
             {
               "name": "imageMigrationConsoleLocation"
@@ -154,6 +160,10 @@
                     "value": "{{inputs.parameters.resourceName}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
                   },
@@ -186,7 +196,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -273,6 +283,12 @@
               "name": "resourceName"
             },
             {
+              "name": "configChecksum"
+            },
+            {
+              "name": "checksumField"
+            },
+            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -283,11 +299,12 @@
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
           "action": "get",
-          "successCondition": "status.phase == Ready"
+          "successCondition": "{{='status.phase == Ready, status.'+inputs.parameters.checksumField+' == '+inputs.parameters.configChecksum}}",
+          "failureCondition": "status.phase == Error"
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -306,6 +323,12 @@
               "name": "resourceName"
             },
             {
+              "name": "configChecksum"
+            },
+            {
+              "name": "checksumField"
+            },
+            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -316,11 +339,12 @@
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
           "action": "get",
-          "successCondition": "status.phase == Ready"
+          "successCondition": "{{='status.phase == Completed, status.'+inputs.parameters.checksumField+' == '+inputs.parameters.configChecksum}}",
+          "failureCondition": "status.phase == Error"
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -339,6 +363,12 @@
               "name": "resourceName"
             },
             {
+              "name": "configChecksum"
+            },
+            {
+              "name": "checksumField"
+            },
+            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -349,11 +379,12 @@
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
           "action": "get",
-          "successCondition": "status.phase == Ready"
+          "successCondition": "{{='status.phase == Completed, status.'+inputs.parameters.checksumField+' == '+inputs.parameters.configChecksum}}",
+          "failureCondition": "status.phase == Error"
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -384,7 +415,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -404,11 +435,14 @@
             },
             {
               "name": "snapshotName"
+            },
+            {
+              "name": "configChecksum"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Ready\n  snapshotName: \"{{inputs.parameters.snapshotName}}\"\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Completed\n  snapshotName: \"{{inputs.parameters.snapshotName}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n  checksumForSnapshotMigration: \"{{inputs.parameters.configChecksum}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
@@ -418,7 +452,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -435,11 +469,17 @@
           "parameters": [
             {
               "name": "resourceName"
+            },
+            {
+              "name": "configChecksum"
+            },
+            {
+              "name": "checksumForReplayer"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Ready\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: Completed\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n  checksumForReplayer: \"{{inputs.parameters.checksumForReplayer}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
@@ -449,7 +489,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -475,7 +515,7 @@
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "Always",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -491,6 +531,176 @@
               }
             }
           ]
+        }
+      },
+      {
+        "name": "readresourcephase",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceKind"
+            },
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
+          "action": "get"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "phase",
+              "valueFrom": {
+                "jsonPath": "{.status.phase}"
+              }
+            },
+            {
+              "name": "configChecksum",
+              "valueFrom": {
+                "jsonPath": "{.status.configChecksum}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "patchresourcephase",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceKind"
+            },
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            },
+            {
+              "name": "configChecksum",
+              "value": ""
+            },
+            {
+              "name": "checksumForSnapshot",
+              "value": ""
+            },
+            {
+              "name": "checksumForReplayer",
+              "value": ""
+            },
+            {
+              "name": "checksumForSnapshotMigration",
+              "value": ""
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n  checksumForSnapshot: \"{{inputs.parameters.checksumForSnapshot}}\"\n  checksumForReplayer: \"{{inputs.parameters.checksumForReplayer}}\"\n  checksumForSnapshotMigration: \"{{inputs.parameters.checksumForSnapshotMigration}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchconfigchecksumannotation",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceApiVersion"
+            },
+            {
+              "name": "resourceKind"
+            },
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "configChecksum"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: \"{{inputs.parameters.resourceApiVersion}}\"\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n  annotations:\n    migration-configChecksum: \"{{inputs.parameters.configChecksum}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchapprovalannotation",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceApiVersion"
+            },
+            {
+              "name": "resourceKind"
+            },
+            {
+              "name": "resourceName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: \"{{inputs.parameters.resourceApiVersion}}\"\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n  annotations:\n    migrations.opensearch.org/approved-by-run: \"{{workflow.uid}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
         }
       }
     ]

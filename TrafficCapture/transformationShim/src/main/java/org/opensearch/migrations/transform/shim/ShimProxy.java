@@ -12,6 +12,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.transform.shim.netty.MultiTargetRoutingHandler;
+import org.opensearch.migrations.transform.shim.reporting.MetricsReceiver;
+import org.opensearch.migrations.transform.shim.reporting.ReportingSink;
 import org.opensearch.migrations.transform.shim.tracing.RootShimProxyContext;
 import org.opensearch.migrations.transform.shim.validation.Target;
 import org.opensearch.migrations.transform.shim.validation.ValidationRule;
@@ -73,6 +75,8 @@ public class ShimProxy {
     private final Duration secondaryTimeout;
     private final int maxContentLength;
     private final RootShimProxyContext rootShimProxyContext;
+    private final MetricsReceiver metricsReceiver;
+    private final ReportingSink reportingSink;
 
     private Channel serverChannel;
     private Channel healthChannel;
@@ -92,6 +96,24 @@ public class ShimProxy {
         int maxContentLength,
         RootShimProxyContext rootShimProxyContext
     ) {
+        this(port, targets, primaryTarget, activeTargets, validators, sslEngineSupplier,
+            allowInsecureBackend, secondaryTimeout, maxContentLength, rootShimProxyContext, null, null);
+    }
+
+    public ShimProxy(
+        int port,
+        Map<String, Target> targets,
+        String primaryTarget,
+        Set<String> activeTargets,
+        List<ValidationRule> validators,
+        java.util.function.Supplier<SSLEngine> sslEngineSupplier,
+        boolean allowInsecureBackend,
+        Duration secondaryTimeout,
+        int maxContentLength,
+        RootShimProxyContext rootShimProxyContext,
+        MetricsReceiver metricsReceiver,
+        ReportingSink reportingSink
+    ) {
         this.port = port;
         this.targets = new LinkedHashMap<>(targets);
         this.primaryTarget = primaryTarget;
@@ -102,6 +124,8 @@ public class ShimProxy {
         this.maxContentLength = maxContentLength > 0 ? maxContentLength : DEFAULT_MAX_CONTENT_LENGTH;
         this.backendSslContext = buildBackendSslContext(allowInsecureBackend);
         this.rootShimProxyContext = rootShimProxyContext;
+        this.metricsReceiver = metricsReceiver;
+        this.reportingSink = reportingSink;
 
         if (!this.targets.containsKey(primaryTarget)) {
             throw new IllegalArgumentException("Primary target '" + primaryTarget + "' not in targets");
@@ -222,7 +246,7 @@ public class ShimProxy {
 
         pipeline.addLast("multiTargetRouter", new MultiTargetRoutingHandler(
             targets, primaryTarget, activeTargets, validators, secondaryTimeout,
-            backendSslContext, maxContentLength, activeRequests, rootShimProxyContext));
+            backendSslContext, maxContentLength, activeRequests, rootShimProxyContext, metricsReceiver));
         addLoggingHandler(pipeline, "E");
     }
 
@@ -253,6 +277,15 @@ public class ShimProxy {
         }
         if (activeRequests.get() > 0) {
             log.warn("Drain timeout reached with {} in-flight requests, forcing shutdown", activeRequests.get());
+        }
+
+        // Close ReportingSink to flush buffered validation documents
+        if (reportingSink != null) {
+            try {
+                reportingSink.close();
+            } catch (Exception e) {
+                log.error("Error closing ReportingSink", e);
+            }
         }
 
         if (workerGroup != null) workerGroup.shutdownGracefully(0, 5, TimeUnit.SECONDS).sync();
