@@ -133,11 +133,18 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
 
     private void runCloudBackup(String solrUrl, String backupLocation) {
         log.info("Detected SolrCloud — using Collections API backup");
-        // Solr S3BackupRepository validates that the location directory exists in S3 before writing.
-        // If the s3RepoUri has a subpath (e.g. s3://bucket/solr-migration-v3), we must ensure
-        // the directory marker object exists at that path before calling the backup API.
+        // Solr's BACKUP API validates that the `location` directory exists before writing
+        // (both S3BackupRepository and LocalFileSystemRepository enforce this). Per-collection
+        // backups use location=<base>/<snapshotName>, so we create that directory up-front.
         if (args.s3RepoUri != null && args.s3Region != null) {
-            ensureS3LocationExists(args.s3RepoUri, args.s3Region, args.s3Endpoint);
+            // S3: create markers at <prefix>/ (parent, when the URI has a subpath) and
+            // <prefix>/<snapshotName>/ (the per-snapshot directory Solr checks via HeadObject).
+            ensureS3LocationExists(args.s3RepoUri, args.snapshotName, args.s3Region, args.s3Endpoint);
+        } else if (args.fileSystemRepoPath != null) {
+            // Filesystem: create <fileSystemRepoPath>/<snapshotName>/ before the BACKUP call.
+            // Solr runs inside its own container in real deployments, so this only works when
+            // the backup target is a shared volume accessible from the CreateSnapshot process.
+            ensureFileSystemLocationExists(args.fileSystemRepoPath, args.snapshotName);
         }
         var creator = new SolrSnapshotCreator(
             solrUrl, args.snapshotName, backupLocation,
@@ -195,26 +202,33 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
      * <p>This uses the SDK S3 client directly (not Solr's built-in client) so we can
      * apply the custom endpoint (e.g. localstack) and path-style access when needed.
      */
-    private void ensureS3LocationExists(String s3RepoUri, String region, String endpoint) {
+    /* package */ void ensureS3LocationExists(String s3RepoUri, String snapshotName, String region, String endpoint) {
         var repoUri = new S3Uri(s3RepoUri);
-        if (repoUri.key == null || repoUri.key.isEmpty()) {
-            log.info("S3 backup location is bucket root, no directory marker needed");
-            return;
-        }
-
-        var dirKey = repoUri.key.endsWith("/") ? repoUri.key : repoUri.key + "/";
-        log.info("Ensuring S3 directory marker exists: s3://{}/{}", repoUri.bucketName, dirKey);
+        var parentKey = repoUri.key;
+        var snapshotKey = (parentKey == null || parentKey.isEmpty())
+            ? snapshotName + "/"
+            : (parentKey.endsWith("/") ? parentKey : parentKey + "/") + snapshotName + "/";
 
         try (var s3Client = buildS3Client(region, endpoint)) {
-            createDirectoryMarkerIfMissing(s3Client, repoUri.bucketName, dirKey);
+            // Create the parent prefix marker only when the URI has a subpath. Bucket root
+            // needs no marker (HeadObject on "" is a no-op).
+            if (parentKey != null && !parentKey.isEmpty()) {
+                var parentDirKey = parentKey.endsWith("/") ? parentKey : parentKey + "/";
+                log.info("Ensuring S3 parent directory marker: s3://{}/{}", repoUri.bucketName, parentDirKey);
+                createDirectoryMarkerIfMissing(s3Client, repoUri.bucketName, parentDirKey);
+            }
+            // Always create the per-snapshot directory marker — Solr 8's S3BackupRepository
+            // HeadObject-checks this exact path when backup `location` includes the snapshot name.
+            log.info("Ensuring S3 snapshot directory marker: s3://{}/{}", repoUri.bucketName, snapshotKey);
+            createDirectoryMarkerIfMissing(s3Client, repoUri.bucketName, snapshotKey);
         } catch (Exception e) {
-            log.warn("Failed to ensure S3 directory marker at s3://{}/{}: {} — continuing; "
-                + "backup may still succeed if Solr's S3BackupRepository creates it implicitly.",
-                repoUri.bucketName, dirKey, e.getMessage());
+            log.warn("Failed to ensure S3 directory markers under s3://{}/{}: {} — continuing; "
+                + "backup may still succeed if Solr's S3BackupRepository creates them implicitly.",
+                repoUri.bucketName, snapshotKey, e.getMessage());
         }
     }
 
-    private static S3Client buildS3Client(String region, String endpoint) {
+    /* package */ static S3Client buildS3Client(String region, String endpoint) {
         var builder = S3Client.builder().region(Region.of(region));
         if (endpoint != null && !endpoint.isEmpty()) {
             var endpointUri = endpoint.contains("://") ? endpoint : "http://" + endpoint;
@@ -225,7 +239,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         return builder.build();
     }
 
-    private void createDirectoryMarkerIfMissing(S3Client s3Client, String bucket, String dirKey) {
+    /* package */ void createDirectoryMarkerIfMissing(S3Client s3Client, String bucket, String dirKey) {
         if (s3DirectoryMarkerExists(s3Client, bucket, dirKey)) {
             log.info("S3 directory marker already exists");
             return;
@@ -240,7 +254,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         log.info("Created S3 directory marker: s3://{}/{}", bucket, dirKey);
     }
 
-    private boolean s3DirectoryMarkerExists(S3Client s3Client, String bucket, String key) {
+    /* package */ boolean s3DirectoryMarkerExists(S3Client s3Client, String bucket, String key) {
         try {
             s3Client.headObject(HeadObjectRequest.builder()
                 .bucket(bucket)
@@ -254,6 +268,32 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
                 return false;
             }
             throw e;
+        }
+    }
+
+    /**
+     * Ensure the filesystem backup location directory exists before invoking Solr's BACKUP
+     * API. Solr validates that the {@code location} path resolves to an existing directory
+     * (LocalFileSystemRepository enforces this) and will return HTTP 500 with
+     * "specified location ... does not exist" otherwise. Creates parents as needed; this is
+     * a no-op if the directory already exists.
+     *
+     * <p>Note: this only helps when the CreateSnapshot process shares a filesystem with the
+     * Solr node. In containerized/remote setups the customer must ensure the path exists
+     * inside the Solr container.
+     */
+    /* package */ void ensureFileSystemLocationExists(String fileSystemRepoPath, String snapshotName) {
+        try {
+            var snapshotDir = java.nio.file.Paths.get(fileSystemRepoPath, snapshotName);
+            log.info("Ensuring filesystem backup directory: {}", snapshotDir);
+            java.nio.file.Files.createDirectories(snapshotDir);
+        } catch (Exception e) {
+            // Most likely cause in production: Solr runs in a separate container/host and the
+            // CreateSnapshot process can't reach its filesystem. That's expected — continue and
+            // let Solr return its own error if the directory still doesn't exist from its view.
+            log.warn("Failed to create filesystem backup directory {}/{}: {} — continuing; "
+                + "backup will fail if Solr cannot see the directory.",
+                fileSystemRepoPath, snapshotName, e.getMessage());
         }
     }
 }

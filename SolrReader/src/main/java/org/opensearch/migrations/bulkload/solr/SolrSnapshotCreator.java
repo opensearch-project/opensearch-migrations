@@ -59,22 +59,30 @@ public class SolrSnapshotCreator {
     /** Trigger an async backup for each collection via the Collections API. */
     public void createSnapshot() {
         for (var collection : collections) {
-            var asyncId = backupName + "-" + collection;
+            // Solr 8's incremental backup (default since 8.9) enforces one collection per
+            // backup name. To keep all collections under a single snapshot directory that the
+            // downstream reader expects (<baseLocation>/<snapshotName>/<collection>/...), we
+            // set Solr's `location` to <baseLocation>/<snapshotName> and `name` to <collection>
+            // so each call writes to a distinct subdirectory under the shared snapshot folder.
+            var asyncId = asyncIdFor(collection);
             var urlBuilder = new StringBuilder(String.format(
                 "%s/solr/admin/collections?action=BACKUP&name=%s&collection=%s&async=%s&wt=json",
-                solrBaseUrl, backupName, collection, asyncId
+                solrBaseUrl, collection, collection, asyncId
             ));
+            var perCollectionLocation = buildPerCollectionLocation(backupLocation, backupName);
             if (backupLocation != null && backupLocation.startsWith("s3://") && repositoryName != null) {
                 // For S3 backups, Solr's S3BackupRepository writes under the configured bucket
                 // (in solr.xml) using `location` as the prefix path. Extract the path portion
-                // from s3://<bucket>/<path> — e.g. s3://bucket/foo → /foo (or / if no subpath).
+                // from s3://<bucket>/<path>/<snapshotName> — e.g. /foo/<snapshotName> — so
+                // Solr writes to <bucket>/<path>/<snapshotName>/<collection>/.
                 urlBuilder.append("&repository=").append(repositoryName)
-                    .append("&location=").append(extractS3Path(backupLocation));
+                    .append("&location=").append(perCollectionLocation);
             } else if (backupLocation != null) {
-                urlBuilder.append("&location=").append(backupLocation);
+                urlBuilder.append("&location=").append(perCollectionLocation);
             }
             var url = urlBuilder.toString();
-            log.atInfo().setMessage("Initiating SolrCloud backup for collection '{}': async={}").addArgument(collection).addArgument(asyncId).log();
+            log.atInfo().setMessage("Initiating SolrCloud backup for collection '{}': name={} async={} location={}")
+                .addArgument(collection).addArgument(collection).addArgument(asyncId).addArgument(perCollectionLocation).log();
             var response = httpClient.getJson(url);
             var status = response.path("responseHeader").path(STATUS_FIELD).asInt(-1);
             if (status != 0) {
@@ -85,10 +93,45 @@ public class SolrSnapshotCreator {
         }
     }
 
+    /**
+     * Build the Solr backup `location` parameter for a specific collection.
+     *
+     * <p>For S3 locations, strips the scheme/bucket and appends the snapshot name so that
+     * Solr writes collection subdirectories directly under <snapshotName>/ (matching the
+     * reader's expectation). For filesystem locations, appends the snapshot name to the
+     * configured path. Returns {@code null} when {@code location} is null.
+     */
+    static String buildPerCollectionLocation(String location, String snapshotName) {
+        if (location == null) {
+            return null;
+        }
+        if (location.startsWith("s3://")) {
+            var base = extractS3Path(location);
+            if ("/".equals(base)) {
+                return "/" + snapshotName;
+            }
+            return base + "/" + snapshotName;
+        }
+        // Filesystem: append snapshotName, preserving a trailing slash.
+        if (location.endsWith("/")) {
+            return location + snapshotName;
+        }
+        return location + "/" + snapshotName;
+    }
+
+    /** Per-collection async id used for REQUESTSTATUS polling. Exposed for tests. */
+    public static String asyncIdFor(String snapshotName, String collection) {
+        return snapshotName + "-" + collection;
+    }
+
+    private String asyncIdFor(String collection) {
+        return asyncIdFor(backupName, collection);
+    }
+
     /** Check if all collection backups have completed by polling async request status. */
     public boolean isSnapshotFinished() {
         for (var collection : collections) {
-            var asyncId = backupName + "-" + collection;
+            var asyncId = asyncIdFor(collection);
             var url = String.format(
                 "%s/solr/admin/collections?action=REQUESTSTATUS&requestid=%s&wt=json",
                 solrBaseUrl, asyncId
