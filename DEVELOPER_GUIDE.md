@@ -19,6 +19,7 @@
 - Java Development Kit (JDK) 17+
 - Python3
 - Docker/Minikube/K3s/etc (for local deployment)
+- [Helm](https://helm.sh/docs/intro/install/)
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html#getting-started-install-instructions) (for AWS deployment)
 - Node.js v22 (downloaded automatically by Gradle)
 - [AWS Cloud Development Kit (CDK)](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html) (for AWS deployment, downloaded automatically by Gradle)
