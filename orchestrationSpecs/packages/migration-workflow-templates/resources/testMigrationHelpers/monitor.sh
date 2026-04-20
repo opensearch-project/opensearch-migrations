@@ -15,10 +15,26 @@
 
 set -e -x
 
-echo "Checking workflow status"
+WORKFLOW_NAMESPACE="${WORKFLOW_NAMESPACE:-ma}"
+MIGRATION_CONSOLE_POD="${MIGRATION_CONSOLE_POD:-migration-console-0}"
 
-STATUS_OUTPUT=$(workflow status --workflow-name migration-workflow 2>&1)
+wait_for_console_pod() {
+  kubectl wait \
+    --namespace "$WORKFLOW_NAMESPACE" \
+    --for=condition=ready "pod/$MIGRATION_CONSOLE_POD" \
+    --timeout=300s >/dev/null
+}
+
+echo "Checking workflow status"
+wait_for_console_pod
+
+set +e
+STATUS_OUTPUT=$(
+  kubectl exec --namespace "$WORKFLOW_NAMESPACE" "$MIGRATION_CONSOLE_POD" -- \
+    /bin/bash -lc 'workflow status --workflow-name migration-workflow' 2>&1
+)
 STATUS_EXIT_CODE=$?
+set -e
 echo "Status output:"
 echo "$STATUS_OUTPUT"
 

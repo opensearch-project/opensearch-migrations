@@ -64,9 +64,7 @@ def _remove_existing_workflow(workflow_name, namespace):
         click.echo("  Could not delete")
         return True
 
-    if wait_until_workflow_deleted(namespace, workflow_name):
-        pass
-    else:
+    if not wait_until_workflow_deleted(namespace, workflow_name):
         raise click.ClickException(
             f"Timed out waiting for workflow '{workflow_name}' to be deleted"
         )
