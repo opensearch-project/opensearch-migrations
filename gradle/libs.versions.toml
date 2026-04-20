@@ -1,7 +1,7 @@
 [versions]
-aws-crt = "0.44.0"
+aws-crt = "0.45.1"
 aws-msk-iam-auth = "2.3.4"
-aws-sdk = "2.42.34"
+aws-sdk = "2.42.36"
 bouncycastle = "1.84"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
@@ -11,9 +11,9 @@ errorprone = "2.42.0"
 errorprone-slf4j = "0.1.29"
 graalvm = "25.0.2"
 groovy = "3.0.25"
-guava = "33.5.0-jre"
+guava = "33.6.0-jre"
 hamcrest = "3.0"
-httpclient5 = "5.6"
+httpclient5 = "5.6.1"
 jackson = "2.21.2"
 jackson-annotations = "2.21"
 jcommander = "2.0"
@@ -190,7 +190,7 @@ transitive-dnsjava           = { module = "dnsjava:dnsjava",                    
 transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "4.0.2"   }
 transitive-json-path         = { module = "com.jayway.jsonpath:json-path",           version = "3.0.0"    }
 transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.6.0"    }
-transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.22.1"   }
+transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.22.2"   }
 transitive-snappy-java       = { module = "org.xerial.snappy:snappy-java",           version = "1.1.10.8" }
 transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.3.0"    }
 transitive-xalan             = { module = "xalan:xalan",                             version = "2.7.3"    }
