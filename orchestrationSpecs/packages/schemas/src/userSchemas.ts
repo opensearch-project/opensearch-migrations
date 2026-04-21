@@ -526,8 +526,13 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
 
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
-        .describe("List of index names to include in the snapshot. " +
-            "Each entry is either an exact index name (e.g. 'logs-2024-01') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*-2024'). " +
+        .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
+            "Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): " +
+            "exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). " +
+            "The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. " +
+            "Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. " +
+            "To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, " +
+            "which filter client-side on the snapshot contents. " +
             "An empty list includes all indices."),
     maxSnapshotRateMbPerNode: z.number().default(0).optional()
         .describe("Maximum snapshot throughput in MB/s per data node. 0 means no rate limiting. Use to reduce I/O impact on the source cluster during snapshot creation."),
@@ -563,8 +568,9 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "Each entry is either an exact name or a regex pattern prefixed with 'regex:'. " +
             "An empty list includes all non-system component templates."),
     indexAllowlist: z.array(z.string()).default([]).optional()
-        .describe("List of index names to include in the metadata migration. " +
+        .describe("Filters which indices are migrated at the metadata stage — evaluated client-side on the snapshot contents after the snapshot has been taken. " +
             "Each entry is either an exact index name (e.g. 'my-index') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). " +
+            "Applies only among indices already captured in the snapshot; to exclude an index from the snapshot itself, use the CreateSnapshot indexAllowlist. " +
             "An empty list includes all non-system indices."),
     indexTemplateAllowlist: z.array(z.string()).default([]).optional()
         .describe("List of index template names to include in the metadata migration. " +
@@ -631,8 +637,9 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
 
 export const USER_RFS_PROCESS_OPTIONS = z.object({
     indexAllowlist: z.array(z.string()).default([]).optional()
-        .describe("List of index names to include in the document backfill. " +
+        .describe("Filters which indices are migrated by the document backfill (RFS) — evaluated client-side on the snapshot contents after the snapshot has been taken. " +
             "Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). " +
+            "Applies only among indices already captured in the snapshot; to exclude an index from the snapshot itself, use the CreateSnapshot indexAllowlist. " +
             "An empty list includes all non-system indices from the snapshot.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
@@ -900,7 +907,15 @@ export const SNAPSHOT_INFO = z.object({
     repos: SOURCE_CLUSTER_REPOS_RECORD.optional()
         .describe("S3 snapshot repositories registered with the source cluster."),
     snapshots: SNAPSHOT_CONFIGS_MAP
-        .describe("Snapshots to use or create for this source cluster.")
+        .describe("Snapshots to use or create for this source cluster."),
+    serializeSnapshotCreation: z.boolean().optional()
+        .describe("Controls whether snapshot creations for this source run one-at-a-time or in parallel. " +
+            "When true, all snapshot creations share a single semaphore so only one runs at any given time; " +
+            "when false, each snapshot can run in parallel with others for this source. " +
+            "When omitted, defaults to true for legacy sources (ES 1-7, OS 1) and false for modern sources (ES 8+, OS 2+). " +
+            "Set explicitly to override the version-based default. " +
+            "Common reason to force true on a modern source: the cluster only supports one snapshot at a time for the indices being captured " +
+            "(for example, OpenSearch UltraWarm indices, which only allow a single index per snapshot and cannot be snapshotted concurrently).")
 }).describe("Snapshot repository and snapshot configuration for a source cluster.");
 
 const AWS_MANAGED_ENDPOINT_PATTERN = /(?:\.es\.amazonaws\.com|\.aos\.[a-z0-9-]+\.on\.aws)(?::\d+)?(?:\/)?$/i;
