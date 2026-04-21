@@ -596,6 +596,10 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
         .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + METADATA_TRANSFORMER_SUFFIX),
     transformerConfigFile: z.string().optional()
         .describe("Path to a JSON file containing transformer configuration." + METADATA_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
+    enableSourcelessMigrations: z.boolean().default(false).optional()
+        .describe("Enable migration of indices that have _source disabled or partially filtered (includes/excludes). " +
+            "When enabled, document backfill will reconstruct documents from stored fields and doc_values. " +
+            "Without this flag, metadata migration will fail if any selected index has _source disabled or partially filtered."),
 }).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
 
 export const USER_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(USER_METADATA_WORKFLOW_OPTIONS);
@@ -697,6 +701,12 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("[Expert] Initial delay in milliseconds for coordinator completion retries. Doubles with each attempt up to coordinatorRetryMaxDelayMs."),
     coordinatorRetryMaxDelayMs: z.number().default(64000).optional()
         .describe("[Expert] Maximum delay in milliseconds for any single coordinator completion retry."),
+    enableSourcelessMigrations: z.boolean().default(false).optional()
+        .describe("Enable migration of indices that have _source disabled or partially filtered (includes/excludes). " +
+            "When enabled, documents are reconstructed from stored fields and doc_values instead of _source. " +
+            "Without this flag, migration of sourceless indices will fail with an error.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
 
 export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);
