@@ -14,7 +14,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -96,20 +95,6 @@ public class RfsMigrateDocuments {
     // Increase successor nextAcquisitionLeaseExponent if shard setup takes more than 10% of lease total time
     private static final double DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.025;
     private static final double INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.1;
-
-    /**
-     * Normalize an S3 key into a prefix: empty → "", otherwise ensure trailing "/".
-     * Used to construct backup S3 URIs from an s3RepoUri that may or may not include a subpath.
-     */
-    static String toKeyPrefix(String key) {
-        if (key == null || key.isEmpty()) {
-            return "";
-        }
-        if (key.endsWith("/")) {
-            return key;
-        }
-        return key + "/";
-    }
 
     public static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = "[" +
             "  {" +
@@ -400,6 +385,11 @@ public class RfsMigrateDocuments {
                     "For Solr backup migration, provide either --snapshot-local-dir or S3 args (--s3-local-dir, --s3-repo-uri, --s3-region)."
                 );
             }
+            if (args.coordinatorArgs.host == null) {
+                throw new ParameterException(
+                    "When source version is SOLR, --coordinator-host must be provided for work coordination."
+                );
+            }
             return;
         }
 
@@ -521,16 +511,7 @@ public class RfsMigrateDocuments {
         var progressCursor = new AtomicReference<WorkItemCursor>();
         var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
-        var completionRetryConfig = new OpenSearchWorkCoordinator.CompletionRetryConfig(
-            arguments.coordinatorRetryMaxRetries,
-            arguments.coordinatorRetryInitialDelayMs,
-            arguments.coordinatorRetryMaxDelayMs);
-        log.atInfo().setMessage("Coordinator completion retry config: maxRetries={}, initialDelay={}ms, maxDelay={}ms, totalWindow=~{}s")
-            .addArgument(completionRetryConfig.maxRetries())
-            .addArgument(completionRetryConfig.initialDelayMs())
-            .addArgument(completionRetryConfig.maxDelayMs())
-            .addArgument(calculateTotalRetryWindowSeconds(completionRetryConfig))
-            .log();
+        var completionRetryConfig = buildCompletionRetryConfig(arguments);
         var coordinatorFactory = new WorkCoordinatorFactory(
             coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig);
         var cleanShutdownCompleted = new AtomicBoolean(false);
@@ -575,16 +556,9 @@ public class RfsMigrateDocuments {
             }));
 
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
-            
-            // Create document exception allowlist from command-line arguments
-            Set<String> allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
-            DocumentExceptionAllowlist allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
-            if (!allowedExceptionTypesSet.isEmpty()) {
-                log.atInfo().setMessage("Document exception allowlist configured with types: {}")
-                    .addArgument(String.join(", ", allowedExceptionTypesSet))
-                    .log();
-            }
-            
+
+            DocumentExceptionAllowlist allowlist = buildDocumentExceptionAllowlist(arguments);
+
             var finder = SnapshotReaderRegistry.getSnapshotFileFinder(
                     arguments.sourceVersion,
                     arguments.versionStrictness.allowLooseVersionMatches);
@@ -663,6 +637,39 @@ public class RfsMigrateDocuments {
             }
         }
         return totalMs / 1000;
+    }
+
+    /**
+     * Build the coordinator completion-retry configuration from CLI args and log its summary.
+     * Shared between the ES and Solr backfill paths.
+     */
+    private static OpenSearchWorkCoordinator.CompletionRetryConfig buildCompletionRetryConfig(Args arguments) {
+        var completionRetryConfig = new OpenSearchWorkCoordinator.CompletionRetryConfig(
+            arguments.coordinatorRetryMaxRetries,
+            arguments.coordinatorRetryInitialDelayMs,
+            arguments.coordinatorRetryMaxDelayMs);
+        log.atInfo().setMessage("Coordinator completion retry config: maxRetries={}, initialDelay={}ms, maxDelay={}ms, totalWindow=~{}s")
+            .addArgument(completionRetryConfig.maxRetries())
+            .addArgument(completionRetryConfig.initialDelayMs())
+            .addArgument(completionRetryConfig.maxDelayMs())
+            .addArgument(calculateTotalRetryWindowSeconds(completionRetryConfig))
+            .log();
+        return completionRetryConfig;
+    }
+
+    /**
+     * Build the document-exception allowlist from CLI args and log when non-empty.
+     * Shared between the ES and Solr backfill paths.
+     */
+    private static DocumentExceptionAllowlist buildDocumentExceptionAllowlist(Args arguments) {
+        var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
+        var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
+        if (!allowedExceptionTypesSet.isEmpty()) {
+            log.atInfo().setMessage("Document exception allowlist configured with types: {}")
+                .addArgument(String.join(", ", allowedExceptionTypesSet))
+                .log();
+        }
+        return allowlist;
     }
 
     private static CoordinatorInfo resolveCoordinatorConnection(Args arguments, ConnectionContext targetConnectionContext, Version targetVersion) {
@@ -873,12 +880,6 @@ public class RfsMigrateDocuments {
         boolean useServerGeneratedIds,
         RootDocumentMigrationContext context
     ) {
-        if (arguments.coordinatorArgs.host == null) {
-            throw new ParameterException(
-                "When source version is SOLR, --coordinator-host must be provided for work coordination."
-            );
-        }
-
         try {
             // Check the coordinator for pending work BEFORE downloading anything from S3.
             // This avoids wasting time/bandwidth downloading schema metadata on every pod restart
@@ -892,15 +893,11 @@ public class RfsMigrateDocuments {
             var progressCursor = new AtomicReference<WorkItemCursor>();
             var cancellationRunnableRef = new AtomicReference<Runnable>();
             var workItemTimeProvider = new WorkItemTimeProvider();
-            var completionRetryConfig = new OpenSearchWorkCoordinator.CompletionRetryConfig(
-                arguments.coordinatorRetryMaxRetries,
-                arguments.coordinatorRetryInitialDelayMs,
-                arguments.coordinatorRetryMaxDelayMs);
+            var completionRetryConfig = buildCompletionRetryConfig(arguments);
             var coordinatorFactory = new WorkCoordinatorFactory(
                 coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig);
             var cleanShutdownCompleted = new AtomicBoolean(false);
-            var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
-            var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
+            var allowlist = buildDocumentExceptionAllowlist(arguments);
 
             try (var workCoordinator = coordinatorFactory.get(
                      new CoordinateWorkHttpClient(coordinatorInfo.connectionContext()),
@@ -932,9 +929,8 @@ public class RfsMigrateDocuments {
                     // Solr's BACKUP API writes to <location>/<snapshotName>/ where <location> is
                     // the path portion of s3RepoUri (or / when no subpath is configured).
                     // Mirror the path-extraction logic so reader & writer land on the same URI.
-                    var repoUri = new S3Uri(arguments.s3RepoUri);
-                    var prefix = toKeyPrefix(repoUri.key);
-                    var backupS3Uri = "s3://" + repoUri.bucketName + "/" + prefix + arguments.snapshotName;
+                    var backupS3Uri = SolrBackupLayout.buildBackupS3Uri(
+                        new S3Uri(arguments.s3RepoUri), arguments.snapshotName);
                     log.atInfo().setMessage("Downloading Solr backup metadata from S3: {}").addArgument(backupS3Uri).log();
                     s3Repo = S3Repo.createRaw(
                         Paths.get(arguments.s3LocalDir),

@@ -9,6 +9,8 @@ import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.common.S3Uri;
+
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -218,5 +220,21 @@ public final class SolrBackupLayout {
         } catch (IOException e) {
             return false;
         }
+    }
+
+    /**
+     * Builds the S3 URI where Solr's BACKUP API writes a snapshot:
+     * {@code s3://<bucket>/[<subpath>/]<snapshotName>}.
+     * Mirrors the path used by the CreateSnapshot step so reader and writer
+     * land on the same URI regardless of whether the repo URI includes a subpath.
+     *
+     * @param repoUri      the repository URI (e.g. {@code s3://my-bucket/dir1})
+     * @param snapshotName the Solr backup name (appended as the final path segment)
+     */
+    public static String buildBackupS3Uri(S3Uri repoUri, String snapshotName) {
+        var prefix = (repoUri.key == null || repoUri.key.isEmpty())
+            ? ""
+            : (repoUri.key.endsWith("/") ? repoUri.key : repoUri.key + "/");
+        return "s3://" + repoUri.bucketName + "/" + prefix + snapshotName;
     }
 }
