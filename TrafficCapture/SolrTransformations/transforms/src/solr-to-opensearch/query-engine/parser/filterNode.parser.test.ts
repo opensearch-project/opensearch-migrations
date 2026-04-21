@@ -522,34 +522,21 @@ describe('FilterNode parsing', () => {
       expect(errors).toEqual([]);
       expect(ast).toEqual({
         type: 'bool',
-        and: [],
-        or: [
+        and: [
           {
-            type: 'bool',
-            and: [
-              {
-                type: 'boost',
-                child: { type: 'filter', child: { type: 'field', field: 'a', value: '1' } },
-                value: 2,
-              },
-            ],
-            or: [],
-            not: [],
-          },
-          {
-            type: 'bool',
-            and: [],
-            or: [],
-            not: [
-              {
-                type: 'boost',
-                child: { type: 'filter', child: { type: 'field', field: 'b', value: '2' } },
-                value: 0.5,
-              },
-            ],
+            type: 'boost',
+            child: { type: 'filter', child: { type: 'field', field: 'a', value: '1' } },
+            value: 2,
           },
         ],
-        not: [],
+        or: [],
+        not: [
+          {
+            type: 'boost',
+            child: { type: 'filter', child: { type: 'field', field: 'b', value: '2' } },
+            value: 0.5,
+          },
+        ],
       });
     });
 

@@ -295,4 +295,91 @@ export const testCases: TestCase[] = [
     solrSchema: threeFieldSchema,
     opensearchMapping: threeFieldMapping,
   }),
+
+  // ───────────────────────────────────────────────────────────
+  // Prefix sequences (+foo -bar +baz)
+  // ───────────────────────────────────────────────────────────
+
+  solrTest('query-bool-prefix-sequence-two', {
+    description: 'Prefix sequence with two terms: +A -B',
+    documents: electronicsClothingDocs,
+    // +category:electronics -status:draft
+    // Expected: electronics that are NOT draft → id 1, 3
+    requestPath: '/solr/testcollection/select?q=' + encodeURIComponent('+category:electronics -status:draft') + '&wt=json',
+    solrSchema: threeFieldSchema,
+    opensearchMapping: threeFieldMapping,
+  }),
+
+  solrTest('query-bool-prefix-sequence-three', {
+    description: 'Prefix sequence with three terms: +A +B -C',
+    documents: electronicsClothingDocs,
+    // +category:electronics +status:active -title:tablet
+    // Expected: electronics AND active AND NOT tablet → id 1 (laptop)
+    requestPath: '/solr/testcollection/select?q=' + encodeURIComponent('+category:electronics +status:active -title:tablet') + '&wt=json',
+    solrSchema: threeFieldSchema,
+    opensearchMapping: threeFieldMapping,
+  }),
+
+  solrTest('query-bool-prefix-sequence-all-required', {
+    description: 'Prefix sequence with all required: +A +B +C',
+    documents: electronicsClothingDocs,
+    // +category:electronics +status:active +title:laptop
+    // Expected: all three must match → id 1
+    requestPath: '/solr/testcollection/select?q=' + encodeURIComponent('+category:electronics +status:active +title:laptop') + '&wt=json',
+    solrSchema: threeFieldSchema,
+    opensearchMapping: threeFieldMapping,
+  }),
+
+  solrTest('query-bool-prefix-sequence-all-prohibited', {
+    description: 'Prefix sequence with all prohibited: -A -B (matches everything except)',
+    documents: electronicsClothingDocs,
+    // -category:electronics -category:clothing
+    // Expected: NOT electronics AND NOT clothing → id 5 (tools)
+    requestPath: '/solr/testcollection/select?q=' + encodeURIComponent('-category:electronics -category:clothing') + '&wt=json',
+    solrSchema: threeFieldSchema,
+    opensearchMapping: threeFieldMapping,
+  }),
+
+  solrTest('query-bool-prefix-sequence-bare-terms', {
+    description: 'Prefix sequence with bare terms: +foo -bar +baz',
+    documents: [
+      { id: '1', title: 'foo bar baz', content: 'all three' },
+      { id: '2', title: 'foo baz', content: 'no bar' },
+      { id: '3', title: 'foo bar', content: 'no baz' },
+      { id: '4', title: 'bar baz', content: 'no foo' },
+    ],
+    // +foo -bar +baz → must have foo AND baz, must NOT have bar
+    // Expected: id 2 (foo baz, no bar)
+    requestPath: '/solr/testcollection/select?q=' + encodeURIComponent('+foo -bar +baz') + '&df=title&wt=json',
+    solrSchema: { fields: { title: { type: 'text_general' }, content: { type: 'text_general' } } },
+    opensearchMapping: { properties: { title: { type: 'text' }, content: { type: 'text' } } },
+  }),
+
+  solrTest('query-bool-prefix-sequence-mixed-field-bare', {
+    description: 'Prefix sequence mixing field:value and bare terms',
+    documents: [
+      { id: '1', title: 'laptop computer', category: 'electronics', status: 'active' },
+      { id: '2', title: 'laptop bag', category: 'accessories', status: 'active' },
+      { id: '3', title: 'phone charger', category: 'electronics', status: 'active' },
+    ],
+    // +laptop +category:electronics -title:bag
+    // Expected: must have "laptop" in df, must be electronics, must NOT have "bag" in title → id 1
+    requestPath: '/solr/testcollection/select?q=' + encodeURIComponent('+laptop +category:electronics -title:bag') + '&df=title&wt=json',
+    solrSchema: threeFieldSchema,
+    opensearchMapping: threeFieldMapping,
+  }),
+
+  solrTest('query-bool-prefix-sequence-with-phrases', {
+    description: 'Prefix sequence with phrase queries: +"hello world" -"goodbye world"',
+    documents: [
+      { id: '1', title: 'hello world today', content: 'greeting' },
+      { id: '2', title: 'hello world goodbye world', content: 'both' },
+      { id: '3', title: 'goodbye world', content: 'farewell' },
+    ],
+    // +"hello world" -"goodbye world"
+    // Expected: must have "hello world", must NOT have "goodbye world" → id 1
+    requestPath: '/solr/testcollection/select?q=' + encodeURIComponent('+"hello world" -"goodbye world"') + '&df=title&wt=json',
+    solrSchema: { fields: { title: { type: 'text_general' }, content: { type: 'text_general' } } },
+    opensearchMapping: { properties: { title: { type: 'text' }, content: { type: 'text' } } },
+  }),
 ];
