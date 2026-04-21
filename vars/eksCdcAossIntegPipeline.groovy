@@ -28,8 +28,7 @@ def call(Map config = [:]) {
             choice(name: 'SOURCE_VERSION', choices: ['ES_7.10'], description: 'Source cluster version')
             choice(name: 'SOURCE_CLUSTER_TYPE', choices: ['OPENSEARCH_MANAGED_SERVICE'], description: 'Source cluster type')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
-            booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source')
-            booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source')
+            booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
             booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Use release bootstrap script')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy')
         }
@@ -86,7 +85,7 @@ def call(Map config = [:]) {
             }
 
             stage('Build') {
-                when { expression { !params.USE_RELEASE_BOOTSTRAP && (params.BUILD_IMAGES || params.BUILD_CHART_AND_DASHBOARDS) } }
+                when { expression { !params.USE_RELEASE_BOOTSTRAP && params.BUILD } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         sh './gradlew clean build -x test --no-daemon --stacktrace'
@@ -102,8 +101,7 @@ def call(Map config = [:]) {
 
                             def bootstrap = resolveBootstrap(
                                 useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
-                                buildImages: params.BUILD_IMAGES,
-                                buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
+                                build: params.BUILD,
                                 skipTestImages: true,
                                 version: params.VERSION,
                                 useGeneralNodePool: true

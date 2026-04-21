@@ -40,14 +40,12 @@ def call(Map config = [:]) {
                                 ./deployment/k8s/aws/assemble-bootstrap.sh
                                 ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                   --deploy-create-vpc-cfn \
-                                  --build-cfn \
-                                  --build-images \
-                                  --build-chart-and-dashboards \
+                                  --build \
                                   --stack-name "${buildStackName}" \
                                   --stage "${buildStage}" \
                                   --region "${params.REGION}" \
-                                  --version latest \
                                   --skip-console-exec \
+                                  --base-dir "\$(pwd)" \
                                   2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
                             """
 
@@ -74,8 +72,7 @@ def call(Map config = [:]) {
                             sh """
                                 ./deployment/k8s/aws/dist/aws-bootstrap.sh \
                                   --deploy-import-vpc-cfn \
-                                  --build-cfn \
-                                  --build-chart-and-dashboards \
+                                  --build \
                                   --create-vpc-endpoints \
                                   --ma-images-source "${env.BUILD_ECR}" \
                                   --stack-name "${isolatedStackName}" \

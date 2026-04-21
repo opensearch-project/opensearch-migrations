@@ -140,28 +140,10 @@ artifacts directly, you'll also need to install:
 # From the repo root
 ./deployment/k8s/aws/aws-bootstrap.sh \
   --deploy-create-vpc-cfn \
-  --build-cfn \
-  --build-images \
-  --build-chart-and-dashboards \
+  --build \
   --stack-name MA-Dev \
   --stage dev \
   --region us-east-2
-```
-
-### Build only some components
-
-When mixing built and downloaded artifacts, `--version` is required to prevent
-version mismatches:
-
-```bash
-# Build CFN from source, use released images and chart
-./deployment/k8s/aws/aws-bootstrap.sh \
-  --deploy-create-vpc-cfn \
-  --build-cfn \
-  --stack-name MA-Dev \
-  --stage dev \
-  --region us-east-2 \
-  --version 2.6.4
 ```
 
 ## Customizing the workloads node pool
@@ -169,7 +151,7 @@ version mismatches:
 The Migration Assistant chart creates a `general-work-pool` NodePool. By
 default, both `amd64` and `arm64` architectures are enabled (see
 `valuesEks.yaml`). The bootstrap script queries this pool to determine which
-architectures to build when using `--build-images`.
+architectures to build when using `--build`.
 
 To customize, pass `--helm-values` with a file containing:
 

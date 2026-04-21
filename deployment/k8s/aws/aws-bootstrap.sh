@@ -10,23 +10,29 @@
 #   3. Configure kubectl and (optionally) grant EKS access to an IAM principal.
 #   4. Install the Migration Assistant Helm chart with CloudWatch dashboards.
 #
-# By default, all artifacts are downloaded from the latest GitHub release:
-#   - CFN templates from GitHub releases
-#   - Helm chart from GitHub releases (dashboard JSONs are bundled inside the chart)
-#   - Container images are mirrored from public registries to private ECR
-#     (use --use-public-images to opt out and pull directly from public.ecr.aws)
+# THREE MODES OF OPERATION:
 #
-# Developers can override any of these with --build-* flags to use locally
-# built artifacts from a repo checkout. When mixing built and downloaded
-# artifacts, --version is required to prevent accidental version mismatches.
+#   1. DEFAULT (no --build, no --version):
+#      Downloads all artifacts from the latest GitHub release. This is the
+#      simplest way to deploy — no repo checkout needed.
+#
+#   2. --build:
+#      Builds all artifacts from a local repo checkout: container images,
+#      CFN templates, Helm chart, and dashboards. Requires --base-dir or
+#      running from within the repo.
+#      When combined with --ma-images-source, images are copied from another
+#      ECR registry instead of being built (CFN + chart are still built).
+#
+#   3. --version <tag>:
+#      Downloads all artifacts for a specific release version (e.g., 2.9.0).
+#      Use this to pin a known-good release.
 #
 # ARCHITECTURE NOTES FOR FUTURE CHANGES:
 #   - Version is resolved ONCE at startup and threaded through all downloads.
 #     To add a new downloaded artifact, use $RELEASE_VERSION for its URL.
-#   - The --build-* flags (--build-cfn, --build-images, --build-chart-and-dashboards)
-#     each gate a section of the script. To add a new buildable component,
-#     add a flag, add it to the build_count validation, and add a conditional
-#     block that switches between download and local build.
+#   - The $build flag gates all build-from-source sections. To add a new
+#     buildable component, add a conditional block that switches between
+#     download and local build based on $build.
 #   - CFN parameters are in the "CFN deployment" section. The parameters come
 #     from the CDK stack in deployment/migration-assistant-solution/lib/solutions-stack-eks.ts.
 #   - Helm values: when using the packaged chart, valuesEks.yaml is extracted
@@ -39,7 +45,7 @@ set -euo pipefail
 # --- defaults ---
 base_dir=""
 namespace="ma"
-build_images=false
+build=false
 use_public_images=true
 skip_console_exec=false
 stage_filter=""
@@ -49,7 +55,6 @@ use_general_node_pool=false
 region="${AWS_CFN_REGION:-}"
 deploy_create_vpc=false
 deploy_import_vpc=false
-build_cfn=false
 cfn_stack_name=""
 vpc_id=""
 subnet_ids=""
@@ -57,7 +62,6 @@ eks_access_principal_arn=""
 skip_cfn_deploy=false
 tls_mode="none"
 pca_arn=""
-build_chart_and_dashboards=false
 version=""
 create_vpc_endpoints=""
 ignore_checks=false
@@ -74,7 +78,7 @@ while [[ $# -gt 0 ]]; do
     --base-dir) base_dir="$2"; shift 2 ;;
     --ma-chart-dir) ma_chart_dir="$2"; shift 2 ;;
     --namespace) namespace="$2"; shift 2 ;;
-    --build-images) build_images=true; shift 1 ;;
+    --build) build=true; shift 1 ;;
     --skip-console-exec) skip_console_exec=true; shift 1 ;;
     --stage) stage_filter="$2"; shift 2 ;;
     --helm-values) extra_helm_values="$2"; shift 2 ;;
@@ -83,13 +87,11 @@ while [[ $# -gt 0 ]]; do
     --region) region="$2"; shift 2 ;;
     --deploy-create-vpc-cfn) deploy_create_vpc=true; shift 1 ;;
     --deploy-import-vpc-cfn) deploy_import_vpc=true; shift 1 ;;
-    --build-cfn) build_cfn=true; shift 1 ;;
     --stack-name) cfn_stack_name="$2"; shift 2 ;;
     --vpc-id) vpc_id="$2"; shift 2 ;;
     --subnet-ids) subnet_ids="$2"; shift 2 ;;
     --eks-access-principal-arn) eks_access_principal_arn="$2"; shift 2 ;;
     --skip-cfn-deploy) skip_cfn_deploy=true; shift 1 ;;
-    --build-chart-and-dashboards) build_chart_and_dashboards=true; shift 1 ;;
     --version) version="$2"; shift 2 ;;
     --create-vpc-endpoints)
       if [[ "${2:-}" == "" || "${2:-}" == --* ]]; then
@@ -171,20 +173,16 @@ while [[ $# -gt 0 ]]; do
       echo "  --image-tag <tag>                         Override the image tag (default: git short SHA)"
       echo ""
       echo "Build options:"
+      echo "  --build                                   Build ALL artifacts from source: images, CFN templates,"
+      echo "                                            and Helm chart + dashboards. Mutually exclusive with --version."
+      echo "                                            When combined with --ma-images-source, images are copied from"
+      echo "                                            another ECR registry instead of being built locally."
+      echo "                                            Requires a repo checkout (see --base-dir)."
       echo "  --base-dir <path>                         opensearch-migrations directory"
       echo "                                            (default: ../../.. from the script location)"
-      echo "  --build-cfn                               Build CFN templates from source (gradle cdkSynthMinified)"
-      echo "                                            instead of using the published S3 templates."
-      echo "                                            Requires one of the --deploy-*-cfn flags."
-      echo "  --build-images                            Build images from source (default: $build_images)"
-      echo "  --build-chart-and-dashboards              Build Helm chart and dashboards from the local repo"
-      echo "                                            instead of downloading from the GitHub release."
-      echo "  --version <tag>                           Release version for artifacts to deploy (CFN templates, images,"
-      echo "                                            chart, dashboards). Defaults to latest GitHub"
-      echo "                                            release. Use 'latest' explicitly to track the newest"
-      echo "                                            release artifacts. Required when mixing --build-* flags (e.g."
-      echo "                                            --build-cfn without --build-images) to avoid accidental"
-      echo "                                            version mismatches between built and downloaded components."
+      echo "  --version <tag>                           Use published release artifacts for the given version."
+      echo "                                            Defaults to latest GitHub release when not specified."
+      echo "                                            Mutually exclusive with --build."
       echo ""
       echo "TLS / Certificate options:"
       echo "  --tls-mode <mode>                         TLS certificate strategy for the capture proxy."
@@ -196,14 +194,20 @@ while [[ $# -gt 0 ]]; do
       echo "                                            (required with --tls-mode pca-existing)"
       echo ""
       echo "Examples:"
-      echo "  # Deploy new infrastructure with a new VPC and bootstrap:"
+      echo "  # Mode 1 — Default: download latest release artifacts, create new VPC:"
       echo "  $0 --deploy-create-vpc-cfn --stack-name MA-Dev --stage dev --region us-east-1"
       echo ""
-      echo "  # Deploy into an existing VPC and bootstrap:"
+      echo "  # Mode 2 — Build everything from source:"
+      echo "  $0 --deploy-create-vpc-cfn --stack-name MA-Dev --stage dev --region us-east-1 --build"
+      echo ""
+      echo "  # Mode 3 — Pin a specific release version:"
+      echo "  $0 --deploy-create-vpc-cfn --stack-name MA-Dev --stage dev --region us-east-1 --version 2.9.0"
+      echo ""
+      echo "  # Deploy into an existing VPC:"
       echo "  $0 --deploy-import-vpc-cfn --stack-name MA-Dev --stage dev \\"
       echo "     --vpc-id vpc-0abc123 --subnet-ids subnet-111,subnet-222 --region us-east-1"
       echo ""
-      echo "  # Bootstrap Migration Assistant only (CloudFormation stack already deployed):"
+      echo "  # Bootstrap only (CloudFormation stack already deployed):"
       echo "  $0 --skip-cfn-deploy --stage dev --region us-east-1"
       exit 0
       ;;
@@ -219,7 +223,7 @@ if [[ "$disable_general_purpose_pool" == "true" && "$use_general_node_pool" == "
   exit 1
 fi
 
-if [[ "$build_images" == "true" ]]; then
+if [[ "$build" == "true" ]]; then
   use_public_images=false
 fi
 
@@ -261,8 +265,8 @@ validate_args() {
     echo "Error: --skip-cfn-deploy cannot be combined with --deploy-create-vpc-cfn or --deploy-import-vpc-cfn." >&2
     exit 1
   fi
-  if [[ "$build_cfn" == "true" && "$deploy_cfn" == "false" ]]; then
-    echo "Error: --build-cfn requires --deploy-create-vpc-cfn or --deploy-import-vpc-cfn." >&2
+  if [[ "$build" == "true" && "$deploy_cfn" == "false" && "$skip_cfn_deploy" == "false" ]]; then
+    echo "Error: --build requires --deploy-create-vpc-cfn, --deploy-import-vpc-cfn, or --skip-cfn-deploy." >&2
     exit 1
   fi
   if [[ "$deploy_cfn" == "true" && -z "$cfn_stack_name" ]]; then
@@ -327,24 +331,20 @@ validate_args() {
       exit 1
     fi
   fi
-  # Validate repo checkout exists when any --build-* flag requires it
-  if [[ "$build_cfn" == "true" || "$build_images" == "true" || "$build_chart_and_dashboards" == "true" ]]; then
+  # Validate repo checkout exists when --build is specified
+  if [[ "$build" == "true" ]]; then
     if [[ ! -f "$base_dir/gradlew" ]]; then
-      echo "Error: --build-cfn, --build-images, and --build-chart-and-dashboards require a repo checkout." >&2
+      echo "Error: --build requires a repo checkout." >&2
       echo "  Expected repo root at: $base_dir" >&2
       echo "  Use --base-dir to specify the repo location, or run this script from within the repo." >&2
       exit 1
     fi
   fi
-  # When mixing build and download, require --version to avoid accidental mismatches
-  local build_count=0
-  [[ "$build_cfn" == "true" ]] && ((build_count++)) || true
-  [[ "$build_images" == "true" || -n "$ma_images_source" ]] && ((build_count++)) || true
-  [[ "$build_chart_and_dashboards" == "true" ]] && ((build_count++)) || true
-  if [[ $build_count -gt 0 && $build_count -lt 3 && -z "$version" ]]; then
-    echo "Error: --version is required when using some but not all --build-* flags." >&2
-    echo "  This prevents version mismatches between built and downloaded components." >&2
-    echo "  Use --version latest to track the newest release, or specify a tag like --version 2.6.4" >&2
+  # --build and --version are mutually exclusive
+  if [[ "$build" == "true" && -n "$version" ]]; then
+    echo "Error: --build and --version are mutually exclusive." >&2
+    echo "  --build builds everything from source (no version needed)." >&2
+    echo "  --version downloads published artifacts for a specific release." >&2
     exit 1
   fi
   if [[ -n "$create_vpc_endpoints" && "$deploy_import_vpc" != "true" ]]; then
@@ -385,9 +385,9 @@ if [[ "$deploy_import_vpc" == "true" && -n "$subnet_ids" && "$ignore_checks" != 
   done
   if [[ "$has_internet" == "false" ]]; then
     echo "  Subnets are isolated (no NAT/IGW routes)."
-    if [[ "$build_images" == "true" ]]; then
+    if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
       echo "" >&2
-      echo "Error: --build-images cannot be used on isolated subnets (no NAT/IGW)." >&2
+      echo "Error: --build cannot be used on isolated subnets (no NAT/IGW) without --ma-images-source." >&2
       echo "  Buildkit and Dockerfile builds require internet access for base images." >&2
       echo "  Build images on a cluster with internet access, then use --ma-images-source" >&2
       echo "  to copy them to the isolated deployment." >&2
@@ -414,7 +414,11 @@ if [[ "$create_vpc_endpoints" == "all" ]]; then
 fi
 
 # --- resolve version once ---
-if [[ -z "$version" || "$version" == "latest" ]]; then
+# Skip version resolution when building everything from source (--build)
+if [[ "$build" == "true" ]]; then
+  RELEASE_VERSION="local-build"
+  echo "Building all artifacts from source (no release version needed)"
+elif [[ -z "$version" || "$version" == "latest" ]]; then
   RELEASE_VERSION=$(curl -sf https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
   RELEASE_VERSION=$(echo "$RELEASE_VERSION" | tr -d '[:space:]')
   [[ -n "$RELEASE_VERSION" ]] || { echo "Error: Could not determine latest release version from GitHub."; exit 1; }
@@ -533,7 +537,7 @@ fi
 # --- CFN deployment (optional) ---
 if [[ "$deploy_cfn" == "true" ]]; then
   # Determine template source
-  if [[ "$build_cfn" == "true" ]]; then
+  if [[ "$build" == "true" ]]; then
     echo "Building CloudFormation templates from source..."
     # Clear STACK_NAME_SUFFIX so CDK produces predictable template filenames.
     # The stack name is controlled by --stack-name, not by CDK stack IDs.
@@ -691,7 +695,12 @@ fi
 # Show resolved configuration and sources
 echo ""
 echo "Resolved configuration:"
-echo "  Version                = ${RELEASE_VERSION}"
+if [[ "$RELEASE_VERSION" == "local-build" ]]; then
+  echo "  Mode                   = Build from source (--build)"
+else
+  echo "  Mode                   = Published artifacts"
+  echo "  Version                = ${RELEASE_VERSION}"
+fi
 echo "  AWS_ACCOUNT              = ${AWS_ACCOUNT}"
 echo "  AWS_CFN_REGION           = ${AWS_CFN_REGION}"
 echo "  STAGE                    = ${STAGE}"
@@ -748,7 +757,7 @@ fi
 # Skip this if building images locally, since we'll pre-create general-work-pool
 CURRENT_NODEPOOLS=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
   --query 'cluster.computeConfig.nodePools' --output text 2>/dev/null)
-if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build_images" != "true" ]]; then
+if [[ "$CURRENT_NODEPOOLS" != *"general-purpose"* ]] && [[ "$build" != "true" ]]; then
   echo "general-purpose nodepool is currently disabled."
   echo "Re-enabling it temporarily to allow pod scheduling during installation..."
   NODE_ROLE_ARN=$(aws eks describe-cluster --name "${MIGRATIONS_EKS_CLUSTER_NAME}" --region "${AWS_CFN_REGION}" \
@@ -814,7 +823,7 @@ if [[ "$ignore_checks" != "true" && -n "${VPC_ID:-}" ]]; then
         echo "Error: --use-public-images cannot be used with isolated subnets (no NAT/IGW)." >&2
         echo "  public.ecr.aws has no VPC endpoint — public images cannot be pulled." >&2
         echo "  Remove --use-public-images to mirror public images to private ECR," >&2
-        echo "  or --build-images to build from source and push to private ECR." >&2
+        echo "  or --build to build from source and push to private ECR." >&2
         echo "  Or use --ignore-checks to skip this check." >&2
         exit 1
       fi
@@ -910,8 +919,8 @@ fi
 # Mirror MA images — runs regardless of whether base mirror was parallel or sequential
 if [[ "$push_images_to_ecr" == "true" ]]; then
   # Mirror MA images to the private ECR repo with expected tags
-  # Skip if --build-images is set — locally-built images take precedence
-  if [[ "$build_images" != "true" ]]; then
+  # Skip if --build is set without --ma-images-source — locally-built images take precedence
+  if [[ "$build" != "true" || -n "$ma_images_source" ]]; then
     echo "Mirroring MA images to private ECR..."
     export PATH="${HOME}/bin:${PATH}"
 
@@ -963,14 +972,14 @@ migration_console|console"
         "${MIGRATIONS_ECR_REGISTRY}:migrations_${build_name}_${IMAGE_TAG}"
     done
   else
-    echo "Skipping MA image mirroring — --build-images will push locally-built images."
+    echo "Skipping MA image mirroring — --build will push locally-built images."
   fi
 
   # Force private images since we're mirroring everything to ECR
   use_public_images=false
 fi
 
-if [[ "$build_images" == "true" ]]; then
+if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
   # Always build for both architectures on EKS
   MULTI_ARCH_NATIVE=true
   BUILD_TARGET="buildImagesToRegistry"
@@ -1011,8 +1020,8 @@ if [[ "$build_images" == "true" ]]; then
 fi
 
 # --- image source selection ---
-# When --build-images is set, images are built from source and pushed to the
-# private ECR registry. Otherwise, public images are pulled from
+# When --build is set (without --ma-images-source), images are built from source
+# and pushed to the private ECR registry. Otherwise, public images are pulled from
 # public.ecr.aws/opensearchproject, tagged with $RELEASE_VERSION.
 # To add a new image, add entries to both branches below.
 if [[ "$use_public_images" == "false" ]]; then
@@ -1045,9 +1054,9 @@ fi
 
 # --- chart source selection ---
 # By default, the Helm chart is downloaded from the GitHub release matching
-# $RELEASE_VERSION. With --build-chart-and-dashboards, it comes from the local
-# repo checkout instead. Dashboard JSONs are bundled inside the chart.
-if [[ "$build_chart_and_dashboards" != "true" ]]; then
+# $RELEASE_VERSION. With --build, it comes from the local repo checkout instead.
+# Dashboard JSONs are bundled inside the chart.
+if [[ "$build" != "true" ]]; then
   RELEASE_BASE_URL="https://github.com/opensearch-project/opensearch-migrations/releases/download/${RELEASE_VERSION}"
   echo "Downloading release artifacts (${RELEASE_VERSION}) from GitHub..."
   curl -fLO "${RELEASE_BASE_URL}/migration-assistant-${RELEASE_VERSION}.tgz" \
@@ -1059,7 +1068,7 @@ fi
 # When using packaged chart, valuesEks.yaml is extracted from the tgz since
 # helm can't reference files inside an archive. When using the local chart,
 # values files are referenced directly. To add new values files, update both paths.
-if [[ "$build_chart_and_dashboards" != "true" ]]; then
+if [[ "$build" != "true" ]]; then
   tar xzf "${ma_chart_dir}" migration-assistant/valuesEks.yaml migration-assistant/values.yaml
   HELM_VALUES_FLAGS="-f migration-assistant/values.yaml -f migration-assistant/valuesEks.yaml"
 else
