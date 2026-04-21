@@ -312,9 +312,9 @@ public class DocumentMigrationBootstrap {
                             name, !meta.isSourceEnabled(), meta.isSourcePartial());
                         return new FieldMappingContext(meta.getMappings());
                     } catch (Exception e) {
-                        log.warn("Failed to read metadata for index {}, skipping sourceless reconstruction: {}",
-                            name, e.getMessage());
-                        return null;
+                        throw new RuntimeException(
+                            "Failed to read metadata for index " + name +
+                            " — cannot determine if source reconstruction is needed", e);
                     }
                 });
             });
