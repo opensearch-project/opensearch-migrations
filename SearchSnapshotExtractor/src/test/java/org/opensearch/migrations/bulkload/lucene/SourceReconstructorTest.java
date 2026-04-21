@@ -1,0 +1,925 @@
+package org.opensearch.migrations.bulkload.lucene;
+
+import java.io.IOException;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Stream;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+/**
+ * Comprehensive unit tests for {@link SourceReconstructor} covering every supported
+ * field type across every reconstruction pathway the class supports.
+ *
+ * The reconstructor has four pathways, each corresponding to different Lucene /
+ * Elasticsearch eras:
+ *
+ *   1. Stored fields (all versions) — {@link #reconstructFromStoredFields}
+ *      Number / byte[] / String leaf values harvested from {@code _source}-less
+ *      segments that still have stored fields for specific columns.
+ *
+ *   2. doc_values (ES 2.x+ for most types; ES 1.x opt-in) — {@link #reconstructFromDocValues}
+ *      NUMERIC / SORTED / SORTED_SET / SORTED_NUMERIC / BINARY columnar storage.
+ *
+ *   3. Points / BKD (Lucene 6+, i.e. ES 5+ / OS 1+) — {@link #reconstructFromPoints}
+ *      Packed byte[] payloads from BKD trees, used when neither stored fields
+ *      nor doc_values exist for a numeric/ip/date field.
+ *
+ *   4. Numeric terms (Lucene 4/5, i.e. ES 1.x / ES 2.x) — {@link #reconstructFromNumericTerms}
+ *      Trie-encoded prefix-coded long/int terms in the inverted index. Decoded via
+ *      {@code NumericUtils.prefixCodedToLong} upstream, then reinterpreted here by
+ *      mapping type (IP / DATE / NUMERIC bit-reinterpretation for float/double).
+ *
+ * Each pathway × type combination is either exercised directly as an individual
+ * {@code @Test} or included in the {@link #allTypesMatrix} parameterized sweep.
+ */
+class SourceReconstructorTest {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    // ---------- Helpers to construct mocks/records without repeating boilerplate ----------
+
+    private static FieldMappingInfo mapping(EsFieldType type, String mappingType) {
+        return new FieldMappingInfo(type, mappingType, null, null, true);
+    }
+
+    private static FieldMappingInfo mapping(EsFieldType type, String mappingType, String format) {
+        return new FieldMappingInfo(type, mappingType, format, null, true);
+    }
+
+    private static FieldMappingInfo mappingScaled(double scalingFactor) {
+        return new FieldMappingInfo(EsFieldType.SCALED_FLOAT, "scaled_float", null, scalingFactor, true);
+    }
+
+    private static FieldMappingContext contextOf(String fieldName, FieldMappingInfo info) {
+        var ctx = new FieldMappingContext(null);
+        // FieldMappingContext has no public setter; register via reflection on the private map.
+        try {
+            var f = FieldMappingContext.class.getDeclaredField("fieldMappings");
+            f.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var m = (java.util.Map<String, FieldMappingInfo>) f.get(ctx);
+            m.put(fieldName, info);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
+        return ctx;
+    }
+
+    private static LuceneField storedString(String name, String value) {
+        var f = mock(LuceneField.class);
+        when(f.name()).thenReturn(name);
+        when(f.stringValue()).thenReturn(value);
+        return f;
+    }
+
+    private static LuceneField storedNumber(String name, Number n) {
+        var f = mock(LuceneField.class);
+        when(f.name()).thenReturn(name);
+        when(f.numericValue()).thenReturn(n);
+        return f;
+    }
+
+    private static LuceneField storedBinary(String name, byte[] bytes) {
+        var f = mock(LuceneField.class);
+        when(f.name()).thenReturn(name);
+        when(f.binaryValue()).thenReturn(bytes);
+        return f;
+    }
+
+    private static LuceneDocument document(LuceneField... fields) {
+        var doc = mock(LuceneDocument.class);
+        List<? extends LuceneField> list = List.of(fields);
+        org.mockito.Mockito.doReturn(list).when(doc).getFields();
+        return doc;
+    }
+
+    /** Reader with no doc-values, no points, and no numeric terms. Only stored fields drive output. */
+    private static LuceneLeafReader storedOnlyReader() {
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+        try {
+            // Default behaviour: no fallback path returns anything.
+            when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.empty());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        return reader;
+    }
+
+    /** Packs a long into Lucene's 8-byte sortable BKD format (sign-bit-flipped big-endian). */
+    private static byte[] packLong(long value) {
+        long raw = value ^ 0x8000000000000000L;
+        byte[] b = new byte[8];
+        for (int i = 7; i >= 0; i--) {
+            b[i] = (byte) (raw & 0xFF);
+            raw >>>= 8;
+        }
+        return b;
+    }
+
+    /** Packs an int into Lucene's 4-byte sortable BKD format (sign-bit-flipped big-endian). */
+    private static byte[] packInt(int value) {
+        int raw = value ^ 0x80000000;
+        byte[] b = new byte[4];
+        for (int i = 3; i >= 0; i--) {
+            b[i] = (byte) (raw & 0xFF);
+            raw >>>= 8;
+        }
+        return b;
+    }
+
+    /** Packs a float into Lucene's 4-byte sortable BKD format (mirrors Float.floatToSortableInt). */
+    private static byte[] packFloat(float value) {
+        int bits = Float.floatToIntBits(value);
+        // floatToSortableInt: bits ^ ((bits >> 31) & 0x7fffffff)
+        int sortable = bits ^ ((bits >> 31) & 0x7fffffff);
+        return packInt(sortable);
+    }
+
+    /** Packs a double into Lucene's 8-byte sortable BKD format (mirrors Double.doubleToSortableLong). */
+    private static byte[] packDouble(double value) {
+        long bits = Double.doubleToLongBits(value);
+        long sortable = bits ^ ((bits >> 63) & 0x7fffffffffffffffL);
+        return packLong(sortable);
+    }
+
+    /** Builds the 16-byte IPv4-mapped IPv6 representation Lucene uses for IP points/docValues. */
+    private static byte[] ipv4MappedIpv6(int a, int b, int c, int d) {
+        byte[] bytes = new byte[16];
+        bytes[10] = (byte) 0xff;
+        bytes[11] = (byte) 0xff;
+        bytes[12] = (byte) a;
+        bytes[13] = (byte) b;
+        bytes[14] = (byte) c;
+        bytes[15] = (byte) d;
+        return bytes;
+    }
+
+    /** Convenience helper: parse SourceReconstructor JSON output for a single field. */
+    private static JsonNode parseField(String json, String field) {
+        try {
+            return MAPPER.readTree(json).get(field);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    // ==========================================================================================
+    // 1. STORED FIELDS PATH
+    // ==========================================================================================
+
+    @Test
+    void reconstructFromStoredFields_booleanTF() {
+        var reader = storedOnlyReader();
+        var doc = document(storedString("enabled", "T"), storedString("disabled", "F"));
+        var ctx = new FieldMappingContext(null);
+        // boolean stored as T/F does not require a mapping — heuristic handles it.
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals(true, parseField(json, "enabled").asBoolean());
+        assertEquals(false, parseField(json, "disabled").asBoolean());
+    }
+
+    @Test
+    void reconstructFromStoredFields_numericPassthroughLong() {
+        var reader = storedOnlyReader();
+        var doc = document(storedNumber("count", 42L));
+        var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals(42L, parseField(json, "count").asLong());
+    }
+
+    @Test
+    void reconstructFromStoredFields_dateLongToIso() {
+        var reader = storedOnlyReader();
+        // 1_700_000_000_000 ms = 2023-11-14T22:13:20Z
+        var doc = document(storedNumber("ts", 1_700_000_000_000L));
+        var ctx = contextOf("ts", mapping(EsFieldType.DATE, "date"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals("2023-11-14T22:13:20Z", parseField(json, "ts").asText());
+    }
+
+    @Test
+    void reconstructFromStoredFields_dateEpochMillisFormat() {
+        var reader = storedOnlyReader();
+        var doc = document(storedNumber("ts", 1_700_000_000_000L));
+        var ctx = contextOf("ts", mapping(EsFieldType.DATE, "date", "epoch_millis"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals(1_700_000_000_000L, parseField(json, "ts").asLong());
+    }
+
+    @Test
+    void reconstructFromStoredFields_dateNanosToIso() {
+        var reader = storedOnlyReader();
+        // 1_700_000_000_000_000_500 ns = 2023-11-14T22:13:20.000000500Z
+        long nanos = 1_700_000_000_000_000_500L;
+        var doc = document(storedNumber("ts", nanos));
+        var ctx = contextOf("ts", mapping(EsFieldType.DATE_NANOS, "date_nanos"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals("2023-11-14T22:13:20.000000500Z", parseField(json, "ts").asText());
+    }
+
+    @Test
+    void reconstructFromStoredFields_scaledFloat() {
+        var reader = storedOnlyReader();
+        // stored raw 12345 with scaling_factor 100 => 123.45
+        var doc = document(storedNumber("price", 12345L));
+        var ctx = contextOf("price", mappingScaled(100.0));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals(123.45, parseField(json, "price").asDouble(), 1e-9);
+    }
+
+    @Test
+    void reconstructFromStoredFields_ipLongEs2x() {
+        var reader = storedOnlyReader();
+        // 192.168.1.100 as 32-bit int
+        long ipLong = (192L << 24) | (168L << 16) | (1L << 8) | 100L;
+        var doc = document(storedNumber("source_ip", ipLong));
+        var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals("192.168.1.100", parseField(json, "source_ip").asText());
+    }
+
+    @Test
+    void reconstructFromStoredFields_ipBinaryIpv4MappedIpv6Es5Plus() {
+        var reader = storedOnlyReader();
+        var doc = document(storedBinary("source_ip", ipv4MappedIpv6(10, 0, 0, 1)));
+        var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals("10.0.0.1", parseField(json, "source_ip").asText());
+    }
+
+    @Test
+    void reconstructFromStoredFields_ipStringNumericEs2x() {
+        var reader = storedOnlyReader();
+        long ipLong = (172L << 24) | (16L << 16) | (0L << 8) | 5L;
+        var doc = document(storedString("source_ip", String.valueOf(ipLong)));
+        var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals("172.16.0.5", parseField(json, "source_ip").asText());
+    }
+
+    @Test
+    void reconstructFromStoredFields_stringUtf8Binary() {
+        var reader = storedOnlyReader();
+        var doc = document(storedBinary("name", "héllo".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        var ctx = contextOf("name", mapping(EsFieldType.STRING, "keyword"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals("héllo", parseField(json, "name").asText());
+    }
+
+    @Test
+    void reconstructFromStoredFields_binaryBase64() {
+        var reader = storedOnlyReader();
+        byte[] payload = {0x00, 0x10, (byte) 0xFF, 0x7F};
+        var doc = document(storedBinary("blob", payload));
+        var ctx = contextOf("blob", mapping(EsFieldType.BINARY, "binary"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals(Base64.getEncoder().encodeToString(payload), parseField(json, "blob").asText());
+    }
+
+    @Test
+    void reconstructFromStoredFields_geoPointIsDroppedForDocValueRecovery() {
+        // geo_point stored fields are intentionally skipped to defer to doc_values.
+        var reader = storedOnlyReader();
+        var doc = document(storedBinary("loc", new byte[]{1, 2, 3, 4, 5, 6, 7, 8}));
+        var ctx = contextOf("loc", mapping(EsFieldType.GEO_POINT, "geo_point"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        // No stored output should appear (null return means empty reconstruction).
+        assertNull(json, "geo_point stored-field path should yield null to defer to doc_values");
+    }
+
+    // ==========================================================================================
+    // 2. DOC_VALUES PATH
+    // ==========================================================================================
+
+    /** Builds a reader whose sole recovery channel is a single doc-value field. */
+    private static LuceneLeafReader docValueReader(String name, DocValueFieldInfo.DocValueType type,
+                                                    boolean isBoolean, Object value) throws IOException {
+        var reader = mock(LuceneLeafReader.class);
+        var info = new DocValueFieldInfo.Simple(name, type, isBoolean);
+        when(reader.getDocValueFields()).thenReturn(List.of(info));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq(info))).thenReturn(value);
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+        return reader;
+    }
+
+    @Test
+    void reconstructFromDocValues_booleanNumericZeroOne() throws IOException {
+        var reader = docValueReader("enabled", DocValueFieldInfo.DocValueType.NUMERIC, true, 1L);
+        var ctx = contextOf("enabled", mapping(EsFieldType.BOOLEAN, "boolean"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(true, parseField(json, "enabled").asBoolean());
+    }
+
+    @Test
+    void reconstructFromDocValues_numericLongPassthrough() throws IOException {
+        var reader = docValueReader("count", DocValueFieldInfo.DocValueType.NUMERIC, false, 999L);
+        var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(999L, parseField(json, "count").asLong());
+    }
+
+    @Test
+    void reconstructFromDocValues_numericFloatFromSortableInt() throws IOException {
+        // float 3.14f - its int bits stored as Long via doc_values
+        long bits = Float.floatToIntBits(3.14f);
+        var reader = docValueReader("price", DocValueFieldInfo.DocValueType.NUMERIC, false, bits);
+        var ctx = contextOf("price", mapping(EsFieldType.NUMERIC, "float"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(3.14, parseField(json, "price").asDouble(), 1e-5);
+    }
+
+    @Test
+    void reconstructFromDocValues_numericDoubleFromLongBits() throws IOException {
+        long bits = Double.doubleToLongBits(2.718281828);
+        var reader = docValueReader("e", DocValueFieldInfo.DocValueType.NUMERIC, false, bits);
+        var ctx = contextOf("e", mapping(EsFieldType.NUMERIC, "double"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(2.718281828, parseField(json, "e").asDouble(), 1e-9);
+    }
+
+    @Test
+    void reconstructFromDocValues_scaledFloatDivides() throws IOException {
+        var reader = docValueReader("price", DocValueFieldInfo.DocValueType.NUMERIC, false, 12345L);
+        var ctx = contextOf("price", mappingScaled(100.0));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(123.45, parseField(json, "price").asDouble(), 1e-9);
+    }
+
+    @Test
+    void reconstructFromDocValues_dateEpochMillisFormatsIso() throws IOException {
+        var reader = docValueReader("ts", DocValueFieldInfo.DocValueType.NUMERIC, false, 1_700_000_000_000L);
+        var ctx = contextOf("ts", mapping(EsFieldType.DATE, "date"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals("2023-11-14T22:13:20Z", parseField(json, "ts").asText());
+    }
+
+    @Test
+    void reconstructFromDocValues_dateNanosFormatsIso() throws IOException {
+        long nanos = 1_700_000_000_000_000_500L;
+        var reader = docValueReader("ts", DocValueFieldInfo.DocValueType.NUMERIC, false, nanos);
+        var ctx = contextOf("ts", mapping(EsFieldType.DATE_NANOS, "date_nanos"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals("2023-11-14T22:13:20.000000500Z", parseField(json, "ts").asText());
+    }
+
+    @Test
+    void reconstructFromDocValues_ipBytes16IPv4Mapped() throws IOException {
+        var reader = docValueReader("source_ip", DocValueFieldInfo.DocValueType.SORTED_SET, false,
+                ipv4MappedIpv6(10, 1, 2, 3));
+        var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals("10.1.2.3", parseField(json, "source_ip").asText());
+    }
+
+    @Test
+    void reconstructFromDocValues_ipLongEs2x() throws IOException {
+        long ipLong = (8L << 24) | (8L << 16) | (8L << 8) | 8L;
+        var reader = docValueReader("source_ip", DocValueFieldInfo.DocValueType.NUMERIC, false, ipLong);
+        var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals("8.8.8.8", parseField(json, "source_ip").asText());
+    }
+
+    @Test
+    void reconstructFromDocValues_unsignedLongNegativeMasked() throws IOException {
+        // -1L as unsigned_long is 2^64 - 1
+        var reader = docValueReader("u", DocValueFieldInfo.DocValueType.NUMERIC, false, -1L);
+        var ctx = contextOf("u", mapping(EsFieldType.UNSIGNED_LONG, "unsigned_long"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(new java.math.BigInteger("18446744073709551615"), parseField(json, "u").bigIntegerValue());
+    }
+
+    @Test
+    void reconstructFromDocValues_stringPassthrough() throws IOException {
+        var reader = docValueReader("name", DocValueFieldInfo.DocValueType.SORTED, false, "foo");
+        var ctx = contextOf("name", mapping(EsFieldType.STRING, "keyword"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals("foo", parseField(json, "name").asText());
+    }
+
+    @Test
+    void reconstructFromDocValues_wildcardDecodesBase64() throws IOException {
+        String original = "wildcard-value";
+        String base64 = Base64.getEncoder().encodeToString(original.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var reader = docValueReader("w", DocValueFieldInfo.DocValueType.BINARY, false, base64);
+        var ctx = contextOf("w", mapping(EsFieldType.STRING, "wildcard"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(original, parseField(json, "w").asText());
+    }
+
+    @Test
+    void reconstructFromDocValues_geoPointFromMortonLong() throws IOException {
+        // Morton encoding is verified end-to-end rather than bit-checked here.
+        // Use a simple Morton-encoded value and assert round-trip through decodeGeoPoint.
+        // We'll pick lat=0 lon=0 equivalent: Morton encoded as 0.
+        var reader = docValueReader("loc", DocValueFieldInfo.DocValueType.NUMERIC, false, 0L);
+        var ctx = contextOf("loc", mapping(EsFieldType.GEO_POINT, "geo_point"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        JsonNode loc = parseField(json, "loc");
+        assertNotNull(loc);
+        // For Morton hash 0 the decoded values land on the negative boundary; just verify
+        // the structure exists so the parameterized sweep catches regressions in shape.
+        assertTrue(loc.has("lat") && loc.has("lon"), "geo_point should decode to {lat, lon}");
+    }
+
+    @Test
+    void reconstructFromDocValues_binaryBase64() throws IOException {
+        byte[] payload = {0x00, 0x10, (byte) 0xFF, 0x7F};
+        var reader = docValueReader("blob", DocValueFieldInfo.DocValueType.BINARY, false, payload);
+        var ctx = contextOf("blob", mapping(EsFieldType.BINARY, "binary"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(Base64.getEncoder().encodeToString(payload), parseField(json, "blob").asText());
+    }
+
+    // ==========================================================================================
+    // 3. POINTS (BKD) FALLBACK — Lucene 6+, i.e. ES 5+ / OS 1+
+    // ==========================================================================================
+
+    /** Builds a reader whose sole recovery channel is a single packed Points value. */
+    private static LuceneLeafReader pointsReader(String name, EsFieldType esType, byte[] packed)
+            throws IOException {
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq(name),
+                org.mockito.ArgumentMatchers.eq(esType),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(List.of(packed)));
+        return reader;
+    }
+
+    @Test
+    void reconstructFromPoints_longBkd() throws IOException {
+        var reader = pointsReader("count", EsFieldType.NUMERIC, packLong(123456789L));
+        var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(123456789L, parseField(json, "count").asLong());
+    }
+
+    @Test
+    void reconstructFromPoints_negativeLongBkd() throws IOException {
+        var reader = pointsReader("signed", EsFieldType.NUMERIC, packLong(-42L));
+        var ctx = contextOf("signed", mapping(EsFieldType.NUMERIC, "long"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(-42L, parseField(json, "signed").asLong());
+    }
+
+    @Test
+    void reconstructFromPoints_intBkd() throws IOException {
+        var reader = pointsReader("small", EsFieldType.NUMERIC, packInt(-1234));
+        var ctx = contextOf("small", mapping(EsFieldType.NUMERIC, "integer"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(-1234, parseField(json, "small").asInt());
+    }
+
+    @Test
+    void reconstructFromPoints_floatBkd() throws IOException {
+        var reader = pointsReader("f", EsFieldType.NUMERIC, packFloat(1.5f));
+        var ctx = contextOf("f", mapping(EsFieldType.NUMERIC, "float"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(1.5, parseField(json, "f").asDouble(), 1e-6);
+    }
+
+    @Test
+    void reconstructFromPoints_doubleBkd() throws IOException {
+        var reader = pointsReader("d", EsFieldType.NUMERIC, packDouble(-0.25));
+        var ctx = contextOf("d", mapping(EsFieldType.NUMERIC, "double"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(-0.25, parseField(json, "d").asDouble(), 1e-12);
+    }
+
+    @Test
+    void reconstructFromPoints_dateBkdToIso() throws IOException {
+        var reader = pointsReader("ts", EsFieldType.DATE, packLong(1_700_000_000_000L));
+        var ctx = contextOf("ts", mapping(EsFieldType.DATE, "date"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals("2023-11-14T22:13:20Z", parseField(json, "ts").asText());
+    }
+
+    @Test
+    void reconstructFromPoints_dateNanosBkd() throws IOException {
+        long nanos = 1_700_000_000_000_000_500L;
+        var reader = pointsReader("ts", EsFieldType.DATE_NANOS, packLong(nanos));
+        var ctx = contextOf("ts", mapping(EsFieldType.DATE_NANOS, "date_nanos"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals("2023-11-14T22:13:20.000000500Z", parseField(json, "ts").asText());
+    }
+
+    @Test
+    void reconstructFromPoints_ipBkd16Bytes() throws IOException {
+        var reader = pointsReader("source_ip", EsFieldType.IP, ipv4MappedIpv6(192, 168, 1, 100));
+        var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals("192.168.1.100", parseField(json, "source_ip").asText());
+    }
+
+    // ==========================================================================================
+    // 4. NUMERIC-TERM FALLBACK — Lucene 4/5, i.e. ES 1.x / ES 2.x
+    // ==========================================================================================
+
+    /** Builds a reader whose sole recovery channel is a single decoded-long term. */
+    private static LuceneLeafReader numericTermReader(String name, EsFieldType esType, long decoded)
+            throws IOException {
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq(name),
+                org.mockito.ArgumentMatchers.eq(esType),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(decoded));
+        return reader;
+    }
+
+    @Test
+    void reconstructFromNumericTerms_ipFromLong() throws IOException {
+        long ipLong = (10L << 24) | (0L << 16) | (0L << 8) | 1L;
+        var reader = numericTermReader("source_ip", EsFieldType.IP, ipLong);
+        var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals("10.0.0.1", parseField(json, "source_ip").asText());
+    }
+
+    @Test
+    void reconstructFromNumericTerms_dateFromLong() throws IOException {
+        var reader = numericTermReader("ts", EsFieldType.DATE, 1_700_000_000_000L);
+        var ctx = contextOf("ts", mapping(EsFieldType.DATE, "date"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals("2023-11-14T22:13:20Z", parseField(json, "ts").asText());
+    }
+
+    @Test
+    void reconstructFromNumericTerms_longPassthrough() throws IOException {
+        var reader = numericTermReader("count", EsFieldType.NUMERIC, 42L);
+        var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(42L, parseField(json, "count").asLong());
+    }
+
+    @Test
+    void reconstructFromNumericTerms_intFromLong() throws IOException {
+        var reader = numericTermReader("n", EsFieldType.NUMERIC, -1234L);
+        var ctx = contextOf("n", mapping(EsFieldType.NUMERIC, "integer"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(-1234, parseField(json, "n").asInt());
+    }
+
+    @Test
+    void reconstructFromNumericTerms_floatFromSortableIntBits() throws IOException {
+        // Lucene 4/5 stores float as sortableInt: bits ^ ((bits >> 31) & 0x7fffffff)
+        int bits = Float.floatToIntBits(3.14f);
+        int sortable = bits ^ ((bits >> 31) & 0x7fffffff);
+        var reader = numericTermReader("f", EsFieldType.NUMERIC, (long) sortable);
+        var ctx = contextOf("f", mapping(EsFieldType.NUMERIC, "float"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(3.14, parseField(json, "f").asDouble(), 1e-5);
+    }
+
+    @Test
+    void reconstructFromNumericTerms_doubleFromSortableLongBits() throws IOException {
+        long bits = Double.doubleToLongBits(-0.5);
+        long sortable = bits ^ ((bits >> 63) & 0x7fffffffffffffffL);
+        var reader = numericTermReader("d", EsFieldType.NUMERIC, sortable);
+        var ctx = contextOf("d", mapping(EsFieldType.NUMERIC, "double"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(-0.5, parseField(json, "d").asDouble(), 1e-12);
+    }
+
+    @Test
+    void reconstructFromNumericTerms_scaledFloatDivides() throws IOException {
+        var reader = numericTermReader("price", EsFieldType.SCALED_FLOAT, 12345L);
+        var ctx = contextOf("price", mappingScaled(100.0));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(123.45, parseField(json, "price").asDouble(), 1e-9);
+    }
+
+    @Test
+    void reconstructFromNumericTerms_unsignedLongNegativeMasked() throws IOException {
+        var reader = numericTermReader("u", EsFieldType.UNSIGNED_LONG, -1L);
+        var ctx = contextOf("u", mapping(EsFieldType.UNSIGNED_LONG, "unsigned_long"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(new java.math.BigInteger("18446744073709551615"), parseField(json, "u").bigIntegerValue());
+    }
+
+    // ==========================================================================================
+    // 5. STRING TERMS FALLBACK — analyzed text without store / doc_values
+    // ==========================================================================================
+
+    @Test
+    void reconstructFromStringTerms_joinsInPositionOrder() throws IOException {
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("body"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            // SourceReconstructor receives the already-joined String from LuceneLeafReader.
+            .thenReturn(Optional.of("quick brown fox"));
+        var ctx = contextOf("body", mapping(EsFieldType.STRING, "text"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals("quick brown fox", parseField(json, "body").asText());
+    }
+
+    @Test
+    void reconstructFromStringTerms_booleanFromTerm() throws IOException {
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("enabled"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.BOOLEAN),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of("T"));
+        var ctx = contextOf("enabled", mapping(EsFieldType.BOOLEAN, "boolean"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(true, parseField(json, "enabled").asBoolean());
+    }
+
+    // ==========================================================================================
+    // 6. PRIORITY / PRECEDENCE — stored wins over doc_values, doc_values wins over fallback.
+    // ==========================================================================================
+
+    @Test
+    void storedFieldsTakePrecedenceOverDocValues() throws IOException {
+        var reader = mock(LuceneLeafReader.class);
+        var info = new DocValueFieldInfo.Simple("count", DocValueFieldInfo.DocValueType.NUMERIC, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(info));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq(info))).thenReturn(999L);
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+        var doc = document(storedNumber("count", 42L));
+        var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        // Stored field's 42 should win over doc_values' 999.
+        assertEquals(42L, parseField(json, "count").asLong());
+    }
+
+    @Test
+    void docValuesTakePrecedenceOverPointsFallback() throws IOException {
+        var reader = mock(LuceneLeafReader.class);
+        var info = new DocValueFieldInfo.Simple("count", DocValueFieldInfo.DocValueType.NUMERIC, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(info));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq(info))).thenReturn(77L);
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(List.of(packLong(999L))));
+        var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertEquals(77L, parseField(json, "count").asLong());
+    }
+
+    @Test
+    void disabledDocValuesInMappingSkipsDocValuesPath() throws IOException {
+        var reader = mock(LuceneLeafReader.class);
+        var info = new DocValueFieldInfo.Simple("count", DocValueFieldInfo.DocValueType.NUMERIC, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(info));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq(info))).thenReturn(77L);
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = new FieldMappingContext(null);
+        try {
+            var f = FieldMappingContext.class.getDeclaredField("fieldMappings");
+            f.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var m = (java.util.Map<String, FieldMappingInfo>) f.get(ctx);
+            m.put("count", new FieldMappingInfo(EsFieldType.NUMERIC, "long", null, null, false));
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
+
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        // Mapping says doc_values disabled — reconstructor must not surface the value from the
+        // doc_values read, and with no stored field nor fallback the document ends up empty → null.
+        assertNull(json);
+    }
+
+    // ==========================================================================================
+    // 7. PARAMETERIZED SWEEP — all types × all pathways in one compact table.
+    //
+    // This guards against silent regressions if a new pathway-specific branch is added and
+    // breaks an existing (type, pathway) combination. The expected JSON-node value for each
+    // combination is encoded up-front so the expectations are visible as a single table.
+    // ==========================================================================================
+
+    enum Path { STORED_FIELD, DOC_VALUES, POINTS, NUMERIC_TERMS }
+
+    private record Row(
+            String name,
+            EsFieldType type,
+            String mappingType,
+            Double scalingFactor,
+            String format,
+            Path path,
+            Object inputValue,        // raw value to plant in the chosen pathway
+            DocValueFieldInfo.DocValueType dvType, // only for DOC_VALUES
+            Object expectedJson       // expected value in JSON tree (String / Number / Boolean / Map / BigInteger)
+    ) {}
+
+    static Stream<Arguments> allTypesMatrix() {
+        return Stream.of(
+            // ---- Stored fields ----
+            Arguments.of(new Row("boolean-stored", EsFieldType.BOOLEAN, "boolean", null, null,
+                Path.STORED_FIELD, "T", null, Boolean.TRUE)),
+            Arguments.of(new Row("long-stored", EsFieldType.NUMERIC, "long", null, null,
+                Path.STORED_FIELD, 42L, null, 42L)),
+            Arguments.of(new Row("date-stored", EsFieldType.DATE, "date", null, null,
+                Path.STORED_FIELD, 1_700_000_000_000L, null, "2023-11-14T22:13:20Z")),
+            Arguments.of(new Row("ip-stored-es2", EsFieldType.IP, "ip", null, null,
+                Path.STORED_FIELD, ((192L << 24) | (168L << 16) | (1L << 8) | 100L), null, "192.168.1.100")),
+            Arguments.of(new Row("scaled-stored", EsFieldType.SCALED_FLOAT, "scaled_float", 100.0, null,
+                Path.STORED_FIELD, 12345L, null, 123.45)),
+
+            // ---- doc_values ----
+            Arguments.of(new Row("boolean-dv", EsFieldType.BOOLEAN, "boolean", null, null,
+                Path.DOC_VALUES, 1L, DocValueFieldInfo.DocValueType.NUMERIC, Boolean.TRUE)),
+            Arguments.of(new Row("long-dv", EsFieldType.NUMERIC, "long", null, null,
+                Path.DOC_VALUES, 99L, DocValueFieldInfo.DocValueType.NUMERIC, 99L)),
+            Arguments.of(new Row("double-dv", EsFieldType.NUMERIC, "double", null, null,
+                Path.DOC_VALUES, Double.doubleToLongBits(2.5),
+                DocValueFieldInfo.DocValueType.NUMERIC, 2.5)),
+            Arguments.of(new Row("date-dv", EsFieldType.DATE, "date", null, null,
+                Path.DOC_VALUES, 1_700_000_000_000L,
+                DocValueFieldInfo.DocValueType.NUMERIC, "2023-11-14T22:13:20Z")),
+            Arguments.of(new Row("ip-dv-binary", EsFieldType.IP, "ip", null, null,
+                Path.DOC_VALUES, ipv4MappedIpv6(10, 0, 0, 1),
+                DocValueFieldInfo.DocValueType.SORTED_SET, "10.0.0.1")),
+            Arguments.of(new Row("string-dv", EsFieldType.STRING, "keyword", null, null,
+                Path.DOC_VALUES, "foo",
+                DocValueFieldInfo.DocValueType.SORTED, "foo")),
+
+            // ---- Points / BKD (ES 5+) ----
+            Arguments.of(new Row("long-bkd", EsFieldType.NUMERIC, "long", null, null,
+                Path.POINTS, packLong(777L), null, 777L)),
+            Arguments.of(new Row("double-bkd", EsFieldType.NUMERIC, "double", null, null,
+                Path.POINTS, packDouble(-0.25), null, -0.25)),
+            Arguments.of(new Row("date-bkd", EsFieldType.DATE, "date", null, null,
+                Path.POINTS, packLong(1_700_000_000_000L), null, "2023-11-14T22:13:20Z")),
+            Arguments.of(new Row("ip-bkd", EsFieldType.IP, "ip", null, null,
+                Path.POINTS, ipv4MappedIpv6(192, 168, 1, 100), null, "192.168.1.100")),
+
+            // ---- Numeric terms (ES 1.x / 2.x) ----
+            Arguments.of(new Row("long-trie", EsFieldType.NUMERIC, "long", null, null,
+                Path.NUMERIC_TERMS, 111L, null, 111L)),
+            Arguments.of(new Row("ip-trie", EsFieldType.IP, "ip", null, null,
+                Path.NUMERIC_TERMS, ((10L << 24) | (0L << 16) | (0L << 8) | 1L), null, "10.0.0.1")),
+            Arguments.of(new Row("date-trie", EsFieldType.DATE, "date", null, null,
+                Path.NUMERIC_TERMS, 1_700_000_000_000L, null, "2023-11-14T22:13:20Z")),
+            Arguments.of(new Row("scaled-trie", EsFieldType.SCALED_FLOAT, "scaled_float", 100.0, null,
+                Path.NUMERIC_TERMS, 12345L, null, 123.45))
+        );
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("allTypesMatrix")
+    void allTypesMatrix(Row row) throws IOException {
+        var info = new FieldMappingInfo(row.type(), row.mappingType(), row.format(),
+                row.scalingFactor(), true);
+        var ctx = contextOf("field", info);
+
+        LuceneLeafReader reader;
+        LuceneDocument doc = document();
+        switch (row.path()) {
+            case STORED_FIELD -> {
+                reader = storedOnlyReader();
+                LuceneField field;
+                if (row.inputValue() instanceof Number n) {
+                    field = storedNumber("field", n);
+                } else if (row.inputValue() instanceof byte[] bytes) {
+                    field = storedBinary("field", bytes);
+                } else {
+                    field = storedString("field", (String) row.inputValue());
+                }
+                doc = document(field);
+            }
+            case DOC_VALUES -> reader = docValueReader("field", row.dvType(), false, row.inputValue());
+            case POINTS -> reader = pointsReader("field", row.type(), (byte[]) row.inputValue());
+            case NUMERIC_TERMS -> reader = numericTermReader("field", row.type(), ((Number) row.inputValue()).longValue());
+            default -> throw new IllegalStateException("Unhandled path: " + row.path());
+        }
+
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertNotNull(json, () -> "Expected non-null reconstruction for " + row.name());
+        JsonNode actual = parseField(json, "field");
+        assertNotNull(actual, () -> "Expected field in JSON for " + row.name() + " → " + json);
+
+        Object expected = row.expectedJson();
+        if (expected instanceof Boolean b) {
+            assertEquals(b, actual.asBoolean(), row.name());
+        } else if (expected instanceof Long l) {
+            assertEquals(l.longValue(), actual.asLong(), row.name());
+        } else if (expected instanceof Integer i) {
+            assertEquals(i.intValue(), actual.asInt(), row.name());
+        } else if (expected instanceof Double d) {
+            assertEquals(d, actual.asDouble(), 1e-9, row.name());
+        } else if (expected instanceof String s) {
+            assertEquals(s, actual.asText(), row.name());
+        } else if (expected instanceof java.math.BigInteger bi) {
+            assertEquals(bi, actual.bigIntegerValue(), row.name());
+        } else {
+            throw new IllegalStateException("Unhandled expected type: " + expected.getClass() + " for " + row.name());
+        }
+    }
+
+    // ==========================================================================================
+    // 8. mergeWithDocValues — ensures fields absent from existing source are merged in.
+    // ==========================================================================================
+
+    @Test
+    void mergeWithDocValues_addsMissingField() throws IOException {
+        var reader = mock(LuceneLeafReader.class);
+        var info = new DocValueFieldInfo.Simple("count", DocValueFieldInfo.DocValueType.NUMERIC, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(info));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq(info))).thenReturn(42L);
+
+        var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
+        String merged = SourceReconstructor.mergeWithDocValues(
+                "{\"name\":\"alice\"}", reader, 0, document(), ctx);
+
+        Map<?,?> result = MAPPER.readValue(merged, Map.class);
+        assertEquals("alice", result.get("name"));
+        assertEquals(42, ((Number) result.get("count")).intValue());
+    }
+
+    @Test
+    void mergeWithDocValues_preservesExistingFieldValue() throws IOException {
+        var reader = mock(LuceneLeafReader.class);
+        var info = new DocValueFieldInfo.Simple("count", DocValueFieldInfo.DocValueType.NUMERIC, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(info));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq(info))).thenReturn(99L);
+
+        var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
+        String merged = SourceReconstructor.mergeWithDocValues(
+                "{\"count\":7}", reader, 0, document(), ctx);
+
+        Map<?,?> result = MAPPER.readValue(merged, Map.class);
+        // Existing source value should not be overwritten by the doc_values value.
+        assertEquals(7, ((Number) result.get("count")).intValue());
+    }
+
+    // ==========================================================================================
+    // 9. shouldSkipField — internal Elasticsearch fields (_id, _source, _type, etc) never appear.
+    // ==========================================================================================
+
+    @Test
+    void internalFieldsSuchAsUnderscoreIdAreNeverEmitted() {
+        var reader = storedOnlyReader();
+        var doc = document(
+                storedString("_id", "abc"),
+                storedString("_uid", "abc"),
+                storedString("_type", "doc"),
+                storedString("_source", "{}"),
+                storedString("name", "alice")
+        );
+        var ctx = contextOf("name", mapping(EsFieldType.STRING, "keyword"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        JsonNode tree;
+        try {
+            tree = MAPPER.readTree(json);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        assertTrue(tree.has("name"));
+        assertTrue(!tree.has("_id"), "_id must be filtered");
+        assertTrue(!tree.has("_uid"), "_uid must be filtered");
+        assertTrue(!tree.has("_type"), "_type must be filtered");
+        assertTrue(!tree.has("_source"), "_source must be filtered");
+    }
+}

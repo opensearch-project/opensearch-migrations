@@ -525,10 +525,16 @@ public class SourceReconstructor {
                     yield sortableShortToHalfFloat(s);
                 }
                 if ("float".equals(mappingType) && packed.length == 4) {
-                    yield Float.intBitsToFloat(decodeIntPoint(packed));
+                    int sortable = decodeIntPoint(packed);
+                    // Undo Lucene's sortableInt→float transform for negative values
+                    int bits = sortable ^ ((sortable >> 31) & 0x7FFFFFFF);
+                    yield Float.intBitsToFloat(bits);
                 }
                 if ("double".equals(mappingType) && packed.length == 8) {
-                    yield Double.longBitsToDouble(decodeLongPoint(packed));
+                    long sortable = decodeLongPoint(packed);
+                    // Undo Lucene's sortableLong→double transform for negative values
+                    long bits = sortable ^ ((sortable >> 63) & 0x7FFFFFFFFFFFFFFFL);
+                    yield Double.longBitsToDouble(bits);
                 }
                 if (packed.length == 8) yield decodeLongPoint(packed);
                 if (packed.length == 4) yield decodeIntPoint(packed);
