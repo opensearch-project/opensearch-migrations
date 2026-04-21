@@ -113,13 +113,21 @@ public interface LuceneLeafReader {
             case STRING -> {
                 // For analyzed string fields without stored fields or doc_values,
                 // reconstruct a lossy version by collecting all indexed tokens in position order.
-                if (termIndex == null) {
-                    yield Optional.empty();
+                // For keyword / "string"+index:not_analyzed fields (which are indexed with
+                // IndexOptions.DOCS and therefore have no positions), fall back to
+                // single-term recovery which preserves the exact original value.
+                if (termIndex != null) {
+                    try {
+                        List<String> terms = termIndex.getTermsForDocument(this, docId, fieldName);
+                        if (terms != null && !terms.isEmpty()) {
+                            yield Optional.of(String.join(" ", terms));
+                        }
+                    } catch (UnsupportedOperationException e) {
+                        // Field indexed without positions; fall through to single-term path.
+                    }
                 }
-                List<String> terms = termIndex.getTermsForDocument(this, docId, fieldName);
-                yield (terms != null && !terms.isEmpty())
-                    ? Optional.of(String.join(" ", terms))
-                    : Optional.empty();
+                String singleTerm = getValueFromTerms(docId, fieldName);
+                yield singleTerm != null ? Optional.of(singleTerm) : Optional.empty();
             }
             case NUMERIC, UNSIGNED_LONG, SCALED_FLOAT, DATE, DATE_NANOS, IP -> {
                 // First try Points (Lucene 6+ stores numerics as BKD-tree points).

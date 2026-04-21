@@ -355,9 +355,16 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                     // inverted index round-trips losslessly even when doc_values/stored are disabled.
                     boolean canRecoverFromKeywordTerms = config.sourceType.equals("keyword")
                         || config.sourceType.equals("string");
+                    // Pre-Points era (ES 1.x/2.x on Lucene 4/5) indexes numeric/ip/date fields as
+                    // trie-encoded prefix-coded terms. SourceReconstructor harvests shift==0 terms
+                    // and decodes them back to the original value, so these round-trip losslessly
+                    // even without doc_values or stored fields.
+                    boolean preBkdNumerics = UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
+                    boolean canRecoverFromNumericTerms = preBkdNumerics && config.supportsPoints;
                     boolean alwaysHasDocValues = config.sourceType.equals("wildcard");
                     boolean shouldRecover = p.hasStore || p.hasDv || canRecoverFromPoints
-                        || canRecoverFromTerms || canRecoverFromKeywordTerms || alwaysHasDocValues;
+                        || canRecoverFromTerms || canRecoverFromKeywordTerms
+                        || canRecoverFromNumericTerms || alwaysHasDocValues;
                     if (shouldRecover) {
                         assertEquals(true, fieldValue != null, fieldName + " should be recovered but was null");
 
