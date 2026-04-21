@@ -10,6 +10,7 @@ import requests
 from pathlib import Path
 
 from console_link.workflow.commands.autocomplete_workflows import DEFAULT_WORKFLOW_NAME
+from console_link.workflow.commands.argo_utils import DEFAULT_ARGO_SERVER_URL
 
 logger = logging.getLogger(__name__)
 
@@ -96,10 +97,7 @@ def _get_cached_label_data(ctx):
 
     try:
         namespace = ctx.params.get('namespace', 'ma')
-        argo_server = ctx.params.get('argo_server') or os.environ.get('ARGO_SERVER') or (
-            f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
-            f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}"
-        )
+        argo_server = ctx.params.get('argo_server') or os.environ.get('ARGO_SERVER') or DEFAULT_ARGO_SERVER_URL
         token = ctx.params.get('token')
         insecure = ctx.params.get('insecure', False)
 

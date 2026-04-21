@@ -134,12 +134,12 @@ class TestWorkflowServiceGetArtifactContent:
             node_id="node-abc",
             artifact_name="statusOutput",
             namespace="ma",
-            argo_server="http://argo:2746"
+            argo_server="https://argo:2746"
         )
 
         assert result == "snapshot completed successfully"
         mock_get.assert_called_once_with(
-            "http://argo:2746/api/v1/workflows/ma/my-wf/artifacts/node-abc/statusOutput",
+            "https://argo:2746/api/v1/workflows/ma/my-wf/artifacts/node-abc/statusOutput",
             headers={"Content-Type": "application/json"},
             verify=True
         )
@@ -154,7 +154,7 @@ class TestWorkflowServiceGetArtifactContent:
             node_id="node-abc",
             artifact_name="statusOutput",
             namespace="ma",
-            argo_server="http://argo:2746"
+            argo_server="https://argo:2746"
         )
 
         assert result is None
@@ -170,7 +170,7 @@ class TestWorkflowServiceGetArtifactContent:
             node_id="node-abc",
             artifact_name="statusOutput",
             namespace="ma",
-            argo_server="http://argo:2746",
+            argo_server="https://argo:2746",
             token="my-token"
         )
 
@@ -189,7 +189,7 @@ class TestWorkflowServiceGetArtifactContent:
             node_id="node-abc",
             artifact_name="statusOutput",
             namespace="ma",
-            argo_server="http://argo:2746",
+            argo_server="https://argo:2746",
             insecure=True
         )
 
