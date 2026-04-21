@@ -377,14 +377,12 @@ public class SourcelessMigrationTest extends SourceTestBase {
                 "delivery_date (stored date) should be present: " + doc1Source);
             log.info("delivery_date reconstructed as: {}", doc1Source.path("delivery_date"));
 
-            // IP field without store: may not reconstruct in ES 1.7
-            // ES 1.7 stores IPs as numeric internally; without "store": true the raw
-            // value may not be available through the Lucene 4 compatibility layer.
-            if (!doc1Source.path("source_ip").isMissingNode()) {
-                log.info("source_ip reconstructed: {}", doc1Source.path("source_ip"));
-            } else {
-                log.info("source_ip not reconstructed — expected for non-stored IP in ES 1.7");
-            }
+            // IP field with neither _source nor stored nor doc_values: ES 1.7 still indexes the
+            // IPv4 as trie-coded numeric TERMS (32-bit-packed long across shift levels).
+            // SourceReconstructor harvests the shift==0 term via buildNumericTermIndex and
+            // converts the decoded long → dotted-quad IPv4 in decodeNumericTerm(IP, ...).
+            Assertions.assertEquals("192.168.1.100", doc1Source.path("source_ip").asText(),
+                "source_ip should reconstruct from trie-coded numeric terms as dotted-quad IPv4");
 
             // ============================================================
             // Verify doc2 — different values, has_attachment=true
@@ -409,6 +407,11 @@ public class SourcelessMigrationTest extends SourceTestBase {
             Assertions.assertEquals(
                 "please find invoice q4 services attached payment due within 30 days",
                 doc2Body);
+
+            // doc2 source_ip covers a different IPv4 octet range (10.0.0.1 vs doc1's 192.168.1.100)
+            // — exercises the trie numeric-term → dotted-quad path on both high and low byte values.
+            Assertions.assertEquals("10.0.0.1", doc2Source.path("source_ip").asText(),
+                "source_ip should reconstruct from trie-coded numeric terms as dotted-quad IPv4");
 
             // ============================================================
             // Verify doc3 — sparse document (missing optional fields)

@@ -29,6 +29,7 @@ import shadow.lucene5.org.apache.lucene.store.ByteArrayDataInput;
 import shadow.lucene5.org.apache.lucene.util.Bits;
 import shadow.lucene5.org.apache.lucene.util.BytesRef;
 import shadow.lucene5.org.apache.lucene.util.FixedBitSet;
+import shadow.lucene5.org.apache.lucene.util.NumericUtils;
 import shadow.lucene5.org.apache.lucene.util.SparseFixedBitSet;
 
 @Slf4j
@@ -297,6 +298,61 @@ public class LeafReader5 implements LuceneLeafReader {
         Map<Integer, List<String>> result = new HashMap<>(docPositions.size());
         docPositions.forEach((docId, positions) -> result.put(docId, new ArrayList<>(positions.values())));
         return result;
+    }
+
+    /**
+     * Single-pass walk of the terms dictionary for a trie-encoded numeric {@code fieldName}.
+     * Harvests only shift==0 terms (fully-precise values) and decodes via
+     * {@link NumericUtils#prefixCodedToLong} / {@link NumericUtils#prefixCodedToInt}.
+     *
+     * Terms at higher shift levels are range-query prefix terms that exist alongside every
+     * value for efficient range scans — they are skipped here because the shift==0 term for
+     * a value is posted against exactly the same docs.
+     *
+     * Byte-length discriminates int-coded (6 bytes at shift=0) vs long-coded (11 bytes at
+     * shift=0) terms. ES 1.x IP fields use long-coded terms even though the value is 32-bit.
+     *
+     * Returns {@code docId -> decoded Long} (first value wins when multi-valued; multi-valued
+     * numeric fields are extremely rare in practice and the reconstructed JSON would need
+     * array support at a higher layer to benefit anyway).
+     */
+    @Override
+    public Map<Integer, Long> buildNumericTermIndex(String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null) return Collections.emptyMap();
+        Map<Integer, Long> result = new HashMap<>();
+        TermsEnum termsEnum = terms.iterator();
+        BytesRef term;
+        while ((term = termsEnum.next()) != null) {
+            Long decoded = decodeShiftZeroTerm(term);
+            if (decoded == null) continue;
+            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.NONE);
+            int doc;
+            while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
+                result.putIfAbsent(doc, decoded);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Returns the decoded numeric value for a term if it is a shift==0 prefix-coded long/int,
+     * else null. Lucene 4/5 encodes the first byte as {@code SHIFT_START_LONG + shift} (0x20)
+     * for long-indexed fields and {@code SHIFT_START_INT + shift} (0x60) for int-indexed
+     * fields, so the header byte uniquely identifies both the encoding family and the shift.
+     * Only shift==0 terms are fully-precise; higher-shift range terms are skipped since the
+     * shift==0 term covers the same docs at full precision.
+     */
+    private static Long decodeShiftZeroTerm(BytesRef term) {
+        if (term.length == 0) return null;
+        byte header = term.bytes[term.offset];
+        if (header == NumericUtils.SHIFT_START_LONG && term.length == NumericUtils.BUF_SIZE_LONG) {
+            return NumericUtils.prefixCodedToLong(term);
+        }
+        if (header == NumericUtils.SHIFT_START_INT && term.length == NumericUtils.BUF_SIZE_INT) {
+            return (long) NumericUtils.prefixCodedToInt(term);
+        }
+        return null;
     }
 
     public String toString() {

@@ -76,12 +76,32 @@ public interface LuceneLeafReader {
     }
 
     /**
+     * Version-specific hook: walk the terms dictionary for a trie-encoded numeric field (ES 1.x /
+     * Lucene 4-5: long, int, double, float, date, ip) and return a docId -> decoded Long map.
+     *
+     * Lucene indexes each numeric value as a chain of prefix-coded terms across shift levels
+     * (for range query support). Only the {@code shift==0} term carries the fully-precise value;
+     * {@code NumericUtils.prefixCodedToLong} / {@code prefixCodedToInt} reverses the encoding.
+     * Floats/doubles are stored as {@code sortableFloatBits}/{@code sortableDoubleBits} longs
+     * and must be converted by the caller via the mapping type.
+     *
+     * Returning Long here keeps the interface version-agnostic; the final numeric type
+     * (int vs long vs float vs double vs IP string) is applied in {@link SourceReconstructor}
+     * using {@link FieldMappingInfo}.
+     *
+     * Called at most once per (segment, field) via {@link SegmentTermIndex}.
+     */
+    default Map<Integer, Long> buildNumericTermIndex(String fieldName) throws IOException {
+        return Collections.emptyMap();
+    }
+
+    /**
      * Fallback recovery: tries Points (for numerics/IP/date), terms (for boolean),
      * or full term collection (for analyzed strings without stored fields).
      * Used when doc_values and stored fields are not available.
      *
      * @param termIndex per-segment term cache; may be null if the caller does not need
-     *                  analyzed-string reconstruction (falls back to empty).
+     *                  analyzed-string or numeric-term reconstruction.
      */
     default Optional<Object> getValueFromPointsOrTerms(int docId, String fieldName, EsFieldType fieldType,
                                                       SegmentTermIndex termIndex) throws IOException {
@@ -100,6 +120,19 @@ public interface LuceneLeafReader {
                 yield (terms != null && !terms.isEmpty())
                     ? Optional.of(String.join(" ", terms))
                     : Optional.empty();
+            }
+            case NUMERIC, UNSIGNED_LONG, SCALED_FLOAT, DATE, DATE_NANOS, IP -> {
+                // First try Points (Lucene 6+ stores numerics as BKD-tree points).
+                List<byte[]> points = getPointValues(docId, fieldName);
+                if (points != null && !points.isEmpty()) {
+                    yield Optional.of(points);
+                }
+                // Fall back to trie-encoded terms (Lucene 4-5 / ES 1.x-2.x).
+                if (termIndex == null) {
+                    yield Optional.empty();
+                }
+                Long numericVal = termIndex.getNumericForDocument(this, docId, fieldName);
+                yield numericVal != null ? Optional.of(numericVal) : Optional.empty();
             }
             default -> {
                 List<byte[]> points = getPointValues(docId, fieldName);

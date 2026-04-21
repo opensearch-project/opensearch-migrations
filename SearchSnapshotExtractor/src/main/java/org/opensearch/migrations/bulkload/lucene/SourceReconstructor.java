@@ -450,7 +450,7 @@ public class SourceReconstructor {
         return b;
     }
 
-    /** Convert fallback value from Points (List<byte[]>) or Terms (String) */
+    /** Convert fallback value from Points (List&lt;byte[]&gt;), Terms (String), or NumericTerms (Long) */
     @SuppressWarnings("unchecked")
     private static Object convertFallbackValue(Object value, FieldMappingInfo mappingInfo) {
         // Terms fallback returns String (for boolean - stored as "T"/"F" in Lucene)
@@ -464,7 +464,49 @@ public class SourceReconstructor {
         if (value instanceof java.util.List<?> pointValues) {
             return decodePointValue((java.util.List<byte[]>) pointValues, mappingInfo);
         }
+        // Numeric terms fallback returns a raw Long decoded from shift==0 trie term
+        // (Lucene 4-5 / ES 1.x-2.x indexes numerics/ip/date as prefix-coded longs or ints).
+        if (value instanceof Long numericVal) {
+            return decodeNumericTerm(numericVal, mappingInfo);
+        }
         return null;
+    }
+
+    /** Decode a raw Long harvested from a shift==0 numeric term into the mapped JSON type. */
+    private static Object decodeNumericTerm(long raw, FieldMappingInfo mappingInfo) {
+        return switch (mappingInfo.type()) {
+            case IP -> String.format("%d.%d.%d.%d",
+                (raw >> 24) & 0xFF,
+                (raw >> 16) & 0xFF,
+                (raw >> 8) & 0xFF,
+                raw & 0xFF);
+            case DATE -> formatDate(raw, mappingInfo.format());
+            case DATE_NANOS -> formatDateNanos(raw);
+            case SCALED_FLOAT -> mappingInfo.scalingFactor() != null
+                ? raw / mappingInfo.scalingFactor()
+                : raw;
+            case UNSIGNED_LONG -> raw < 0 ? BigInteger.valueOf(raw).and(UNSIGNED_LONG_MASK) : raw;
+            case NUMERIC -> {
+                // Lucene 4/5 stores floats/doubles as sortable int/long bits in trie terms.
+                // sortableLongToDouble(l) = Double.longBitsToDouble(l ^ ((l >> 63) & 0x7FFFFFFFFFFFFFFFL))
+                // sortableIntToFloat(i)   = Float.intBitsToFloat(i ^ ((i >> 31) & 0x7FFFFFFF))
+                String mappingType = mappingInfo.mappingType();
+                if ("double".equals(mappingType)) {
+                    long bits = raw ^ ((raw >> 63) & 0x7FFFFFFFFFFFFFFFL);
+                    yield Double.longBitsToDouble(bits);
+                }
+                if ("float".equals(mappingType) || "half_float".equals(mappingType)) {
+                    int iraw = (int) raw;
+                    int bits = iraw ^ ((iraw >> 31) & 0x7FFFFFFF);
+                    yield Float.intBitsToFloat(bits);
+                }
+                if ("integer".equals(mappingType) || "short".equals(mappingType) || "byte".equals(mappingType)) {
+                    yield (int) raw;
+                }
+                yield raw; // long, token_count, etc.
+            }
+            default -> raw;
+        };
     }
 
     /** Decode point value from packed bytes */
