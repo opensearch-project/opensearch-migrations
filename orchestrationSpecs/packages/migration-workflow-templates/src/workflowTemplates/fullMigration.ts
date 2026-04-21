@@ -10,15 +10,15 @@ import {
     DENORMALIZED_REPLAY_CONFIG,
     ENRICHED_SNAPSHOT_MIGRATION_FILTER,
     getZodKeys,
-    KAFKA_CLIENT_CONFIG, NAMED_KAFKA_CLIENT_CONFIG,
+    NAMED_KAFKA_CLIENT_CONFIG,
     NAMED_KAFKA_CLUSTER_CONFIG,
     NAMED_TARGET_CLUSTER_CONFIG,
-    PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
 } from '@opensearch-migrations/schemas'
 import {
     AllowLiteralOrExpression,
+    BaseExpression,
     configMapKey,
     defineParam,
     expr,
@@ -28,6 +28,7 @@ import {
     makeParameterLoop,
     selectInputsFieldsAsExpressionRecord,
     selectInputsForRegister,
+    Serialized,
     typeToken,
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
@@ -75,6 +76,13 @@ function defaultImagesMap(imageConfigMapName: AllowLiteralOrExpression<string>) 
 
 const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
 
+function checksumNotDone(
+    actualChecksum: BaseExpression<string>,
+    desiredChecksum: BaseExpression<string>,
+): BaseExpression<boolean, "complicatedExpression"> {
+    return expr.and(expr.literal(true), expr.not(expr.equals(actualChecksum, desiredChecksum)));
+}
+
 export const FullMigration = WorkflowBuilder.create({
     k8sResourceName: "full-migration",
     parallelism: 100,
@@ -96,27 +104,38 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("version", typeToken<string>())
+        .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
         .addOptionalInput("groupName_view", c => "Kafka Cluster")
         .addOptionalInput("sortOrder_view", c => 999)
 
-        .addSteps(b => b
-            .addStep("deployCluster", SetupKafka, "deployKafkaClusterWithRetry", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    version: b.inputs.version,
-                    clusterConfig: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "config"),
-                })
-            )
-            .addStep("stampChecksum", ResourceManagement, "patchConfigChecksumAnnotation", c =>
-                c.register({
-                    resourceApiVersion: expr.literal("kafka.strimzi.io/v1"),
-                    resourceKind: expr.literal("Kafka"),
-                    resourceName: b.inputs.clusterName,
-                    configChecksum: b.inputs.configChecksum,
-                })
-            )
-        )
+        .addSteps(b => {
+            return b
+                .addStep("reconcileKafkaClusterResource", ResourceManagement, "reconcileKafkaClusterResource", c =>
+                    c.register({
+                        kafkaClusterConfig: b.inputs.kafkaClusterConfig,
+                        retryGateName: expr.concat(b.inputs.clusterName, expr.literal(".vapretry")),
+                        retryGroupName_view: expr.concat(expr.literal("KafkaCluster: "), b.inputs.clusterName),
+                    })
+                )
+                .addStep("deployCluster", SetupKafka, "deployKafkaClusterAndTopics", c =>
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        version: b.inputs.version,
+                        clusterConfig: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "config"),
+                        ownerUid: b.inputs.resourceUid,
+                    }),
+                    {when: c => ({templateExp: checksumNotDone(c.reconcileKafkaClusterResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
+                )
+                .addStep("patchKafkaClusterReady", ResourceManagement, "patchKafkaClusterReady", c =>
+                    c.register({
+                        resourceName: b.inputs.clusterName,
+                        phase: expr.literal("Ready"),
+                        configChecksum: b.inputs.configChecksum,
+                    }),
+                    {when: c => ({templateExp: checksumNotDone(c.reconcileKafkaClusterResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
+                );
+        })
     )
 
 
@@ -127,25 +146,38 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("kafkaTopicName", typeToken<string>())
         .addRequiredInput("proxyName", typeToken<string>())
+        .addRequiredInput("topicCrName", typeToken<string>())
+        .addRequiredInput("resourceUid", typeToken<string>())
+        .addRequiredInput("kafkaClusterOwnerUid", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
+        .addRequiredInput("topicPartitions", typeToken<number>())
+        .addRequiredInput("topicReplicas", typeToken<number>())
+        .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
         .addOptionalInput("groupName_view", c => "Proxy")
         .addOptionalInput("sortOrder_view", c => 999)
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "CaptureProxy"]))
 
         .addSteps(b => b
-            .addStep("setupProxy", SetupCapture, "setupProxyWithLifecycle", c =>
+            .addStep("setupProxy", SetupCapture, "reconcileCaptureTopicAndProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     proxyConfig: b.inputs.proxyConfig,
                     kafkaClusterName: b.inputs.kafkaClusterName,
                     kafkaTopicName: b.inputs.kafkaTopicName,
                     proxyName: b.inputs.proxyName,
+                    topicCrName: b.inputs.topicCrName,
+                    ownerUid: b.inputs.resourceUid,
+                    kafkaClusterOwnerUid: b.inputs.kafkaClusterOwnerUid,
                     configChecksum: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["configChecksum"], ""),
+                    topicConfigChecksum: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["topicConfigChecksum"], ""),
                     checksumForSnapshot: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForSnapshot"], ""),
                     checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["checksumForReplayer"], ""),
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    topicPartitions: b.inputs.topicPartitions,
+                    topicReplicas: b.inputs.topicReplicas,
+                    topicConfig: b.inputs.topicConfig,
                 })
             )
         )
@@ -166,14 +198,21 @@ export const FullMigration = WorkflowBuilder.create({
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
-        .addSteps(b => b
-            .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
+        .addSteps(b => {
+            return b
+            .addStep("reconcileDataSnapshotResource", ResourceManagement, "reconcileDataSnapshotResource", c =>
+                c.register({
+                    resourceName: b.inputs.resourceName,
+                    snapshotItemConfig: b.inputs.snapshotItemConfig,
+                }),
+            )
+            .addStep("readSnapshotPhase", ResourceManagement, "readResourcePhase", c =>
                 c.register({
                     resourceKind: expr.literal("DataSnapshot"),
                     resourceName: b.inputs.resourceName,
                 })
             )
-            .addStep("waitForProxyDeps", ResourceManagement, "waitForCapturedTraffic", c =>
+            .addStep("waitForProxyDeps", ResourceManagement, "waitForCaptureProxy", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: expr.get(c.item, "name"),
@@ -182,11 +221,29 @@ export const FullMigration = WorkflowBuilder.create({
                     }), {
                     loopWith: makeParameterLoop(
                         expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "dependsOnProxySetups")),
-                    when: c => ({templateExp: expr.not(expr.and(
-                        expr.equals(c.checkPhase.outputs.phase, "Completed"),
-                        expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                    ))}),
+                    when: c => ({templateExp: expr.and(
+                        expr.not(expr.and(
+                            expr.equals(c.readSnapshotPhase.outputs.phase, "Completed"),
+                            expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
+                        )),
+                        expr.not(expr.and(
+                            expr.equals(c.readSnapshotPhase.outputs.phase, "Running"),
+                            expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
+                        ))
+                    )}),
                 }
+            )
+            .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.resourceName,
+                    configChecksum: b.inputs.configChecksum,
+                    checksumField: expr.literal("checksumForSnapshotMigration"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.readSnapshotPhase.outputs.phase, "Running"),
+                    expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
+                )})}
             )
             .addStep("createOrGetSnapshot", CreateOrGetSnapshot, "createOrGetSnapshot", c =>
                 c.register({
@@ -214,12 +271,15 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.deserializeRecord(b.inputs.snapshotItemConfig), "semaphoreKey"),
                     configChecksum: b.inputs.configChecksum,
                 }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Completed"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
+                {when: c => ({templateExp: expr.and(
+                    expr.not(expr.equals(c.readSnapshotPhase.outputs.phase, "Completed")),
+                    expr.not(expr.and(
+                        expr.equals(c.readSnapshotPhase.outputs.phase, "Running"),
+                        expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
+                    ))
+                )})}
             )
-        )
+        })
     )
 
 
@@ -280,6 +340,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("groupName_view", typeToken<string>())
         .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addOptionalInput("metadataMigrationConfig", c =>
@@ -294,7 +356,9 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("idGenerator", INTERNAL, "doNothing")
             .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c => {
                     return c.register({
-                        ...selectInputsForRegister(b, c)
+                        ...selectInputsForRegister(b, c),
+                        crdName: b.inputs.crdName,
+                        crdUid: b.inputs.resourceUid,
                     });
                 },
                 {when: {templateExp: expr.not(expr.isEmpty(b.inputs.metadataMigrationConfig))}}
@@ -304,7 +368,9 @@ export const FullMigration = WorkflowBuilder.create({
                         ...(selectInputsForRegister(b, c)),
                         sessionName: c.steps.idGenerator.id,
                         sourceVersion: b.inputs.sourceVersion,
-                        sourceLabel: b.inputs.sourceLabel
+                        sourceLabel: b.inputs.sourceLabel,
+                        crdName: b.inputs.crdName,
+                        crdUid: b.inputs.resourceUid
                     }),
                 {when: {templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig))}}
             )
@@ -316,17 +382,22 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("resourceUid", typeToken<string>())
         .addOptionalInput("groupName_view", c => "Snapshot Migration")
         .addOptionalInput("sortOrder_view", c => 999)
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
 
-        .addSteps(b => b
-            .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
-                c.register({
-                    resourceKind: expr.literal("SnapshotMigration"),
-                    resourceName: b.inputs.resourceName,
-                })
+        .addSteps(b => {
+            return b
+            .addStep("reconcileSnapshotMigrationResource", ResourceManagement, "reconcileSnapshotMigrationResource", c => {
+                    return c.register({
+                        snapshotMigrationConfig: b.inputs.snapshotMigrationConfig,
+                        resourceName: b.inputs.resourceName,
+                        retryGateName: expr.concat(b.inputs.resourceName, expr.literal(".vapretry")),
+                        retryGroupName_view: expr.concat(expr.literal("SnapshotMigration: "), b.inputs.resourceName),
+                    });
+                },
             )
             .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c => {
                 const config = expr.deserializeRecord(b.inputs.snapshotMigrationConfig);
@@ -342,10 +413,7 @@ export const FullMigration = WorkflowBuilder.create({
                 });
             }, {
                     when: c => ({templateExp: expr.and(
-                        expr.not(expr.and(
-                            expr.equals(c.checkPhase.outputs.phase, "Completed"),
-                            expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                        )),
+                        checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
                         expr.hasKey(
                             expr.get(
                                 expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
@@ -367,10 +435,7 @@ export const FullMigration = WorkflowBuilder.create({
                     });
                 }, {
                     when: c => ({templateExp: expr.and(
-                        expr.not(expr.and(
-                            expr.equals(c.checkPhase.outputs.phase, "Completed"),
-                            expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                        )),
+                        checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
                         expr.hasKey(
                             expr.get(
                                 expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
@@ -392,8 +457,6 @@ export const FullMigration = WorkflowBuilder.create({
 
                     return c.register({
                         ...selectInputsForRegister(b, c),
-                        ...selectInputsFieldsAsExpressionRecord(c.item, c,
-                            getZodKeys(PER_INDICES_SNAPSHOT_MIGRATION_CONFIG)),
                         sourceVersion: expr.get(snapshotMigrationConfig, "sourceVersion"),
                         sourceLabel: expr.get(snapshotMigrationConfig, "sourceLabel"),
                         targetConfig: expr.serialize(expr.get(snapshotMigrationConfig, "targetConfig")),
@@ -402,34 +465,39 @@ export const FullMigration = WorkflowBuilder.create({
                             label: expr.get(snapshotRepoConfig, "label"),
                             repoConfig: expr.get(snapshotRepoConfig, "repoConfig")
                         })),
-                        migrationLabel: expr.get(c.item, "label"),
-                        groupName_view: expr.get(c.item, "label"),
+                        migrationLabel: expr.get(snapshotMigrationConfig, "migrationLabel"),
+                        metadataMigrationConfig: expr.serialize(expr.dig(
+                            snapshotMigrationConfig,
+                            ["metadataMigrationConfig"],
+                            expr.makeDict({}) as any
+                        )),
+                        documentBackfillConfig: expr.serialize(expr.dig(
+                            snapshotMigrationConfig,
+                            ["documentBackfillConfig"],
+                            expr.makeDict({}) as any
+                        )),
+                        crdName: b.inputs.resourceName,
+                        resourceUid: b.inputs.resourceUid,
+                        groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
                         sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], "")
                     });
                 }, {
-                    loopWith: makeParameterLoop(
-                        expr.get(expr.deserializeRecord(b.inputs.snapshotMigrationConfig), "migrations")),
-                    when: c => ({templateExp: expr.not(expr.and(
-                        expr.equals(c.checkPhase.outputs.phase, "Completed"),
-                        expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                    ))}),
+                    when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)}),
                 }
             )
-            .addStep("patchSnapshotMigration", ResourceManagement, "patchSnapshotMigrationReady", c =>
-                c.register({
+            .addStep("patchSnapshotMigrationCompleted", ResourceManagement, "patchSnapshotMigrationCompleted",
+                c => c.register({
                     resourceName: b.inputs.resourceName,
+                    phase: expr.literal("Completed"),
                     configChecksum: b.inputs.configChecksum,
                     checksumForReplayer: expr.dig(
                         expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
                         ["checksumForReplayer"], ""
                     ),
                 }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Completed"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
+                {when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
-        )
+        })
     )
 
 
@@ -443,19 +511,25 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
         .addRequiredInput("name", typeToken<string>())
+        .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("dependsOn", typeToken<string[]>())
         .addOptionalInput("groupName_view", c => "Traffic Replay")
         .addOptionalInput("sortOrder_view", c => 999)
         .addRequiredInput("dependsOnSnapshotMigrations", typeToken<z.infer<typeof ENRICHED_SNAPSHOT_MIGRATION_FILTER>[]>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "TrafficReplayer"]))
 
-        .addSteps(b => b
-            .addStep("checkPhase", ResourceManagement, "readResourcePhase", c =>
+        .addSteps(b => {
+            return b
+            .addStep("reconcileTrafficReplayResource", ResourceManagement, "reconcileTrafficReplayResource", c =>
                 c.register({
-                    resourceKind: expr.literal("TrafficReplay"),
-                    resourceName: b.inputs.name,
-                })
+                    name: b.inputs.name,
+                    dependsOn: b.inputs.dependsOn,
+                    replayerOptions: b.inputs.replayerOptions,
+                    retryGateName: expr.concat(b.inputs.name, expr.literal(".trafficreplay.vapretry")),
+                    retryGroupName_view: expr.concat(expr.literal("TrafficReplay: "), b.inputs.name),
+                }),
             )
             .addStep("waitForSnapshotMigrationDeps", ResourceManagement, "waitForSnapshotMigration", c => {
                     return c.register({
@@ -469,7 +543,9 @@ export const FullMigration = WorkflowBuilder.create({
                                 ""
                             ),
                             expr.literal("-"),
-                            expr.asString(expr.get(c.item, "snapshot"))
+                            expr.asString(expr.get(c.item, "snapshot")),
+                            expr.literal("-"),
+                            expr.asString(expr.get(c.item, "migrationLabel"))
                         ),
                         configChecksum: expr.dig(c.item, ["configChecksum"], expr.literal("")),
                         checksumField: expr.literal("checksumForReplayer"),
@@ -477,42 +553,28 @@ export const FullMigration = WorkflowBuilder.create({
                 }, {
                     loopWith: makeParameterLoop(expr.deserializeRecord(b.inputs.dependsOnSnapshotMigrations)),
                     when: c => ({templateExp: expr.and(
-                        expr.not(expr.and(
-                            expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                            expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                        )),
+                        checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
                         expr.not(expr.isEmpty(expr.deserializeRecord(b.inputs.dependsOnSnapshotMigrations)))
                     )}),
                 }
             )
-            .addStep("waitForProxy", ResourceManagement, "waitForCapturedTraffic", c =>
+            .addStep("waitForProxy", ResourceManagement, "waitForCaptureProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.fromProxy,
                     configChecksum: b.inputs.fromProxyConfigChecksum,
                     checksumField: expr.literal("checksumForReplayer"),
                 }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
+                {when: c => ({templateExp: checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
             .addStep("waitForKafkaCluster", ResourceManagement, "waitForKafkaCluster", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.kafkaClusterName,
-                    configChecksum: expr.dig(
-                        expr.deserializeRecord(b.inputs.kafkaConfig),
-                        ["configChecksum"],
-                        ""
-                    ),
                 })
             , {
                 when: c => ({templateExp: expr.and(
-                    expr.not(expr.and(
-                        expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                        expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                    )),
+                    checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
                     expr.dig(
                         expr.deserializeRecord(b.inputs.kafkaConfig),
                         ["managedByWorkflow"],
@@ -527,10 +589,7 @@ export const FullMigration = WorkflowBuilder.create({
                 })
             , {
                 when: c => ({templateExp: expr.and(
-                    expr.not(expr.and(
-                        expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                        expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                    )),
+                    checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
                     expr.dig(
                         expr.deserializeRecord(b.inputs.kafkaConfig),
                         ["managedByWorkflow"],
@@ -547,30 +606,20 @@ export const FullMigration = WorkflowBuilder.create({
                     resolvedKafkaConnection: c.steps.readKafkaConnectionProfile.outputs.bootstrapServers,
                     resolvedKafkaListenerName: c.steps.readKafkaConnectionProfile.outputs.listenerName,
                     resolvedKafkaAuthType: c.steps.readKafkaConnectionProfile.outputs.authType,
-                    name: expr.concat(
-                        b.inputs.fromProxy,
-                        expr.literal("-"),
-                        expr.get(expr.deserializeRecord(b.inputs.targetConfig), "label"),
-                        expr.literal("-replayer"))
+                    name: b.inputs.name,
+                    ownerUid: b.inputs.resourceUid,
                 }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
+                {when: c => ({templateExp: checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
-            .addStep("markReady", ResourceManagement, "patchResourcePhase", c =>
-                c.register({
-                    resourceKind: expr.literal("TrafficReplay"),
+            .addStep("patchTrafficReplayReady", ResourceManagement, "patchTrafficReplayReady",
+                c => c.register({
                     resourceName: b.inputs.name,
                     phase: expr.literal("Ready"),
                     configChecksum: b.inputs.configChecksum,
                 }),
-                {when: c => ({templateExp: expr.not(expr.and(
-                    expr.equals(c.checkPhase.outputs.phase, "Ready"),
-                    expr.equals(c.checkPhase.outputs.configChecksum, b.inputs.configChecksum)
-                ))})}
+                {when: c => ({templateExp: checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
-        )
+        })
     )
 
 
@@ -591,11 +640,13 @@ export const FullMigration = WorkflowBuilder.create({
                         version: expr.get(c.item, "version"),
                         config: expr.deserializeRecord(expr.get(c.item, "config")),
                         topics: expr.deserializeRecord(expr.get(c.item, "topics")),
-                        configChecksum: expr.get(c.item, "configChecksum")
+                        configChecksum: expr.get(c.item, "configChecksum"),
+                        resourceUid: expr.get(c.item, "resourceUid"),
                     })),
                     //kafkaClusterConfig: expr.cast(c.item).to<Serialized<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>>(),
                     clusterName: expr.get(c.item, "name"),
-                    version: expr.cast(expr.get(c.item, "version")).to<string>(),
+                    version: expr.get(c.item, "version"),
+                    resourceUid: expr.get(c.item, "resourceUid"),
                     configChecksum: expr.dig(c.item, ["configChecksum"], ""),
                     groupName_view: expr.get(c.item, "name"),
                     sortOrder_view: expr.literal(1),
@@ -619,8 +670,10 @@ export const FullMigration = WorkflowBuilder.create({
                         sourceAllowInsecure: expr.get(c.item, "sourceAllowInsecure"),
                         proxyConfig: expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
                         configChecksum: expr.dig(c.item, ["configChecksum"], ""),
+                        topicConfigChecksum: expr.dig(c.item, ["topicConfigChecksum"], ""),
                         checksumForSnapshot: expr.dig(c.item, ["checksumForSnapshot"], ""),
                         checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
+                        resourceUid: expr.get(c.item, "resourceUid"),
                     })),
                     // proxyConfig:      expr.cast(c.item).to<Serialized<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>>(),
                     kafkaClusterName: expr.dig(
@@ -634,6 +687,13 @@ export const FullMigration = WorkflowBuilder.create({
                         ""
                     ),
                     proxyName: expr.get(c.item, "name"),
+                    topicCrName: expr.concat(expr.get(c.item, "name"), expr.literal("-topic")),
+                    resourceUid: expr.get(c.item, "resourceUid"),
+                    kafkaClusterOwnerUid: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["clusterResourceUid"],
+                        ""
+                    ),
                     listenPort: expr.dig(
                         expr.deserializeRecord(expr.get(c.item, "proxyConfig")),
                         ["listenPort"],
@@ -644,6 +704,21 @@ export const FullMigration = WorkflowBuilder.create({
                         ["podReplicas"],
                         1
                     ),
+                    topicPartitions: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["topicSpecOverrides", "partitions"],
+                        1
+                    ),
+                    topicReplicas: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["topicSpecOverrides", "replicas"],
+                        1
+                    ),
+                    topicConfig: expr.serialize(expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["topicSpecOverrides", "config"],
+                        expr.makeDict({})
+                    )),
                     groupName_view: expr.get(c.item, "name"),
                     sortOrder_view: expr.literal(2),
                 }), {
@@ -672,16 +747,15 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: expr.concat(
                         expr.get(c.item, "sourceLabel"),
                         expr.literal("-"),
-                        // TODO/BUG - need to fix this in the type system.
-                        // The following line is required, but won't type check w/out the any cast!
                         expr.dig(
                             expr.deserializeRecord(expr.get(c.item, "targetConfig")),
                             ["label"],
                             ""
                         ),
-                        // expr.get(expr.get(c.item, "targetConfig"), "label"),
                         expr.literal("-"),
-                        expr.get(c.item, "label")
+                        expr.get(c.item, "label"),
+                        expr.literal("-"),
+                        expr.get(c.item, "migrationLabel")
                     ),
                     groupName_view: expr.concat(
                         expr.get(c.item, "sourceLabel"),
@@ -692,21 +766,9 @@ export const FullMigration = WorkflowBuilder.create({
                             ""
                         )
                     ),
-                    snapshotMigrationConfig: expr.serialize(expr.makeDict({
-                        label: expr.get(c.item, "label"),
-                        snapshotNameResolution: expr.deserializeRecord(expr.get(c.item, "snapshotNameResolution")),
-                        snapshotConfigChecksum: expr.get(c.item, "snapshotConfigChecksum"),
-                        migrations: expr.deserializeRecord(expr.get(c.item, "migrations")),
-                        sourceVersion: expr.get(c.item, "sourceVersion"),
-                        sourceLabel: expr.get(c.item, "sourceLabel"),
-                        targetConfig: expr.deserializeRecord(expr.get(c.item, "targetConfig")),
-                        snapshotConfig: expr.deserializeRecord(expr.get(c.item, "snapshotConfig")),
-                        sourceEndpoint: expr.dig(c.item, ["sourceEndpoint"], ""),
-                        configChecksum: expr.get(c.item, "configChecksum"),
-                        checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
-                    })),
-//                    snapshotMigrationConfig: expr.cast(c.item).to<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>()
+                    snapshotMigrationConfig: expr.cast(c.item).to<Serialized<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>>(),
                     configChecksum: expr.dig(c.item, ["configChecksum"], ""),
+                    resourceUid: expr.get(c.item, "resourceUid"),
                     sortOrder_view: expr.literal(4),
                 }), {
                     loopWith: makeParameterLoop(

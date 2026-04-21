@@ -91,6 +91,7 @@ jobs:
           - libraries/testAutomation
     env:
       WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'AIAdvisor/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'libraries/') && format('./{0}', matrix.py-project) || matrix.py-project == 'solrMigrationDevSandbox' && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
+      WORKFLOW_TEST_KUBE_CONTEXT: kind-console-link-test
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
@@ -103,7 +104,7 @@ jobs:
         if: matrix.py-project == 'migrationConsole/lib/console_link'
         uses: helm/kind-action@v1.14.0
         with:
-          cluster_name: kind-test-cluster
+          cluster_name: console-link-test
 
       # Verify Kind cluster is ready (only for console_link project)
       - name: Verify Kind cluster
@@ -112,6 +113,10 @@ jobs:
           kubectl cluster-info
           kubectl get nodes
           kubectl get namespaces
+
+      - name: Install workflow test cluster dependencies
+        if: matrix.py-project == 'migrationConsole/lib/console_link'
+        run: ./scripts/setupWorkflowTestCluster.sh
 
       - name: Install dependencies (Pipfile)
         if: matrix.py-project != 'AIAdvisor/skills/solr-opensearch-migration-advisor'

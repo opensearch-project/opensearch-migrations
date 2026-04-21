@@ -36,11 +36,14 @@
             },
             {
               "name": "workflowUid"
+            },
+            {
+              "name": "ownerUid"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\nspec: {{inputs.parameters.nodePoolSpec}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\nspec: {{=fromJSON(inputs.parameters.nodePoolSpec)}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -69,11 +72,14 @@
             },
             {
               "name": "workflowUid"
+            },
+            {
+              "name": "ownerUid"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  labels:\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{inputs.parameters.kafkaSpec}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=fromJSON(inputs.parameters.kafkaSpec)}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.listeners"
@@ -110,11 +116,14 @@
             },
             {
               "name": "workflowUid"
+            },
+            {
+              "name": "ownerUid"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  labels:\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{inputs.parameters.kafkaSpec}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=fromJSON(inputs.parameters.kafkaSpec)}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.listeners"
@@ -154,6 +163,9 @@
             },
             {
               "name": "workflowUid"
+            },
+            {
+              "name": "ownerUid"
             }
           ]
         },
@@ -175,6 +187,10 @@
                   {
                     "name": "workflowUid",
                     "value": "{{inputs.parameters.workflowUid}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.ownerUid}}"
                   }
                 ]
               },
@@ -198,6 +214,10 @@
                   {
                     "name": "workflowUid",
                     "value": "{{inputs.parameters.workflowUid}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.ownerUid}}"
                   }
                 ]
               },
@@ -230,6 +250,9 @@
               "name": "workflowUid"
             },
             {
+              "name": "ownerUid"
+            },
+            {
               "name": "partitions"
             },
             {
@@ -241,7 +264,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\nspec:\n  partitions: {{inputs.parameters.partitions}}\n  replicas: {{inputs.parameters.replicas}}\n  config: {{inputs.parameters.topicConfig}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\nspec:\n  partitions: {{inputs.parameters.partitions}}\n  replicas: {{inputs.parameters.replicas}}\n  config: {{=fromJSON(inputs.parameters.topicConfig)}}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.topicName"
@@ -278,11 +301,14 @@
             },
             {
               "name": "workflowUid"
+            },
+            {
+              "name": "ownerUid"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaUser\nmetadata:\n  name: \"{{=inputs.parameters.clusterName+'-migration-app'}}\"\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\nspec: {{inputs.parameters.userSpec}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaUser\nmetadata:\n  name: \"{{=inputs.parameters.clusterName+'-migration-app'}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\nspec: {{=fromJSON(inputs.parameters.userSpec)}}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.conditions"
@@ -301,32 +327,20 @@
         }
       },
       {
-        "name": "suspendforretry",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "name"
-            }
-          ]
-        },
-        "suspend": {},
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "deploykafkanodepoolwithretry",
+        "name": "deploykafkaclusterandtopics",
         "inputs": {
           "parameters": [
             {
               "name": "clusterName"
             },
             {
+              "name": "version"
+            },
+            {
               "name": "clusterConfig"
             },
             {
-              "name": "retryGroupName_view",
-              "value": "Apply"
+              "name": "ownerUid"
             }
           ]
         },
@@ -347,104 +361,16 @@
                   {
                     "name": "workflowUid",
                     "value": "{{workflow.uid}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.ownerUid}}"
                   }
                 ]
               },
-              "name": "tryApply",
-              "continueOn": {
-                "failed": true
-              }
+              "name": "deployNodePool"
             }
           ],
-          [
-            {
-              "template": "suspendforretry",
-              "when": "{{=steps.tryApply.status == 'Failed'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "name",
-                    "value": "KafkaNodePool"
-                  }
-                ]
-              },
-              "name": "waitForFix"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "patchapprovalannotation",
-                "name": "resource-management"
-              },
-              "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceApiVersion",
-                    "value": "kafka.strimzi.io/v1"
-                  },
-                  {
-                    "name": "resourceKind",
-                    "value": "KafkaNodePool"
-                  },
-                  {
-                    "name": "resourceName",
-                    "value": "dual-role"
-                  }
-                ]
-              },
-              "name": "patchApproval"
-            }
-          ],
-          [
-            {
-              "template": "deploykafkanodepoolwithretry",
-              "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "clusterConfig",
-                    "value": "{{inputs.parameters.clusterConfig}}"
-                  },
-                  {
-                    "name": "retryGroupName_view",
-                    "value": "{{inputs.parameters.retryGroupName_view}}"
-                  }
-                ]
-              },
-              "name": "retryLoop"
-            }
-          ]
-        ],
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "deploykafkaclusterkraftwithretry",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "clusterName"
-            },
-            {
-              "name": "version"
-            },
-            {
-              "name": "clusterConfig"
-            },
-            {
-              "name": "retryGroupName_view",
-              "value": "Apply"
-            }
-          ]
-        },
-        "steps": [
           [
             {
               "template": "deploykafkacluster",
@@ -465,266 +391,20 @@
                   {
                     "name": "workflowUid",
                     "value": "{{workflow.uid}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.ownerUid}}"
                   }
                 ]
               },
-              "name": "tryApply",
-              "continueOn": {
-                "failed": true
-              }
+              "name": "deployCluster"
             }
           ],
-          [
-            {
-              "template": "suspendforretry",
-              "when": "{{=steps.tryApply.status == 'Failed'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "name",
-                    "value": "KafkaCluster"
-                  }
-                ]
-              },
-              "name": "waitForFix"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "patchapprovalannotation",
-                "name": "resource-management"
-              },
-              "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceApiVersion",
-                    "value": "kafka.strimzi.io/v1"
-                  },
-                  {
-                    "name": "resourceKind",
-                    "value": "Kafka"
-                  },
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.clusterName}}"
-                  }
-                ]
-              },
-              "name": "patchApproval"
-            }
-          ],
-          [
-            {
-              "template": "deploykafkaclusterkraftwithretry",
-              "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "version",
-                    "value": "{{inputs.parameters.version}}"
-                  },
-                  {
-                    "name": "clusterConfig",
-                    "value": "{{inputs.parameters.clusterConfig}}"
-                  },
-                  {
-                    "name": "retryGroupName_view",
-                    "value": "{{inputs.parameters.retryGroupName_view}}"
-                  }
-                ]
-              },
-              "name": "retryLoop"
-            }
-          ]
-        ],
-        "outputs": {
-          "parameters": [
-            {
-              "name": "brokers",
-              "valueFrom": {
-                "expression": "steps.tryApply.outputs.parameters.bootstrapServers"
-              }
-            }
-          ]
-        }
-      },
-      {
-        "name": "createkafkatopicwithretry",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "clusterName"
-            },
-            {
-              "name": "topicName"
-            },
-            {
-              "name": "partitions"
-            },
-            {
-              "name": "replicas"
-            },
-            {
-              "name": "topicConfig"
-            },
-            {
-              "name": "retryGroupName_view",
-              "value": "Apply"
-            }
-          ]
-        },
-        "steps": [
-          [
-            {
-              "template": "createkafkatopic",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "topicName",
-                    "value": "{{inputs.parameters.topicName}}"
-                  },
-                  {
-                    "name": "workflowUid",
-                    "value": "{{workflow.uid}}"
-                  },
-                  {
-                    "name": "partitions",
-                    "value": "{{inputs.parameters.partitions}}"
-                  },
-                  {
-                    "name": "replicas",
-                    "value": "{{inputs.parameters.replicas}}"
-                  },
-                  {
-                    "name": "topicConfig",
-                    "value": "{{inputs.parameters.topicConfig}}"
-                  }
-                ]
-              },
-              "name": "tryApply",
-              "continueOn": {
-                "failed": true
-              }
-            }
-          ],
-          [
-            {
-              "template": "suspendforretry",
-              "when": "{{=steps.tryApply.status == 'Failed'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "name",
-                    "value": "KafkaTopic"
-                  }
-                ]
-              },
-              "name": "waitForFix"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "patchapprovalannotation",
-                "name": "resource-management"
-              },
-              "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceApiVersion",
-                    "value": "kafka.strimzi.io/v1"
-                  },
-                  {
-                    "name": "resourceKind",
-                    "value": "KafkaTopic"
-                  },
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.topicName}}"
-                  }
-                ]
-              },
-              "name": "patchApproval"
-            }
-          ],
-          [
-            {
-              "template": "createkafkatopicwithretry",
-              "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "topicName",
-                    "value": "{{inputs.parameters.topicName}}"
-                  },
-                  {
-                    "name": "partitions",
-                    "value": "{{inputs.parameters.partitions}}"
-                  },
-                  {
-                    "name": "replicas",
-                    "value": "{{inputs.parameters.replicas}}"
-                  },
-                  {
-                    "name": "topicConfig",
-                    "value": "{{inputs.parameters.topicConfig}}"
-                  },
-                  {
-                    "name": "retryGroupName_view",
-                    "value": "{{inputs.parameters.retryGroupName_view}}"
-                  }
-                ]
-              },
-              "name": "retryLoop"
-            }
-          ]
-        ],
-        "outputs": {
-          "parameters": [
-            {
-              "name": "topicName",
-              "valueFrom": {
-                "expression": "steps.tryApply.outputs.parameters.topicName"
-              }
-            }
-          ]
-        }
-      },
-      {
-        "name": "createkafkauserwithretry",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "clusterName"
-            },
-            {
-              "name": "clusterConfig"
-            },
-            {
-              "name": "retryGroupName_view",
-              "value": "Apply"
-            }
-          ]
-        },
-        "steps": [
           [
             {
               "template": "createkafkauser",
+              "when": "{{=sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512'}}",
               "arguments": {
                 "parameters": [
                   {
@@ -738,203 +418,19 @@
                   {
                     "name": "workflowUid",
                     "value": "{{workflow.uid}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.ownerUid}}"
                   }
                 ]
               },
-              "name": "tryApply",
-              "continueOn": {
-                "failed": true
-              }
-            }
-          ],
-          [
-            {
-              "template": "suspendforretry",
-              "when": "{{=steps.tryApply.status == 'Failed'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "name",
-                    "value": "KafkaUser"
-                  }
-                ]
-              },
-              "name": "waitForFix"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "patchapprovalannotation",
-                "name": "resource-management"
-              },
-              "when": "{{=steps.waitForFix.status == 'Succeeded'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceApiVersion",
-                    "value": "kafka.strimzi.io/v1"
-                  },
-                  {
-                    "name": "resourceKind",
-                    "value": "KafkaUser"
-                  },
-                  {
-                    "name": "resourceName",
-                    "value": "{{=inputs.parameters.clusterName+'-migration-app'}}"
-                  }
-                ]
-              },
-              "name": "patchApproval"
-            }
-          ],
-          [
-            {
-              "template": "createkafkauserwithretry",
-              "when": "{{=steps.patchApproval.status == 'Succeeded'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "clusterConfig",
-                    "value": "{{inputs.parameters.clusterConfig}}"
-                  },
-                  {
-                    "name": "retryGroupName_view",
-                    "value": "{{inputs.parameters.retryGroupName_view}}"
-                  }
-                ]
-              },
-              "name": "retryLoop"
+              "name": "deployKafkaUser"
             }
           ]
         ],
         "outputs": {
           "parameters": []
-        }
-      },
-      {
-        "name": "deploykafkaclusterwithretry",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "clusterName"
-            },
-            {
-              "name": "version"
-            },
-            {
-              "name": "clusterConfig"
-            }
-          ]
-        },
-        "steps": [
-          [
-            {
-              "templateRef": {
-                "template": "readkafkaconnectionprofile",
-                "name": "resource-management"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.clusterName}}"
-                  }
-                ]
-              },
-              "name": "checkExisting",
-              "continueOn": {
-                "failed": true
-              }
-            }
-          ],
-          [
-            {
-              "template": "deploykafkanodepoolwithretry",
-              "when": "{{=!(steps.checkExisting.status == 'Succeeded')}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "clusterConfig",
-                    "value": "{{inputs.parameters.clusterConfig}}"
-                  },
-                  {
-                    "name": "retryGroupName_view",
-                    "value": "{{='KafkaNodePool: '+inputs.parameters.clusterName}}"
-                  }
-                ]
-              },
-              "name": "deployPool"
-            }
-          ],
-          [
-            {
-              "template": "deploykafkaclusterkraftwithretry",
-              "when": "{{=!(steps.checkExisting.status == 'Succeeded')}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "version",
-                    "value": "{{inputs.parameters.version}}"
-                  },
-                  {
-                    "name": "clusterConfig",
-                    "value": "{{inputs.parameters.clusterConfig}}"
-                  },
-                  {
-                    "name": "retryGroupName_view",
-                    "value": "{{='KafkaCluster: '+inputs.parameters.clusterName}}"
-                  }
-                ]
-              },
-              "name": "deployCluster"
-            }
-          ],
-          [
-            {
-              "template": "createkafkauserwithretry",
-              "when": "{{=!(steps.checkExisting.status == 'Succeeded') && sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "clusterName",
-                    "value": "{{inputs.parameters.clusterName}}"
-                  },
-                  {
-                    "name": "clusterConfig",
-                    "value": "{{inputs.parameters.clusterConfig}}"
-                  },
-                  {
-                    "name": "retryGroupName_view",
-                    "value": "{{='KafkaUser: '+inputs.parameters.clusterName}}"
-                  }
-                ]
-              },
-              "name": "createKafkaUser"
-            }
-          ]
-        ],
-        "outputs": {
-          "parameters": [
-            {
-              "name": "bootstrapServers",
-              "valueFrom": {
-                "expression": "((steps.checkExisting.status == 'Succeeded') ? (steps.checkExisting.outputs.parameters.bootstrapServers) : (steps.deployCluster.outputs.parameters.brokers))"
-              }
-            }
-          ]
         }
       }
     ]

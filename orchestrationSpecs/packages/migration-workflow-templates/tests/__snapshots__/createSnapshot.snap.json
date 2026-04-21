@@ -410,7 +410,7 @@
           [
             {
               "templateRef": {
-                "template": "patchdatasnapshotready",
+                "template": "patchdatasnapshotcompleted",
                 "name": "resource-management"
               },
               "arguments": {
@@ -420,16 +420,24 @@
                     "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')+'-'+jsonpath(inputs.parameters.snapshotConfig, '$.label')}}"
                   },
                   {
+                    "name": "phase",
+                    "value": "Completed"
+                  },
+                  {
                     "name": "snapshotName",
                     "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.snapshotName')}}"
                   },
                   {
                     "name": "configChecksum",
                     "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "checksumForSnapshotMigration",
+                    "value": "{{inputs.parameters.configChecksum}}"
                   }
                 ]
               },
-              "name": "patchDataSnapshot"
+              "name": "patchDataSnapshotCompleted"
             }
           ]
         ],

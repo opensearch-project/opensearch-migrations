@@ -7,6 +7,7 @@ import {
     ResourceRequirementsType,
     ARGO_RFS_OPTIONS,
     ARGO_RFS_WORKFLOW_OPTION_KEYS,
+    SNAPSHOT_MIGRATION_CONFIG,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 import {CONTAINER_NAMES} from "../containerNames";
@@ -23,6 +24,7 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {Deployment} from "@opensearch-migrations/argo-workflow-builders";
+import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {makeRepoParamDict} from "./metadataMigration";
 import {
     setupLog4jConfigForContainer,
@@ -35,6 +37,7 @@ import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCredsEnvVars, getCoordinatorHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
+import {ResourceManagement} from "./resourceManagement";
 
 function shouldCreateRfsWorkCoordinationCluster(
     documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>
@@ -111,6 +114,8 @@ function getRfsDeploymentManifest
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
     resources: BaseExpression<ResourceRequirementsType>,
+    crdName: BaseExpression<string>,
+    crdUid: BaseExpression<string>,
 
     sourceK8sLabel: BaseExpression<string>,
     targetK8sLabel: BaseExpression<string>,
@@ -118,6 +123,14 @@ function getRfsDeploymentManifest
     fromSnapshotMigrationK8sLabel: BaseExpression<string>,
     taskK8sLabel: BaseExpression<string>
 }): Deployment {
+    const ownerReferences: OwnerReference[] = [{
+        apiVersion: "migrations.opensearch.org/v1alpha1",
+        kind: "SnapshotMigration",
+        name: makeDirectTypeProxy(args.crdName),
+        uid: makeDirectTypeProxy(args.crdUid),
+        controller: false,
+        blockOwnerDeletion: true
+    }];
     const useCustomLogging = expr.not(expr.isEmpty(args.loggingConfigMap));
     const baseContainerDefinition = {
         name: CONTAINER_NAMES.BULK_LOADER,
@@ -160,6 +173,7 @@ function getRfsDeploymentManifest
         kind: "Deployment",
         metadata: {
             name: makeStringTypeProxy(deploymentName),
+            ownerReferences,
             labels: {
                 "workflows.argoproj.io/workflow": makeStringTypeProxy(args.workflowName),
                 "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
@@ -214,42 +228,32 @@ set -e -x
 touch /tmp/status-output.txt
 touch /tmp/phase-output.txt
 
-status=$(console --config-file=/config/migration_services.yaml backfill status --deep-check)
+status_json=$(console --config-file=/config/migration_services.yaml --json backfill status --deep-check)
+status=$(echo "$status_json" | jq -r '.status')
 
 # Check if initializing
-if [[ "$status" == "Shards are initializing" ]]; then
+if [[ "$status" == "Pending" ]]; then
     echo "Shards are initializing" > /tmp/status-output.txt
 else
-    # Format detailed status
-    echo "$status" | awk '
-    /^Backfill status:/ { status = $3 }
-    /^Backfill percentage_completed:/ { pct = $3 }
-    /^Backfill eta_ms:/ { eta = $3 }
-    /^Backfill shard_total:/ { total = $3 }
-    /^Backfill shard_complete:/ { complete = $3 }
-    /^Backfill shard_in_progress:/ { progress = $3 }
-    /^Backfill shard_waiting:/ { waiting = $3 }
-
-    END {
-        gsub(/^[^.]+\\./, "", status)
-        eta_str = (eta == "" || eta == "None") ? "unknown" : int(eta/1000) "s"
-        printf "complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d\\n", 
-               pct, eta_str, progress, waiting, complete, total
-    }
-    ' > /tmp/status-output.txt
+    eval "$(echo "$status_json" | jq -r '
+      @sh "pct=\(.percentage_completed // 0)
+      eta=\(if .eta_ms == null then "unknown" else "\(.eta_ms / 1000 | floor)s" end)
+      progress=\(.shard_in_progress // 0)
+      waiting=\(.shard_waiting // 0)
+      complete=\(.shard_complete // 0)
+      total=\(.shard_total // 0)"
+    ')"
+    printf "complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d\\n" \
+           "$pct" "$eta" "$progress" "$waiting" "$complete" "$total" > /tmp/status-output.txt
 fi
 
 # Check completion status - exit 0 only if complete, otherwise exit 1
-echo "$status" | awk '
-/^Backfill shard_total:/ {total=$3} 
-/^Backfill shard_complete:/ {complete=$3} 
-END {
-  if(total > 0 && total==complete) {
-    exit 0
-  } else {
-    exit 1
-  }
-}' || (echo Checked > /tmp/phase-output.txt && exit 1)
+if [[ "$status" == "Completed" ]]; then
+  exit 0
+else
+  echo Checked > /tmp/phase-output.txt
+  exit 1
+fi
 `;
     return expr.fillTemplate(template, {"SESSION_NAME": sessionName});
 }
@@ -260,7 +264,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
 })
 
     .addParams(CommonWorkflowParameters)
-
 
     .addTemplate("stopHistoricalBackfill", t => t
         .addRequiredInput("sessionName", typeToken<string>())
@@ -337,6 +340,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
         .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("targetK8sLabel", typeToken<string>())
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
@@ -347,7 +352,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "create",
-                setOwnerReference: true,
+                setOwnerReference: false,
                 manifest: getRfsDeploymentManifest({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
@@ -361,6 +366,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     workflowName: expr.getWorkflowValue("name"),
                     jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig),
                     resources: expr.deserializeRecord(b.inputs.resources),
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                     sourceK8sLabel: b.inputs.sourceK8sLabel,
                     targetK8sLabel: b.inputs.targetK8sLabel,
                     snapshotK8sLabel: b.inputs.snapshotK8sLabel,
@@ -381,6 +388,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("rfsCoordinatorConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof ARGO_RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
@@ -404,6 +413,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.sourceEndpoint)
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
+                    crdName: b.inputs.crdName,
+                    crdUid: b.inputs.crdUid,
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
@@ -423,6 +434,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof ARGO_RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
@@ -467,6 +480,8 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("sessionName", typeToken<string>())
         .addRequiredInput("documentBackfillConfig", typeToken<z.infer<typeof ARGO_RFS_OPTIONS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
         .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole", "CoordinatorCluster"]))
 
@@ -477,7 +492,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 .addStep("createRfsCoordinator", RfsCoordinatorCluster, "createRfsCoordinator", c =>
                         c.register({
                             clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName),
-                            coordinatorImage: b.inputs.imageCoordinatorClusterLocation
+                            coordinatorImage: b.inputs.imageCoordinatorClusterLocation,
+                            ownerName: b.inputs.crdName,
+                            ownerUid: b.inputs.crdUid
                         }),
                     {when: {templateExp: createRfsCluster}}
                 )

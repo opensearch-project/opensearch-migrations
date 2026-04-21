@@ -51,6 +51,9 @@
               "name": "version"
             },
             {
+              "name": "resourceUid"
+            },
+            {
               "name": "configChecksum"
             },
             {
@@ -67,9 +70,35 @@
           [
             {
               "templateRef": {
-                "template": "deploykafkaclusterwithretry",
+                "template": "reconcilekafkaclusterresource",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "kafkaClusterConfig",
+                    "value": "{{inputs.parameters.kafkaClusterConfig}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.clusterName+'.vapretry'}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='KafkaCluster: '+inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "reconcileKafkaClusterResource"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "deploykafkaclusterandtopics",
                 "name": "setup-kafka"
               },
+              "when": "{{=true && !(steps.reconcileKafkaClusterResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -83,6 +112,10 @@
                   {
                     "name": "clusterConfig",
                     "value": "{{=jsonpath(inputs.parameters.kafkaClusterConfig, '$.config')}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
                   }
                 ]
               },
@@ -92,22 +125,19 @@
           [
             {
               "templateRef": {
-                "template": "patchconfigchecksumannotation",
+                "template": "patchkafkaclusterready",
                 "name": "resource-management"
               },
+              "when": "{{=true && !(steps.reconcileKafkaClusterResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
-                    "name": "resourceApiVersion",
-                    "value": "kafka.strimzi.io/v1"
-                  },
-                  {
-                    "name": "resourceKind",
-                    "value": "Kafka"
-                  },
-                  {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Ready"
                   },
                   {
                     "name": "configChecksum",
@@ -115,7 +145,7 @@
                   }
                 ]
               },
-              "name": "stampChecksum"
+              "name": "patchKafkaClusterReady"
             }
           ]
         ],
@@ -140,10 +170,28 @@
               "name": "proxyName"
             },
             {
+              "name": "topicCrName"
+            },
+            {
+              "name": "resourceUid"
+            },
+            {
+              "name": "kafkaClusterOwnerUid"
+            },
+            {
               "name": "listenPort"
             },
             {
               "name": "podReplicas"
+            },
+            {
+              "name": "topicPartitions"
+            },
+            {
+              "name": "topicReplicas"
+            },
+            {
+              "name": "topicConfig"
             },
             {
               "name": "groupName_view",
@@ -171,7 +219,7 @@
           [
             {
               "templateRef": {
-                "template": "setupproxywithlifecycle",
+                "template": "reconcilecapturetopicandproxy",
                 "name": "setup-capture"
               },
               "arguments": {
@@ -193,12 +241,32 @@
                     "value": "{{inputs.parameters.proxyName}}"
                   },
                   {
+                    "name": "topicCrName",
+                    "value": "{{inputs.parameters.topicCrName}}"
+                  },
+                  {
                     "name": "listenPort",
                     "value": "{{inputs.parameters.listenPort}}"
                   },
                   {
                     "name": "podReplicas",
                     "value": "{{inputs.parameters.podReplicas}}"
+                  },
+                  {
+                    "name": "topicPartitions",
+                    "value": "{{inputs.parameters.topicPartitions}}"
+                  },
+                  {
+                    "name": "topicReplicas",
+                    "value": "{{inputs.parameters.topicReplicas}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{inputs.parameters.topicConfig}}"
+                  },
+                  {
+                    "name": "kafkaClusterOwnerUid",
+                    "value": "{{inputs.parameters.kafkaClusterOwnerUid}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -217,8 +285,16 @@
                     "value": "{{inputs.parameters.imageCaptureProxyPullPolicy}}"
                   },
                   {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
+                  },
+                  {
                     "name": "configChecksum",
                     "value": "{{=sprig.dig('configChecksum', '', fromJSON(inputs.parameters.proxyConfig))}}"
+                  },
+                  {
+                    "name": "topicConfigChecksum",
+                    "value": "{{=sprig.dig('topicConfigChecksum', '', fromJSON(inputs.parameters.proxyConfig))}}"
                   },
                   {
                     "name": "checksumForSnapshot",
@@ -303,6 +379,27 @@
           [
             {
               "templateRef": {
+                "template": "reconciledatasnapshotresource",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "snapshotItemConfig",
+                    "value": "{{inputs.parameters.snapshotItemConfig}}"
+                  }
+                ]
+              },
+              "name": "reconcileDataSnapshotResource"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "readresourcephase",
                 "name": "resource-management"
               },
@@ -318,17 +415,17 @@
                   }
                 ]
               },
-              "name": "checkPhase"
+              "name": "readSnapshotPhase"
             }
           ],
           [
             {
               "templateRef": {
-                "template": "waitforcapturedtraffic",
+                "template": "waitforcaptureproxy",
                 "name": "resource-management"
               },
               "withParam": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['dependsOnProxySetups']}}",
-              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Completed' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=!(steps.readSnapshotPhase.outputs.parameters.phase == 'Completed' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && !(steps.readSnapshotPhase.outputs.parameters.phase == 'Running' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -359,10 +456,44 @@
           [
             {
               "templateRef": {
+                "template": "waitfordatasnapshot",
+                "name": "resource-management"
+              },
+              "when": "{{=steps.readSnapshotPhase.outputs.parameters.phase == 'Running' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "checksumField",
+                    "value": "checksumForSnapshotMigration"
+                  }
+                ]
+              },
+              "name": "waitForSnapshot"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "createorgetsnapshot",
                 "name": "create-or-get-snapshot"
               },
-              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Completed' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=!(steps.readSnapshotPhase.outputs.parameters.phase == 'Completed') && !(steps.readSnapshotPhase.outputs.parameters.phase == 'Running' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -576,6 +707,12 @@
               "name": "migrationLabel"
             },
             {
+              "name": "crdName"
+            },
+            {
+              "name": "resourceUid"
+            },
+            {
               "name": "groupName_view"
             },
             {
@@ -675,12 +812,20 @@
                     "value": "{{inputs.parameters.migrationLabel}}"
                   },
                   {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
                   },
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
                   }
                 ]
               },
@@ -721,6 +866,10 @@
                     "value": "{{inputs.parameters.migrationLabel}}"
                   },
                   {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
                     "name": "sourceEndpoint",
                     "value": "{{inputs.parameters.sourceEndpoint}}"
                   },
@@ -751,6 +900,10 @@
                   {
                     "name": "sessionName",
                     "value": "{{steps.idGenerator.id}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
                   }
                 ]
               },
@@ -774,6 +927,9 @@
             },
             {
               "name": "configChecksum"
+            },
+            {
+              "name": "resourceUid"
             },
             {
               "name": "groupName_view",
@@ -824,22 +980,30 @@
           [
             {
               "templateRef": {
-                "template": "readresourcephase",
+                "template": "reconcilesnapshotmigrationresource",
                 "name": "resource-management"
               },
               "arguments": {
                 "parameters": [
                   {
-                    "name": "resourceKind",
-                    "value": "SnapshotMigration"
+                    "name": "snapshotMigrationConfig",
+                    "value": "{{inputs.parameters.snapshotMigrationConfig}}"
                   },
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.resourceName+'.vapretry'}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='SnapshotMigration: '+inputs.parameters.resourceName}}"
                   }
                 ]
               },
-              "name": "checkPhase"
+              "name": "reconcileSnapshotMigrationResource"
             }
           ],
           [
@@ -848,7 +1012,7 @@
                 "template": "waitfordatasnapshot",
                 "name": "resource-management"
               },
-              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Completed' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && 'dataSnapshotResourceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']}}",
+              "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && 'dataSnapshotResourceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']}}",
               "arguments": {
                 "parameters": [
                   {
@@ -882,7 +1046,7 @@
                 "template": "readdatasnapshotname",
                 "name": "resource-management"
               },
-              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Completed' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && 'dataSnapshotResourceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']}}",
+              "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && 'dataSnapshotResourceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']}}",
               "arguments": {
                 "parameters": [
                   {
@@ -897,13 +1061,16 @@
           [
             {
               "template": "migratefromsnapshot",
-              "withParam": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrations']}}",
-              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Completed' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
+                    "name": "resourceUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
+                  },
+                  {
                     "name": "groupName_view",
-                    "value": "{{=item['label']}}"
+                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrationLabel']}}"
                   },
                   {
                     "name": "uniqueRunNonce",
@@ -950,18 +1117,6 @@
                     "value": "{{inputs.parameters.imageCoordinatorClusterPullPolicy}}"
                   },
                   {
-                    "name": "label",
-                    "value": "{{=jsonpath(toJSON(item), '$.label')}}"
-                  },
-                  {
-                    "name": "metadataMigrationConfig",
-                    "value": "{{=sprig.dig('metadataMigrationConfig', '', item)}}"
-                  },
-                  {
-                    "name": "documentBackfillConfig",
-                    "value": "{{=sprig.dig('documentBackfillConfig', '', item)}}"
-                  },
-                  {
                     "name": "sourceVersion",
                     "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceVersion']}}"
                   },
@@ -979,7 +1134,19 @@
                   },
                   {
                     "name": "migrationLabel",
-                    "value": "{{=item['label']}}"
+                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrationLabel']}}"
+                  },
+                  {
+                    "name": "metadataMigrationConfig",
+                    "value": "{{=toJSON(sprig.dig('metadataMigrationConfig', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig)))}}"
+                  },
+                  {
+                    "name": "documentBackfillConfig",
+                    "value": "{{=toJSON(sprig.dig('documentBackfillConfig', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig)))}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.resourceName}}"
                   },
                   {
                     "name": "sourceEndpoint",
@@ -993,15 +1160,19 @@
           [
             {
               "templateRef": {
-                "template": "patchsnapshotmigrationready",
+                "template": "patchsnapshotmigrationcompleted",
                 "name": "resource-management"
               },
-              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Completed' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Completed"
                   },
                   {
                     "name": "configChecksum",
@@ -1013,7 +1184,7 @@
                   }
                 ]
               },
-              "name": "patchSnapshotMigration"
+              "name": "patchSnapshotMigrationCompleted"
             }
           ]
         ],
@@ -1047,7 +1218,13 @@
               "name": "name"
             },
             {
+              "name": "resourceUid"
+            },
+            {
               "name": "configChecksum"
+            },
+            {
+              "name": "dependsOn"
             },
             {
               "name": "groupName_view",
@@ -1078,22 +1255,34 @@
           [
             {
               "templateRef": {
-                "template": "readresourcephase",
+                "template": "reconciletrafficreplayresource",
                 "name": "resource-management"
               },
               "arguments": {
                 "parameters": [
                   {
-                    "name": "resourceKind",
-                    "value": "TrafficReplay"
+                    "name": "name",
+                    "value": "{{inputs.parameters.name}}"
                   },
                   {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.name}}"
+                    "name": "dependsOn",
+                    "value": "{{inputs.parameters.dependsOn}}"
+                  },
+                  {
+                    "name": "replayerOptions",
+                    "value": "{{inputs.parameters.replayerOptions}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{=inputs.parameters.name+'.trafficreplay.vapretry'}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='TrafficReplay: '+inputs.parameters.name}}"
                   }
                 ]
               },
-              "name": "checkPhase"
+              "name": "reconcileTrafficReplayResource"
             }
           ],
           [
@@ -1103,7 +1292,7 @@
                 "name": "resource-management"
               },
               "withParam": "{{inputs.parameters.dependsOnSnapshotMigrations}}",
-              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && !(0 == len(inputs.parameters.dependsOnSnapshotMigrations))}}",
+              "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && !(0 == len(inputs.parameters.dependsOnSnapshotMigrations))}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1120,7 +1309,7 @@
                   },
                   {
                     "name": "resourceName",
-                    "value": "{{=item['source']+'-'+sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))+'-'+item['snapshot']}}"
+                    "value": "{{=item['source']+'-'+sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))+'-'+item['snapshot']+'-'+item['migrationLabel']}}"
                   },
                   {
                     "name": "checksumField",
@@ -1134,10 +1323,10 @@
           [
             {
               "templateRef": {
-                "template": "waitforcapturedtraffic",
+                "template": "waitforcaptureproxy",
                 "name": "resource-management"
               },
-              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1171,13 +1360,9 @@
                 "template": "waitforkafkacluster",
                 "name": "resource-management"
               },
-              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && sprig.dig('managedByWorkflow', false, fromJSON(inputs.parameters.kafkaConfig))}}",
+              "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && sprig.dig('managedByWorkflow', false, fromJSON(inputs.parameters.kafkaConfig))}}",
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "configChecksum",
-                    "value": "{{=sprig.dig('configChecksum', '', fromJSON(inputs.parameters.kafkaConfig))}}"
-                  },
                   {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
@@ -1201,7 +1386,7 @@
                 "template": "readkafkaconnectionprofile",
                 "name": "resource-management"
               },
-              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && sprig.dig('managedByWorkflow', false, fromJSON(inputs.parameters.kafkaConfig))}}",
+              "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && sprig.dig('managedByWorkflow', false, fromJSON(inputs.parameters.kafkaConfig))}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1219,7 +1404,7 @@
                 "template": "setupreplayer",
                 "name": "replayer"
               },
-              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1228,7 +1413,7 @@
                   },
                   {
                     "name": "name",
-                    "value": "{{=inputs.parameters.fromProxy+'-'+fromJSON(inputs.parameters.targetConfig)['label']+'-replayer'}}"
+                    "value": "{{inputs.parameters.name}}"
                   },
                   {
                     "name": "targetConfig",
@@ -1261,6 +1446,10 @@
                   {
                     "name": "resolvedKafkaAuthType",
                     "value": "{{steps.readKafkaConnectionProfile.outputs.parameters.authType}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.resourceUid}}"
                   }
                 ]
               },
@@ -1270,16 +1459,12 @@
           [
             {
               "templateRef": {
-                "template": "patchresourcephase",
+                "template": "patchtrafficreplayready",
                 "name": "resource-management"
               },
-              "when": "{{=!(steps.checkPhase.outputs.parameters.phase == 'Ready' && steps.checkPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
-                  {
-                    "name": "resourceKind",
-                    "value": "TrafficReplay"
-                  },
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.name}}"
@@ -1294,7 +1479,7 @@
                   }
                 ]
               },
-              "name": "markReady"
+              "name": "patchTrafficReplayReady"
             }
           ]
         ],
@@ -1415,7 +1600,7 @@
                 "parameters": [
                   {
                     "name": "kafkaClusterConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"version\", item['version'], \"config\", fromJSON(item['config']), \"topics\", fromJSON(item['topics']), \"configChecksum\", item['configChecksum']))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"version\", item['version'], \"config\", fromJSON(item['config']), \"topics\", fromJSON(item['topics']), \"configChecksum\", item['configChecksum'], \"resourceUid\", item['resourceUid']))}}"
                   },
                   {
                     "name": "clusterName",
@@ -1424,6 +1609,10 @@
                   {
                     "name": "version",
                     "value": "{{=item['version']}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=item['resourceUid']}}"
                   },
                   {
                     "name": "configChecksum",
@@ -1464,7 +1653,7 @@
                   },
                   {
                     "name": "proxyConfig",
-                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item)))}}"
+                    "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"kafkaConfig\", fromJSON(item['kafkaConfig']), \"sourceEndpoint\", item['sourceEndpoint'], \"sourceAllowInsecure\", item['sourceAllowInsecure'], \"proxyConfig\", fromJSON(item['proxyConfig']), \"configChecksum\", sprig.dig('configChecksum', '', item), \"topicConfigChecksum\", sprig.dig('topicConfigChecksum', '', item), \"checksumForSnapshot\", sprig.dig('checksumForSnapshot', '', item), \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item), \"resourceUid\", item['resourceUid']))}}"
                   },
                   {
                     "name": "kafkaClusterName",
@@ -1479,12 +1668,36 @@
                     "value": "{{=item['name']}}"
                   },
                   {
+                    "name": "topicCrName",
+                    "value": "{{=item['name']+'-topic'}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=item['resourceUid']}}"
+                  },
+                  {
+                    "name": "kafkaClusterOwnerUid",
+                    "value": "{{=sprig.dig('clusterResourceUid', '', fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
                     "name": "listenPort",
                     "value": "{{=sprig.dig('listenPort', 9200, fromJSON(item['proxyConfig']))}}"
                   },
                   {
                     "name": "podReplicas",
                     "value": "{{=sprig.dig('podReplicas', 1, fromJSON(item['proxyConfig']))}}"
+                  },
+                  {
+                    "name": "topicPartitions",
+                    "value": "{{=sprig.dig('topicSpecOverrides', 'partitions', 1, fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "topicReplicas",
+                    "value": "{{=sprig.dig('topicSpecOverrides', 'replicas', 1, fromJSON(item['kafkaConfig']))}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{=toJSON(sprig.dig('topicSpecOverrides', 'config', sprig.dict(), fromJSON(item['kafkaConfig'])))}}"
                   },
                   {
                     "name": "groupName_view",
@@ -1614,7 +1827,7 @@
                   },
                   {
                     "name": "resourceName",
-                    "value": "{{=item['sourceLabel']+'-'+sprig.dig('label', '', fromJSON(item['targetConfig']))+'-'+item['label']}}"
+                    "value": "{{=item['sourceLabel']+'-'+sprig.dig('label', '', fromJSON(item['targetConfig']))+'-'+item['label']+'-'+item['migrationLabel']}}"
                   },
                   {
                     "name": "groupName_view",
@@ -1622,11 +1835,15 @@
                   },
                   {
                     "name": "snapshotMigrationConfig",
-                    "value": "{{=toJSON(sprig.dict(\"label\", item['label'], \"snapshotNameResolution\", fromJSON(item['snapshotNameResolution']), \"snapshotConfigChecksum\", item['snapshotConfigChecksum'], \"migrations\", fromJSON(item['migrations']), \"sourceVersion\", item['sourceVersion'], \"sourceLabel\", item['sourceLabel'], \"targetConfig\", fromJSON(item['targetConfig']), \"snapshotConfig\", fromJSON(item['snapshotConfig']), \"sourceEndpoint\", sprig.dig('sourceEndpoint', '', item), \"configChecksum\", item['configChecksum'], \"checksumForReplayer\", sprig.dig('checksumForReplayer', '', item)))}}"
+                    "value": "{{item}}"
                   },
                   {
                     "name": "configChecksum",
                     "value": "{{=sprig.dig('configChecksum', '', item)}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=item['resourceUid']}}"
                   },
                   {
                     "name": "sortOrder_view",
@@ -1662,6 +1879,10 @@
                     "value": "{{=jsonpath(toJSON(item), '$.name')}}"
                   },
                   {
+                    "name": "dependsOn",
+                    "value": "{{=jsonpath(toJSON(item), '$.dependsOn')}}"
+                  },
+                  {
                     "name": "dependsOnSnapshotMigrations",
                     "value": "{{=jsonpath(toJSON(item), '$.dependsOnSnapshotMigrations')}}"
                   },
@@ -1692,6 +1913,10 @@
                   {
                     "name": "configChecksum",
                     "value": "{{=jsonpath(toJSON(item), '$.configChecksum')}}"
+                  },
+                  {
+                    "name": "resourceUid",
+                    "value": "{{=jsonpath(toJSON(item), '$.resourceUid')}}"
                   },
                   {
                     "name": "targetConfig",

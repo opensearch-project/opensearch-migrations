@@ -432,6 +432,9 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
 }).describe("Kubernetes deployment-level options for the traffic replayer.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
+    authHeaderValue: z.string().default("").optional()
+        .describe("Static value to use for the \"authorization\" header of each request (cannot be used with other auth arguments)")
+        .changeRestriction('gated'),
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
         .changeRestriction('impossible'),

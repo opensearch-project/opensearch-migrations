@@ -17,6 +17,11 @@ rules:
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
+  # Namespace-scoped batch jobs for metadata migration execution
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
   # Add permissions for Argo workflows
   - apiGroups: ["argoproj.io"]
     resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
@@ -39,8 +44,8 @@ rules:
 
   # OpenSearch migration custom resources
   - apiGroups: ["migrations.opensearch.org"]
-    resources: ["capturedtraffics", "datasnapshots", "snapshotmigrations", "trafficreplays",
-                "capturedtraffics/status", "datasnapshots/status", "snapshotmigrations/status", "trafficreplays/status"]
+    resources: ["approvalgates", "capturedtraffics", "captureproxies", "datasnapshots", "kafkaclusters", "snapshotmigrations", "trafficreplays",
+                "capturedtraffics/status", "captureproxies/status", "datasnapshots/status", "kafkaclusters/status", "snapshotmigrations/status", "trafficreplays/status"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # Kafka resources permissions

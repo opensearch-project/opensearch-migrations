@@ -165,8 +165,26 @@ class WorkflowDataFetcher:
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
 
+        logger.warning(
+            "Fetching workflow data from Argo API: workflow=%s namespace=%s url=%s insecure=%s",
+            workflow_name, namespace, url, insecure
+        )
         response = requests.get(url, headers=headers, verify=not insecure)
-        return response.json() if response.status_code == 200 else {}
+        if response.status_code != 200:
+            logger.warning(
+                "Argo API workflow fetch failed: status=%s content_type=%s body=%s",
+                response.status_code,
+                response.headers.get("content-type"),
+                response.text[:1000],
+            )
+            return {}
+
+        logger.warning(
+            "Argo API workflow fetch succeeded: status=%s content_type=%s",
+            response.status_code,
+            response.headers.get("content-type"),
+        )
+        return response.json()
 
     def list_workflows(self, argo_server: str, namespace: str,
                        insecure: bool, exclude_completed: bool) -> List[Dict[str, Any]]:

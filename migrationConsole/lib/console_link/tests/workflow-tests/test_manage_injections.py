@@ -272,7 +272,6 @@ class TestArgoServiceFiltering:
         assert node1["finishedAt"] == "2024-01-01T00:02:00Z"
 
         # Should NOT have these extra fields
-        assert "templateName" not in node1
         assert "templateScope" not in node1
         assert "hostNodeName" not in node1
         assert "resourcesDuration" not in node1
@@ -300,10 +299,8 @@ class TestArgoServiceFiltering:
         _, slim_data = argo.get_workflow("my-workflow", "default")
 
         node1 = slim_data["status"]["nodes"]["node-1"]
-        # Original: "my-workflow.step-one(0:param=value)" should be cleaned
-        # clean_display_name strips the workflow prefix and params
-        assert "my-workflow." not in node1["displayName"]
-        assert "(0:" not in node1["displayName"]
+        # displayName is kept raw; cleaning happens at render time in tree_utils
+        assert node1["displayName"] == "my-workflow.step-one(0:param=value)"
 
     @patch('console_link.workflow.tui.manage_injections.WorkflowService')
     @patch('console_link.workflow.tui.manage_injections.requests.get')

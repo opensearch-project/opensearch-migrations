@@ -5,7 +5,7 @@ import {
     OVERALL_MIGRATION_CONFIG,
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
-    ARGO_MIGRATION_CONFIG, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
+    ARGO_MIGRATION_CONFIG_PRE_ENRICH, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
     GENERATE_SNAPSHOT, EXTERNALLY_MANAGED_SNAPSHOT, PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
     FieldMeta, ChecksumDependency,
     USER_PROXY_PROCESS_OPTIONS, USER_PROXY_WORKFLOW_OPTIONS,
@@ -19,7 +19,7 @@ import { generateSemaphoreKey } from './semaphoreUtils';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
-type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG>;
+type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 export type NormalizedUserConfig = Omit<InputConfig, "kafkaClusterConfiguration"> & {
     kafkaClusterConfiguration: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>;
 };
@@ -343,10 +343,10 @@ function isGenerateSnapshot(config: any): config is z.infer<typeof GENERATE_SNAP
 
 export class MigrationConfigTransformer extends StreamSchemaTransformer<
     typeof OVERALL_MIGRATION_CONFIG,
-    typeof ARGO_MIGRATION_CONFIG
+    typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH
 > {
     constructor() {
-        super(OVERALL_MIGRATION_CONFIG, ARGO_MIGRATION_CONFIG);
+        super(OVERALL_MIGRATION_CONFIG, ARGO_MIGRATION_CONFIG_PRE_ENRICH);
     }
 
     validateInput(data: unknown): NormalizedUserConfig {
@@ -406,6 +406,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             ...p,
             kafkaConfig: { ...p.kafkaConfig, configChecksum: kafkaChecksums.get(p.kafkaConfig.label) ?? '' },
             configChecksum: cs(p.proxyConfig, kafkaChecksums.get(p.kafkaConfig.label)),
+            topicConfigChecksum: cs(p.kafkaConfig.kafkaTopic, p.kafkaConfig.topicSpecOverrides, kafkaChecksums.get(p.kafkaConfig.label)),
             checksumForSnapshot: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'snapshot', kafkaChecksums.get(p.kafkaConfig.label)),
             checksumForReplayer: csDep(PROXY_SCHEMA, p.proxyConfig as Record<string, unknown>, 'replayer', kafkaChecksums.get(p.kafkaConfig.label)),
         }));
@@ -435,35 +436,52 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }
 
         const migrationsWithChecksums = snapshotMigrations.map(m => {
-            // Extract replayer-material fields from each migration's documentBackfillConfig
-            const replayerMaterialParts = m.migrations.map((mig: any) =>
-                mig.documentBackfillConfig
-                    ? csDep(RFS_SCHEMA, mig.documentBackfillConfig as Record<string, unknown>, 'replayer')
-                    : ''
-            );
+            const replayerMaterialPart = m.documentBackfillConfig
+                ? csDep(RFS_SCHEMA, m.documentBackfillConfig as Record<string, unknown>, 'replayer')
+                : '';
             return {
                 ...m,
                 snapshotConfigChecksum: snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '',
-                configChecksum: cs(m.migrations, m.targetConfig, snapshotChecksums.get([m.sourceLabel, m.label].join('-'))),
-                checksumForReplayer: cs(m.targetConfig, ...replayerMaterialParts),
+                configChecksum: cs(
+                    m.metadataMigrationConfig ?? {},
+                    m.documentBackfillConfig ?? {},
+                    m.targetConfig,
+                    snapshotChecksums.get([m.sourceLabel, m.label].join('-'))
+                ),
+                checksumForReplayer: cs(m.targetConfig, replayerMaterialPart),
             };
         });
-        const migrationChecksums = new Map(migrationsWithChecksums.map(m =>
-            [[m.sourceLabel, m.label].join('-'), m.configChecksum]
-        ));
-        const migrationChecksumForReplayer = new Map(migrationsWithChecksums.map(m =>
-            [[m.sourceLabel, m.label].join('-'), m.checksumForReplayer]
-        ));
 
         const replaysWithChecksums = trafficReplays.map(r => ({
             ...r,
+            dependsOn: [
+                r.fromProxy,
+                ...((r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
+                    migrationsWithChecksums
+                        .filter(m =>
+                            m.sourceLabel === dep.source &&
+                            m.targetConfig.label === r.toTarget.label &&
+                            m.label === dep.snapshot
+                        )
+                        .map(m => [m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel].join('-'))
+                ))
+            ],
             kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
             fromProxyConfigChecksum: proxyChecksumForReplayer.get(r.fromProxy) ?? '',
             configChecksum: cs(r.replayerConfig, r.toTarget, proxyChecksumForReplayer.get(r.fromProxy)),
-            dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).map(dep => ({
-                ...dep,
-                configChecksum: migrationChecksumForReplayer.get([dep.source, dep.snapshot].join('-')) ?? '',
-            })),
+            dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
+                migrationsWithChecksums
+                    .filter(m =>
+                        m.sourceLabel === dep.source &&
+                        m.targetConfig.label === r.toTarget.label &&
+                        m.label === dep.snapshot
+                    )
+                    .map(m => ({
+                        ...dep,
+                        migrationLabel: m.migrationLabel,
+                        configChecksum: m.checksumForReplayer,
+                    }))
+            ),
         }));
 
         const kafkasWithChecksums = kafkaClusters.map(k => ({
@@ -480,7 +498,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         };
 
         try {
-            return ARGO_MIGRATION_CONFIG.parse(output);
+            return ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(output);
         } catch (error) {
             throw new Error("Error while safely parsing the transformed workflow " +
                 "as a configuration for the argo workflow.", { cause: error });
@@ -659,24 +677,28 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     ? { externalSnapshotName: (snapshotDef.config as z.infer<typeof EXTERNALLY_MANAGED_SNAPSHOT>).externallyManagedSnapshotName }
                     : { dataSnapshotResourceName: globallyUniqueSnapshotName };
 
-                results.push({
-                    label: snapshotName,
-                    snapshotNameResolution,
-                    snapshotConfigChecksum: '',
-                    migrations: autoLabelMigrations(migrations),
-                    sourceVersion: sourceCluster.version || "",
-                    sourceLabel: fromSource,
-                    targetConfig: { ...targetCluster, label: toTarget },
-                    snapshotConfig: {
+                for (const migration of autoLabelMigrations(migrations)) {
+                    results.push({
                         label: snapshotName,
-                        ...(repoConfig ? {
-                            repoConfig: {
-                                ...repoConfig,
-                                repoName: snapshotDef.repoName
-                            }
-                        } : {})
-                    }
-                });
+                        migrationLabel: migration.label,
+                        snapshotNameResolution,
+                        snapshotConfigChecksum: '',
+                        metadataMigrationConfig: migration.metadataMigrationConfig,
+                        documentBackfillConfig: migration.documentBackfillConfig,
+                        sourceVersion: sourceCluster.version || "",
+                        sourceLabel: fromSource,
+                        targetConfig: { ...targetCluster, label: toTarget },
+                        snapshotConfig: {
+                            label: snapshotName,
+                            ...(repoConfig ? {
+                                repoConfig: {
+                                    ...repoConfig,
+                                    repoName: snapshotDef.repoName
+                                }
+                            } : {})
+                        }
+                    });
+                }
             }
         }
         return results;

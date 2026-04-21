@@ -13,6 +13,7 @@ import {
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
+import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {setupLog4jConfigForContainer} from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
@@ -20,10 +21,25 @@ import {getTargetHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {CONTAINER_NAMES} from "../containerNames";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {ResourceManagement} from "./resourceManagement";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
 const KAFKA_CA_MOUNT_PATH = "/config/kafka-ca";
+
+function makeOwnerReferences(
+    ownerName: BaseExpression<string>,
+    ownerUid: BaseExpression<string>,
+): OwnerReference[] {
+    return [{
+        apiVersion: "migrations.opensearch.org/v1alpha1",
+        kind: "TrafficReplay",
+        name: makeDirectTypeProxy(ownerName),
+        uid: makeDirectTypeProxy(ownerUid),
+        controller: true,
+        blockOwnerDeletion: true,
+    }];
+}
 
 function makeReplayerTargetParamDict(
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>
@@ -142,6 +158,7 @@ function getReplayerDeploymentManifest
     kafkaAuthType: BaseExpression<string>,
     kafkaSecretName: BaseExpression<string>,
     kafkaCaSecretName: BaseExpression<string>,
+    ownerUid: BaseExpression<string>,
 }): Deployment {
     const isScramAuth = expr.equals(args.kafkaAuthType, expr.literal("scram-sha-512"));
     const baseContainerDefinition = {
@@ -208,6 +225,7 @@ function getReplayerDeploymentManifest
         kind: "Deployment",
         metadata: {
             name: makeDirectTypeProxy(args.name),
+            ownerReferences: makeOwnerReferences(args.name, args.ownerUid),
             labels: {
                 app: "replayer",
                 "workflows.argoproj.io/workflow": makeDirectTypeProxy(args.workflowName)
@@ -256,6 +274,7 @@ export const Replayer = WorkflowBuilder.create({
       .addRequiredInput("kafkaAuthType", typeToken<string>())
       .addRequiredInput("kafkaSecretName", typeToken<string>())
       .addRequiredInput("kafkaCaSecretName", typeToken<string>())
+      .addRequiredInput("ownerUid", typeToken<string>())
       .addRequiredInput("podReplicas", typeToken<number>())
       .addRequiredInput("jvmArgs", typeToken<string>())
       .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
@@ -266,7 +285,7 @@ export const Replayer = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
-                setOwnerReference: true,
+                setOwnerReference: false,
                 successCondition: "status.readyReplicas > 0",
                 manifest: getReplayerDeploymentManifest({
                     podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
@@ -283,7 +302,8 @@ export const Replayer = WorkflowBuilder.create({
                     kafkaAuthConfigMapName: b.inputs.kafkaAuthConfigMapName,
                     kafkaAuthType: b.inputs.kafkaAuthType,
                     kafkaSecretName: b.inputs.kafkaSecretName,
-                    kafkaCaSecretName: b.inputs.kafkaCaSecretName
+                    kafkaCaSecretName: b.inputs.kafkaCaSecretName,
+                    ownerUid: b.inputs.ownerUid,
                 })
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
@@ -310,6 +330,7 @@ export const Replayer = WorkflowBuilder.create({
       )
       .addRequiredInput("kafkaGroupId", typeToken<string>())
       .addRequiredInput("name", typeToken<string>())
+      .addRequiredInput("ownerUid", typeToken<string>())
       .addRequiredInput(
         "targetConfig",
         typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
@@ -356,6 +377,7 @@ export const Replayer = WorkflowBuilder.create({
               kafkaAuthType: effectiveKafkaAuthType,
               kafkaSecretName: expr.getLoose(kafkaConfig, "secretName"),
               kafkaCaSecretName: expr.getLoose(kafkaConfig, "caSecretName"),
+              ownerUid: b.inputs.ownerUid,
               podReplicas: expr.dig(
                 expr.deserializeRecord(b.inputs.replayerOptions),
                 ["podReplicas"],
@@ -382,7 +404,7 @@ export const Replayer = WorkflowBuilder.create({
                     b.inputs.resolvedKafkaConnection,
                     b.inputs.resolvedKafkaListenerName,
                     b.inputs.resolvedKafkaAuthType,
-                  ) as any,
+                  ),
                 ),
               ),
               resources: expr.serialize(
