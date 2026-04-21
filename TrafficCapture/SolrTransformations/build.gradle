@@ -74,6 +74,7 @@ dependencies {
     testImplementation libs.testcontainers
     testImplementation libs.testcontainers.junit.jupiter
     testImplementation libs.testcontainers.opensearch
+    testImplementation libs.netty.all
     testRuntimeOnly libs.junit.jupiter.engine
     testRuntimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
 }
