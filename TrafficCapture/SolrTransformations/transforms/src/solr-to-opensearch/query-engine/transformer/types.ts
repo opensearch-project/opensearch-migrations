@@ -21,6 +21,21 @@ export type TransformChild = (child: ASTNode) => Map<string, any>;
 /**
  * A function that transforms an AST node into an OpenSearch DSL Map.
  *
+ * Each AST node type has a corresponding TransformRuleFn. The dispatcher
+ * looks up the function by `node.type` and calls it.
+ *
+ * Rules for leaf nodes (FieldNode, PhraseNode, RangeNode, MatchAllNode)
+ * can ignore the `transformChild` parameter. Rules for composite nodes
+ * (BoolNode, GroupNode, BoostNode) use it to recurse into children.
+ *
+ * Example (leaf rule):
+ *   (FieldNode { field: "title", value: "java" }, _)
+ *   → Map{"match" → Map{"title" → "java"}}
+ *
+ * Example (composite rule):
+ *   (BoolNode { and: [FieldNode, RangeNode], ... }, transformChild)
+ *   → Map{"bool" → Map{"must" → [transformChild(FieldNode), transformChild(RangeNode)]}}
+ *
  * @param node - The AST node to transform
  * @param transformChild - Callback for recursive child transformation
  * @param fieldMappings - Optional field name → OpenSearch type map for query type selection

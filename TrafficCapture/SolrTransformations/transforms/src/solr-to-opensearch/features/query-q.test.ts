@@ -62,4 +62,19 @@ describe('query-q request transform', () => {
     // translateQ defaults to *:* which should produce some query
     expect(ctx.body.has('query')).toBe(true);
   });
+
+  it('uses term query for keyword fields when fieldMappings provided', () => {
+    const ctx = createMockContext({ q: 'category:electronics' });
+    ctx.fieldMappings = new Map([['category', 'keyword']]);
+    request.apply(ctx);
+    const query = ctx.body.get('query') as Map<string, any>;
+    expect(query.has('term')).toBe(true);
+  });
+
+  it('uses match query when fieldMappings not provided', () => {
+    const ctx = createMockContext({ q: 'category:electronics' });
+    request.apply(ctx);
+    const query = ctx.body.get('query') as Map<string, any>;
+    expect(query.has('match')).toBe(true);
+  });
 });

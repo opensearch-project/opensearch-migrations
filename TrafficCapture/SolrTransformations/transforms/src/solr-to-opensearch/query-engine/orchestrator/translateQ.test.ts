@@ -39,6 +39,19 @@ describe('translateQ', () => {
       expect(result.warnings).toEqual([]);
     });
 
+    it('passes fieldMappings through to transformNode', () => {
+      const fakeAst: ASTNode = { type: 'matchAll' };
+      const fakeDsl = new Map([['match_all', new Map()]]);
+      mockParse.mockReturnValue({ ast: fakeAst, errors: [] });
+      mockTransform.mockReturnValue(fakeDsl);
+
+      const mappings = new Map([['title', 'text'], ['category', 'keyword']]);
+      const result = translateQ(params(['q', 'title:java']), 'fail-fast', mappings);
+
+      expect(mockTransform).toHaveBeenCalledWith(fakeAst, mappings);
+      expect(result.dsl).toBe(fakeDsl);
+    });
+
     it('defaults q to *:* when not provided', () => {
       mockParse.mockReturnValue({ ast: { type: 'matchAll' }, errors: [] });
       mockTransform.mockReturnValue(new Map([['match_all', new Map()]]));
