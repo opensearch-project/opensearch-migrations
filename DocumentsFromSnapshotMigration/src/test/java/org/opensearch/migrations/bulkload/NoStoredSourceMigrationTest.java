@@ -350,8 +350,14 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                     boolean isES8Plus = !UnboundVersionMatchers.isBelowES_8_X.test(sourceVersion.getVersion())
                         && !VersionMatchers.anyOS.test(sourceVersion.getVersion());
                     boolean canRecoverFromTerms = config.targetType.equals("boolean") && !isES8Plus;
+                    // Un-tokenized string fields (keyword, or ES 1-4 "string" with index:not_analyzed)
+                    // store the entire value as a single indexed term, so reconstruction from the
+                    // inverted index round-trips losslessly even when doc_values/stored are disabled.
+                    boolean canRecoverFromKeywordTerms = config.sourceType.equals("keyword")
+                        || config.sourceType.equals("string");
                     boolean alwaysHasDocValues = config.sourceType.equals("wildcard");
-                    boolean shouldRecover = p.hasStore || p.hasDv || canRecoverFromPoints || canRecoverFromTerms || alwaysHasDocValues;
+                    boolean shouldRecover = p.hasStore || p.hasDv || canRecoverFromPoints
+                        || canRecoverFromTerms || canRecoverFromKeywordTerms || alwaysHasDocValues;
                     if (shouldRecover) {
                         assertEquals(true, fieldValue != null, fieldName + " should be recovered but was null");
 
