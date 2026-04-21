@@ -346,6 +346,185 @@ describe('parseSolrQuery', () => {
     });
   });
 
+  // ─── LocalParamsNode ──────────────────────────────────────────────────────
+
+  describe('LocalParamsNode', () => {
+    it('parses type short form: {!dismax}java', () => {
+      const { ast, errors } = parseSolrQuery('{!dismax}java', emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast).toMatchObject({
+        type: 'localParams',
+        params: [{ key: 'type', value: 'dismax', deref: false }],
+        body: { type: 'bare', value: 'java', isPhrase: false },
+      });
+    });
+
+    it('parses key=value pairs with quoted value', () => {
+      const { ast, errors } = parseSolrQuery("{!edismax qf='title author'}java", emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast).toMatchObject({
+        type: 'localParams',
+        params: [
+          { key: 'type', value: 'edismax', deref: false },
+          { key: 'qf', value: 'title author', deref: false },
+        ],
+        body: { type: 'bare', value: 'java', isPhrase: false },
+      });
+    });
+
+    it('parses empty local params: {!}java', () => {
+      const { ast, errors } = parseSolrQuery('{!}java', emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast).toMatchObject({
+        type: 'localParams',
+        params: [],
+        body: { type: 'bare', value: 'java', isPhrase: false },
+      });
+    });
+
+    it('parses v key and re-parses its value as body', () => {
+      const { ast, errors } = parseSolrQuery("{!dismax qf=title v='solr rocks'}", emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast).toMatchObject({
+        type: 'localParams',
+        params: expect.arrayContaining([
+          { key: 'type', value: 'dismax', deref: false },
+          { key: 'qf', value: 'title', deref: false },
+          { key: 'v', value: 'solr rocks', deref: false },
+        ]),
+      });
+      // v key body is re-parsed: "solr rocks" → two bare terms joined by implicit OR
+      expect(ast).not.toBeNull();
+      expect(ast?.type).toBe('localParams');
+      if (ast?.type === 'localParams') {
+        expect(ast.body).not.toBeNull();
+        expect(ast.body?.type).toBe('bool');
+      }
+    });
+
+    it('parses dereference value: {!dismax v=$qq}', () => {
+      const { ast, errors } = parseSolrQuery('{!dismax v=$qq}', emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast).toMatchObject({
+        type: 'localParams',
+        params: [
+          { key: 'type', value: 'dismax', deref: false },
+          { key: 'v', value: 'qq', deref: true },
+        ],
+        body: null,
+      });
+    });
+
+    it('returns parse error for missing closing }', () => {
+      const { ast, errors } = parseSolrQuery('{!dismax', emptyParams);
+      expect(ast).toBeNull();
+      expect(errors).toHaveLength(1);
+    });
+
+    it('returns parse error for unterminated quoted value', () => {
+      // The grammar treats the unterminated quote as consuming everything to end of input
+      const { ast, errors } = parseSolrQuery("{!dismax qf='unterminated", emptyParams);
+      expect(ast).toBeNull();
+      expect(errors).toHaveLength(1);
+    });
+
+    it('handles backslash escapes in single-quoted values', () => {
+      // Use a key other than 'v' so the value isn't re-parsed as a query.
+      // The grammar should unescape \' inside single-quoted values.
+      const BS = String.fromCodePoint(92);  // backslash
+      const SQ = String.fromCodePoint(39);  // single quote
+      // Input: {!dismax qf='it\'s'}java — qf value contains an escaped quote
+      const input = '{' + '!dismax qf=' + SQ + 'it' + BS + SQ + 's' + SQ + '}java';
+      const { ast, errors } = parseSolrQuery(input, emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast).toMatchObject({
+        type: 'localParams',
+        params: expect.arrayContaining([
+          expect.objectContaining({ key: 'qf', value: "it's" }),
+        ]),
+      });
+    });
+
+    it('backward compat: title:java produces no LocalParamsNode', () => {
+      const { ast, errors } = parseSolrQuery('title:java', emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast?.type).not.toBe('localParams');
+    });
+
+    it('resolves default fields through LocalParamsNode body', () => {
+      const { ast, errors } = parseSolrQuery('{!dismax}java', paramsWithDf('title'));
+      expect(errors).toEqual([]);
+      expect(ast).toMatchObject({
+        type: 'localParams',
+        body: { type: 'bare', value: 'java', isPhrase: false, defaultField: 'title' },
+      });
+    });
+
+    it('applies q.op=AND through LocalParamsNode body', () => {
+      const params = new Map([['q.op', 'AND']]);
+      const { ast, errors } = parseSolrQuery('{!dismax}title:java title:python', params);
+      expect(errors).toEqual([]);
+      expect(ast?.type).toBe('localParams');
+      if (ast?.type === 'localParams' && ast.body?.type === 'bool') {
+        expect(ast.body.and).toHaveLength(2);
+        expect(ast.body.or).toHaveLength(0);
+      }
+    });
+
+    it('v key body override ignores trailing text', () => {
+      const { ast, errors } = parseSolrQuery("{!dismax v='solr rocks'}trailing", emptyParams);
+      expect(errors).toEqual([]);
+      // The body should come from v='solr rocks', not from 'trailing'
+      expect(ast?.type).toBe('localParams');
+      if (ast?.type === 'localParams') {
+        expect(ast.body).not.toBeNull();
+        // "solr rocks" parses to two bare terms
+        expect(ast.body?.type).toBe('bool');
+      }
+    });
+
+    it('parses double-quoted values', () => {
+      const { ast, errors } = parseSolrQuery('{!dismax qf="title author"}java', emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast).toMatchObject({
+        type: 'localParams',
+        params: expect.arrayContaining([
+          { key: 'qf', value: 'title author', deref: false },
+        ]),
+      });
+    });
+
+    it('parses local params with no body', () => {
+      const { ast, errors } = parseSolrQuery('{!dismax}', emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast).toMatchObject({
+        type: 'localParams',
+        params: [{ key: 'type', value: 'dismax', deref: false }],
+        body: null,
+      });
+    });
+
+    it('parses explicit type=dismax key-value pair', () => {
+      const { ast, errors } = parseSolrQuery('{!type=dismax qf=title}java', emptyParams);
+      expect(errors).toEqual([]);
+      expect(ast).toMatchObject({
+        type: 'localParams',
+        params: [
+          { key: 'type', value: 'dismax', deref: false },
+          { key: 'qf', value: 'title', deref: false },
+        ],
+      });
+    });
+
+    it('returns error when v key value fails to re-parse', () => {
+      // v='title:java AND )' is invalid Solr syntax — the re-parse should fail
+      const { ast, errors } = parseSolrQuery("{!dismax v='title:java AND )'}", emptyParams);
+      expect(ast).toBeNull();
+      expect(errors).toHaveLength(1);
+      expect(errors[0].message).toBeDefined();
+    });
+  });
+
   // ─── q.op parameter ──────────────────────────────────────────────────────
 
   describe('q.op=AND', () => {
@@ -446,10 +625,10 @@ describe('parseSolrQuery', () => {
       expect(errors).toEqual([]);
       // All three terms joined by implicit adjacency → converted to AND
       expect(ast).not.toBeNull();
-      expect(ast!.type).toBe('bool');
-      if (ast!.type === 'bool') {
-        expect(ast!.and).toHaveLength(3);
-        expect(ast!.or).toHaveLength(0);
+      expect(ast?.type).toBe('bool');
+      if (ast?.type === 'bool') {
+        expect(ast.and).toHaveLength(3);
+        expect(ast.or).toHaveLength(0);
       }
     });
   });

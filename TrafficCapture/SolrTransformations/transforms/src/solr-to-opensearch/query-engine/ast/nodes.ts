@@ -160,6 +160,44 @@ export interface FilterNode {
   child: ASTNode;
 }
 
+/**
+ * A single key-value pair inside a local params block.
+ *
+ * Example: `qf=title` → { key: 'qf', value: 'title', deref: false }
+ * Example: `v=$qq`    → { key: 'v', value: 'qq', deref: true }
+ */
+export interface LocalParamsPair {
+  key: string;
+  value: string;
+  /** True when the value was a $-prefixed parameter dereference. */
+  deref: boolean;
+}
+
+/**
+ * AST node for a query string with a {!...} local params prefix.
+ *
+ * The grammar captures the body as a raw string. The parser (parser.ts)
+ * inspects the `type` param and re-parses the raw body with the appropriate
+ * grammar — e.g., Lucene syntax for lucene/dismax/edismax, or leaves it
+ * raw for unsupported parser types.
+ *
+ * Example: `{!dismax qf=title}java` →
+ *   { type: 'localParams',
+ *     params: [{ key: 'type', value: 'dismax', deref: false },
+ *              { key: 'qf', value: 'title', deref: false }],
+ *     rawBody: 'java',
+ *     body: BareNode { value: 'java', isPhrase: false } }
+ */
+export interface LocalParamsNode {
+  type: 'localParams';
+  /** Parsed key-value pairs from the {!...} block, in order. */
+  params: LocalParamsPair[];
+  /** Raw body text after the closing `}`, before any re-parsing. */
+  rawBody: string | null;
+  /** The query body — parsed from rawBody or the v key value. Null when unresolved (e.g., dereference). */
+  body: ASTNode | null;
+}
+
 /** Union of all AST node types. Every node in the parsed Solr query tree is one of these variants. */
 export type ASTNode =
   | BareNode
@@ -170,4 +208,5 @@ export type ASTNode =
   | RangeNode
   | MatchAllNode
   | GroupNode
-  | BoostNode;
+  | BoostNode
+  | LocalParamsNode;

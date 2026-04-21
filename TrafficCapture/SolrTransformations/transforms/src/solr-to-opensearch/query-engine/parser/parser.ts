@@ -98,6 +98,14 @@ export function parseSolrQuery(
 
   try {
     const ast = getParser().parse(query) as ASTNode;
+
+    // Phase 2: If the grammar produced a LocalParamsNode, re-parse the body
+    // based on the query parser type. The grammar captures the body as raw
+    // text; we parse it here with the appropriate grammar.
+    if (ast.type === 'localParams') {
+      resolveLocalParamsBody(ast);
+    }
+
     // Apply q.op before resolveDefaultFields — applyDefaultOperator reads
     // the `implicit` flag which resolveDefaultFields cleans up.
     if (qOp === 'AND') {
@@ -130,6 +138,60 @@ export function toParseError(err: unknown): ParseError {
     message: e?.message || 'Parse error',
     position: e?.location?.start?.offset ?? 0,
   };
+}
+
+/**
+ * Query parser types whose body uses Lucene/Solr query syntax.
+ * For these types, the raw body is re-parsed using the Solr grammar.
+ * Other types (e.g., func, terms) need their own parsers.
+ */
+const LUCENE_FAMILY_TYPES = new Set([
+  'lucene', 'dismax', 'edismax',
+]);
+
+/**
+ * Resolve the body of a LocalParamsNode.
+ *
+ * The grammar captures the body as raw text. This function determines the
+ * effective body string (from the `v` key or the trailing raw text), then
+ * re-parses it using the appropriate grammar based on the `type` param.
+ *
+ * For Lucene-family types (lucene, dismax, edismax, or no type specified),
+ * the body is parsed with the Solr grammar. For other types, the body is
+ * left as null — future parsers (e.g., function query) will handle them.
+ *
+ * @throws Re-throws parse errors from body re-parsing so the caller can
+ *         convert them to ParseError via toParseError().
+ */
+function resolveLocalParamsBody(node: import('../ast/nodes').LocalParamsNode): void {
+  const vPair = node.params.find((p) => p.key === 'v');
+
+  // Dereference — can't resolve at parse time
+  if (vPair?.deref) {
+    node.body = null;
+    return;
+  }
+
+  // Determine the effective body string: v key takes precedence over raw body
+  const bodyStr = vPair ? vPair.value : node.rawBody;
+  if (!bodyStr) {
+    node.body = null;
+    return;
+  }
+
+  // Determine the parser type (short form or explicit type= pair)
+  const typePair = node.params.find((p) => p.key === 'type');
+  const parserType = typePair?.value?.toLowerCase();
+
+  // For Lucene-family types (or no type = default Lucene), re-parse with Solr grammar
+  if (!parserType || LUCENE_FAMILY_TYPES.has(parserType)) {
+    node.body = getParser().parse(bodyStr) as import('../ast/nodes').ASTNode;
+    return;
+  }
+
+  // Unknown parser type — leave body null for now.
+  // Future: route to func query parser, terms parser, etc.
+  node.body = null;
 }
 
 /** Walk the AST and resolve BareNode default fields.
@@ -166,6 +228,9 @@ function resolveDefaultFields(node: ASTNode, df: string): void {
     case 'group':
     case 'filter':
       resolveDefaultFields(node.child, df);
+      break;
+    case 'localParams':
+      if (node.body) resolveDefaultFields(node.body, df);
       break;
     case 'matchAll':
       break;
@@ -212,6 +277,9 @@ function applyDefaultOperator(node: ASTNode): void {
     case 'group':
     case 'filter':
       applyDefaultOperator(node.child);
+      break;
+    case 'localParams':
+      if (node.body) applyDefaultOperator(node.body);
       break;
     case 'bare':
     case 'field':

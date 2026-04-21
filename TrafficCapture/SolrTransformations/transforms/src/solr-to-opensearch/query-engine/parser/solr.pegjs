@@ -24,9 +24,51 @@
 
 // A query is an OR expression surrounded by optional whitespace.
 // An empty query (e.g., "") produces a MatchAllNode.
+// When a {!...} local params prefix is present, the body is captured as raw
+// text. The parser (parser.ts) re-parses the body based on the `type` param.
 query
-  = _ expr:orExpr _ { return expr; }
+  = _ lp:localParams body:$(.+)? _ {
+      return { type: 'localParams', params: lp, rawBody: body || null, body: null };
+    }
+  / _ expr:orExpr _ { return expr; }
   / _ { return { type: 'matchAll' }; }
+
+// ─── Local params ─────────────────────────────────────────────────────────────
+// Solr local params prefix: {!key=value ...}query
+// Carries metadata like parser type, default field, query fields.
+
+localParams
+  = "{!" _ shortForm:localParamsShortForm? pairs:(_ localParamsPair)* _ "}" {
+      const result = [];
+      if (shortForm) result.push({ key: 'type', value: shortForm, deref: false });
+      for (const p of pairs) result.push(p[1]);
+      return result;
+    }
+
+localParamsShortForm
+  = id:localParamsKey !("=") { return id; }
+
+localParamsPair
+  = key:localParamsKey "=" val:localParamsValue {
+      return { key: key, value: val.value, deref: val.deref };
+    }
+
+localParamsKey
+  = $([a-zA-Z_][a-zA-Z0-9._]*)
+
+localParamsValue
+  = "'" chars:localParamsSingleQuotedChar* "'" { return { value: chars.join(''), deref: false }; }
+  / "\"" chars:localParamsDoubleQuotedChar* "\"" { return { value: chars.join(''), deref: false }; }
+  / "$" name:localParamsKey { return { value: name, deref: true }; }
+  / val:$[^ \t\n\r}]+ { return { value: val, deref: false }; }
+
+localParamsSingleQuotedChar
+  = "\\" c:. { return c; }
+  / [^'\\]
+
+localParamsDoubleQuotedChar
+  = "\\" c:. { return c; }
+  / [^"\\]
 
 // ─── Boolean operators ────────────────────────────────────────────────────────
 // Precedence is encoded by nesting: orExpr → andExpr → unaryExpr → primary.
