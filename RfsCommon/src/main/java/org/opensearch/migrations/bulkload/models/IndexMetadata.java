@@ -35,6 +35,43 @@ public interface IndexMetadata extends Index {
 
     IndexMetadata deepCopy();
 
+    /**
+     * Returns whether _source is enabled for this index. Inspects the mappings JSON
+     * for `_source.enabled` field. Returns true if _source is enabled or not explicitly set
+     * (ES default is enabled).
+     *
+     * Handles multiple mapping formats:
+     * - ES 1.x-5.x: {"type_name": {"_source": {"enabled": false}, "properties": {...}}}
+     * - ES 6.x: {"_doc": {"_source": {"enabled": false}, "properties": {...}}}
+     * - ES 7.x+: {"_source": {"enabled": false}, "properties": {...}}
+     */
+    default boolean isSourceEnabled() {
+        JsonNode mappings = getMappings();
+        if (mappings == null || mappings.isMissingNode()) {
+            return true;
+        }
+        // Try direct _source (ES 7+ or already unwrapped)
+        JsonNode sourceNode = mappings.path("_source");
+        if (!sourceNode.isMissingNode() && sourceNode.has("enabled")) {
+            return sourceNode.get("enabled").asBoolean(true);
+        }
+        // Try typed mappings (ES 1.x-6.x): {"type_name": {"_source": ...}}
+        if (mappings.isObject()) {
+            var fields = mappings.fields();
+            while (fields.hasNext()) {
+                var entry = fields.next();
+                JsonNode typeMapping = entry.getValue();
+                if (typeMapping.isObject()) {
+                    JsonNode typedSource = typeMapping.path("_source");
+                    if (!typedSource.isMissingNode() && typedSource.has("enabled")) {
+                        return typedSource.get("enabled").asBoolean(true);
+                    }
+                }
+            }
+        }
+        return true; // default: source is enabled
+    }
+
     default void validateRawJson(ObjectNode rawJson) {
         if (rawJson == null) {
             throw new InvalidSnapshotFormatException();

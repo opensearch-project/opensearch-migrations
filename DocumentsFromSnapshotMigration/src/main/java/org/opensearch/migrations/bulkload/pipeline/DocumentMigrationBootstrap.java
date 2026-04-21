@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -16,6 +18,8 @@ import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RfsException;
+import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
+import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
@@ -88,6 +92,15 @@ public class DocumentMigrationBootstrap {
     // Optional: external document source (e.g. Solr). When set, bypasses LuceneSnapshotSource.
     @Builder.Default
     private final DocumentSource externalDocumentSource = null;
+
+    // Sourceless migration support: when true and index has _source disabled,
+    // reconstructs documents from stored fields and doc_values
+    @Builder.Default
+    private final boolean enableSourcelessMigrations = false;
+
+    // Index metadata factory for reading mappings (needed for sourceless migration)
+    @Builder.Default
+    private final IndexMetadata.Factory indexMetadataFactory = null;
 
     // Optional: work coordination
     @Builder.Default
@@ -283,6 +296,27 @@ public class DocumentMigrationBootstrap {
         if (previousSnapshotName != null && deltaMode != null) {
             log.info("Creating delta document source: previous={}, mode={}", previousSnapshotName, deltaMode);
             builder.delta(previousSnapshotName, deltaMode, deltaContextFactory);
+        }
+        if (enableSourcelessMigrations && indexMetadataFactory != null) {
+            log.info("Sourceless migrations enabled — will reconstruct _source from stored fields/doc_values");
+            Map<String, FieldMappingContext> cache = new ConcurrentHashMap<>();
+            builder.sourcelessMappingContextProvider(indexName -> {
+                return cache.computeIfAbsent(indexName, name -> {
+                    try {
+                        var meta = indexMetadataFactory.fromRepo(snapshotName, name);
+                        if (meta.isSourceEnabled()) {
+                            log.debug("Index {} has _source enabled, no reconstruction needed", name);
+                            return null;
+                        }
+                        log.info("Index {} has _source disabled, building FieldMappingContext for reconstruction", name);
+                        return new FieldMappingContext(meta.getMappings());
+                    } catch (Exception e) {
+                        log.warn("Failed to read metadata for index {}, skipping sourceless reconstruction: {}",
+                            name, e.getMessage());
+                        return null;
+                    }
+                });
+            });
         }
         return builder.build();
     }

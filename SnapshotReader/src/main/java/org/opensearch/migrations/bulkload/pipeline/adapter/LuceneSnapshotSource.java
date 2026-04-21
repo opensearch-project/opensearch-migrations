@@ -4,16 +4,19 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
+import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
@@ -48,6 +51,9 @@ public class LuceneSnapshotSource implements DocumentSource {
     // Max shard size enforcement (0 = no limit)
     private final long maxShardSizeBytes;
 
+    // When non-null, provides FieldMappingContext for indices with _source disabled
+    private final Function<String, FieldMappingContext> sourcelessMappingContextProvider;
+
     private LuceneSnapshotSource(Builder builder) {
         this.extractor = builder.extractor;
         this.snapshotName = builder.snapshotName;
@@ -56,6 +62,7 @@ public class LuceneSnapshotSource implements DocumentSource {
         this.previousSnapshotName = builder.previousSnapshotName;
         this.deltaMode = builder.deltaMode;
         this.deltaContextFactory = builder.deltaContextFactory;
+        this.sourcelessMappingContextProvider = builder.sourcelessMappingContextProvider;
     }
 
     public static Builder builder(SnapshotExtractor extractor, String snapshotName, Path workDir) {
@@ -70,6 +77,7 @@ public class LuceneSnapshotSource implements DocumentSource {
         private String previousSnapshotName;
         private DeltaMode deltaMode;
         private Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory;
+        private Function<String, FieldMappingContext> sourcelessMappingContextProvider;
 
         private Builder(SnapshotExtractor extractor, String snapshotName, Path workDir) {
             this.extractor = extractor;
@@ -87,6 +95,16 @@ public class LuceneSnapshotSource implements DocumentSource {
             this.previousSnapshotName = previousSnapshotName;
             this.deltaMode = deltaMode;
             this.deltaContextFactory = deltaContextFactory;
+            return this;
+        }
+
+        /**
+         * When set, enables sourceless document reconstruction. The function receives
+         * an index name and returns a FieldMappingContext for that index (or null if
+         * the index has _source enabled and doesn't need reconstruction).
+         */
+        public Builder sourcelessMappingContextProvider(Function<String, FieldMappingContext> provider) {
+            this.sourcelessMappingContextProvider = provider;
             return this;
         }
 
@@ -182,7 +200,11 @@ public class LuceneSnapshotSource implements DocumentSource {
         SnapshotExtractor.ShardEntry entry, Partition partition, long startingDocOffset
     ) {
         log.info("Reading documents from {} starting at docIdx {}", partition, startingDocOffset);
-        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset))
+        var esPartition = (EsShardPartition) partition;
+        FieldMappingContext mappingContext = sourcelessMappingContextProvider != null
+            ? sourcelessMappingContextProvider.apply(esPartition.indexName())
+            : null;
+        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset), mappingContext)
             .map(LuceneAdapter::fromLucene);
     }
 

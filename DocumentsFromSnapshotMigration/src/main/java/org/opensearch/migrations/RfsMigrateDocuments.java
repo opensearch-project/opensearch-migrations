@@ -315,6 +315,15 @@ public class RfsMigrateDocuments {
             hidden = true
         )
         public DeltaMode experimentalDeltaMode = null;
+
+        @Parameter(required = false,
+            names = { "--enable-sourceless-migrations" },
+            description = "Enable migration of indices that have _source disabled. When enabled, documents " +
+                "are reconstructed from stored fields and doc_values instead of _source. " +
+                "Without this flag, migration of sourceless indices will fail with an error.",
+            arity = 0
+        )
+        public boolean enableSourcelessMigrations = false;
     }
 
 
@@ -598,7 +607,8 @@ public class RfsMigrateDocuments {
                 context,
                 cancellationRunnableRef,
                 arguments.experimental.previousSnapshotName,
-                arguments.experimental.experimentalDeltaMode);
+                arguments.experimental.experimentalDeltaMode,
+                arguments.experimental.enableSourcelessMigrations);
             cleanShutdownCompleted.set(true);
             if (status == CompletionStatus.NOTHING_DONE) {
                 log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
@@ -1095,6 +1105,38 @@ public class RfsMigrateDocuments {
         String previousSnapshotName,
         DeltaMode deltaMode
     ) throws IOException, InterruptedException, NoWorkLeftException {
+        return runWithPipeline(extractor, targetClient, snapshotName, workDir, transformerSupplier,
+            useServerGeneratedIds, allowlist, maxDocsPerBatch, maxBytesPerBatch, batchConcurrency,
+            maxShardSizeBytes, progressCursor, workCoordinator, maxInitialLeaseDuration, leaseExpireTrigger,
+            workItemTimeProvider, indexMetadataFactory, indexAllowlist, rootDocumentContext, cancellationRunnable,
+            previousSnapshotName, deltaMode, false);
+    }
+
+    public static CompletionStatus runWithPipeline(
+        SnapshotExtractor extractor,
+        OpenSearchClient targetClient,
+        String snapshotName,
+        java.nio.file.Path workDir,
+        Supplier<IJsonTransformer> transformerSupplier,
+        boolean useServerGeneratedIds,
+        DocumentExceptionAllowlist allowlist,
+        int maxDocsPerBatch,
+        long maxBytesPerBatch,
+        int batchConcurrency,
+        long maxShardSizeBytes,
+        AtomicReference<WorkItemCursor> progressCursor,
+        IWorkCoordinator workCoordinator,
+        Duration maxInitialLeaseDuration,
+        LeaseExpireTrigger leaseExpireTrigger,
+        WorkItemTimeProvider workItemTimeProvider,
+        IndexMetadata.Factory indexMetadataFactory,
+        List<String> indexAllowlist,
+        RootDocumentMigrationContext rootDocumentContext,
+        AtomicReference<Runnable> cancellationRunnable,
+        String previousSnapshotName,
+        DeltaMode deltaMode,
+        boolean enableSourcelessMigrations
+    ) throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = prepareWorkCoordination(
             workCoordinator, leaseExpireTrigger, indexMetadataFactory,
             snapshotName, indexAllowlist, rootDocumentContext
@@ -1117,6 +1159,8 @@ public class RfsMigrateDocuments {
             .deltaContextFactory(previousSnapshotName != null && deltaMode != null
                 ? () -> new RfsContexts.DeltaStreamContext(rootDocumentContext, null)
                 : null)
+            .enableSourcelessMigrations(enableSourcelessMigrations)
+            .indexMetadataFactory(indexMetadataFactory)
             .workCoordinator(scopedWorkCoordinator)
             .workItemTimeProvider(workItemTimeProvider)
             .maxInitialLeaseDuration(maxInitialLeaseDuration)
