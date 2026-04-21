@@ -19,6 +19,9 @@ export const request: MicroTransform<RequestContext> = {
     ctx.msg.set('method', 'POST');
     const headers = ctx.msg.get('headers');
     if (headers) {
+      // Remove original Content-Type (may differ in casing) to avoid duplicate headers.
+      // The Java proxy uses headers.add() which would create two Content-Type entries.
+      headers.delete('Content-Type');
       headers.set('content-type', 'application/json');
     }
   },

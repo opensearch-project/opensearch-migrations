@@ -19,6 +19,8 @@ the root cause, and provides a workaround where one exists.
 | [COMMITWITHIN](#commitwithin)                   | `commitWithin=N` translated to immediate refresh |
 | [FQ-LOCAL-PARAMS](#filter-queries-local-params) | Filter query local params (`cache`, `cost`) and post filters not supported |
 | [FQ-CACHING](#fq-caching)                       | Filter query caching granularity differs between Solr and OpenSearch |
+| [JSON-QUERIES](#json-queries)                   | JSON Request API `queries` key not supported |
+| [JSON-PARAM-PREFIX](#json-param-prefix)         | JSON Request API `json.<param>` prefix passthrough not supported |
 
 ---
 
@@ -410,3 +412,52 @@ internal heuristics.
   OpenSearch caches warm up through live traffic.
 * **Potential performance variance** — Workloads relying heavily on repeated
   `fq` reuse may observe different latency characteristics after migration.
+
+---
+
+---
+
+## JSON-QUERIES
+
+**Feature:** Named sub-queries via `queries` key in JSON Request API
+
+**Solr behaviour:**
+The JSON Request API supports a `queries` key for defining named sub-queries
+that can be referenced elsewhere in the request using local params syntax
+(`{!v=$query_name}`):
+```json
+{
+  "query": "*:*",
+  "queries": {
+    "electronics": "category:electronics"
+  },
+  "filter": ["{!v=$electronics}"]
+}
+```
+
+**Current status:**
+Not supported. The `queries` key depends on local params (`{!...}`) syntax
+which is also not supported. The `queries` key in the JSON body is silently
+ignored.
+
+**Reference:** https://solr.apache.org/guide/solr/latest/query-guide/json-query-dsl.html#additional-queries
+
+---
+
+## JSON-PARAM-PREFIX
+
+**Feature:** `json.<param_name>` URL parameter prefix
+
+**Solr behaviour:**
+Solr allows JSON body properties to be specified as URL query parameters
+using the `json.` prefix. For example, `json.limit=5` is equivalent to
+`{"limit": 5}` in the JSON body. This enables overriding JSON body values
+from the URL.
+
+**Current status:**
+Not supported. The `json.` prefix passthrough is a URL-to-JSON-body bridge
+(opposite direction from what the `json-request` transform handles). URL
+parameters with the `json.` prefix are treated as unsupported params and
+rejected by validation.
+
+**Reference:** https://solr.apache.org/guide/solr/latest/query-guide/json-request-api.html#json-parameter-merging
