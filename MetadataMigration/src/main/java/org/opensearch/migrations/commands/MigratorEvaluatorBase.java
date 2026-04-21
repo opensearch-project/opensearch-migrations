@@ -178,7 +178,7 @@ public abstract class MigratorEvaluatorBase {
             }
             try {
                 var indexMetadata = metadataFactory.fromRepo(arguments.snapshotName, index.getName());
-                if (!indexMetadata.isSourceEnabled()) {
+                if (indexMetadata.needsSourceReconstruction()) {
                     sourcelessIndices.add(index.getName());
                 }
             } catch (Exception e) {
@@ -188,7 +188,7 @@ public abstract class MigratorEvaluatorBase {
 
         if (!sourcelessIndices.isEmpty() && !arguments.enableSourcelessMigrations) {
             throw new com.beust.jcommander.ParameterException(
-                "The following indices have _source disabled: " + sourcelessIndices + ". "
+                "The following indices have _source disabled or partial (includes/excludes): " + sourcelessIndices + ". "
                 + "Document backfill will not be able to migrate these indices without the "
                 + "--enable-sourceless-migrations flag on both metadata migration and backfill commands. "
                 + "With this flag, documents will be reconstructed from stored fields and doc_values."

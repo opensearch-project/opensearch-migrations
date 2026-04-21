@@ -37,41 +37,79 @@ public interface IndexMetadata extends Index {
     IndexMetadata deepCopy();
 
     /**
-     * Returns whether _source is enabled for this index. Inspects the mappings JSON
-     * for `_source.enabled` field. Returns true if _source is enabled or not explicitly set
-     * (ES default is enabled).
+     * Returns the {@code _source} configuration node from this index's mappings, or null if absent.
+     * Version-specific subclasses should override this if their mappings format wraps
+     * {@code _source} under a type name (ES 1.x–6.x).
      *
-     * Handles multiple mapping formats:
-     * - ES 1.x-5.x: {"type_name": {"_source": {"enabled": false}, "properties": {...}}}
-     * - ES 6.x: {"_doc": {"_source": {"enabled": false}, "properties": {...}}}
-     * - ES 7.x+: {"_source": {"enabled": false}, "properties": {...}}
+     * <p>The default implementation handles both typed and typeless layouts as a fallback.
      */
     @JsonIgnore
-    default boolean isSourceEnabled() {
+    default JsonNode getSourceNode() {
         JsonNode mappings = getMappings();
         if (mappings == null || mappings.isMissingNode()) {
-            return true;
+            return null;
         }
-        // Try direct _source (ES 7+ or already unwrapped)
+        // Direct _source (ES 7+, OS, or already unwrapped)
         JsonNode sourceNode = mappings.path("_source");
-        if (!sourceNode.isMissingNode() && sourceNode.has("enabled")) {
-            return sourceNode.get("enabled").asBoolean(true);
+        if (!sourceNode.isMissingNode()) {
+            return sourceNode;
         }
-        // Try typed mappings (ES 1.x-6.x): {"type_name": {"_source": ...}}
+        // Typed mappings (ES 1.x-6.x): {"type_name": {"_source": ...}}
         if (mappings.isObject()) {
             var fields = mappings.fields();
             while (fields.hasNext()) {
-                var entry = fields.next();
-                JsonNode typeMapping = entry.getValue();
+                JsonNode typeMapping = fields.next().getValue();
                 if (typeMapping.isObject()) {
                     JsonNode typedSource = typeMapping.path("_source");
-                    if (!typedSource.isMissingNode() && typedSource.has("enabled")) {
-                        return typedSource.get("enabled").asBoolean(true);
+                    if (!typedSource.isMissingNode()) {
+                        return typedSource;
                     }
                 }
             }
         }
-        return true; // default: source is enabled
+        return null;
+    }
+
+    /**
+     * Returns whether _source is enabled for this index.
+     * Returns true if _source is enabled or not explicitly set (ES default is enabled).
+     */
+    @JsonIgnore
+    default boolean isSourceEnabled() {
+        JsonNode sourceNode = getSourceNode();
+        if (sourceNode == null || !sourceNode.has("enabled")) {
+            return true;
+        }
+        return sourceNode.get("enabled").asBoolean(true);
+    }
+
+    /**
+     * Returns whether _source has includes or excludes filtering (partial source).
+     * When partial, some fields are missing from the stored _source and must be
+     * reconstructed from doc_values or stored fields.
+     */
+    @JsonIgnore
+    default boolean isSourcePartial() {
+        JsonNode sourceNode = getSourceNode();
+        if (sourceNode == null) {
+            return false;
+        }
+        return hasNonEmptyArray(sourceNode, "includes") || hasNonEmptyArray(sourceNode, "excludes");
+    }
+
+    /**
+     * Returns true if the index needs source reconstruction during migration.
+     * This is the case when _source is disabled or when _source is partial
+     * (has includes/excludes filtering).
+     */
+    @JsonIgnore
+    default boolean needsSourceReconstruction() {
+        return !isSourceEnabled() || isSourcePartial();
+    }
+
+    private static boolean hasNonEmptyArray(JsonNode node, String fieldName) {
+        JsonNode arr = node.get(fieldName);
+        return arr != null && arr.isArray() && arr.size() > 0;
     }
 
     default void validateRawJson(ObjectNode rawJson) {

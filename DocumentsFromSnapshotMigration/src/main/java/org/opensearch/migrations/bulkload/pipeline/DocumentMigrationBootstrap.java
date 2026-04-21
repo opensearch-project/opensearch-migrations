@@ -304,11 +304,12 @@ public class DocumentMigrationBootstrap {
                 return cache.computeIfAbsent(indexName, name -> {
                     try {
                         var meta = indexMetadataFactory.fromRepo(snapshotName, name);
-                        if (meta.isSourceEnabled()) {
-                            log.debug("Index {} has _source enabled, no reconstruction needed", name);
+                        if (!meta.needsSourceReconstruction()) {
+                            log.debug("Index {} has full _source enabled, no reconstruction needed", name);
                             return null;
                         }
-                        log.info("Index {} has _source disabled, building FieldMappingContext for reconstruction", name);
+                        log.info("Index {} needs source reconstruction (disabled={}, partial={}), building FieldMappingContext",
+                            name, !meta.isSourceEnabled(), meta.isSourcePartial());
                         return new FieldMappingContext(meta.getMappings());
                     } catch (Exception e) {
                         log.warn("Failed to read metadata for index {}, skipping sourceless reconstruction: {}",
