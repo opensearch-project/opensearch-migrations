@@ -16,7 +16,6 @@ import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
