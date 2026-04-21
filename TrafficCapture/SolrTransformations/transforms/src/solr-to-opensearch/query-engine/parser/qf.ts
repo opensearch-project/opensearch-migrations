@@ -64,6 +64,9 @@ export function applyQueryFields(node: ASTNode, queryFields: string[]): void {
     case 'filter':
       applyQueryFields(node.child, queryFields);
       break;
+    case 'localParams':
+      if (node.body) applyQueryFields(node.body, queryFields);
+      break;
     case 'field':
     case 'phrase':
     case 'range':
