@@ -454,6 +454,66 @@ describe('parseSolrQuery', () => {
     });
   });
 
+  // ─── defType + qf (edismax/dismax) ──────────────────────────────────────
+
+  describe('defType + qf', () => {
+    it('stamps queryFields on BareNode when defType=edismax and qf is set', () => {
+      const params = new Map([['defType', 'edismax'], ['qf', 'title^2 body']]);
+      const { ast, errors } = parseSolrQuery('java', params);
+      expect(errors).toEqual([]);
+      expect(ast).toEqual({ type: 'bare', value: 'java', isPhrase: false, queryFields: ['title^2', 'body'] });
+    });
+
+    it('stamps queryFields on BareNode when defType=dismax and qf is set', () => {
+      const params = new Map([['defType', 'dismax'], ['qf', 'title body']]);
+      const { ast, errors } = parseSolrQuery('java', params);
+      expect(errors).toEqual([]);
+      expect(ast).toEqual({ type: 'bare', value: 'java', isPhrase: false, queryFields: ['title', 'body'] });
+    });
+
+    it('queryFields takes precedence over df on BareNode', () => {
+      const params = new Map([['defType', 'edismax'], ['qf', 'title body'], ['df', 'content']]);
+      const { ast, errors } = parseSolrQuery('java', params);
+      expect(errors).toEqual([]);
+      // queryFields set, defaultField should not be set
+      expect(ast).toEqual({ type: 'bare', value: 'java', isPhrase: false, queryFields: ['title', 'body'] });
+    });
+
+    it('does not stamp queryFields when defType is standard (no defType param)', () => {
+      const params = new Map([['qf', 'title body']]);
+      const { ast, errors } = parseSolrQuery('java', params);
+      expect(errors).toEqual([]);
+      expect(ast).toEqual({ type: 'bare', value: 'java', isPhrase: false });
+    });
+
+    it('does not stamp queryFields when qf is absent', () => {
+      const params = new Map([['defType', 'edismax']]);
+      const { ast, errors } = parseSolrQuery('java', params);
+      expect(errors).toEqual([]);
+      expect(ast).toEqual({ type: 'bare', value: 'java', isPhrase: false });
+    });
+
+    it('stamps queryFields on all BareNodes in a bool query', () => {
+      const params = new Map([['defType', 'edismax'], ['qf', 'title body']]);
+      const { ast, errors } = parseSolrQuery('java python', params);
+      expect(errors).toEqual([]);
+      expect(ast).toEqual({
+        type: 'bool', and: [], not: [],
+        or: [
+          { type: 'bare', value: 'java', isPhrase: false, queryFields: ['title', 'body'] },
+          { type: 'bare', value: 'python', isPhrase: false, queryFields: ['title', 'body'] },
+        ],
+      });
+    });
+
+    it('does not stamp queryFields on FieldNode (explicit field syntax)', () => {
+      const params = new Map([['defType', 'edismax'], ['qf', 'title body']]);
+      const { ast, errors } = parseSolrQuery('title:java', params);
+      expect(errors).toEqual([]);
+      expect(ast).toEqual({ type: 'field', field: 'title', value: 'java' });
+    });
+  });
+
   // ─── toParseError ────────────────────────────────────────────────────────
 
   describe('toParseError', () => {

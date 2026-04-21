@@ -64,13 +64,20 @@ export interface PhraseNode {
  * The transformer converts this to OpenSearch's query_string query, which
  * searches across the default field (or all fields if df is not set).
  *
- * For phrases (isPhrase=true), the transformer wraps the query in quotes
- * so OpenSearch's query_string treats it as a phrase search.
+ * When queryFields is set (edismax/dismax with qf param), the transformer
+ * emits a multi_match across those fields. Each entry is a raw OpenSearch
+ * field spec — either "fieldName" or "fieldName^boost" — matching the qf
+ * param format directly, since OpenSearch multi_match fields use the same
+ * syntax. Takes precedence over defaultField when set.
+ *
+ * When defaultField is set (df param, standard parser), the transformer
+ * emits a query_string with default_field.
  *
  * Examples:
- *   `java` → BareNode { query: "java", isPhrase: false }
- *   `"hello world"` → BareNode { query: "hello world", isPhrase: true }
- *   `java` with df="content" → BareNode { query: "java", isPhrase: false, defaultField: "content" }
+ *   `java` → BareNode { value: "java", isPhrase: false }
+ *   `"hello world"` → BareNode { value: "hello world", isPhrase: true }
+ *   `java` with df="content" → BareNode { ..., defaultField: "content" }
+ *   `java` with qf="title^2 body" → BareNode { ..., queryFields: ["title^2", "body"] }
  */
 export interface BareNode {
   type: 'bare';
@@ -80,6 +87,12 @@ export interface BareNode {
   isPhrase: boolean;
   /** The default field from df parameter, or undefined if not set. */
   defaultField?: string;
+  /**
+   * Query fields from the `qf` parameter (edismax/dismax).
+   * Raw field specs in OpenSearch multi_match format: "field" or "field^boost".
+   * Takes precedence over defaultField when set.
+   */
+  queryFields?: string[];
 }
 
 /**

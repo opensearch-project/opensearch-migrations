@@ -1,17 +1,22 @@
 /**
- * Transformation rule for BareNode → OpenSearch `query_string` query.
+ * Transformation rule for BareNode → OpenSearch `multi_match` or `query_string` query.
  *
- * Maps bare Solr terms/phrases (without field prefix) to OpenSearch's query_string.
- * When defaultField is set, includes it in the output; otherwise omits it to let
- * OpenSearch use its default behavior.
+ * When queryFields is set (edismax/dismax with qf param), emits a multi_match
+ * query across those fields. Each field spec is passed through as-is from the
+ * qf param ("field" or "field^boost") since OpenSearch uses the same format.
  *
- * For phrases (isPhrase=true), wraps the query in quotes so OpenSearch's
- * query_string treats it as a phrase search matching words in order.
+ * type "best_fields" matches Solr's dismax behavior for terms (score = max
+ * field score). For phrases (isPhrase=true), uses type "phrase".
  *
- * Special characters are escaped to prevent query_string from interpreting them
- * as operators (e.g., foo:bar would be treated as a field query without escaping).
+ * Falls back to query_string when queryFields is absent (standard parser).
  *
- * Examples:
+ * Examples (multi_match):
+ *   `java` with qf="title^2 body"
+ *     → Map{"multi_match" → Map{"query"→"java", "fields"→["title^2","body"], "type"→"best_fields"}}
+ *   `"hello world"` with qf="title body"
+ *     → Map{"multi_match" → Map{"query"→"hello world", "fields"→["title","body"], "type"→"phrase"}}
+ *
+ * Examples (query_string fallback):
  *   `java` (no df) → Map{"query_string" → Map{"query" → "java"}}
  *   `java` (df="content") → Map{"query_string" → Map{"query" → "java", "default_field" → "content"}}
  *   `"hello world"` (no df) → Map{"query_string" → Map{"query" → "\"hello world\""}}
@@ -46,9 +51,20 @@ export const bareRule: TransformRuleFn = (
   // Bare is a leaf node — transformChild not used
   _transformChild,
 ): Map<string, any> => {
-  const { value, isPhrase, defaultField } = node;
+  const { value, isPhrase, defaultField, queryFields } = node;
 
-  // Escape special characters to prevent query_string from interpreting them as operators
+  // multi_match path: qf fields provided (edismax/dismax)
+  if (queryFields && queryFields.length > 0) {
+    return new Map([
+      ['multi_match', new Map<string, any>([
+        ['query', value],
+        ['fields', queryFields],
+        ['type', isPhrase ? 'phrase' : 'best_fields'],
+      ])],
+    ]);
+  }
+
+  // query_string fallback (standard parser / df only)
   const escapedQuery = escapeQueryString(value);
 
   // Wrap phrases in quotes for query_string to treat as phrase search

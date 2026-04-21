@@ -19,7 +19,7 @@
  *   matchAll / empty query       → MatchAllNode
  *   group                        → GroupNode
  *   boost suffix (^N)            → BoostNode wrapping the boosted node
- *
+
  * Trace example for `title:java AND price:[10 TO 100]`:
  *   1. query → orExpr → andExpr
  *   2. andExpr matches: head "AND" tail
@@ -31,9 +31,14 @@
  *   3. andExpr action returns
  *        → { type:'bool', and:[FieldNode, RangeNode], or:[], not:[] }   (BoolNode)
  *
+ * Post-parse passes (applied in order):
+ *   1. applyDefaultOperator  — q.op=AND: convert implicit-OR BoolNodes to AND
+ *   2. resolveDefaultFields  — df → BareNode.defaultField
+ *   3. applyQueryFields      — qf → BareNode.queryFields (edismax/dismax only)
+ *
  * Responsibilities:
  *   - Parse the query string into an AST
- *   - Apply the default field (df) from params to BareNode nodes
+ *   - Orchestrate post-parse AST normalization passes
  *   - Return parse errors as ParseError (never throws)
  */
 
@@ -41,6 +46,7 @@ import * as peggy from 'peggy';
 import grammar from './solr.pegjs';
 import type { ASTNode } from '../ast/nodes';
 import type { ParseResult, ParseError } from './types';
+import { parseQueryFields, applyQueryFields } from './qf';
 
 // Lazily compiled parser — the grammar is inlined at build time and compiled
 // on the first call to parseSolrQuery, then cached for all subsequent calls.
@@ -57,8 +63,7 @@ function getParser(): peggy.Parser {
  * Parse a Solr query string into an AST.
  *
  * @param query - The raw Solr query string (the `q` parameter value)
- * @param params - Request parameters. Reads `df` to resolve bare
- *                 values and unfielded phrases to a default field.
+ * @param params - Request parameters. Reads `df`, `q.op`, `defType`, `qf`.
  * @returns ParseResult with the AST and any errors
  *
  * Examples:
@@ -66,7 +71,10 @@ function getParser(): peggy.Parser {
  *   → { ast: BoolNode { and: [FieldNode, RangeNode] }, errors: [] }
  *
  *   parseSolrQuery("java", new Map([["df", "title"]]))
- *   → { ast: FieldNode { field: "title", value: "java" }, errors: [] }
+ *   → { ast: BareNode { value: "java", defaultField: "title" }, errors: [] }
+ *
+ *   parseSolrQuery("java", new Map([["defType", "edismax"], ["qf", "title^2 body"]]))
+ *   → { ast: BareNode { value: "java", queryFields: [{field:"title",boost:2},{field:"body"}] }, errors: [] }
  *
  *   parseSolrQuery("title:java AND )", new Map())
  *   → { ast: null, errors: [{ message: "...", position: 16 }] }
@@ -85,6 +93,9 @@ export function parseSolrQuery(
   // Solr accepts both "AND" and "and", so we normalize to uppercase.
   const qOp = params.get('q.op')?.toUpperCase();
 
+  // defType selects edismax/dismax semantics for the qf pass.
+  const defType = params.get('defType')?.toLowerCase();
+
   try {
     const ast = getParser().parse(query) as ASTNode;
     // Apply q.op before resolveDefaultFields — applyDefaultOperator reads
@@ -93,6 +104,15 @@ export function parseSolrQuery(
       applyDefaultOperator(ast);
     }
     resolveDefaultFields(ast, df);
+
+    // qf → BareNode.queryFields (edismax/dismax only)
+    if (defType === 'edismax' || defType === 'dismax') {
+      const queryFields = parseQueryFields(params.get('qf'));
+      if (queryFields) {
+        applyQueryFields(ast, queryFields);
+      }
+    }
+
     return { ast, errors: [] };
   } catch (err: unknown) {
     return { ast: null, errors: [toParseError(err)] };
@@ -206,4 +226,3 @@ function applyDefaultOperator(node: ASTNode): void {
     }
   }
 }
-
