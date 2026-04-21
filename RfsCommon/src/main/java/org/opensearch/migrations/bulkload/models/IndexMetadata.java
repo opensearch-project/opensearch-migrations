@@ -45,8 +45,8 @@ public interface IndexMetadata extends Index {
      */
     @JsonIgnore
     default JsonNode getSourceNode() {
-        JsonNode mappings = getMappings();
-        if (mappings == null || mappings.isMissingNode()) {
+        JsonNode mappings = unwrapMappingsArrayIfNeeded(getMappings());
+        if (mappings == null) {
             return null;
         }
         // Direct _source (ES 7+, OS, or already unwrapped)
@@ -55,16 +55,44 @@ public interface IndexMetadata extends Index {
             return sourceNode;
         }
         // Typed mappings (ES 1.x-6.x): {"type_name": {"_source": ...}}
-        if (mappings.isObject()) {
-            var fields = mappings.fields();
-            while (fields.hasNext()) {
-                JsonNode typeMapping = fields.next().getValue();
-                if (typeMapping.isObject()) {
-                    JsonNode typedSource = typeMapping.path("_source");
-                    if (!typedSource.isMissingNode()) {
-                        return typedSource;
-                    }
-                }
+        return findTypedSourceNode(mappings);
+    }
+
+    /**
+     * Unwraps the ES 5.x/6.x snapshot format where typed mappings are wrapped in an array:
+     * {@code mappings: [{"doc": {"_source": {...}, "properties": {...}}}]}.
+     * Returns the first element if array-wrapped, the input if already an object, or null otherwise.
+     */
+    private static JsonNode unwrapMappingsArrayIfNeeded(JsonNode mappings) {
+        if (mappings == null || mappings.isMissingNode()) {
+            return null;
+        }
+        if (!mappings.isArray()) {
+            return mappings;
+        }
+        if (mappings.isEmpty()) {
+            return null;
+        }
+        JsonNode first = mappings.get(0);
+        return (first != null && first.isObject()) ? first : null;
+    }
+
+    /**
+     * Searches an object node's direct children for a {@code _source} sub-node
+     * (typed mappings layout from ES 1.x-6.x). Returns null if not found.
+     */
+    private static JsonNode findTypedSourceNode(JsonNode mappings) {
+        if (!mappings.isObject()) {
+            return null;
+        }
+        var fields = mappings.fields();
+        while (fields.hasNext()) {
+            JsonNode typeMapping = fields.next().getValue();
+            JsonNode typedSource = (typeMapping != null && typeMapping.isObject())
+                ? typeMapping.path("_source")
+                : null;
+            if (typedSource != null && !typedSource.isMissingNode()) {
+                return typedSource;
             }
         }
         return null;
