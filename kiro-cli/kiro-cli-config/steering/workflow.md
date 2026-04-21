@@ -47,8 +47,13 @@ workflow configure edit --stdin  # Load config from stdin (overwrites existing)
 workflow configure view          # View current config
 workflow configure clear         # Reset config
 
-# View full config schema (JSON Schema)
+# View full config schema (JSON Schema) from the running console pod
 kubectl exec migration-console-0 -n ma -- cat /root/.workflowUser.schema.json
+
+# Or download the versioned schema directly from GitHub releases
+# (works when the migration-console pod is not yet deployed)
+# Replace <VERSION> with the installed release tag, e.g. 3.0.1
+curl -sLO https://github.com/opensearch-project/opensearch-migrations/releases/download/<VERSION>/workflowMigration.schema.json
 ```
 
 ## Load Config Programmatically
@@ -310,11 +315,17 @@ kubectl exec migration-console-0 -n ma -- workflow configure sample
 # Load it as a starting point
 kubectl exec migration-console-0 -n ma -- workflow configure sample --load
 
-# View the JSON Schema
+# View the JSON Schema (from the running console pod)
 kubectl exec migration-console-0 -n ma -- cat /root/.workflowUser.schema.json
+
+# Or download the versioned JSON Schema directly from GitHub releases
+# Use this when the migration-console pod is not yet deployed, or when
+# you need to reference the schema from outside the cluster.
+# Replace <VERSION> with the installed release tag, e.g. 3.0.1
+curl -sLO https://github.com/opensearch-project/opensearch-migrations/releases/download/<VERSION>/workflowMigration.schema.json
 ```
 
-The config schema changes between versions. The sample output is always accurate for the installed version.
+The config schema changes between versions. The sample output is always accurate for the installed version, and the `workflowMigration.schema.json` asset published on each GitHub release corresponds exactly to that release tag.
 
 ### Key Config Concepts
 - **Empty `{}` enables a feature with defaults** — without it, the feature is disabled
