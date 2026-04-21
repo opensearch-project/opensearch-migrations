@@ -67,3 +67,29 @@ describe('transformNode – GroupNode handling', () => {
     ]));
   });
 });
+
+describe('transformNode – LocalParamsNode handling', () => {
+  it('transforms LocalParamsNode body', () => {
+    const result = transformNode({
+      type: 'localParams',
+      params: [{ key: 'type', value: 'dismax', deref: false }],
+      rawBody: 'title:java',
+      body: { type: 'field', field: 'title', value: 'java' },
+    });
+
+    expect(result).toEqual(new Map([
+      ['match', new Map([['title', new Map([['query', 'java']])]])],
+    ]));
+  });
+
+  it('returns match_all when LocalParamsNode has no body', () => {
+    const result = transformNode({
+      type: 'localParams',
+      params: [{ key: 'type', value: 'dismax', deref: false }],
+      rawBody: null,
+      body: null,
+    });
+
+    expect(result).toEqual(new Map([['match_all', new Map()]]));
+  });
+});

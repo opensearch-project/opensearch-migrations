@@ -102,6 +102,17 @@ export function transformNode(node: ASTNode): Map<string, any> {
     return transformNode(node.child);
   }
 
+  // LocalParamsNode: extract metadata and transform the body.
+  // The local params metadata (type, qf, df, etc.) is available on node.params
+  // for the orchestrator to use. The transformer only handles the body query.
+  if (node.type === 'localParams') {
+    if (node.body) {
+      return transformNode(node.body);
+    }
+    // No body — return match_all as default
+    return new Map([['match_all', new Map()]]);
+  }
+
   const rule = rules[node.type];
   if (!rule) {
     throw new Error(`No transform rule registered for node type: ${node.type}`);
