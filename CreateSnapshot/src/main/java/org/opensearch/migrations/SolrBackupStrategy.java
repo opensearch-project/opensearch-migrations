@@ -2,9 +2,12 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -175,7 +178,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
         waitForCompletion(creator::isBackupFinished);
     }
 
-    private void waitForCompletion(java.util.function.BooleanSupplier isFinished) {
+    private void waitForCompletion(BooleanSupplier isFinished) {
         if (!args.noWait) {
             log.info("Waiting for Solr backup to complete...");
             while (!isFinished.getAsBoolean()) {
@@ -297,9 +300,9 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
      */
     private void ensureFileSystemLocationExists(String fileSystemRepoPath, String snapshotName) {
         try {
-            var snapshotDir = java.nio.file.Paths.get(fileSystemRepoPath, snapshotName);
+            var snapshotDir = Paths.get(fileSystemRepoPath, snapshotName);
             log.info("Ensuring filesystem backup directory: {}", snapshotDir);
-            java.nio.file.Files.createDirectories(snapshotDir);
+            Files.createDirectories(snapshotDir);
         } catch (Exception e) {
             // Most likely cause in production: Solr runs in a separate container/host and the
             // CreateSnapshot process can't reach its filesystem. That's expected — continue and

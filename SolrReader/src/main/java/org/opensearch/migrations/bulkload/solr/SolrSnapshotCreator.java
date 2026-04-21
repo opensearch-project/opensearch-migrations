@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.solr;
 
+import java.net.URI;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -169,7 +170,7 @@ public class SolrSnapshotCreator {
      */
     static String extractS3Path(String s3Uri) {
         try {
-            var path = java.net.URI.create(s3Uri).getPath();
+            var path = URI.create(s3Uri).getPath();
             if (path == null || path.isEmpty() || "/".equals(path)) {
                 return "/";
             }

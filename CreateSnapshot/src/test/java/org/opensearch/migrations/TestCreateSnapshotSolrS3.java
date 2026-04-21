@@ -3,6 +3,7 @@ package org.opensearch.migrations;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 
@@ -840,7 +841,7 @@ public class TestCreateSnapshotSolrS3 {
         try (var s3 = testS3Client();
              var stream = s3.getObject(GetObjectRequest.builder()
                  .bucket(BUCKET_NAME).key(propsKey).build())) {
-            body = new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            body = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
         }
         log.info("backup_0.properties contents for {}:\n{}", collName, body);
 

@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -173,7 +174,7 @@ public class S3Repo implements SourceRepo {
         }
 
         String relativePathStr = filePathStr.substring(s3LocalDirStr.length());
-        if (relativePathStr.startsWith(java.io.File.separator)) {
+        if (relativePathStr.startsWith(File.separator)) {
             relativePathStr = relativePathStr.substring(1);
         }
 

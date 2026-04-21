@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.function.Function;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -104,7 +105,7 @@ public final class SolrBackupLayout {
             // Group by shard name, keep highest backup index per shard
             var byShardName = files
                 .filter(p -> SHARD_METADATA_PATTERN.matcher(p.getFileName().toString()).matches())
-                .collect(java.util.stream.Collectors.groupingBy(p -> {
+                .collect(Collectors.groupingBy(p -> {
                     var m = SHARD_METADATA_PATTERN.matcher(p.getFileName().toString());
                     m.matches();
                     return m.group(1); // shard name

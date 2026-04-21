@@ -8,12 +8,17 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -126,7 +131,7 @@ public class RfsMigrateDocuments {
                 return DeltaMode.valueOf(value.toUpperCase());
             } catch (IllegalArgumentException e) {
                 throw new ParameterException("Invalid delta mode: " + value + ". Valid values are: " + 
-                    String.join(", ", java.util.Arrays.stream(DeltaMode.values())
+                    String.join(", ", Arrays.stream(DeltaMode.values())
                         .map(Enum::name)
                         .toArray(String[]::new)));
             }
@@ -949,12 +954,12 @@ public class RfsMigrateDocuments {
                 // when ShardWorkPreparer actually needs to iterate shards for an uncompleted work item.
                 // If work-coordination already has everything marked complete, ShardWorkPreparer short-
                 // circuits via onAlreadyCompleted and no schema downloads happen at all.
-                var schemas = new java.util.LinkedHashMap<String, JsonNode>();
+                var schemas = new LinkedHashMap<String, JsonNode>();
                 final List<String> collections;
                 if (s3Repo != null) {
-                    collections = new java.util.ArrayList<>(s3Repo.listTopLevelDirectories());
+                    collections = new ArrayList<>(s3Repo.listTopLevelDirectories());
                 } else {
-                    collections = new java.util.ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
+                    collections = new ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
                 }
                 if (!arguments.indexAllowlist.isEmpty()) {
                     collections.retainAll(arguments.indexAllowlist);
@@ -975,8 +980,8 @@ public class RfsMigrateDocuments {
                 // collectionPreparer (which downloads metadata) and the shardPreparer
                 // (which downloads shard index files) both use the same prefix, even for the
                 // two-level Solr 8 incremental layout.
-                final java.util.Map<String, String> dataPrefixByCollection = new java.util.concurrent.ConcurrentHashMap<>();
-                java.util.function.Consumer<String> collectionPreparer = collection -> {
+                final Map<String, String> dataPrefixByCollection = new ConcurrentHashMap<>();
+                Consumer<String> collectionPreparer = collection -> {
                     if (finalS3Repo != null) {
                         var resolved = SolrBackupLayout.resolveCollectionDataPrefix(
                             collection, finalS3Repo::listSubDirectories);
@@ -995,7 +1000,7 @@ public class RfsMigrateDocuments {
                     var dataDir = dataPrefix.isEmpty() ? collectionRoot : collectionRoot.resolve(dataPrefix);
                     schemas.put(collection, SolrSchemaXmlParser.findAndParse(dataDir));
                 };
-                java.util.function.Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
+                Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
                     var dataPrefix = dataPrefixByCollection.getOrDefault(partition.collection(), "");
                     var collectionDataPrefix = dataPrefix.isEmpty()
                         ? partition.collection()
@@ -1074,7 +1079,7 @@ public class RfsMigrateDocuments {
         SnapshotExtractor extractor,
         OpenSearchClient targetClient,
         String snapshotName,
-        java.nio.file.Path workDir,
+        Path workDir,
         Supplier<IJsonTransformer> transformerSupplier,
         boolean useServerGeneratedIds,
         DocumentExceptionAllowlist allowlist,

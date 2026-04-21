@@ -4,6 +4,8 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
@@ -177,7 +179,7 @@ public class SolrToOpenSearchEndToEndTest {
 
             assertTrue(doc.path("multi_string").isArray(), "multi_string should be an array");
             assertThat("multi_string size", doc.path("multi_string").size(), equalTo(3));
-            var multiValues = new java.util.HashSet<String>();
+            var multiValues = new HashSet<String>();
             doc.path("multi_string").forEach(v -> multiValues.add(v.asText()));
             assertTrue(multiValues.contains("alpha"), "multi_string should contain alpha");
             assertTrue(multiValues.contains("beta"), "multi_string should contain beta");
@@ -733,7 +735,7 @@ public class SolrToOpenSearchEndToEndTest {
             ));
         }
         sb.append("]");
-        var curlCmd = new java.util.ArrayList<String>();
+        var curlCmd = new ArrayList<String>();
         curlCmd.add("curl");
         curlCmd.add("-s");
         if (user != null && pass != null) {

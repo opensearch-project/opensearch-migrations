@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
@@ -168,13 +169,13 @@ public class SolrBackupSource implements DocumentSource {
                 .sorted()
                 .flatMap(shardDir -> {
                     if (hasSegmentsFile(shardDir)) {
-                        return java.util.stream.Stream.of(shardDir);
+                        return Stream.of(shardDir);
                     }
                     var indexPath = shardDir.resolve("data").resolve(INDEX_DIR_NAME);
                     if (hasSegmentsFile(indexPath)) {
-                        return java.util.stream.Stream.of(indexPath);
+                        return Stream.of(indexPath);
                     }
-                    return java.util.stream.Stream.empty();
+                    return Stream.empty();
                 })
                 .toList();
 

@@ -1,5 +1,6 @@
 package org.opensearch.migrations;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.List;
@@ -155,7 +156,7 @@ class SolrS3MetadataMigrationTest {
     }
 
     @TempDir
-    java.io.File tempDir;
+    File tempDir;
 
     /**
      * Full pipeline: SolrCloud → CreateSnapshot → S3 (LocalStack) →
