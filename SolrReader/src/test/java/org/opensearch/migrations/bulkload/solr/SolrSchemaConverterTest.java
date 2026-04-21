@@ -146,6 +146,90 @@ class SolrSchemaConverterTest {
         assertThat(mappings.get("properties").get("text_all").get("type").asText(), equalTo("keyword"));
     }
 
+    @Test
+    void copyFieldDestResolvesTypeFromDynamicFieldPattern() {
+        var fields = MAPPER.createArrayNode();
+        fields.add(field("title", "text_general"));
+
+        var dynamicFields = MAPPER.createArrayNode();
+        dynamicFields.add(dynField("*_str", "strings"));
+
+        var copyFields = MAPPER.createArrayNode();
+        var cf = MAPPER.createObjectNode();
+        cf.put("source", "title");
+        cf.put("dest", "title_str");
+        copyFields.add(cf);
+
+        var mappings = SolrSchemaConverter.convertToOpenSearchMappings(fields, dynamicFields, copyFields, null);
+        var properties = mappings.get("properties");
+
+        assertThat("title → text", properties.get("title").get("type").asText(), equalTo("text"));
+        assertThat("title_str → keyword (via *_str dynamic pattern)",
+            properties.get("title_str").get("type").asText(), equalTo("keyword"));
+    }
+
+    @Test
+    void copyFieldDestResolvesDateTypeFromDynamicFieldWithFormat() {
+        var fields = MAPPER.createArrayNode();
+        fields.add(field("name", "text_general"));
+
+        var dynamicFields = MAPPER.createArrayNode();
+        dynamicFields.add(dynField("*_dt", "pdate"));
+
+        var copyFields = MAPPER.createArrayNode();
+        var cf = MAPPER.createObjectNode();
+        cf.put("source", "name");
+        cf.put("dest", "name_dt");
+        copyFields.add(cf);
+
+        var mappings = SolrSchemaConverter.convertToOpenSearchMappings(fields, dynamicFields, copyFields, null);
+        var dest = mappings.get("properties").get("name_dt");
+
+        assertThat("name_dt → date", dest.get("type").asText(), equalTo("date"));
+        assertThat("date format included", dest.get("format").asText(), equalTo(SolrSchemaConverter.OS_DATE_FORMAT));
+    }
+
+    @Test
+    void copyFieldDestFallsBackToTextWhenNoDynamicFieldMatches() {
+        var fields = MAPPER.createArrayNode();
+        fields.add(field("title", "text_general"));
+
+        var dynamicFields = MAPPER.createArrayNode();
+        dynamicFields.add(dynField("*_s", "string")); // does not match "text_all"
+
+        var copyFields = MAPPER.createArrayNode();
+        var cf = MAPPER.createObjectNode();
+        cf.put("source", "title");
+        cf.put("dest", "text_all");
+        copyFields.add(cf);
+
+        var mappings = SolrSchemaConverter.convertToOpenSearchMappings(fields, dynamicFields, copyFields, null);
+        assertThat("text_all → text (no dynamic match)",
+            mappings.get("properties").get("text_all").get("type").asText(), equalTo("text"));
+    }
+
+    @Test
+    void copyFieldDestResolvesViaFieldTypeClass() {
+        var fields = MAPPER.createArrayNode();
+        fields.add(field("brand", "text_general"));
+
+        var dynamicFields = MAPPER.createArrayNode();
+        dynamicFields.add(dynField("*_str", "my_str_type"));
+
+        var fieldTypes = MAPPER.createArrayNode();
+        fieldTypes.add(fieldType("my_str_type", "solr.StrField"));
+
+        var copyFields = MAPPER.createArrayNode();
+        var cf = MAPPER.createObjectNode();
+        cf.put("source", "brand");
+        cf.put("dest", "brand_str");
+        copyFields.add(cf);
+
+        var mappings = SolrSchemaConverter.convertToOpenSearchMappings(fields, dynamicFields, copyFields, fieldTypes);
+        assertThat("brand_str → keyword (via fieldType class resolution)",
+            mappings.get("properties").get("brand_str").get("type").asText(), equalTo("keyword"));
+    }
+
     // --- FieldType class resolution tests ---
 
     @Test

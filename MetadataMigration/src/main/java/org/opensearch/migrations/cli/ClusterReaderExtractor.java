@@ -15,6 +15,7 @@ import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
 import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
 import org.opensearch.migrations.bulkload.solr.SolrSnapshotReader;
 import org.opensearch.migrations.cluster.ClusterReader;
@@ -83,34 +84,64 @@ public class ClusterReaderExtractor {
         List<String> collectionNames;
         if (arguments.fileSystemRepoPath != null) {
             backupDir = Path.of(arguments.fileSystemRepoPath);
-            try {
-                collectionNames = SolrSnapshotReader.discoverCollections(backupDir);
-            } catch (IOException e) {
-                throw new ParameterException("Failed to list backup directory: " + backupDir + ": " + e.getMessage());
-            }
+            collectionNames = discoverFileSystemCollections(backupDir);
         } else if (arguments.s3LocalDirPath != null) {
-            // Solr BACKUP API writes to s3://<bucket>/<backupName>/ (location=/ at repo root).
-            var repoUri = new S3Uri(arguments.s3RepoUri);
-            var backupS3Uri = arguments.snapshotName != null
-                ? "s3://" + repoUri.bucketName + "/" + arguments.snapshotName
-                : arguments.s3RepoUri;
-            var s3Repo = S3Repo.createRaw(
-                Path.of(arguments.s3LocalDirPath),
-                new S3Uri(backupS3Uri),
-                arguments.s3Region,
-                Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
-            );
-            // Discover collections from S3 listing, download only schema metadata (no index data)
+            var s3Repo = createSolrS3Repo();
             backupDir = s3Repo.getRepoRootDir();
             collectionNames = s3Repo.listTopLevelDirectories();
             for (var collection : collectionNames) {
-                s3Repo.downloadPrefix(collection + "/zk_backup_0");
+                downloadZkBackupForCollection(s3Repo, collection);
             }
         } else {
             throw new ParameterException("Solr snapshot requires --file-system-repo-path or S3 args");
         }
 
-        // Parse schemas from backup directory
+        return buildSolrSnapshotReader(backupDir, collectionNames);
+    }
+
+    private List<String> discoverFileSystemCollections(Path backupDir) {
+        try {
+            return SolrSnapshotReader.discoverCollections(backupDir);
+        } catch (IOException e) {
+            throw new ParameterException("Failed to list backup directory: " + backupDir + ": " + e.getMessage());
+        }
+    }
+
+    private S3Repo createSolrS3Repo() {
+        // Solr's BACKUP API writes to <location>/<snapshotName>/ where <location> is
+        // the path portion of s3RepoUri (or / when no subpath is configured).
+        var repoUri = new S3Uri(arguments.s3RepoUri);
+        var backupS3Uri = arguments.snapshotName != null
+            ? SolrBackupLayout.buildBackupS3Uri(repoUri, arguments.snapshotName)
+            : arguments.s3RepoUri;
+        return S3Repo.createRaw(
+            Path.of(arguments.s3LocalDirPath),
+            new S3Uri(backupS3Uri),
+            arguments.s3Region,
+            Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
+        );
+    }
+
+    /**
+     * Download the latest zk_backup_N for a collection from S3, handling both the flat
+     * and two-level Solr 8 backup layouts.
+     *
+     * Solr 8 may produce either:
+     *   {@code <snap>/<collection>/zk_backup_N/} (flat), or
+     *   {@code <snap>/<collection>/<innerName>/zk_backup_N/} (two-level, Solr 8 incremental).
+     *
+     * Delegates layout resolution to {@link SolrBackupLayout#resolveCollectionDataPrefix}.
+     */
+    private void downloadZkBackupForCollection(S3Repo s3Repo, String collection) {
+        var resolved = SolrBackupLayout.resolveCollectionDataPrefix(collection, s3Repo::listSubDirectories);
+        if (resolved == null) {
+            log.warn("No zk_backup directories found for collection '{}' in S3", collection);
+            return;
+        }
+        s3Repo.downloadPrefix(resolved.joinWith(collection) + "/" + resolved.latestZkBackupName());
+    }
+
+    private ClusterReader buildSolrSnapshotReader(Path backupDir, List<String> collectionNames) {
         var schemas = new LinkedHashMap<String, JsonNode>();
         for (var name : collectionNames) {
             schemas.put(name, SolrSchemaXmlParser.findAndParse(backupDir.resolve(name)));

@@ -140,15 +140,15 @@ class DefaultOperationsLibrary:
             # While cat/indices returns a doc count metric, the underlying implementation bleeds through details, only
             # capture the index name and make a separate api call for the doc count
             index_name = index_details['index']
-            valid_index = not self.index_matches_ignored_index(index_name,
-                                                               index_prefix_ignore_list=index_prefix_ignore_list)
-            if index_prefix_ignore_list is None or valid_index:
-                # "To get an accurate count of Elasticsearch documents, use the cat count or count APIs."
-                # See https://www.elastic.co/guide/en/elasticsearch/reference/7.10/cat-indices.html
+            if index_prefix_ignore_list is not None and self.index_matches_ignored_index(
+                    index_name, index_prefix_ignore_list=index_prefix_ignore_list):
+                continue
+            # "To get an accurate count of Elasticsearch documents, use the cat count or count APIs."
+            # See https://www.elastic.co/guide/en/elasticsearch/reference/7.10/cat-indices.html
 
-                count_response = execute_api_call(cluster=cluster, path=f"/{index_name}/_count?format=json", **kwargs)
-                index_dict[index_name] = count_response.json()
-                index_dict[index_name]['index'] = index_name
+            count_response = execute_api_call(cluster=cluster, path=f"/{index_name}/_count?format=json", **kwargs)
+            index_dict[index_name] = count_response.json()
+            index_dict[index_name]['index'] = index_name
         return index_dict
 
     def check_doc_counts_match(self, cluster: Cluster,

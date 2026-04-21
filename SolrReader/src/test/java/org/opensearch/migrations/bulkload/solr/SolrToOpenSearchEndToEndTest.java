@@ -4,6 +4,8 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
@@ -177,7 +179,7 @@ public class SolrToOpenSearchEndToEndTest {
 
             assertTrue(doc.path("multi_string").isArray(), "multi_string should be an array");
             assertThat("multi_string size", doc.path("multi_string").size(), equalTo(3));
-            var multiValues = new java.util.HashSet<String>();
+            var multiValues = new HashSet<String>();
             doc.path("multi_string").forEach(v -> multiValues.add(v.asText()));
             assertTrue(multiValues.contains("alpha"), "multi_string should contain alpha");
             assertTrue(multiValues.contains("beta"), "multi_string should contain beta");
@@ -319,6 +321,90 @@ public class SolrToOpenSearchEndToEndTest {
             var properties = mappingRoot.path("properties");
             // The explicit 'title' field should be in properties
             assertThat("title mapped", properties.has("title"), equalTo(true));
+        }
+    }
+
+    /**
+     * E2E: copyField destinations resolve their type from dynamic field patterns, not hardcoded text.
+     * Simulates the common Solr pattern: text_general field + copyField to *_str (type=strings)
+     * for faceting. Verifies the *_str fields get "keyword" mapping in OpenSearch, not "text".
+     */
+    @ParameterizedTest(name = "copyField type resolution: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch")
+    void copyFieldDestinationsResolveTypeFromDynamicFields(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            createSolrCollection(solr, COLLECTION_NAME);
+
+            // Add fields, a dynamic field pattern, and copyField directives
+            // This mirrors a real-world Solr pattern: text_general fields with *_str for faceting
+            solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/" + COLLECTION_NAME + "/schema",
+                "-d", "{\"add-field\":["
+                    + "{\"name\":\"brand\",\"type\":\"text_general\",\"stored\":true},"
+                    + "{\"name\":\"category\",\"type\":\"text_general\",\"stored\":true}"
+                    + "],"
+                    + "\"add-dynamic-field\":["
+                    + "{\"name\":\"*_str\",\"type\":\"strings\",\"stored\":false,\"docValues\":true,\"indexed\":false}"
+                    + "],"
+                    + "\"add-copy-field\":["
+                    + "{\"source\":\"brand\",\"dest\":\"brand_str\",\"maxChars\":256},"
+                    + "{\"source\":\"category\",\"dest\":\"category_str\",\"maxChars\":256}"
+                    + "]}");
+
+            // Index a document
+            solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/" + COLLECTION_NAME + "/update?commit=true",
+                "-d", "[{\"id\":\"cf1\",\"brand\":\"Acme Corp\",\"category\":\"Electronics\"}]");
+
+            var schema = fetchSolrSchema(solr, COLLECTION_NAME);
+            var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
+
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
+            var targetClient = createOpenSearchClient(target);
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
+            var pipeline = new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE);
+            pipeline.migrateAll().collectList().block();
+
+            var restClient = createRestClient(target);
+            var ctx = DocumentMigrationTestContext.factory().noOtelTracking();
+            restClient.get("_refresh", ctx.createUnboundRequestContext());
+
+            // --- Verify mappings: *_str fields should be "keyword", not "text" ---
+            var mappingResp = restClient.get(
+                COLLECTION_NAME + "/_mapping", ctx.createUnboundRequestContext()
+            );
+            var properties = MAPPER.readTree(mappingResp.body)
+                .path(COLLECTION_NAME).path("mappings").path("properties");
+            log.atInfo().setMessage("CopyField mapping test — properties: {}").addArgument(properties).log();
+
+            assertThat("brand → text", properties.path("brand").path("type").asText(), equalTo("text"));
+            assertThat("category → text", properties.path("category").path("type").asText(), equalTo("text"));
+            assertThat("brand_str → keyword (from *_str dynamic pattern)",
+                properties.path("brand_str").path("type").asText(), equalTo("keyword"));
+            assertThat("category_str → keyword (from *_str dynamic pattern)",
+                properties.path("category_str").path("type").asText(), equalTo("keyword"));
+
+            // --- Verify the source document fields migrated ---
+            var searchResp = restClient.get(
+                COLLECTION_NAME + "/_search?q=id:cf1&size=1", ctx.createUnboundRequestContext()
+            );
+            var hits = MAPPER.readTree(searchResp.body).path("hits").path("hits");
+            assertThat("Should find cf1", hits.size(), equalTo(1));
+
+            var doc = hits.get(0).path("_source");
+            assertThat("brand value", doc.path("brand").asText(), equalTo("Acme Corp"));
+            assertThat("category value", doc.path("category").asText(), equalTo("Electronics"));
         }
     }
 
@@ -495,7 +581,7 @@ public class SolrToOpenSearchEndToEndTest {
             var containerBackupDir = backupLocation + "/cloud_backup/" + collection;
             copyDirectoryFromContainer(solr, containerBackupDir, localBackupRoot.resolve(collection));
 
-            // Parse schema from the backup's zk_backup_0 directory
+            // Parse schema from the backup's latest zk_backup_N directory
             var schema = SolrSchemaXmlParser.findAndParse(localBackupRoot.resolve(collection));
 
             // Verify shard discovery — should find 2 shards
@@ -519,7 +605,7 @@ public class SolrToOpenSearchEndToEndTest {
     }
 
     /**
-     * E2E: SolrCloud metadata migration — verifies schema from backup's zk_backup_0
+     * E2E: SolrCloud metadata migration — verifies schema from backup's latest zk_backup_N
      * is correctly converted to OpenSearch mappings.
      */
     @ParameterizedTest(name = "solrcloud metadata: {0} → {1}")
@@ -572,7 +658,7 @@ public class SolrToOpenSearchEndToEndTest {
                 backupLocation + "/meta_backup/" + collection,
                 localBackupRoot.resolve(collection));
 
-            // Parse schema from zk_backup_0 in the backup
+            // Parse schema from the latest zk_backup_N in the backup
             var schema = SolrSchemaXmlParser.findAndParse(localBackupRoot.resolve(collection));
             var schemaNode = schema.path("schema");
 
@@ -649,7 +735,7 @@ public class SolrToOpenSearchEndToEndTest {
             ));
         }
         sb.append("]");
-        var curlCmd = new java.util.ArrayList<String>();
+        var curlCmd = new ArrayList<String>();
         curlCmd.add("curl");
         curlCmd.add("-s");
         if (user != null && pass != null) {

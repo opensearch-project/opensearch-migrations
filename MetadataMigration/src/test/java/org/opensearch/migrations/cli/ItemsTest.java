@@ -54,7 +54,31 @@ public class ItemsTest {
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("indexes"), is(true));
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("aliases"), is(true));
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("errors"), is(true));
+        // Default succeedOnEmpty=true: empty items should NOT produce an error
         assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").size(), equalTo(0));
+    }
+
+    @Test
+    void testEmptyWithSucceedOnEmptyFalse() throws Exception {
+        var items = createEmptyItemsBuilder()
+            .succeedOnEmpty(false)
+            .build();
+
+        // Test String Output
+        var stringOutput = items.asCliOutput();
+        
+        // Test JSON Output
+        var jsonOutput = items.asJsonOutput();
+        
+        // String output assertions — same visual output regardless of succeedOnEmpty
+        assertThat(stringOutput, containsString("Migrated Items:"));
+        assertThat(stringOutput, containsStringCount(Items.NONE_FOUND_MARKER, 4));
+        assertThat(stringOutput, hasLineCount(12));
+        
+        // JSON output assertions — strict mode (succeedOnEmpty=false) should produce an error
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.has("errors"), is(true));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").size(), equalTo(1));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").get(0).asText(), containsString("No migration items found"));
     }
 
     @Test

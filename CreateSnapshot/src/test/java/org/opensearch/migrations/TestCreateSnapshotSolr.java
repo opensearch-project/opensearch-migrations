@@ -115,14 +115,20 @@ public class TestCreateSnapshotSolr {
         args.fileSystemRepoPath = "/var/solr/data/backups";
         args.noWait = false;
 
-        CLOUD_SOLR.execInContainer("mkdir", "-p", "/var/solr/data/backups");
+        // With the per-snapshot location layout (<base>/<snapshotName>), Solr validates that the
+        // exact location directory exists before accepting the BACKUP call. Pre-create both the
+        // parent and the per-snapshot dir inside the Solr container.
+        CLOUD_SOLR.execInContainer("mkdir", "-p", "/var/solr/data/backups/test_cloud_backup");
 
         var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
         creator.run();
 
-        var result = CLOUD_SOLR.execInContainer("ls", "/var/solr/data/backups");
+        var result = CLOUD_SOLR.execInContainer("ls", "/var/solr/data/backups/test_cloud_backup");
         log.atInfo().setMessage("Cloud backup directory contents: {}").addArgument(result.getStdout()).log();
-        Assertions.assertTrue(result.getStdout().contains("test_cloud_backup"),
-            "Backup directory should contain the backup");
+        // New layout: <fileSystemRepoPath>/<snapshotName>/<collection>/... — verify collection
+        // subdir was created by Solr (not just the empty per-snapshot dir we pre-created).
+        Assertions.assertTrue(result.getStdout().contains("cloudcoll"),
+            "Backup directory " + "/var/solr/data/backups/test_cloud_backup" + " should contain the "
+                + "'cloudcoll' collection subdir after BACKUP completes; saw: " + result.getStdout());
     }
 }

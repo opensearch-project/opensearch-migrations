@@ -24,6 +24,7 @@ import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSin
 import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
 import org.opensearch.migrations.bulkload.solr.SolrBackupSource;
 import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
+import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
 import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
@@ -70,6 +71,12 @@ public class SolrSnapshotToOpenSearchTest {
         return Stream.of(
             Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V3_5_0, false),
             Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V3_5_0, true)
+        );
+    }
+
+    static Stream<Arguments> solr8ToOpenSearch3Cloud() {
+        return Stream.of(
+            Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V3_5_0)
         );
     }
 
@@ -254,6 +261,146 @@ public class SolrSnapshotToOpenSearchTest {
             );
             var hits = MAPPER.readTree(resp.body).path("hits").path("hits");
             assertThat("Should find Inception", hits.size(), equalTo(1));
+        }
+    }
+
+    /**
+     * Tests migrating a SolrCloud collection with 2 shards through the work coordinator.
+     * This is the critical path: ShardWorkPreparer must discover both shards from the
+     * backup metadata and create work items for each. Then migrateOneShard() must
+     * process each shard independently, resulting in all documents being migrated.
+     *
+     * This test reproduces the production bug where only 1 of 2 shards was discovered
+     * because shard_backup_metadata was not yet available when counting shards.
+     */
+    @ParameterizedTest(name = "multi-shard coordinator: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch3Cloud")
+    void multiShardCoordinatorMigration(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = SolrClusterContainer.cloud(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            var collection = "multi_shard_test";
+            int numShards = 2;
+
+            // Create SolrCloud collection with 2 shards
+            var createResult = solr.execInContainer("curl", "-sf",
+                "http://localhost:8983/solr/admin/collections?action=CREATE"
+                    + "&name=" + collection
+                    + "&numShards=" + numShards
+                    + "&replicationFactor=1"
+                    + "&maxShardsPerNode=" + numShards
+                    + "&wt=json");
+            log.atInfo().setMessage("Create collection response: {}")
+                .addArgument(createResult.getStdout()).log();
+            if (createResult.getExitCode() != 0) {
+                throw new RuntimeException("Failed to create collection: " + createResult.getStderr());
+            }
+
+            // Index 20 documents distributed across shards by Solr's hash routing
+            for (int i = 1; i <= 20; i++) {
+                solr.execInContainer("curl", "-s",
+                    "http://localhost:8983/solr/" + collection + "/update?commit=true",
+                    "-H", "Content-Type: application/json",
+                    "-d", String.format(
+                        "[{\"id\":\"%d\",\"title\":\"Document %d\",\"value\":%d}]", i, i, i * 10));
+            }
+
+            // Verify doc count in Solr
+            var countResult = solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/" + collection + "/select?q=*:*&rows=0&wt=json");
+            log.atInfo().setMessage("Solr doc count: {}").addArgument(countResult.getStdout()).log();
+
+            // Backup via Collections API
+            var backupLocation = "/var/solr/data/backups";
+            solr.execInContainer("mkdir", "-p", backupLocation);
+            var backupResult = solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/admin/collections?action=BACKUP"
+                    + "&name=multi_shard_backup"
+                    + "&collection=" + collection
+                    + "&location=" + backupLocation
+                    + "&wt=json");
+            log.atInfo().setMessage("Backup response: {}").addArgument(backupResult.getStdout()).log();
+
+            // Wait for backup to complete
+            Thread.sleep(2000);
+
+            // Copy backup from container to local temp dir
+            var backupRoot = tempDir.toPath().resolve("multi_shard_backup");
+            var containerBackupDir = backupLocation + "/multi_shard_backup/" + collection;
+            copyDirectoryFromContainer(solr, containerBackupDir, backupRoot.resolve(collection));
+
+            // Fetch schema from the backup's latest zk_backup_N directory
+            var schema = SolrSchemaXmlParser.findAndParse(backupRoot.resolve(collection));
+
+            // Set up coordinator-based migration
+            var connectionContext = ConnectionContextTestParams.builder()
+                .host(target.getUrl()).build().toConnectionContext();
+            var targetClient = new OpenSearchClientFactory(connectionContext).determineVersionAndCreate();
+            var targetVersion_ = targetClient.getClusterVersion();
+
+            var schemas = Map.<String, JsonNode>of(collection, schema);
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupRoot, schemas);
+            var documentSource = new SolrMultiCollectionSource(backupRoot, schemas);
+
+            var coordinatorFactory = new WorkCoordinatorFactory(targetVersion_);
+            var progressCursor = new AtomicReference<WorkItemCursor>();
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+            var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            try (var workCoordinator = coordinatorFactory.get(
+                     new CoordinateWorkHttpClient(connectionContext),
+                     SourceTestBase.TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                     UUID.randomUUID().toString(),
+                     Clock.systemUTC(),
+                     workItemRef::set);
+                 var processManager = new LeaseExpireTrigger(w -> {
+                     log.atDebug().setMessage("Lease expired for {} (test)").addArgument(w).log();
+                 })) {
+
+                var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);
+
+                // Register work items — this is where the bug was: ShardWorkPreparer
+                // calls fromRepo() which needs shard_backup_metadata to count shards correctly
+                new ShardWorkPreparer().run(
+                    scopedWorkCoordinator, indexMetadataFactory,
+                    "solr-multishard", List.of(collection), testContext
+                );
+
+                // Process shards one at a time until no work left
+                int shardsProcessed = 0;
+                for (int attempt = 0; attempt < 10; attempt++) {
+                    var runner = DocumentMigrationBootstrap.builder()
+                        .targetClient(targetClient)
+                        .snapshotName("solr-multishard")
+                        .maxDocsPerBatch(1000)
+                        .maxBytesPerBatch(Long.MAX_VALUE)
+                        .batchConcurrency(10)
+                        .allowlist(DocumentExceptionAllowlist.empty())
+                        .externalDocumentSource(documentSource)
+                        .workCoordinator(scopedWorkCoordinator)
+                        .maxInitialLeaseDuration(Duration.ofMinutes(5))
+                        .cursorConsumer(progressCursor::set)
+                        .cancellationTriggerConsumer(r -> {})
+                        .build();
+
+                    var status = runner.migrateOneShard(testContext::createReindexContext);
+                    if (status == CompletionStatus.NOTHING_DONE) break;
+                    shardsProcessed++;
+                }
+
+                // Must process exactly 2 shards — one for each shard in the SolrCloud collection
+                assertThat("Should process exactly " + numShards + " shards", shardsProcessed, equalTo(numShards));
+            }
+
+            // All 20 docs must be present — not just one shard's worth
+            verifyDocCount(target, collection, 20);
         }
     }
 

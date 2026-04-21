@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -173,7 +174,7 @@ public class S3Repo implements SourceRepo {
         }
 
         String relativePathStr = filePathStr.substring(s3LocalDirStr.length());
-        if (relativePathStr.startsWith(java.io.File.separator)) {
+        if (relativePathStr.startsWith(File.separator)) {
             relativePathStr = relativePathStr.substring(1);
         }
 
@@ -246,14 +247,30 @@ public class S3Repo implements SourceRepo {
      * @return list of directory names (without trailing slash)
      */
     public List<String> listTopLevelDirectories() {
+        return listSubDirectories("");
+    }
+
+    /**
+     * Lists "directories" (common prefixes) under a relative prefix within the repo.
+     * For example, with repo prefix {@code s3://bucket/backup/} and relativePrefix
+     * {@code "myCollection/"}, returns names like {@code ["zk_backup_0", "zk_backup_1", "index"]}.
+     *
+     * @param relativePrefix path relative to repo root (e.g. "myCollection/"). Empty string lists top-level.
+     * @return list of directory names (without trailing slash)
+     */
+    public List<String> listSubDirectories(String relativePrefix) {
         String prefixKey = s3RepoUri.key;
         if (!prefixKey.isEmpty() && !prefixKey.endsWith("/")) {
             prefixKey = prefixKey + "/";
         }
+        String fullPrefix = prefixKey + relativePrefix;
+        if (!fullPrefix.isEmpty() && !fullPrefix.endsWith("/")) {
+            fullPrefix = fullPrefix + "/";
+        }
 
         var listRequest = ListObjectsV2Request.builder()
             .bucket(s3RepoUri.bucketName)
-            .prefix(prefixKey.isEmpty() ? null : prefixKey)
+            .prefix(fullPrefix.isEmpty() ? null : fullPrefix)
             .delimiter("/")
             .build();
 
@@ -261,13 +278,13 @@ public class S3Repo implements SourceRepo {
         try {
             response = s3Client.listObjectsV2(listRequest).join();
         } catch (CompletionException e) {
-            throw new CannotListObjectsInS3(s3RepoUri.bucketName, prefixKey, e);
+            throw new CannotListObjectsInS3(s3RepoUri.bucketName, fullPrefix, e);
         }
 
-        String finalPrefixKey = prefixKey;
+        String finalFullPrefix = fullPrefix;
         return response.commonPrefixes().stream()
             .map(p -> p.prefix())
-            .map(p -> p.substring(finalPrefixKey.length()))
+            .map(p -> p.substring(finalFullPrefix.length()))
             .map(p -> p.endsWith("/") ? p.substring(0, p.length() - 1) : p)
             .filter(p -> !p.isEmpty())
             .toList();

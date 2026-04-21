@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
@@ -120,12 +121,13 @@ public class SolrBackupSource implements DocumentSource {
         if (!Files.isDirectory(metadataDir)) {
             return null;
         }
-        try (var mdFiles = Files.list(metadataDir)) {
-            var files = mdFiles.filter(p -> p.getFileName().toString().endsWith(".json")).toList();
-            if (files.isEmpty()) return null;
+        try {
+            // Use SolrBackupLayout to find only the latest metadata file per shard
+            var latestFiles = SolrBackupLayout.findLatestShardMetadataFiles(metadataDir);
+            if (latestFiles.isEmpty()) return null;
 
             var result = new LinkedHashMap<String, Map<String, String>>();
-            for (var mdFile : files) {
+            for (var mdFile : latestFiles) {
                 // md_shard1_0.json → shard1
                 var mdName = mdFile.getFileName().toString();
                 var shardName = mdName.replaceFirst("^md_", "").replaceFirst("_\\d+\\.json$", "");
@@ -167,13 +169,13 @@ public class SolrBackupSource implements DocumentSource {
                 .sorted()
                 .flatMap(shardDir -> {
                     if (hasSegmentsFile(shardDir)) {
-                        return java.util.stream.Stream.of(shardDir);
+                        return Stream.of(shardDir);
                     }
                     var indexPath = shardDir.resolve("data").resolve(INDEX_DIR_NAME);
                     if (hasSegmentsFile(indexPath)) {
-                        return java.util.stream.Stream.of(indexPath);
+                        return Stream.of(indexPath);
                     }
-                    return java.util.stream.Stream.empty();
+                    return Stream.empty();
                 })
                 .toList();
 

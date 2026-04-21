@@ -80,7 +80,8 @@ public class SolrMultiCollectionSource implements DocumentSource {
         return sources.computeIfAbsent(collection, c -> {
             var schema = schemas.get(c);
             var schemaNode = schema != null ? schema.path("schema") : schema;
-            return new SolrBackupSource(backupDir.resolve(c), c, schemaNode);
+            var collectionDir = SolrBackupLayout.resolveCollectionDataDir(backupDir.resolve(c));
+            return new SolrBackupSource(collectionDir, c, schemaNode);
         });
     }
 
@@ -97,6 +98,7 @@ public class SolrMultiCollectionSource implements DocumentSource {
 
     @Override
     public CollectionMetadata readCollectionMetadata(String collectionName) {
+        ensureCollectionPrepared(collectionName);
         return getSource(collectionName).readCollectionMetadata(collectionName);
     }
 

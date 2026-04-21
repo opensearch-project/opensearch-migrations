@@ -167,6 +167,7 @@ slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 testcontainers = {module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
 testcontainers-junit-jupiter = {module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers-modules" }
 testcontainers-kafka = {module = "org.testcontainers:kafka", version.ref = "testcontainers-modules" }
+testcontainers-localstack = {module = "org.testcontainers:localstack", version.ref = "testcontainers-modules" }
 testcontainers-opensearch = {module = "org.opensearch:opensearch-testcontainers", version.ref = "opensearch-testcontainers" }
 testcontainers-solr = {module = "org.testcontainers:solr", version.ref = "testcontainers-modules" }
 testcontainers-toxiproxy = {module = "org.testcontainers:toxiproxy", version.ref = "testcontainers-modules" }
