@@ -1,11 +1,15 @@
 package org.opensearch.migrations;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.solr.SolrHttpClient;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.testutils.CloseableLogSetup;
 
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.AfterEach;
@@ -23,6 +27,7 @@ import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -33,6 +38,7 @@ import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 
 /**
  * End-to-end testcontainer-based tests for the S3 directory marker logic and the
@@ -900,5 +906,205 @@ public class TestCreateSnapshotSolrS3 {
                 "Snapshot root should have exactly one common prefix per collection; got="
                     + commonPrefixes);
         }
+    }
+
+    /**
+     * G1: When the S3 bucket referenced by s3RepoUri does not exist, {@code ensureS3LocationExists}
+     * must swallow the resulting exception (HeadObject/PutObject against a missing bucket throws
+     * a non-NoSuchKey S3Exception, exercising the outer {@code catch (Exception e)} branch that
+     * rethrow-cases in {@code s3DirectoryMarkerExists} ultimately fall into) and emit a WARN
+     * log. The surrounding cloud backup will then proceed and fail downstream when Solr itself
+     * tries to access the bucket — but the marker helper must not abort the run.
+     *
+     * <p>Net effect verified: (a) the warn-log path fires with the expected marker message
+     * prefix, (b) Solr's subsequent BACKUP call fails (bucket still missing), and (c) no marker
+     * objects were created in the real bucket. This is the dual of G4 — the outer catch
+     * swallows anything that propagates from the helper stack.
+     */
+    @Test
+    void cloudBackup_s3LocationMarkerFailure_continuesToBackup() throws Exception {
+        String collName = "nonexistent_bucket_coll";
+        createCollection(collName, 1);
+        indexDocs(collName, 2);
+
+        String missingBucket = "no-such-bucket-" + System.nanoTime();
+        String snapshotName = "backup_missing_bucket";
+        var args = makeArgs("s3://" + missingBucket + "/anyprefix", snapshotName);
+        args.solrCollections = List.of(collName);
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        try (var logCapture = new CloseableLogSetup(SolrBackupStrategy.class.getName())) {
+            var creator = new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext());
+            // Expect the overall run to fail when Solr's BACKUP attempts to write to a missing
+            // bucket, but the pre-flight marker creation must not short-circuit it with a throw.
+            Assertions.assertThrows(Exception.class, creator::run,
+                "Backup should ultimately fail when S3 bucket does not exist");
+
+            boolean sawWarn = logCapture.getLogEvents().stream()
+                .anyMatch(m -> m.contains("Failed to ensure S3 directory markers")
+                    && m.contains(missingBucket));
+            Assertions.assertTrue(sawWarn,
+                "Expected WARN log from ensureS3LocationExists for missing bucket; got events: "
+                    + logCapture.getLogEvents());
+        }
+
+        // No marker objects should have been created in any *real* bucket (smoke-check our
+        // test bucket is untouched at the random prefix).
+        try (var s3 = testS3Client()) {
+            Assertions.assertFalse(s3ObjectExists(s3, "anyprefix/"),
+                "No marker should exist in the real test bucket at the random prefix");
+        }
+    }
+
+    /**
+     * G2: {@code buildS3Client(region, endpoint)} is private+static; exercise the branch where
+     * endpoint is null or empty — the builder must NOT apply {@code endpointOverride} in that
+     * case (relying on the SDK's default regional resolution). Verified by reading back
+     * {@code S3Client.serviceClientConfiguration().endpointOverride()} which returns an
+     * Optional that is empty when no override was set.
+     *
+     * <p>Also verifies the complementary happy path: when a non-empty endpoint is passed the
+     * Optional is present and carries the expected URI (prefixing with {@code http://} when
+     * the scheme is absent).
+     */
+    @Test
+    void buildS3Client_nullOrEmptyEndpoint_usesAwsDefaultResolution() throws Exception {
+        Method build = SolrBackupStrategy.class.getDeclaredMethod(
+            "buildS3Client", String.class, String.class);
+        build.setAccessible(true);
+
+        // null endpoint -> no override
+        try (S3Client c = (S3Client) build.invoke(null, "us-east-1", null)) {
+            Assertions.assertFalse(c.serviceClientConfiguration().endpointOverride().isPresent(),
+                "null endpoint should leave endpointOverride unset");
+        }
+        // empty endpoint -> no override
+        try (S3Client c = (S3Client) build.invoke(null, "us-east-1", "")) {
+            Assertions.assertFalse(c.serviceClientConfiguration().endpointOverride().isPresent(),
+                "empty endpoint should leave endpointOverride unset");
+        }
+        // explicit endpoint without scheme -> wrapped in http:// and applied
+        try (S3Client c = (S3Client) build.invoke(null, "us-east-1", "localhost:4566")) {
+            var opt = c.serviceClientConfiguration().endpointOverride();
+            Assertions.assertTrue(opt.isPresent(), "endpoint should be applied when non-empty");
+            Assertions.assertEquals("http://localhost:4566", opt.get().toString(),
+                "endpoint without scheme must be prefixed with http://");
+        }
+        // explicit endpoint with scheme -> passed through as-is
+        try (S3Client c = (S3Client) build.invoke(null, "us-east-1", "https://s3.example.com")) {
+            var opt = c.serviceClientConfiguration().endpointOverride();
+            Assertions.assertTrue(opt.isPresent(), "endpoint should be applied when non-empty");
+            Assertions.assertEquals("https://s3.example.com", opt.get().toString(),
+                "endpoint with scheme must be used verbatim");
+        }
+    }
+
+    /**
+     * G3: Pre-create ONLY the per-snapshot directory marker {@code <parent>/<snapshot>/} before
+     * invoking the backup. The parent prefix marker {@code <parent>/} should not exist yet.
+     * The cloud backup path must detect the snapshot marker as already-present (exercising the
+     * "already exists" log branch in {@code createDirectoryMarkerIfMissing}) AND create the
+     * missing parent marker. Inverse of
+     * {@link #cloudBackupToSubpath_preExistingMarker_idempotentAndSucceeds}.
+     */
+    @Test
+    void cloudBackup_onlySnapshotMarkerPreExists_parentCreated() throws Exception {
+        String collName = "preexist_snap_only_coll";
+        createCollection(collName, 1);
+        indexDocs(collName, 3);
+
+        String subpath = "preexist-snap-only";
+        String snapshotName = "backup_snap_only";
+        var args = makeArgs("s3://" + BUCKET_NAME + "/" + subpath, snapshotName);
+        args.solrCollections = List.of(collName);
+
+        // Pre-create ONLY the per-snapshot marker; the parent subpath marker does NOT exist yet.
+        try (var s3 = testS3Client()) {
+            s3.putObject(PutObjectRequest.builder()
+                    .bucket(BUCKET_NAME)
+                    .key(subpath + "/" + snapshotName + "/")
+                    .contentType("application/x-directory")
+                    .build(),
+                RequestBody.empty());
+            Assertions.assertFalse(s3ObjectExists(s3, subpath + "/"),
+                "Parent marker should NOT exist yet (test precondition)");
+            Assertions.assertTrue(s3ObjectExists(s3, subpath + "/" + snapshotName + "/"),
+                "Snapshot marker precondition failed");
+        }
+
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        try (var logCapture = new CloseableLogSetup(SolrBackupStrategy.class.getName())) {
+            new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();
+
+            // Parent marker must have been created; snapshot marker hit the "already exists" path.
+            long alreadyExistsLogCount = logCapture.getLogEvents().stream()
+                .filter(m -> m.contains("S3 directory marker already exists"))
+                .count();
+            Assertions.assertTrue(alreadyExistsLogCount >= 1,
+                "Expected at least one 'already exists' log for the snapshot marker; got: "
+                    + logCapture.getLogEvents());
+            boolean createdParent = logCapture.getLogEvents().stream()
+                .anyMatch(m -> m.contains("Created S3 directory marker")
+                    && m.contains(subpath + "/")
+                    && !m.contains(snapshotName));
+            Assertions.assertTrue(createdParent,
+                "Expected 'Created S3 directory marker' for parent prefix; got: "
+                    + logCapture.getLogEvents());
+        }
+
+        try (var s3 = testS3Client()) {
+            Assertions.assertTrue(s3ObjectExists(s3, subpath + "/"),
+                "Parent marker should have been created by ensureS3LocationExists");
+            var keys = listS3Keys(s3, subpath + "/" + snapshotName + "/");
+            Assertions.assertFalse(keys.isEmpty(),
+                "Backup should have written data under the pre-existing snapshot marker");
+        }
+    }
+
+    /**
+     * G5: Exercise {@code s3DirectoryMarkerExists} third catch branch — an {@link S3Exception}
+     * whose {@code statusCode()} is NOT 404 must be rethrown (not swallowed as "marker
+     * absent"). We invoke the private method reflectively via a JDK dynamic proxy S3Client that
+     * throws a synthesized 403 S3Exception from {@code headObject}. The method is expected to
+     * propagate the exception — and callers (ensureS3LocationExists) then catch it in their
+     * outer try/catch and log a warning, which is what allows a Deny-HeadObject scenario to
+     * surface as a "Failed to ensure S3 directory markers" warn rather than silent false.
+     */
+    @Test
+    void s3DirectoryMarkerExists_non404S3Exception_isRethrown() throws Exception {
+        Method exists = SolrBackupStrategy.class.getDeclaredMethod(
+            "s3DirectoryMarkerExists", S3Client.class, String.class, String.class);
+        exists.setAccessible(true);
+
+        S3Exception status403 = (S3Exception) S3Exception.builder()
+            .statusCode(403)
+            .message("Access Denied (synthesized)")
+            .awsErrorDetails(AwsErrorDetails.builder().errorCode("AccessDenied").build())
+            .build();
+
+        S3Client throwingClient = (S3Client) Proxy.newProxyInstance(
+            S3Client.class.getClassLoader(),
+            new Class<?>[] {S3Client.class},
+            (proxy, m, a) -> {
+                if ("headObject".equals(m.getName())) {
+                    throw status403;
+                }
+                if ("close".equals(m.getName())) {
+                    return null;
+                }
+                // Any other method is unexpected for this test.
+                throw new UnsupportedOperationException("Unexpected call: " + m.getName());
+            });
+
+        // Construct via the normal ctor with a valid Args — the method under test reads no
+        // instance fields, so the constructor side-effects don't affect the assertion.
+        var strategy = new SolrBackupStrategy(makeArgs("s3://" + BUCKET_NAME + "/ignored", "ignored"));
+
+        InvocationTargetException ite = Assertions.assertThrows(InvocationTargetException.class,
+            () -> exists.invoke(strategy, throwingClient, "some-bucket", "some/key/"));
+        Assertions.assertTrue(ite.getCause() instanceof S3Exception,
+            "Expected S3Exception to be rethrown for non-404 status; got: " + ite.getCause());
+        Assertions.assertEquals(403, ((S3Exception) ite.getCause()).statusCode(),
+            "Rethrown exception should preserve the original 403 status code");
     }
 }
