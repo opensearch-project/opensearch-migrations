@@ -9,6 +9,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotMetadataLoader;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.transformation.entity.Index;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,6 +46,7 @@ public interface IndexMetadata extends Index {
      * - ES 6.x: {"_doc": {"_source": {"enabled": false}, "properties": {...}}}
      * - ES 7.x+: {"_source": {"enabled": false}, "properties": {...}}
      */
+    @JsonIgnore
     default boolean isSourceEnabled() {
         JsonNode mappings = getMappings();
         if (mappings == null || mappings.isMissingNode()) {
