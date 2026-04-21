@@ -13,6 +13,7 @@ import org.opensearch.migrations.bulkload.version_es_1_7.SnapshotReader_ES_1_7;
 import org.opensearch.migrations.bulkload.version_es_2_4.SnapshotReader_ES_2_4;
 import org.opensearch.migrations.bulkload.version_es_6_8.SnapshotReader_ES_6_8;
 import org.opensearch.migrations.bulkload.version_es_7_10.SnapshotReader_ES_7_10;
+import org.opensearch.migrations.bulkload.version_es_9_0.SnapshotReader_ES_9_0;
 import org.opensearch.migrations.bulkload.version_universal.RemoteReader;
 
 import lombok.experimental.UtilityClass;
@@ -28,6 +29,11 @@ public class SnapshotReaderRegistry {
             new SnapshotReader_ES_1_7(),
             new SnapshotReader_ES_2_4(),
             new SnapshotReader_ES_6_8(),
+            // ES 9.x + OS 3.x use Lucene 10 snapshots. Must be registered BEFORE ES_7_10
+            // because ES_7_10.looseCompatibleWith() claims anyOS (including OS 3.x); first
+            // matching provider wins. Strict match has no overlap — ES_7_10 only claims
+            // ES <=8.x + OS 1.x/2.x — so order only matters in loose mode.
+            new SnapshotReader_ES_9_0(),
             new SnapshotReader_ES_7_10(),
             new RemoteReader()
         );

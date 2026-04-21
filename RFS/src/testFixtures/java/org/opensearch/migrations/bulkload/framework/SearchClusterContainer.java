@@ -86,6 +86,9 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         return Collections.unmodifiableMap(merged);
     }
 
+    public static final ContainerVersion ES_V9_1 = Elasticsearch9Version.fromTag("9.1.5");
+    public static final ContainerVersion ES_V9_0 = Elasticsearch9Version.fromTag("9.0.8");
+
     public static final ContainerVersion ES_V8_19 = Elasticsearch8Version.fromTag("8.19.11");
     public static final ContainerVersion ES_V8_18 = Elasticsearch8Version.fromTag("8.18.8");
     public static final ContainerVersion ES_V8_17 = Elasticsearch8Version.fromTag("8.17.10");
@@ -539,6 +542,20 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             String imageName = "custom-elasticsearch:" + tag;
             Version version = Version.fromString("ES " + tag);
             return new ElasticsearchVersion(imageName, version);
+        }
+    }
+
+    public static class Elasticsearch9Version extends ContainerVersion {
+        public Elasticsearch9Version(String imageName, Version version) {
+            // ES 9 reuses the ELASTICSEARCH_8 init flavor — same xpack security toggles,
+            // cluster.name, node.name, etc. When ES 9 requires new config (e.g. entitlements
+            // runtime, geoip updater), add an ELASTICSEARCH_9 flavor.
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_8, "elasticsearch");
+        }
+        public static Elasticsearch9Version fromTag(String tag) {
+            String imageName = "custom-elasticsearch:" + tag;
+            Version version = Version.fromString("ES " + tag);
+            return new Elasticsearch9Version(imageName, version);
         }
     }
 

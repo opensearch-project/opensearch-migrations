@@ -92,11 +92,12 @@ public class TransformerMapper {
         if (!allowLooseMatches && VersionMatchers.equalOrBetween_ES_7_0_and_7_8.test(sourceVersion)) {
             return List.of(new IndexMappingTypeRemoval(params.getMultiTypeResolutionBehavior()));
         }
-        // ES 7.9+, 8.x, OS — no type removal needed
+        // ES 7.9+, 8.x, 9.x, OS — no type removal needed
         if (allowLooseMatches
             ? UnboundVersionMatchers.anyES.or(UnboundVersionMatchers.anyOS).test(sourceVersion)
             : (VersionMatchers.equalOrGreaterThanES_7_9.test(sourceVersion)
                 || VersionMatchers.isES_8_X.test(sourceVersion)
+                || VersionMatchers.isES_9_X.test(sourceVersion)
                 || VersionMatchers.anyOS.test(sourceVersion))) {
             return List.of();
         }

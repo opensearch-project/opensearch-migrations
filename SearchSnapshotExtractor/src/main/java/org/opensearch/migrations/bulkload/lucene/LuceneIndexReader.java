@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.lucene.version_10.IndexReader10;
 import org.opensearch.migrations.bulkload.lucene.version_5.IndexReader5;
 import org.opensearch.migrations.bulkload.lucene.version_6.IndexReader6;
 import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
@@ -98,6 +99,7 @@ public interface LuceneIndexReader {
                 case LUCENE_6 -> new IndexReader6(path);
                 case LUCENE_7 -> new IndexReader7(path, caps.softDeletesPossible(), caps.softDeletesFieldName());
                 case LUCENE_9 -> new IndexReader9(path, caps.softDeletesPossible(), caps.softDeletesFieldName());
+                case LUCENE_10 -> new IndexReader10(path, caps.softDeletesPossible(), caps.softDeletesFieldName());
             };
         }
     }

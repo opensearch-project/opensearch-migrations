@@ -15,6 +15,28 @@ sourceSets {
             srcDir 'src/lucene9/resources'
         }
     }
+    lucene10 {
+        java {
+            srcDir 'src/lucene10/java'
+        }
+        resources {
+            srcDir 'src/lucene10/resources'
+        }
+    }
+}
+
+// Lucene 10 requires Java 21 — override just the lucene10 compile task's toolchain.
+// The rest of the project stays on Java 17 (see root build.gradle line ~169).
+// foojay-resolver-convention (settings.gradle) auto-downloads JDK 21 on demand.
+tasks.named('compileLucene10Java', JavaCompile).configure {
+    javaCompiler = javaToolchains.compilerFor {
+        languageVersion = JavaLanguageVersion.of(21)
+        vendor = JvmVendorSpec.AMAZON
+    }
+    // The shadow jar relocates everything into shadow.lucene10.* so we can keep the
+    // class-file major version as 21; the shadowed output is loaded reflectively via
+    // separate classloaders (see LuceneIndexReaderFactory).
+    options.release.set(21)
 }
 
 configurations {
@@ -23,9 +45,15 @@ configurations {
     lucene7
     lucene9
     lucene9Implementation.extendsFrom(lucene9)
+    lucene10
+    lucene10Implementation.extendsFrom(lucene10)
 }
 
 tasks.named('processLucene9Resources').configure {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
+tasks.named('processLucene10Resources').configure {
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
 }
 
@@ -62,8 +90,20 @@ tasks.register('shadowLucene9', com.github.jengelman.gradle.plugins.shadow.tasks
     }
 }
 
+tasks.register('shadowLucene10', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    dependsOn compileLucene10Java, processLucene10Resources
+    mergeServiceFiles()
+    archiveClassifier.set('lucene10-shadow')
+    configurations = [project.configurations.lucene10]
+    from sourceSets.lucene10.output
+    relocate 'org.apache.lucene', 'shadow.lucene10.org.apache.lucene'
+    manifest {
+        attributes 'Multi-Release': 'true'
+    }
+}
+
 tasks.register('prepareShadowJars') {
-    dependsOn shadowLucene5, shadowLucene6, shadowLucene7, shadowLucene9
+    dependsOn shadowLucene5, shadowLucene6, shadowLucene7, shadowLucene9, shadowLucene10
 }
 
 tasks.named('build') {
@@ -81,7 +121,7 @@ publishing {
             pom {
                 description = 'Reads Elasticsearch/OpenSearch snapshots and extracts documents and metadata via Lucene'
             }
-            ['shadowLucene5', 'shadowLucene6', 'shadowLucene7', 'shadowLucene9'].each { taskName ->
+            ['shadowLucene5', 'shadowLucene6', 'shadowLucene7', 'shadowLucene9', 'shadowLucene10'].each { taskName ->
                 artifact(tasks.named(taskName))
             }
         }
@@ -118,8 +158,15 @@ dependencies {
     lucene9 libs.lucene.v9.suggest
     lucene9 libs.zstd.jni
 
+    lucene10 libs.lucene.v10.core
+    lucene10 libs.lucene.v10.analysis.common
+    lucene10 libs.lucene.v10.backward.codecs
+    lucene10 libs.lucene.v10.suggest
+    lucene10 libs.zstd.jni
+
     implementation shadowLucene5.outputs.files
     implementation shadowLucene6.outputs.files
     implementation shadowLucene7.outputs.files
     implementation shadowLucene9.outputs.files
+    implementation shadowLucene10.outputs.files
 }
