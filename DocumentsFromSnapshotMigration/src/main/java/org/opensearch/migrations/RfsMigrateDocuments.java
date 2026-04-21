@@ -963,41 +963,56 @@ public class RfsMigrateDocuments {
                     schemas.put(collection, null);  // placeholder; populated lazily by collectionPreparer
                 }
 
-                // collectionPreparer hydrates a collection on first access: downloads the latest
-                // zk_backup_N (S3 only) and the shard_backup_metadata, then parses the schema into
-                // the schemas map. Called from SolrBackupIndexMetadataFactory.fromRepo and
+                // collectionPreparer hydrates a collection on first access: resolves the backup
+                // layout (flat vs. two-level), downloads the latest zk_backup_N and
+                // shard_backup_metadata (S3 only), then parses the schema into the schemas map.
+                // Called from SolrBackupIndexMetadataFactory.fromRepo and
                 // SolrMultiCollectionSource.readDocuments, wrapped so it runs at most once per
                 // collection per process.
                 final S3Repo finalS3Repo = s3Repo;
                 final Path finalBackupDir = backupDir;
+                // dataPrefixByCollection caches the resolved layout for each collection so the
+                // collectionPreparer (which downloads metadata) and the shardPreparer
+                // (which downloads shard index files) both use the same prefix, even for the
+                // two-level Solr 8 incremental layout.
+                final java.util.Map<String, String> dataPrefixByCollection = new java.util.concurrent.ConcurrentHashMap<>();
                 java.util.function.Consumer<String> collectionPreparer = collection -> {
                     if (finalS3Repo != null) {
-                        var subDirs = finalS3Repo.listSubDirectories(collection);
-                        var latestZkBackup = SolrBackupLayout.findLatestZkBackupName(subDirs);
-                        if (latestZkBackup != null) {
-                            finalS3Repo.downloadPrefix(collection + "/" + latestZkBackup);
+                        var resolved = SolrBackupLayout.resolveCollectionDataPrefix(
+                            collection, finalS3Repo::listSubDirectories);
+                        if (resolved != null) {
+                            dataPrefixByCollection.put(collection, resolved.dataPrefix());
+                            var dataRoot = resolved.joinWith(collection);
+                            finalS3Repo.downloadPrefix(dataRoot + "/" + resolved.latestZkBackupName());
+                            log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
+                            finalS3Repo.downloadPrefix(dataRoot + "/shard_backup_metadata");
                         } else {
                             log.warn("No zk_backup directories found for collection '{}' in S3", collection);
                         }
-                        log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
-                        finalS3Repo.downloadPrefix(collection + "/shard_backup_metadata");
                     }
-                    schemas.put(collection, SolrSchemaXmlParser.findAndParse(finalBackupDir.resolve(collection)));
+                    var collectionRoot = finalBackupDir.resolve(collection);
+                    var dataPrefix = dataPrefixByCollection.getOrDefault(collection, "");
+                    var dataDir = dataPrefix.isEmpty() ? collectionRoot : collectionRoot.resolve(dataPrefix);
+                    schemas.put(collection, SolrSchemaXmlParser.findAndParse(dataDir));
                 };
                 java.util.function.Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
+                    var dataPrefix = dataPrefixByCollection.getOrDefault(partition.collection(), "");
+                    var collectionDataPrefix = dataPrefix.isEmpty()
+                        ? partition.collection()
+                        : partition.collection() + "/" + dataPrefix;
                     var mapping = partition.fileNameMapping();
                     if (mapping != null) {
                         // SolrCloud UUID backup: download only the UUID files for this shard
                         log.atInfo().setMessage("Downloading {} index files for shard '{}/{}' from S3")
                             .addArgument(mapping.size()).addArgument(partition.collection()).addArgument(partition.shard()).log();
                         for (var uuid : mapping.values()) {
-                            finalS3Repo.downloadFile(partition.collection() + "/index/" + uuid);
+                            finalS3Repo.downloadFile(collectionDataPrefix + "/index/" + uuid);
                         }
                     } else {
                         // Non-UUID layout: download the shard's directory
                         log.atInfo().setMessage("Downloading index data for shard '{}/{}' from S3")
                             .addArgument(partition.collection()).addArgument(partition.shard()).log();
-                        finalS3Repo.downloadPrefix(partition.collection() + "/index");
+                        finalS3Repo.downloadPrefix(collectionDataPrefix + "/index");
                     }
                 } : null;
 

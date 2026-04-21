@@ -54,7 +54,8 @@ public class SolrBackupIndexMetadataFactory implements IndexMetadata.Factory {
         var schemaNode = schema != null ? schema.path("schema") : MAPPER.createObjectNode();
 
         // Discover shard count from backup directory
-        var source = new SolrBackupSource(backupDir.resolve(indexName), indexName, schemaNode);
+        var collectionDir = SolrBackupLayout.resolveCollectionDataDir(backupDir.resolve(indexName));
+        var source = new SolrBackupSource(collectionDir, indexName, schemaNode);
         int shardCount = source.listPartitions(indexName).size();
         log.info("Solr collection {} has {} shard(s)", indexName, shardCount);
 

@@ -1107,4 +1107,221 @@ public class TestCreateSnapshotSolrS3 {
         Assertions.assertEquals(403, ((S3Exception) ite.getCause()).statusCode(),
             "Rethrown exception should preserve the original 403 status code");
     }
+
+    /**
+     * G6: Exercise {@code s3DirectoryMarkerExists} second catch branch — a plain
+     * {@link S3Exception} with {@code statusCode()==404} that is NOT a {@link NoSuchKeyException}
+     * must be treated as "marker absent" (return false). Some S3-compatible stores and certain
+     * SDK wrapping layers surface missing-object as a bare S3Exception with status 404 rather
+     * than the typed subclass; the fall-through branch exists specifically for that case. This
+     * complements {@link #s3DirectoryMarkerExists_non404S3Exception_isRethrown} which covers the
+     * rethrow side of the same 3-way catch.
+     */
+    @Test
+    void s3DirectoryMarkerExists_status404S3Exception_treatedAsAbsent() throws Exception {
+        Method exists = SolrBackupStrategy.class.getDeclaredMethod(
+            "s3DirectoryMarkerExists", S3Client.class, String.class, String.class);
+        exists.setAccessible(true);
+
+        S3Exception status404 = (S3Exception) S3Exception.builder()
+            .statusCode(404)
+            .message("Not Found (synthesized, non-NoSuchKey)")
+            .awsErrorDetails(AwsErrorDetails.builder().errorCode("NotFound").build())
+            .build();
+
+        S3Client throwingClient = (S3Client) Proxy.newProxyInstance(
+            S3Client.class.getClassLoader(),
+            new Class<?>[] {S3Client.class},
+            (proxy, m, a) -> {
+                if ("headObject".equals(m.getName())) {
+                    throw status404;
+                }
+                if ("close".equals(m.getName())) {
+                    return null;
+                }
+                throw new UnsupportedOperationException("Unexpected call: " + m.getName());
+            });
+
+        var strategy = new SolrBackupStrategy(makeArgs("s3://" + BUCKET_NAME + "/ignored", "ignored"));
+        Object result = exists.invoke(strategy, throwingClient, "some-bucket", "some/key/");
+        Assertions.assertEquals(Boolean.FALSE, result,
+            "s3DirectoryMarkerExists should return false for a 404 S3Exception (not rethrow)");
+    }
+
+    /**
+     * Helper: Solr caches async task status by request ID. If we reuse the same async ID across
+     * two BACKUP calls (as CreateSnapshot does, using snapshotName-collection), Solr short-circuits
+     * the second call and returns the cached "completed" status without running a new backup.
+     * Call this between runs to clear the cache so the second BACKUP actually executes.
+     *
+     * <p>Mirrors the synchronous-curl workaround used by {@code SolrSuccessiveBackupsTest}, but
+     * reuses our {@link SolrHttpClient} so the call flows through the same connection pool.
+     */
+    private static void deleteSolrAsyncStatus(String asyncId) {
+        try {
+            solrHttpClient().getJson(solrUrl()
+                + "/solr/admin/collections?action=DELETESTATUS&requestid="
+                + asyncId + "&wt=json");
+        } catch (Exception e) {
+            // Best-effort — if the task doesn't exist, Solr returns an error we can ignore.
+            log.atWarn().setMessage("DELETESTATUS for asyncId={} failed: {}")
+                .addArgument(asyncId).addArgument(e.getMessage()).log();
+        }
+    }
+
+    /**
+     * G7: Back-to-back backups to the SAME snapshot name. Solr 8 incremental backup does not
+     * fail on a duplicate name — it appends successive revisions:
+     *   zk_backup_0/, zk_backup_1/, backup_0.properties, backup_1.properties, md_shard1_0.json, md_shard1_1.json
+     * This test is the only one in this file that actually produces a {@code zk_backup_1} directory
+     * in LocalStack through the real CreateSnapshot code path (SolrSuccessiveBackupsTest produces
+     * one too, but on a local-FS backup and via direct curl, bypassing our CreateSnapshot wrapper
+     * and S3 entirely). Our downstream {@link org.opensearch.migrations.bulkload.solr.SolrBackupLayout}
+     * helpers ({@code findLatestZkBackup}, {@code findLatestShardMetadataFiles}) are written to
+     * traverse these revisions, so verifying the S3 artifacts exist closes the loop.
+     *
+     * <p>This also naturally exercises the "both markers already exist" skip branches in
+     * {@code createDirectoryMarkerIfMissing} without a synthetic setup — on the second run the
+     * parent and per-snapshot markers are both present from run #1.
+     *
+     * <p>NOTE: We must clear Solr's async-task status between runs. CreateSnapshot uses
+     * {@code async=<snapshotName>-<collection>} as the request ID, and Solr caches completed
+     * task status indefinitely; without a DELETESTATUS the second BACKUP call is a no-op that
+     * returns the cached "completed" state without running.
+     */
+    @Test
+    void cloudBackup_sameSnapshotNameTwice_appendsIncrementalRevisions() throws Exception {
+        String collName = "incremental_coll";
+        createCollection(collName, 1);
+        indexDocs(collName, 3);
+
+        String subpath = "incremental-revisions";
+        String snapshotName = "backup_same_name";
+        var args = makeArgs("s3://" + BUCKET_NAME + "/" + subpath, snapshotName);
+        args.solrCollections = List.of(collName);
+
+        // Run 1
+        new CreateSnapshot(args, SnapshotTestContext.factory().noOtelTracking()
+            .createSnapshotCreateContext()).run();
+
+        // Clear Solr's async-task cache so run 2's BACKUP isn't short-circuited.
+        deleteSolrAsyncStatus(
+            org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator.asyncIdFor(
+                snapshotName, collName));
+
+        // Add more docs so run 2 produces a materially different snapshot
+        indexDocs(collName, 5);
+
+        // Run 2 — same s3RepoUri, same snapshotName. Expect "already exists" skip-branches on
+        // BOTH markers, and a new revision under the same collection data prefix.
+        try (var logCapture = new CloseableLogSetup(SolrBackupStrategy.class.getName())) {
+            new CreateSnapshot(args, SnapshotTestContext.factory().noOtelTracking()
+                .createSnapshotCreateContext()).run();
+
+            long alreadyExistsLogs = logCapture.getLogEvents().stream()
+                .filter(m -> m.contains("S3 directory marker already exists"))
+                .count();
+            Assertions.assertTrue(alreadyExistsLogs >= 2,
+                "Second run should hit the 'already exists' skip branch for BOTH markers "
+                    + "(parent + per-snapshot); got count=" + alreadyExistsLogs
+                    + ", events=" + logCapture.getLogEvents());
+        }
+
+        String collDataPrefix = subpath + "/" + snapshotName + "/" + collName + "/" + collName + "/";
+        try (var s3 = testS3Client()) {
+            var keys = listS3Keys(s3, collDataPrefix);
+            log.info("Keys after two snapshots to the same name: {}", keys);
+
+            // Solr appends successive revisions rather than overwriting.
+            Assertions.assertTrue(
+                keys.stream().anyMatch(k -> k.startsWith(collDataPrefix + "zk_backup_0/")),
+                "zk_backup_0/ (first revision) must exist; keys=" + keys);
+            Assertions.assertTrue(
+                keys.stream().anyMatch(k -> k.startsWith(collDataPrefix + "zk_backup_1/")),
+                "zk_backup_1/ (second revision, produced by same-name re-run) must exist; "
+                    + "this is the key fact SolrBackupLayout.findLatestZkBackup relies on; "
+                    + "keys=" + keys);
+            Assertions.assertTrue(
+                keys.stream().anyMatch(k -> k.equals(collDataPrefix + "backup_0.properties")),
+                "backup_0.properties must exist; keys=" + keys);
+            Assertions.assertTrue(
+                keys.stream().anyMatch(k -> k.equals(collDataPrefix + "backup_1.properties")),
+                "backup_1.properties (second revision) must exist; keys=" + keys);
+
+            // Shard metadata picks up a new revision too — md_shard1_0.json AND md_shard1_1.json.
+            // SolrBackupLayout.findLatestShardMetadataFiles must pick the _1 file for this shard.
+            var shardMetaKeys = keys.stream()
+                .filter(k -> k.contains("/shard_backup_metadata/md_shard1_"))
+                .toList();
+            Assertions.assertTrue(shardMetaKeys.stream().anyMatch(k -> k.endsWith("_0.json")),
+                "md_shard1_0.json must exist after run #1; keys=" + shardMetaKeys);
+            Assertions.assertTrue(shardMetaKeys.stream().anyMatch(k -> k.endsWith("_1.json")),
+                "md_shard1_1.json must exist after run #2 (same snapshot name); "
+                    + "keys=" + shardMetaKeys);
+        }
+    }
+
+    /**
+     * G8: Multi-shard variant of the same-name successive-revision test. Solr 8 increments the
+     * per-shard metadata counter independently for each shard, so a 2-shard collection that gets
+     * backed up to the same snapshot name twice produces md_shard1_0, md_shard1_1, md_shard2_0,
+     * md_shard2_1. SolrBackupLayout.findLatestShardMetadataFiles is expected to return the
+     * highest N per shard — without this test nothing in the repo verifies that Solr actually
+     * increments per-shard counters (as opposed to a single global counter). This distinction
+     * matters for the downstream reader: a single global counter would mean md_shard1_1 and
+     * md_shard2_1 point at the same revision, which would break shard-parallel discovery.
+     */
+    @Test
+    void cloudBackup_sameSnapshotNameTwice_multiShard_perShardRevisionCounters() throws Exception {
+        String collName = "incremental_multishard_coll";
+        createCollection(collName, 2);
+        indexDocs(collName, 12);
+
+        String subpath = "incremental-multishard";
+        String snapshotName = "backup_multishard_same_name";
+        var args = makeArgs("s3://" + BUCKET_NAME + "/" + subpath, snapshotName);
+        args.solrCollections = List.of(collName);
+
+        // Run 1
+        new CreateSnapshot(args, SnapshotTestContext.factory().noOtelTracking()
+            .createSnapshotCreateContext()).run();
+
+        // Clear Solr's async-task cache before run 2 (see deleteSolrAsyncStatus javadoc).
+        deleteSolrAsyncStatus(
+            org.opensearch.migrations.bulkload.solr.SolrSnapshotCreator.asyncIdFor(
+                snapshotName, collName));
+
+        // Index more docs, run 2 to the same name
+        indexDocs(collName, 8);
+        new CreateSnapshot(args, SnapshotTestContext.factory().noOtelTracking()
+            .createSnapshotCreateContext()).run();
+
+        String collDataPrefix = subpath + "/" + snapshotName + "/" + collName + "/" + collName + "/";
+        try (var s3 = testS3Client()) {
+            var shardMetaKeys = listS3Keys(s3, collDataPrefix + "shard_backup_metadata/");
+            log.info("Shard metadata keys after two multi-shard snapshots: {}", shardMetaKeys);
+
+            // Expect md_shard1_{0,1}.json AND md_shard2_{0,1}.json — per-shard counter, not global.
+            for (String shard : List.of("shard1", "shard2")) {
+                Assertions.assertTrue(
+                    shardMetaKeys.stream().anyMatch(k -> k.endsWith("/md_" + shard + "_0.json")),
+                    shard + " must have rev 0 metadata; keys=" + shardMetaKeys);
+                Assertions.assertTrue(
+                    shardMetaKeys.stream().anyMatch(k -> k.endsWith("/md_" + shard + "_1.json")),
+                    shard + " must have rev 1 metadata (same-name re-run); "
+                        + "keys=" + shardMetaKeys);
+            }
+
+            // Both revisions of the top-level properties file should coexist.
+            var propsKeys = listS3Keys(s3, collDataPrefix).stream()
+                .filter(k -> k.endsWith(".properties"))
+                .toList();
+            Assertions.assertTrue(propsKeys.stream()
+                    .anyMatch(k -> k.endsWith("/backup_0.properties")),
+                "backup_0.properties should exist; keys=" + propsKeys);
+            Assertions.assertTrue(propsKeys.stream()
+                    .anyMatch(k -> k.endsWith("/backup_1.properties")),
+                "backup_1.properties should exist; keys=" + propsKeys);
+        }
+    }
 }

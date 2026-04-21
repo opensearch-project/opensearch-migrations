@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 import lombok.extern.slf4j.Slf4j;
@@ -50,11 +51,12 @@ public final class SolrBackupLayout {
      * @return path to the latest zk_backup directory, or null if none found
      */
     public static Path findLatestZkBackup(Path collectionDir) {
-        if (!Files.isDirectory(collectionDir)) {
+        var dataDir = resolveCollectionDataDir(collectionDir);
+        if (dataDir == null || !Files.isDirectory(dataDir)) {
             log.warn("Collection directory does not exist: {}", collectionDir);
             return null;
         }
-        try (var entries = Files.list(collectionDir)) {
+        try (var entries = Files.list(dataDir)) {
             var latest = entries
                 .filter(Files::isDirectory)
                 .filter(p -> ZK_BACKUP_PATTERN.matcher(p.getFileName().toString()).matches())
@@ -64,7 +66,7 @@ public final class SolrBackupLayout {
                 return latest.get();
             }
         } catch (IOException e) {
-            log.warn("Failed to list directories in {}", collectionDir, e);
+            log.warn("Failed to list directories in {}", dataDir, e);
         }
         return null;
     }
@@ -127,5 +129,93 @@ public final class SolrBackupLayout {
     private static int extractShardMetadataIndex(Path path) {
         var m = SHARD_METADATA_PATTERN.matcher(path.getFileName().toString());
         return m.matches() ? Integer.parseInt(m.group(2)) : -1;
+    }
+
+    /**
+     * Resolution of a collection's data prefix when listing subdirectories
+     * (typically from an S3 listing). Solr 8 backups produce two possible layouts under
+     * {@code <snapshot>/<collection>/}:
+     * <ul>
+     *   <li>Flat: {@code zk_backup_N/, shard_backup_metadata/, index/} directly under {@code <collection>/}</li>
+     *   <li>Two-level: {@code <innerName>/zk_backup_N/, <innerName>/shard_backup_metadata/, <innerName>/index/}
+     *       where {@code <innerName>} is often (but not always) the collection name.</li>
+     * </ul>
+     * <p>This result tells callers where the data lives relative to {@code <collection>/}:
+     * the empty string for the flat layout, or {@code "<innerName>"} for the two-level layout.
+     */
+    public record CollectionDataPrefix(String dataPrefix, String latestZkBackupName) {
+        /** Returns {@code <collection>/<dataPrefix>} when dataPrefix is non-empty, else {@code <collection>}. */
+        public String joinWith(String collection) {
+            return dataPrefix.isEmpty() ? collection : collection + "/" + dataPrefix;
+        }
+    }
+
+    /**
+     * Resolves the data prefix and latest zk_backup_N under {@code <collection>/} by consulting
+     * a subdirectory listing function (e.g. S3 listing). Returns {@code null} if no zk_backup is
+     * found in either the flat or two-level layout.
+     *
+     * @param collection the collection name
+     * @param listSubDirectories function that, given a path relative to the backup root, returns
+     *                           the direct subdirectory names under it (non-recursive)
+     * @return the resolved data prefix + latest zk_backup name, or {@code null} if none found
+     */
+    public static CollectionDataPrefix resolveCollectionDataPrefix(
+        String collection, Function<String, List<String>> listSubDirectories
+    ) {
+        var subDirs = listSubDirectories.apply(collection);
+        var flatLatest = findLatestZkBackupName(subDirs);
+        if (flatLatest != null) {
+            return new CollectionDataPrefix("", flatLatest);
+        }
+        for (var innerDir : subDirs) {
+            var innerSubDirs = listSubDirectories.apply(collection + "/" + innerDir);
+            var innerLatest = findLatestZkBackupName(innerSubDirs);
+            if (innerLatest != null) {
+                log.info("Found zk_backup in two-level layout: {}/{}/{}", collection, innerDir, innerLatest);
+                return new CollectionDataPrefix(innerDir, innerLatest);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Filesystem counterpart to {@link #resolveCollectionDataPrefix}: given a local
+     * collection directory, returns the directory that actually contains the Solr backup
+     * data files ({@code shard_backup_metadata/}, {@code index/}, {@code zk_backup_N/},
+     * or {@code backup_*.properties}). Descends exactly one level for the Solr 8
+     * two-level incremental layout. Returns {@code collectionDir} unchanged if the data
+     * appears at the top level, or if no data can be located.
+     */
+    public static Path resolveCollectionDataDir(Path collectionDir) {
+        if (collectionDir == null || !Files.isDirectory(collectionDir)) {
+            return collectionDir;
+        }
+        if (containsBackupDataMarkers(collectionDir)) {
+            return collectionDir;
+        }
+        try (var entries = Files.list(collectionDir)) {
+            return entries.filter(Files::isDirectory)
+                .filter(SolrBackupLayout::containsBackupDataMarkers)
+                .findFirst()
+                .orElse(collectionDir);
+        } catch (IOException e) {
+            log.warn("Failed to resolve collection data dir under {}: {}", collectionDir, e.getMessage());
+            return collectionDir;
+        }
+    }
+
+    private static boolean containsBackupDataMarkers(Path dir) {
+        try (var entries = Files.list(dir)) {
+            return entries.anyMatch(p -> {
+                var name = p.getFileName().toString();
+                return name.equals("shard_backup_metadata")
+                    || name.equals("index")
+                    || ZK_BACKUP_PATTERN.matcher(name).matches()
+                    || name.startsWith("backup_");
+            });
+        } catch (IOException e) {
+            return false;
+        }
     }
 }

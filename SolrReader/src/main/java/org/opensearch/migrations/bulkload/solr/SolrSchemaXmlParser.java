@@ -100,6 +100,8 @@ public class SolrSchemaXmlParser {
      * Find and parse the managed-schema.xml from a Solr backup collection directory.
      * Looks in the latest zk_backup_N/configs/&lt;configName&gt;/managed-schema.xml,
      * where N is the highest revision from successive backups to the same location.
+     * Layout (flat vs. two-level) is resolved automatically via
+     * {@link SolrBackupLayout#findLatestZkBackup(Path)}.
      */
     public static JsonNode findAndParse(Path collectionDir) {
         var latestZkBackup = SolrBackupLayout.findLatestZkBackup(collectionDir);
