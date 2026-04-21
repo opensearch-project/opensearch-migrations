@@ -3,56 +3,32 @@
 set -xeuo pipefail
 
 MIGRATIONS_REPO_ROOT_DIR=$(git rev-parse --show-toplevel)
+source "${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/localTestingCommon.sh"
+source "${MIGRATIONS_REPO_ROOT_DIR}/buildImages/backends/k8sHostedBuildkit.sh"
 
 wait_for_cluster_dns() {
-  echo "Waiting for CoreDNS to become ready..."
-  kubectl wait --namespace kube-system \
-    --for=condition=ready pod \
-    --selector k8s-app=kube-dns \
-    --timeout=180s
-
-  echo "Verifying external DNS resolution through the cluster DNS service..."
+  local kube_context
   local attempt
-  for attempt in $(seq 1 30); do
-    if minikube ssh -- nslookup registry-1.docker.io 10.96.0.10 >/dev/null 2>&1; then
-      echo "Cluster DNS can resolve registry-1.docker.io"
-      return 0
+  kube_context="${KUBE_CONTEXT:-minikube}"
+  print_step "Waiting for cluster DNS"
+  echo "Waiting for CoreDNS pod to be created..."
+  for attempt in $(seq 1 60); do
+    if kubectl --context "${kube_context}" get pod -n kube-system -l k8s-app=kube-dns -o name | grep -q .; then
+      break
+    fi
+    if [[ "${attempt}" -eq 60 ]]; then
+      echo "CoreDNS pod was not created within the timeout" >&2
+      return 1
     fi
     sleep 2
   done
 
-  echo "Cluster DNS did not resolve registry-1.docker.io within the timeout" >&2
-  return 1
-}
-
-print_step() {
-  echo
-  echo "==> $1"
-}
-
-wait_for_ma_runtime() {
-  print_step "Waiting for core Migration Assistant workloads"
-  kubectl --context "${KUBE_CONTEXT}" -n ma rollout status statefulset/migration-console --timeout=10m
-  kubectl --context "${KUBE_CONTEXT}" -n ma wait --for=condition=ready pod -l app.kubernetes.io/name=argo-workflows-server --timeout=10m
-  kubectl --context "${KUBE_CONTEXT}" -n ma wait --for=condition=ready pod -l app.kubernetes.io/name=strimzi-cluster-operator --timeout=10m
-}
-
-wait_for_test_clusters() {
-  print_step "Waiting for local source and target test clusters"
-  kubectl --context "${KUBE_CONTEXT}" -n ma rollout status statefulset/elasticsearch-master --timeout=10m
-  kubectl --context "${KUBE_CONTEXT}" -n ma rollout status statefulset/opensearch-cluster-master --timeout=10m
-}
-
-print_next_steps() {
-  print_step "Local environment is ready"
-  echo "Migration console:"
-  echo "  kubectl -n ma exec --stdin --tty migration-console-0 -- /bin/bash"
-  echo
-  echo "Current pods:"
-  kubectl --context "${KUBE_CONTEXT}" -n ma get pods
-  echo
-  echo "Helm releases:"
-  helm --kube-context "${KUBE_CONTEXT}" -n ma list
+  echo "Waiting for CoreDNS to become ready..."
+  kubectl --context "${kube_context}" wait --namespace kube-system \
+    --for=condition=ready pod \
+    --selector k8s-app=kube-dns \
+    --timeout=180s
+  echo "CoreDNS is ready."
 }
 
 ## One time things - will require a restart to minikube if it was already running
@@ -76,103 +52,20 @@ else
     --insecure-registry="${INSECURE_REGISTRY_CIDR}"
 fi
 
-wait_for_cluster_dns
-
-cd "${MIGRATIONS_REPO_ROOT_DIR}"
-gradlew() {
-    "${MIGRATIONS_REPO_ROOT_DIR}/gradlew" "$@"
-}
-
 export KUBE_CONTEXT="${KUBE_CONTEXT:-minikube}"
-
-export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
-export BUILDKIT_HELM_ARGS="--set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0"
-print_step "Preparing BuildKit and local registry services"
-"${MIGRATIONS_REPO_ROOT_DIR}"/buildImages/setUpK8sImageBuildServices.sh
-
-BUILDER_NAME="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
-
+wait_for_cluster_dns
 LOCAL_REGISTRY_PORT="${LOCAL_REGISTRY_PORT:-30500}"
 MINIKUBE_IP="$(minikube ip)"
 LOCAL_REGISTRY="${MINIKUBE_IP}:${LOCAL_REGISTRY_PORT}"
-export LOCAL_REGISTRY
-echo "Using local registry at: ${LOCAL_REGISTRY}"
+BUILD_REGISTRY_ENDPOINT="${BUILD_REGISTRY_ENDPOINT:-localhost:5001}"
+POST_MA_INSTALL_HOOK="${POST_MA_INSTALL_HOOK:-wait_for_ma_runtime}"
+POST_TC_INSTALL_HOOK="${POST_TC_INSTALL_HOOK:-wait_for_test_clusters}"
 
-ARCH=$(uname -m)
-case "$ARCH" in
-  x86_64)
-    PLATFORM="amd64"
-    ;;
-  arm64|aarch64)
-    PLATFORM="arm64"
-    ;;
-  *)
-    echo "Unsupported architecture: $ARCH"
-    exit 1
-    ;;
-esac
-
-print_step "Building container images for ${PLATFORM}"
-gradlew :buildImages:buildImagesToRegistry_$PLATFORM -Pbuilder="$BUILDER_NAME"
-
-kubectl config set-context "${KUBE_CONTEXT}" --namespace=ma
+run_local_test_deploy
 
 # Nice to have additions to minikube
 print_step "Enabling metrics-server addon"
 minikube addons enable metrics-server
-
-cd "${MIGRATIONS_REPO_ROOT_DIR}"/deployment/k8s/
-
-# Helm installs
-print_step "Updating Helm dependencies"
-helm dependency update charts/aggregates/testClusters
-helm dependency update charts/aggregates/migrationAssistantWithArgo
-
-if [ "${USE_LOCAL_REGISTRY:-false}" = "true" ]; then
-  echo "Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
-  print_step "Installing Migration Assistant chart"
-  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
-    --wait --timeout 10m \
-    -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml \
-    --set "images.captureProxy.repository=${LOCAL_REGISTRY}/migrations/capture_proxy" \
-    --set "images.captureProxy.tag=latest" \
-    --set "images.captureProxy.pullPolicy=Always" \
-    --set "images.installer.repository=${LOCAL_REGISTRY}/migrations/migration_console" \
-    --set "images.installer.tag=latest" \
-    --set "images.installer.pullPolicy=Always" \
-    --set "images.migrationConsole.repository=${LOCAL_REGISTRY}/migrations/migration_console" \
-    --set "images.migrationConsole.tag=latest" \
-    --set "images.migrationConsole.pullPolicy=Always" \
-    --set "images.trafficReplayer.repository=${LOCAL_REGISTRY}/migrations/traffic_replayer" \
-    --set "images.trafficReplayer.tag=latest" \
-    --set "images.trafficReplayer.pullPolicy=Always" \
-    --set "images.reindexFromSnapshot.repository=${LOCAL_REGISTRY}/migrations/reindex_from_snapshot" \
-    --set "images.reindexFromSnapshot.tag=latest" \
-    --set "images.reindexFromSnapshot.pullPolicy=Always"
-
-  wait_for_ma_runtime
-
-  print_step "Installing local source and target test clusters"
-  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
-      --wait --timeout 10m \
-      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard"
-else
-  echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
-  print_step "Installing Migration Assistant chart"
-  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
-    --wait --timeout 10m \
-    -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
-
-  wait_for_ma_runtime
-
-  print_step "Installing local source and target test clusters"
-  helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
-    --wait --timeout 10m
-fi
-
-wait_for_test_clusters
-print_next_steps
-
 
 # Other useful stuff...
 

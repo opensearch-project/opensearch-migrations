@@ -12,11 +12,11 @@ class RegistryImageBuildUtils {
         final String hostUrl      // For Jib, which runs in the JVM directly (e.g., localhost:5001)
         final String containerUrl // For BuildKit, which runs in a container (e.g., docker-registry:5000)
 
-        Registry(String rawUrl) {
+        Registry(String rawUrl, String localContainerUrl="docker-registry:5000") {
             this.hostUrl = rawUrl
-            // Assume that to the container that anything on localhost should map to docker-registry:5000
+            // Keep the host-visible endpoint for Jib, but make the container-visible endpoint explicit.
             if (rawUrl.startsWith("localhost:")) {
-                this.containerUrl = "docker-registry:5000"
+                this.containerUrl = localContainerUrl
             } else {
                 this.containerUrl = rawUrl
             }
@@ -272,7 +272,7 @@ class RegistryImageBuildUtils {
             try {
                 def context = "kubectl config current-context".execute().text.trim()
                 if (context) {
-                    // NOTE: This naming convention must match setupK8sBuilders.sh's BUILDER_NAME derivation
+                    // NOTE: This naming convention must match the k8s-hosted builder setup scripts.
                     builder = "builder-" + context.replaceAll("[^a-zA-Z0-9_-]", "-")
                     if (!builderWarningShown) {
                         project.logger.lifecycle("No -Pbuilder specified, derived '${builder}' from kube context '${context}'")

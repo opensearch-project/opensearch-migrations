@@ -25,6 +25,36 @@ echo "Will start minikube, build images, and install the MA helm chart for those
 $(git rev-parse --show-toplevel)/deployment/k8s/localTesting.sh
 ```
 
+### kind
+
+Install prerequisites (see below), including `kind`.
+
+This script creates a `kind` cluster, starts or reuses an external local
+registry at `localhost:5002` by default, starts or reuses an external `buildkitd`
+container, builds the project images into that registry, and installs the same
+helm charts used by the Minikube flow.
+
+```bash
+echo "Will create/reuse a kind cluster, build images, and install the MA helm chart for those images"
+$(git rev-parse --show-toplevel)/deployment/k8s/kindTesting.sh
+```
+
+To fully clean up the `kind` test environment created by that workflow,
+including the docker-hosted registry container, docker-hosted BuildKit
+container, and builder state, run:
+
+```bash
+$(git rev-parse --show-toplevel)/deployment/k8s/kindCleanup.sh
+```
+
+The external `docker-registry` and `buildkitd` containers now use named Docker
+volumes, so deleting the containers does not delete their stored images or
+BuildKit cache. To force a cold reset of those volumes too, run:
+
+```bash
+KIND_PRUNE_VOLUMES=true $(git rev-parse --show-toplevel)/deployment/k8s/kindCleanup.sh
+```
+
 Run this to open the migration-console terminal so that you can run 
 `workflow commands`
 
@@ -46,12 +76,12 @@ As a developer, you'll need to install
 * [kubectl](https://kubernetes.io/docs/tasks/tools/)
 * [helm](https://helm.sh/docs/intro/install/)
 
-### Install docker (for minikube and legacy docker builds)
+### Install docker
 Follow instructions [here](https://docs.docker.com/engine/install/) to set up Docker. Docker can be used to build Docker images as well as run a local Kubernetes cluster. 
 
 Notice that there are two different gradle tasks to build images:
 * [:TrafficCapture:dockerSolution:buildDockerImages](../../TrafficCapture/dockerSolution/README.md) builds all the images for the ECS solution and can also bring up a docker compose environment to demonstrate capture and replay.
-* [:buildImagesToRegistry](../../buildImages/README.md) builds the same set of images using jib and buildkit.  These to not require docker and can be run from a container.  In a fully-containerized K8s environment, these are necessary to complete builds.  CI pipelines are beginnning to use this project rather than the dockerSolution one.
+* [:buildImagesToRegistry](../../buildImages/README.md) builds the same set of images using jib and buildkit. These do not require docker and can be run from a container. In a fully-containerized K8s environment, these are necessary to complete builds.
 
 ### Setup a Kubernetes cluster
 
@@ -77,6 +107,27 @@ A convenience script `minikubeLocal.sh` is located in this directory which wraps
 ./miniKubeLocal.sh --pause
 ./miniKubeLocal.sh --delete
 ```
+
+### Install kind
+
+Install `kind` from the upstream release or your package manager of choice.
+The `kindTesting.sh` script assumes the cluster is created from
+[kindClusterConfig.yaml](kindClusterConfig.yaml), which configures kind to pull
+project images from the local registry mirror at `localhost:5002` by default.
+
+The local testing scripts use different build backends:
+* `localTesting.sh` uses the `k8sHosted` backend, with BuildKit and the registry running in Kubernetes.
+* `kindTesting.sh` uses the `dockerHosted` backend, with `docker-registry` and `buildkitd` running as Docker containers and kind nodes pulling from that registry.
+
+Those backend implementations live under [buildImages/backends](../../buildImages/backends), which keeps image-build orchestration with the build tooling.
+
+This split allows the two local flows to coexist on one host by default:
+* Minikube keeps using host port `5001`
+* `kind` uses host port `5002`
+
+If you want the kind cluster to run on OrbStack instead of Docker Desktop,
+switch the active Docker context before running the script so `docker` and
+`kind` target the same backend.
 
 ## Deploying
 

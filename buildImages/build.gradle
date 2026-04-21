@@ -5,8 +5,11 @@ import org.opensearch.migrations.image.PullThroughCacheHelper
 def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5001'
 def intermediateUrl = rootProject.findProperty('intermediateRegistry') ?: publishedUrl
 
-def publishedRegistry = new Registry(publishedUrl.toString())
-def intermediateRegistry = new Registry(intermediateUrl.toString())
+def localContainerRegistryEndpoint =
+        rootProject.findProperty('localContainerRegistryEndpoint')?.toString() ?: 'docker-registry:5000'
+
+def publishedRegistry = new Registry(publishedUrl.toString(), localContainerRegistryEndpoint)
+def intermediateRegistry = new Registry(intermediateUrl.toString(), localContainerRegistryEndpoint)
 
 // ECR pull-through cache: auto-derived from ECR_PULL_THROUGH_ENDPOINT env var in root build.gradle.
 // Can be overridden with: ./gradlew buildImagesToRegistry -PpullThroughCacheEndpoint=123456789.dkr.ecr.us-east-1.amazonaws.com
