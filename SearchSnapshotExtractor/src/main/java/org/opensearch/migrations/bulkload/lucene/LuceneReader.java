@@ -117,6 +117,12 @@ public class LuceneReader {
         // Start at
         int startDocIdInSegment = (docStartingId <= segmentDocBase) ? 0 : docStartingId - segmentDocBase;
 
+        // Per-segment term position cache. Built lazily on first need. This local reference
+        // lives only inside the Flux created below; once that Flux terminates, the index
+        // and the large Map<docId,List<String>> it holds become GC-eligible naturally.
+        // No instance-level cache on the LeafReader, so no explicit clear step is required.
+        final SegmentTermIndex termIndex = new SegmentTermIndex();
+
         // For any errors, we want to log the segment reader debug info so we can see which segment is causing the issue.
         // This allows us to pass the supplier to getDocument without having to recompute the debug info
         // every time if requested multiple times.
@@ -136,7 +142,7 @@ public class LuceneReader {
         return Flux.fromStream(idxStream.boxed())
             .flatMapSequential(docIdx -> Mono.defer(() -> {
                     try {
-                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext);
+                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex);
                         return Mono.justOrEmpty(document);
                     } catch (Exception e) {
                         log.atError().setMessage("Error reading document from reader {} with index: {}")
@@ -156,9 +162,16 @@ public class LuceneReader {
         return readDocsFromSegment(readerAndBase, docStartingId, indexDirectoryPath, operation, null);
     }
 
-    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, 
+    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
             final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
             FieldMappingContext mappingContext) {
+        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo,
+            indexDirectoryPath, operation, mappingContext, null);
+    }
+
+    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
+            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
+            FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
         LuceneDocument document;
         try {
             document = reader.document(luceneDocId);
@@ -212,7 +225,7 @@ public class LuceneReader {
             }
 
             sourceBytes = resolveSourceBytes(sourceBytes, reader, luceneDocId, document, mappingContext,
-                openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath);
+                openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
             if (sourceBytes == null) {
                 return null;
             }
@@ -246,10 +259,10 @@ public class LuceneReader {
      */
     private static byte[] resolveSourceBytes(byte[] sourceBytes, LuceneLeafReader reader, int luceneDocId,
             LuceneDocument document, FieldMappingContext mappingContext, String openSearchDocId,
-            Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath) {
+            Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, SegmentTermIndex termIndex) {
         if (sourceBytes == null || sourceBytes.length == 0) {
             return reconstructSourceBytes(reader, luceneDocId, document, mappingContext,
-                openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath);
+                openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
         }
         if (mappingContext != null) {
             String merged = SourceReconstructor.mergeWithDocValues(
@@ -261,7 +274,7 @@ public class LuceneReader {
 
     private static byte[] reconstructSourceBytes(LuceneLeafReader reader, int luceneDocId,
             LuceneDocument document, FieldMappingContext mappingContext, String openSearchDocId,
-            Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath) {
+            Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, SegmentTermIndex termIndex) {
         if (mappingContext == null) {
             log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have the _source field enabled.")
                 .addArgument(luceneDocId)
@@ -272,7 +285,7 @@ public class LuceneReader {
         }
         log.atDebug().setMessage("Document {} has no _source, attempting reconstruction from doc_values and stored fields")
             .addArgument(openSearchDocId).log();
-        String reconstructed = SourceReconstructor.reconstructSource(reader, luceneDocId, document, mappingContext);
+        String reconstructed = SourceReconstructor.reconstructSource(reader, luceneDocId, document, mappingContext, termIndex);
         if (reconstructed == null || reconstructed.isEmpty()) {
             log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, _source is missing and reconstruction failed.")
                 .addArgument(luceneDocId)

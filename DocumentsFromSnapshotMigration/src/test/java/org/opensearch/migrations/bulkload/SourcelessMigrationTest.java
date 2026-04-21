@@ -166,7 +166,7 @@ public class SourcelessMigrationTest extends SourceTestBase {
             // Index documents representing emails
             String doc1 = "{"
                 + "\"subject\": \"Meeting Tomorrow at 10am\","
-                + "\"body\": \"Hi team, the weekly standup is moved to 10am tomorrow. Please update your team calendars.\","
+                + "\"body\": \"Hi team, please review the docs at https://wiki.example.com/migration before the meeting. If you have questions email support@example.com or reach out to the team directly.\","
                 + "\"from_addr\": \"alice@example.com\","
                 + "\"to_addr\": \"team@example.com\","
                 + "\"message_id\": \"<abc123@mail.example.com>\","
@@ -323,42 +323,17 @@ public class SourcelessMigrationTest extends SourceTestBase {
             // by their indexed position (via PostingsEnum.POSITIONS). This preserves the
             // original word order but is still lossy: lowercased, stopwords removed,
             // punctuation lost. Duplicate terms appear at each original position.
-            Assertions.assertFalse(doc1Source.path("body").isMissingNode(),
-                "Analyzed non-stored field should be reconstructed (lossy) from inverted index terms: " + doc1Source);
+            // URLs and emails are preserved as single tokens by the uax_url_email tokenizer.
             String reconstructedBody = doc1Source.path("body").asText();
             log.info("Lossy body reconstruction: '{}'", reconstructedBody);
-            // The original: "Hi team, the weekly standup is moved to 10am tomorrow. Please update your team calendars."
-            // After uax_url_email tokenizer + lowercase + stop filter, expect tokens in original order:
-            // hi team weekly standup moved 10am tomorrow please update your team calendars
-            // (stopwords "the", "is", "to" removed; all lowercased; original word order preserved;
-            //  "team" appears twice at its original positions)
-            Assertions.assertTrue(reconstructedBody.contains("10am"),
-                "Should contain '10am' token: " + reconstructedBody);
-            Assertions.assertTrue(reconstructedBody.contains("calendars"),
-                "Should contain 'calendars' token: " + reconstructedBody);
-            Assertions.assertTrue(reconstructedBody.contains("standup"),
-                "Should contain 'standup' token: " + reconstructedBody);
-            Assertions.assertTrue(reconstructedBody.contains("tomorrow"),
-                "Should contain 'tomorrow' token: " + reconstructedBody);
-            // Verify original word order is preserved (not alphabetical)
-            int standupPos = reconstructedBody.indexOf("standup");
-            int tomorrowPos = reconstructedBody.indexOf("tomorrow");
-            Assertions.assertTrue(standupPos < tomorrowPos,
-                "Original word order should be preserved — 'standup' before 'tomorrow': " + reconstructedBody);
-            // Verify duplicate term "team" appears twice at correct positions
-            int firstTeam = reconstructedBody.indexOf("team");
-            int secondTeam = reconstructedBody.indexOf("team", firstTeam + 1);
-            Assertions.assertTrue(secondTeam > firstTeam,
-                "Duplicate term 'team' should appear twice: " + reconstructedBody);
-            Assertions.assertTrue(firstTeam < standupPos,
-                "First 'team' should be near start (before 'standup'): " + reconstructedBody);
-            Assertions.assertTrue(secondTeam > tomorrowPos,
-                "Second 'team' should be after 'tomorrow': " + reconstructedBody);
-            // Stopwords should be removed by the analyzer
-            Assertions.assertFalse(reconstructedBody.contains(" the "),
-                "Stopword 'the' should have been removed by analyzer: " + reconstructedBody);
-            Assertions.assertFalse(reconstructedBody.contains(" is "),
-                "Stopword 'is' should have been removed by analyzer: " + reconstructedBody);
+            // Original: "Hi team, please review the docs at https://wiki.example.com/migration before the meeting.
+            //            If you have questions email support@example.com or reach out to the team directly."
+            // After uax_url_email + lowercase + stop: stopwords removed, lowercased, URLs/emails intact,
+            // "team" appears twice at original positions, word order preserved
+            Assertions.assertEquals(
+                "hi team please review docs https://wiki.example.com/migration before meeting "
+                    + "you have questions email support@example.com reach out team directly",
+                reconstructedBody);
 
             // STORED + NOT_ANALYZED fields: exact reconstruction via stored field
             Assertions.assertEquals("alice@example.com", doc1Source.path("from_addr").asText(),
@@ -427,18 +402,13 @@ public class SourcelessMigrationTest extends SourceTestBase {
             Assertions.assertTrue(doc2Source.path("has_attachment").asBoolean(),
                 "has_attachment=true should reconstruct");
 
-            // doc2 body: "Please find the invoice for Q4 services attached. Payment is due within 30 days."
-            // After analysis: stopwords removed, lowercased, original word order preserved via positions
-            Assertions.assertFalse(doc2Source.path("body").isMissingNode(),
-                "doc2 body should be reconstructed (lossy): " + doc2Source);
+            // doc2 body: lossy reconstruction from inverted index
+            // Original: "Please find the invoice for Q4 services attached. Payment is due within 30 days."
             String doc2Body = doc2Source.path("body").asText();
             log.info("doc2 lossy body: '{}'", doc2Body);
-            Assertions.assertTrue(doc2Body.contains("invoice"),
-                "doc2 body should contain 'invoice': " + doc2Body);
-            Assertions.assertTrue(doc2Body.contains("payment"),
-                "doc2 body should contain 'payment': " + doc2Body);
-            Assertions.assertTrue(doc2Body.contains("q4"),
-                "doc2 body should contain 'q4' (lowercased from Q4): " + doc2Body);
+            Assertions.assertEquals(
+                "please find invoice q4 services attached payment due within 30 days",
+                doc2Body);
 
             // ============================================================
             // Verify doc3 — sparse document (missing optional fields)

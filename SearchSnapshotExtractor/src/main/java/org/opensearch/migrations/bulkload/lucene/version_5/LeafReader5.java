@@ -4,7 +4,10 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
@@ -260,31 +263,40 @@ public class LeafReader5 implements LuceneLeafReader {
         return null;
     }
 
+    /**
+     * Single-pass walk of the terms dictionary for {@code fieldName}. Produces a
+     * docId -> position-ordered term list map used by {@link SegmentTermIndex}
+     * to reconstruct analyzed-text fields when neither stored fields nor
+     * doc_values are available.
+     *
+     * No caching here: the surrounding {@link SegmentTermIndex} owns the
+     * returned map, and that index lives only as long as the per-segment Flux
+     * created in {@link org.opensearch.migrations.bulkload.lucene.LuceneReader#readDocsFromSegment}.
+     */
     @Override
-    public List<String> getAllTermsForDocument(int docId, String fieldName) throws IOException {
+    public Map<Integer, List<String>> buildTermPositionIndex(String fieldName) throws IOException {
         Terms terms = wrapped.terms(fieldName);
-        if (terms == null) return Collections.emptyList();
-        // Collect (position -> term) pairs using positions from the postings list
-        java.util.TreeMap<Integer, String> positionToTerm = new java.util.TreeMap<>();
+        if (terms == null) return Collections.emptyMap();
+        // docId -> (position -> term)
+        Map<Integer, TreeMap<Integer, String>> docPositions = new HashMap<>();
         TermsEnum termsEnum = terms.iterator();
         BytesRef term;
         while ((term = termsEnum.next()) != null) {
+            String termStr = term.utf8ToString();
             PostingsEnum postings = termsEnum.postings(null, PostingsEnum.POSITIONS);
             int doc;
             while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
-                if (doc == docId) {
-                    String termStr = term.utf8ToString();
-                    int freq = postings.freq();
-                    for (int i = 0; i < freq; i++) {
-                        int pos = postings.nextPosition();
-                        positionToTerm.put(pos, termStr);
-                    }
-                    break;
+                TreeMap<Integer, String> positions = docPositions.computeIfAbsent(doc, k -> new TreeMap<>());
+                int freq = postings.freq();
+                for (int i = 0; i < freq; i++) {
+                    int pos = postings.nextPosition();
+                    positions.put(pos, termStr);
                 }
-                if (doc > docId) break;
             }
         }
-        return new ArrayList<>(positionToTerm.values());
+        Map<Integer, List<String>> result = new HashMap<>(docPositions.size());
+        docPositions.forEach((docId, positions) -> result.put(docId, new ArrayList<>(positions.values())));
+        return result;
     }
 
     public String toString() {

@@ -33,8 +33,13 @@ public class SourceReconstructor {
     /**
      * Reconstructs _source JSON from stored fields and doc_values for a document.
      * Uses mapping context for type-aware conversion when available.
+     *
+     * @param termIndex per-segment term position cache, scoped to the current
+     *                  segment's Flux; may be null if caller does not need
+     *                  analyzed-text fallback (treated as empty).
      */
-    public static String reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document, FieldMappingContext mappingContext) {
+    public static String reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document,
+            FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
         try {
             Map<String, Object> reconstructed = new LinkedHashMap<>();
             
@@ -89,7 +94,7 @@ public class SourceReconstructor {
                     }
                     FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
                     if (mappingInfo != null) {
-                        var fallbackValue = reader.getValueFromPointsOrTerms(docId, fieldName, mappingInfo.type());
+                        var fallbackValue = reader.getValueFromPointsOrTerms(docId, fieldName, mappingInfo.type(), termIndex);
                         if (fallbackValue.isPresent()) {
                             Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
                             if (converted != null) {
@@ -110,6 +115,12 @@ public class SourceReconstructor {
             log.atWarn().setCause(e).setMessage("Failed to reconstruct source for document {}").addArgument(docId).log();
             return null;
         }
+    }
+
+    /** Backwards-compatible overload for callers that don't supply a term index (e.g. Solr path). */
+    public static String reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document,
+            FieldMappingContext mappingContext) {
+        return reconstructSource(reader, docId, document, mappingContext, null);
     }
 
     /**
