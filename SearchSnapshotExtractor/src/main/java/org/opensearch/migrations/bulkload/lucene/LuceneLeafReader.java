@@ -59,7 +59,18 @@ public interface LuceneLeafReader {
     default String getValueFromTerms(int docId, String fieldName) throws IOException { return null; }
 
     /**
-     * Fallback recovery: tries Points (for numerics/IP/date) or terms (for boolean).
+     * Reconstructs text from the inverted index by collecting all terms for a document
+     * and ordering them by their indexed position. Uses PostingsEnum.POSITIONS to read
+     * each term's position(s) and freq() to handle repeated terms. The result preserves
+     * the original word order but is still lossy (stopwords removed, lowercased, etc.).
+     */
+    default java.util.List<String> getAllTermsForDocument(int docId, String fieldName) throws IOException {
+        return java.util.Collections.emptyList();
+    }
+
+    /**
+     * Fallback recovery: tries Points (for numerics/IP/date), terms (for boolean),
+     * or full term collection (for analyzed strings without stored fields).
      * Used when doc_values and stored fields are not available.
      */
     default java.util.Optional<Object> getValueFromPointsOrTerms(int docId, String fieldName, EsFieldType fieldType) throws IOException {
@@ -67,6 +78,14 @@ public interface LuceneLeafReader {
             case BOOLEAN -> {
                 String term = getValueFromTerms(docId, fieldName);
                 yield term != null ? java.util.Optional.of(term) : java.util.Optional.empty();
+            }
+            case STRING -> {
+                // For analyzed string fields without stored fields or doc_values,
+                // reconstruct a lossy version by collecting all indexed tokens.
+                var terms = getAllTermsForDocument(docId, fieldName);
+                yield (terms != null && !terms.isEmpty())
+                    ? java.util.Optional.of(String.join(" ", terms))
+                    : java.util.Optional.empty();
             }
             default -> {
                 var points = getPointValues(docId, fieldName);

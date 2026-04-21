@@ -260,6 +260,33 @@ public class LeafReader5 implements LuceneLeafReader {
         return null;
     }
 
+    @Override
+    public List<String> getAllTermsForDocument(int docId, String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null) return Collections.emptyList();
+        // Collect (position -> term) pairs using positions from the postings list
+        java.util.TreeMap<Integer, String> positionToTerm = new java.util.TreeMap<>();
+        TermsEnum termsEnum = terms.iterator();
+        BytesRef term;
+        while ((term = termsEnum.next()) != null) {
+            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.POSITIONS);
+            int doc;
+            while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
+                if (doc == docId) {
+                    String termStr = term.utf8ToString();
+                    int freq = postings.freq();
+                    for (int i = 0; i < freq; i++) {
+                        int pos = postings.nextPosition();
+                        positionToTerm.put(pos, termStr);
+                    }
+                    break;
+                }
+                if (doc > docId) break;
+            }
+        }
+        return new ArrayList<>(positionToTerm.values());
+    }
+
     public String toString() {
         return wrapped.toString();
     }

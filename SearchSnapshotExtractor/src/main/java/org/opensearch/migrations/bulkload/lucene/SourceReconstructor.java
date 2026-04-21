@@ -93,7 +93,6 @@ public class SourceReconstructor {
                         if (fallbackValue.isPresent()) {
                             Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
                             if (converted != null) {
-                                log.debug("[Fallback] Recovered field {} = {}", fieldName, converted);
                                 reconstructed.put(fieldName, converted);
                             }
                         }

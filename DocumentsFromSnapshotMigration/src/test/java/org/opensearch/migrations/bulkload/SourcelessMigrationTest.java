@@ -48,12 +48,14 @@ import org.testcontainers.lifecycle.Startables;
  * Models a realistic email-archive index pattern with custom analyzers,
  * stored vs non-stored fields, and mixed field types.
  *
- * Documents are reconstructed from stored fields and doc_values via SourceReconstructor.
+ * Documents are reconstructed from stored fields, doc_values, and the inverted
+ * index via SourceReconstructor.
  *
  * Key behaviors tested:
  * - Stored fields (store: "yes") reconstruct with exact original values
  * - Not-analyzed strings reconstruct exactly via doc_values
- * - Analyzed strings WITHOUT store may lose stopwords/case (only tokens available)
+ * - Analyzed strings WITHOUT store: lossy reconstruction from inverted index tokens
+ *   (lowercased, stopwords removed, but original word order IS preserved via term positions)
  * - Numeric, boolean, date, IP types reconstruct correctly
  */
 @Slf4j
@@ -164,7 +166,7 @@ public class SourcelessMigrationTest extends SourceTestBase {
             // Index documents representing emails
             String doc1 = "{"
                 + "\"subject\": \"Meeting Tomorrow at 10am\","
-                + "\"body\": \"Hi team, the weekly standup is moved to 10am tomorrow. Please update your calendars.\","
+                + "\"body\": \"Hi team, the weekly standup is moved to 10am tomorrow. Please update your team calendars.\","
                 + "\"from_addr\": \"alice@example.com\","
                 + "\"to_addr\": \"team@example.com\","
                 + "\"message_id\": \"<abc123@mail.example.com>\","
@@ -315,18 +317,48 @@ public class SourcelessMigrationTest extends SourceTestBase {
                 doc1Source.path("subject").asText(),
                 "Stored analyzed field should preserve original text exactly");
 
-            // NOT-STORED + ANALYZED field: CANNOT be reconstructed in ES 1.7.
+            // NOT-STORED + ANALYZED field: Lossy reconstruction from inverted index.
             // The body field uses uax_url_email analyzer without "store": true.
-            // In ES 1.7 (Lucene 4.x), analyzed strings only exist as tokens in the
-            // inverted index — no stored field, no doc_values for analyzed strings.
-            // There is no per-document data to reconstruct from, so the field is absent.
-            // This is a fundamental limitation: users must mark fields with store=true
-            // if they need them reconstructed from a sourceless index.
-            Assertions.assertTrue(doc1Source.path("body").isMissingNode(),
-                "Analyzed non-stored field should NOT be reconstructable in ES 1.7 — "
-                    + "no stored field or doc_values exist for analyzed strings. "
-                    + "If this assertion fails, the reconstruction logic changed. "
-                    + "Got: " + doc1Source.path("body"));
+            // We reconstruct by collecting all terms for the document and ordering them
+            // by their indexed position (via PostingsEnum.POSITIONS). This preserves the
+            // original word order but is still lossy: lowercased, stopwords removed,
+            // punctuation lost. Duplicate terms appear at each original position.
+            Assertions.assertFalse(doc1Source.path("body").isMissingNode(),
+                "Analyzed non-stored field should be reconstructed (lossy) from inverted index terms: " + doc1Source);
+            String reconstructedBody = doc1Source.path("body").asText();
+            log.info("Lossy body reconstruction: '{}'", reconstructedBody);
+            // The original: "Hi team, the weekly standup is moved to 10am tomorrow. Please update your team calendars."
+            // After uax_url_email tokenizer + lowercase + stop filter, expect tokens in original order:
+            // hi team weekly standup moved 10am tomorrow please update your team calendars
+            // (stopwords "the", "is", "to" removed; all lowercased; original word order preserved;
+            //  "team" appears twice at its original positions)
+            Assertions.assertTrue(reconstructedBody.contains("10am"),
+                "Should contain '10am' token: " + reconstructedBody);
+            Assertions.assertTrue(reconstructedBody.contains("calendars"),
+                "Should contain 'calendars' token: " + reconstructedBody);
+            Assertions.assertTrue(reconstructedBody.contains("standup"),
+                "Should contain 'standup' token: " + reconstructedBody);
+            Assertions.assertTrue(reconstructedBody.contains("tomorrow"),
+                "Should contain 'tomorrow' token: " + reconstructedBody);
+            // Verify original word order is preserved (not alphabetical)
+            int standupPos = reconstructedBody.indexOf("standup");
+            int tomorrowPos = reconstructedBody.indexOf("tomorrow");
+            Assertions.assertTrue(standupPos < tomorrowPos,
+                "Original word order should be preserved — 'standup' before 'tomorrow': " + reconstructedBody);
+            // Verify duplicate term "team" appears twice at correct positions
+            int firstTeam = reconstructedBody.indexOf("team");
+            int secondTeam = reconstructedBody.indexOf("team", firstTeam + 1);
+            Assertions.assertTrue(secondTeam > firstTeam,
+                "Duplicate term 'team' should appear twice: " + reconstructedBody);
+            Assertions.assertTrue(firstTeam < standupPos,
+                "First 'team' should be near start (before 'standup'): " + reconstructedBody);
+            Assertions.assertTrue(secondTeam > tomorrowPos,
+                "Second 'team' should be after 'tomorrow': " + reconstructedBody);
+            // Stopwords should be removed by the analyzer
+            Assertions.assertFalse(reconstructedBody.contains(" the "),
+                "Stopword 'the' should have been removed by analyzer: " + reconstructedBody);
+            Assertions.assertFalse(reconstructedBody.contains(" is "),
+                "Stopword 'is' should have been removed by analyzer: " + reconstructedBody);
 
             // STORED + NOT_ANALYZED fields: exact reconstruction via stored field
             Assertions.assertEquals("alice@example.com", doc1Source.path("from_addr").asText(),
@@ -394,6 +426,19 @@ public class SourcelessMigrationTest extends SourceTestBase {
                 "Large size value should reconstruct correctly");
             Assertions.assertTrue(doc2Source.path("has_attachment").asBoolean(),
                 "has_attachment=true should reconstruct");
+
+            // doc2 body: "Please find the invoice for Q4 services attached. Payment is due within 30 days."
+            // After analysis: stopwords removed, lowercased, original word order preserved via positions
+            Assertions.assertFalse(doc2Source.path("body").isMissingNode(),
+                "doc2 body should be reconstructed (lossy): " + doc2Source);
+            String doc2Body = doc2Source.path("body").asText();
+            log.info("doc2 lossy body: '{}'", doc2Body);
+            Assertions.assertTrue(doc2Body.contains("invoice"),
+                "doc2 body should contain 'invoice': " + doc2Body);
+            Assertions.assertTrue(doc2Body.contains("payment"),
+                "doc2 body should contain 'payment': " + doc2Body);
+            Assertions.assertTrue(doc2Body.contains("q4"),
+                "doc2 body should contain 'q4' (lowercased from Q4): " + doc2Body);
 
             // ============================================================
             // Verify doc3 — sparse document (missing optional fields)
