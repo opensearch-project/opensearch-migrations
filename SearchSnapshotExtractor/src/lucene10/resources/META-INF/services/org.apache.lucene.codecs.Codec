@@ -1,3 +1,5 @@
-# No K-NN codec shims ported to Lucene 10 yet.
-# When ES 9 / OS 3 snapshots with k-NN vector fields are encountered,
-# add ported codec class FQNs here (one per line).
+# Codec shims ported to Lucene 10 (ES 9.x / OS 3.x snapshots).
+# Class FQNs are pre-relocation; the ShadowJar rewrites the imports (but NOT service
+# file contents outside the META-INF rewrite handled by mergeServiceFiles) to the
+# shadow.lucene10 namespace at package time.
+org.opensearch.migrations.bulkload.lucene.version_10.Elasticsearch900Lucene101CodecFallback
