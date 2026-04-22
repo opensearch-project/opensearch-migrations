@@ -23,7 +23,7 @@ import * as highlighting from './features/highlighting';
 import * as hitsToDocs from './features/hits-to-docs';
 import * as aggsToFacets from './features/aggs-to-facets';
 import * as responseHeader from './features/response-header';
-import * as updateDoc from './features/update-doc';
+import * as updateRouter from './features/update-router';
 import * as validation from './features/validation';
 import { initValidation } from './features/validation';
 import type { ParamRule } from './features/validation';
@@ -85,7 +85,7 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
       sort.request, // sort=... → sort DSL
     ],
     update: [
-      updateDoc.request, // single doc: /update/json/docs → /_doc/{id}
+      updateRouter.request,   // single entry point: routes /update/* by path and body shape
     ],
   },
 };
@@ -101,7 +101,7 @@ export const responseRegistry: TransformRegistry<ResponseContext> = {
       responseHeader.response, // synthesize responseHeader
     ],
     update: [
-      updateDoc.response, // OpenSearch _doc response → Solr update response format
+      updateRouter.response,  // generic _doc response → Solr format (create/update/delete)
     ],
   },
 };
