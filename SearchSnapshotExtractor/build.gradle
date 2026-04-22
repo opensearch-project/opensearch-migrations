@@ -25,20 +25,6 @@ sourceSets {
     }
 }
 
-// Lucene 10 requires Java 21 — override just the lucene10 compile task's toolchain.
-// The rest of the project stays on Java 17 (see root build.gradle line ~169).
-// foojay-resolver-convention (settings.gradle) auto-downloads JDK 21 on demand.
-tasks.named('compileLucene10Java', JavaCompile).configure {
-    javaCompiler = javaToolchains.compilerFor {
-        languageVersion = JavaLanguageVersion.of(21)
-        vendor = JvmVendorSpec.AMAZON
-    }
-    // The shadow jar relocates everything into shadow.lucene10.* so we can keep the
-    // class-file major version as 21; the shadowed output is loaded reflectively via
-    // separate classloaders (see LuceneIndexReaderFactory).
-    options.release.set(21)
-}
-
 configurations {
     lucene5
     lucene6
@@ -55,6 +41,36 @@ tasks.named('processLucene9Resources').configure {
 
 tasks.named('processLucene10Resources').configure {
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
+// The lucene10 sourceSet contains IndexReader10, which `implements LuceneIndexReader`
+// from the main sourceSet. It therefore needs main's compiled classes (plus their
+// transitive compile dependencies) on its compile classpath. We deliberately do NOT
+// make main depend on lucene10: main loads IndexReader10 reflectively at runtime via
+// the shadowLucene10 jar.
+dependencies {
+    // Only the main sourceSet's compiled classes (for the LuceneIndexReader /
+    // LuceneDirectoryReader interface contract). We deliberately do NOT pull in
+    // main.compileClasspath — that would transitively include shadowLucene10.outputs
+    // via `implementation shadowLucene10.outputs.files` below and create a cycle
+    // (compileJava -> shadowLucene10 -> compileLucene10Java -> compileJava).
+    lucene10Implementation files(sourceSets.main.output.classesDirs)
+    lucene10Implementation project(':RfsCommon')
+    lucene10Implementation libs.slf4j.api
+    lucene10Implementation libs.reactor.core
+}
+
+tasks.named('compileLucene10Java', JavaCompile) {
+    dependsOn tasks.named('compileJava')
+    // Lucene 10 requires JDK 21 (class-file v65). The rest of the project is pinned
+    // to JDK 17, so only this JavaCompile task gets the JDK 21 toolchain override.
+    // Do NOT move this onto the ShadowJar task — ShadowJar has no `javaLauncher`
+    // property and repackages class files without executing them.
+    javaCompiler = javaToolchains.compilerFor {
+        languageVersion = JavaLanguageVersion.of(21)
+        vendor = JvmVendorSpec.AMAZON
+    }
+    options.release.set(21)
 }
 
 tasks.register('shadowLucene5', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
@@ -168,5 +184,9 @@ dependencies {
     implementation shadowLucene6.outputs.files
     implementation shadowLucene7.outputs.files
     implementation shadowLucene9.outputs.files
-    implementation shadowLucene10.outputs.files
+    // The main sourceSet no longer directly imports shadow.lucene10.* — IndexReader10
+    // is loaded reflectively at runtime via LuceneIndexReader.Factory. Keeping this at
+    // compile-time would also create a task cycle:
+    //   compileJava -> shadowLucene10 -> compileLucene10Java -> (main classes) -> compileJava.
+    runtimeOnly shadowLucene10.outputs.files
 }

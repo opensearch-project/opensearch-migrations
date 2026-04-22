@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
-import org.opensearch.migrations.bulkload.lucene.version_10.IndexReader10;
 import org.opensearch.migrations.bulkload.lucene.version_5.IndexReader5;
 import org.opensearch.migrations.bulkload.lucene.version_6.IndexReader6;
 import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
@@ -99,7 +98,24 @@ public interface LuceneIndexReader {
                 case LUCENE_6 -> new IndexReader6(path);
                 case LUCENE_7 -> new IndexReader7(path, caps.softDeletesPossible(), caps.softDeletesFieldName());
                 case LUCENE_9 -> new IndexReader9(path, caps.softDeletesPossible(), caps.softDeletesFieldName());
-                case LUCENE_10 -> new IndexReader10(path, caps.softDeletesPossible(), caps.softDeletesFieldName());
+                case LUCENE_10 -> {
+                    // IndexReader10 lives in the JDK-21-compiled `lucene10` sourceSet and is
+                    // shipped via the `shadowLucene10` jar. Main (JDK 17) cannot import the
+                    // class directly because shadow-jar relocation does not alter class-file
+                    // version — so load it reflectively through the LuceneIndexReader contract.
+                    try {
+                        Class<?> cls = Class.forName(
+                            "org.opensearch.migrations.bulkload.lucene.version_10.IndexReader10");
+                        var ctor = cls.getConstructor(Path.class, boolean.class, String.class);
+                        yield (LuceneIndexReader) ctor.newInstance(
+                            path, caps.softDeletesPossible(), caps.softDeletesFieldName());
+                    } catch (ReflectiveOperationException e) {
+                        throw new RuntimeException(
+                            "Failed to load IndexReader10 — ensure "
+                                + "SearchSnapshotExtractor-*-lucene10-shadow.jar is on the classpath",
+                            e);
+                    }
+                }
             };
         }
     }
