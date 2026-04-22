@@ -30,8 +30,7 @@ Source Context File
     "dataNodeCount": 1,
     "managerNodeCount": 0,
     "serverAccessType": "ipv4",
-    "restrictServerAccessTo": "0.0.0.0/0",
-    "captureProxyEnabled": false
+    "restrictServerAccessTo": "0.0.0.0/0"
   }
 }
 

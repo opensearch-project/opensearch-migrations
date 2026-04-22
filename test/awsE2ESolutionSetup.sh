@@ -46,13 +46,17 @@ clean_up_all () {
   cd "$MIGRATION_CDK_PATH" || exit
   npx cdk destroy "*" --force --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID"
   cd "$EC2_SOURCE_CDK_PATH" || exit
-  npx cdk destroy "*" --force --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
+  # The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
+  cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
+  npx cdk destroy "*" --force --c contextKey="$SOURCE_CONTEXT_ID"
 }
 
 # One-time required CDK bootstrap setup for a given region. Only required if the 'CDKToolkit' CFN stack does not exist
 bootstrap_region () {
   # Picking arbitrary context values to satisfy required values for CDK synthesis. These should not need to be kept in sync with the actual deployment context values
-  cdk bootstrap --require-approval never --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
+  # The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
+  cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
+  cdk bootstrap --require-approval never --c contextKey="$SOURCE_CONTEXT_ID"
 }
 
 usage() {
@@ -177,13 +181,15 @@ else
 fi
 cd opensearch-cluster-cdk && git pull
 npm ci
+# The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
+cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
 if [ "$BOOTSTRAP_REGION" = true ] ; then
   bootstrap_region
 fi
 
 if [ "$SKIP_SOURCE_DEPLOY" = false ] && [ "$CLEAN_UP_ALL" = false ] ; then
   # Deploy source cluster on EC2 instances
-  cdk deploy "*" --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID" --require-approval never
+  cdk deploy "*" --c contextKey="$SOURCE_CONTEXT_ID" --require-approval never
   if [ $? -ne 0 ]; then
     echo "Error: deploy source cluster failed, exiting."
     exit 1
