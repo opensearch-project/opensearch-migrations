@@ -341,15 +341,22 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                     String fieldName = fieldName(config, p);
                     JsonNode fieldValue = source.get(fieldName);
 
-                    if (!config.recoverable()) {
+                    // ES 7.0+ and OpenSearch (any version) ship with soft-deletes enabled
+                    // by default, which causes the engine to write a stored "_recovery_source"
+                    // field containing the full original _source JSON whenever
+                    // `_source.enabled: false`. When present, every field is recoverable
+                    // regardless of its doc_values / store settings. ES 6.x technically has
+                    // the feature (since 6.5) but soft-deletes is opt-in there, so the field
+                    // is absent by default.
+                    boolean hasRecoverySource = UnboundVersionMatchers.anyOS.test(sourceVersion.getVersion())
+                        || !UnboundVersionMatchers.isBelowES_7_X.test(sourceVersion.getVersion());
+                    if (!config.recoverable() && !hasRecoverySource) {
                         assertEquals(null, fieldValue, fieldName + " should NOT be recovered (unsupported type)");
                         continue;
                     }
 
                     boolean canRecoverFromPoints = pointsSupported && config.supportsPoints;
-                    boolean isES8Plus = !UnboundVersionMatchers.isBelowES_8_X.test(sourceVersion.getVersion())
-                        && !VersionMatchers.anyOS.test(sourceVersion.getVersion());
-                    boolean canRecoverFromTerms = config.targetType.equals("boolean") && !isES8Plus;
+                    boolean canRecoverFromTerms = config.targetType.equals("boolean") && !hasRecoverySource;
                     // Un-tokenized string fields (keyword, or ES 1-4 "string" with index:not_analyzed)
                     // store the entire value as a single indexed term, so reconstruction from the
                     // inverted index round-trips losslessly even when doc_values/stored are disabled.
@@ -362,9 +369,11 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                     boolean preBkdNumerics = UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
                     boolean canRecoverFromNumericTerms = preBkdNumerics && config.supportsPoints;
                     boolean alwaysHasDocValues = config.sourceType.equals("wildcard");
+                    boolean canRecoverFromRecoverySource = hasRecoverySource;
                     boolean shouldRecover = p.hasStore || p.hasDv || canRecoverFromPoints
                         || canRecoverFromTerms || canRecoverFromKeywordTerms
-                        || canRecoverFromNumericTerms || alwaysHasDocValues;
+                        || canRecoverFromNumericTerms || alwaysHasDocValues
+                        || canRecoverFromRecoverySource;
                     if (shouldRecover) {
                         assertEquals(true, fieldValue != null, fieldName + " should be recovered but was null");
 
@@ -391,7 +400,16 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                             continue;
                         }
                         if (config.sourceType.equals("token_count")) {
-                            assertEquals(5, fieldValue.asInt(), fieldName + " value mismatch");
+                            // With ES 6.5+ `_recovery_source`, the original input string is
+                            // preserved verbatim (e.g. "one two three four five") rather than
+                            // the token-counted integer. For older versions, reconstruction
+                            // from doc_values/stored gives the integer count.
+                            if (hasRecoverySource) {
+                                assertEquals(config.testValue.toString(), fieldValue.asText(),
+                                    fieldName + " should preserve original string via _recovery_source");
+                            } else {
+                                assertEquals(5, fieldValue.asInt(), fieldName + " value mismatch");
+                            }
                             continue;
                         }
                         if (config.sourceType.equals("scaled_float")) {
@@ -508,6 +526,13 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
     @MethodSource("versionPairs")
     public void testUnrecoverableDocumentSkipped(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
         if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            return;
+        }
+        // ES 7.0+ and OpenSearch ship with soft-deletes enabled by default, which causes
+        // the engine to write a stored "_recovery_source" field whenever `_source.enabled:false`.
+        // Every field is then recoverable, so there's no "unrecoverable" scenario to exercise here.
+        if (UnboundVersionMatchers.anyOS.test(sourceVersion.getVersion())
+            || !UnboundVersionMatchers.isBelowES_7_X.test(sourceVersion.getVersion())) {
             return;
         }
 

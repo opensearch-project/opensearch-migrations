@@ -207,6 +207,19 @@ public class LuceneReader {
                         sourceBytes = field.utf8Value();
                         break;
                     }
+                    case "_recovery_source": {
+                        // ES 7.0+ and OpenSearch store the original _source in this field
+                        // when the index is configured with `_source.enabled: false`,
+                        // as a byproduct of soft-deletes being enabled by default.
+                        // (ES 6.5+ technically introduced the field, but soft-deletes
+                        // is opt-in there, so it's not reliably present.) When present,
+                        // it contains the full original JSON and can be used directly
+                        // without reconstruction. `_source` takes precedence when both are present.
+                        if (sourceBytes == null) {
+                            sourceBytes = field.utf8Value();
+                        }
+                        break;
+                    }
                     case "_routing": {
                         routing = field.stringValue();
                         break;
