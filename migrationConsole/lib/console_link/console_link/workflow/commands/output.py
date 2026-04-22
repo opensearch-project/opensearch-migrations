@@ -3,7 +3,6 @@ from contextlib import ExitStack
 
 import click
 import logging
-import os
 import subprocess
 
 from kubernetes import client
