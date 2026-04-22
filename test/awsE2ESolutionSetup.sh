@@ -171,11 +171,11 @@ sed -i -e "s/<STAGE>/$STAGE/g" "$SOURCE_GEN_CONTEXT_FILE"
 sed -i -e "s/<STAGE>/$STAGE/g" "$MIGRATION_GEN_CONTEXT_FILE"
 
 if [ ! -d "opensearch-cluster-cdk" ]; then
-  git clone https://github.com/lewijacn/opensearch-cluster-cdk.git
+  git clone https://github.com/opensearch-project/opensearch-cluster-cdk.git
 else
   echo "Repo already exists, skipping clone."
 fi
-cd opensearch-cluster-cdk && git pull && git checkout migration-es && git pull
+cd opensearch-cluster-cdk && git pull
 npm ci
 if [ "$BOOTSTRAP_REGION" = true ] ; then
   bootstrap_region

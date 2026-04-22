@@ -50,7 +50,8 @@ def call(Map config = [:]) {
             "serverAccessType": "ipv4",
             "restrictServerAccessTo": "0.0.0.0/0",
             "enableImdsCredentialRefresh": true,
-            "requireImdsv2": true
+            "requireImdsv2": true,
+            "captureProxyEnabled": false
           }
         }
     """
