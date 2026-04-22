@@ -9,12 +9,7 @@ plugins {
 
 java {
     toolchain {
-        // Pin buildSrc itself (the convention-plugin classes compiled here) to
-        // JDK 17 so the Gradle daemon — which may launch under JDK 17 on some
-        // CI agents — can load these classes. The main project toolchain is
-        // still 21; Gradle's toolchain resolver auto-provisions it for the
-        // JavaCompile/Test tasks of the real source sets.
-        languageVersion.set(JavaLanguageVersion.of(17))
+        languageVersion.set(JavaLanguageVersion.of(21))
         vendor.set(JvmVendorSpec.AMAZON)
     }
 }
