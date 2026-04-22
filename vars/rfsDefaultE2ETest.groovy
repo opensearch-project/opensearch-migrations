@@ -20,8 +20,7 @@ def call(Map config = [:]) {
             "managerNodeCount": 0,
             "serverAccessType": "ipv4",
             "restrictServerAccessTo": "0.0.0.0/0",
-            "enableImdsCredentialRefresh": true,
-            "captureProxyEnabled": false
+            "enableImdsCredentialRefresh": true
           }
         }
     """
