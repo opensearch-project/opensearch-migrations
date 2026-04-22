@@ -5,7 +5,7 @@ A hands-on walkthrough that takes you from zero to contributing. By the end you'
 ## Prerequisites
 
 - Docker & Docker Compose
-- Java 17+ (Corretto recommended)
+- Java 21+ (Corretto recommended)
 - Node.js 20+
 - `curl` and `python3` (for JSON formatting)
 

@@ -23,7 +23,7 @@
 # 2. AWS CDK CLI installed globally:
 #    $ npm install -g aws-cdk@latest
 #
-# 3. Java 11 (required by the opensearch-migrations project)
+# 3. Java 21 (required by the opensearch-migrations project)
 # 4. Docker (for building container images)
 #
 ################################################################################

@@ -99,7 +99,7 @@ DockerServiceProps[] dockerServices = [
         new DockerServiceProps([projectName:"reindexFromSnapshot",
                                 dockerImageName:"reindex_from_snapshot",
                                 inputDir:"./docker",
-                                buildArgs:[BASE_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:17-al2023-headless")],
+                                buildArgs:[BASE_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:21-al2023-headless")],
                                 taskDependencies:["copyDockerRuntimeJars", "syncVersionFile_reindexFromSnapshot"]])
 ] as DockerServiceProps[]
 
