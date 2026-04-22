@@ -15,7 +15,7 @@ import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
 import {promises as dns} from "dns";
 import {createHash} from "crypto";
-import { generateSemaphoreKey } from './semaphoreUtils';
+import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
@@ -598,7 +598,12 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 const proxyDeps = proxyNamesBySource.get(sourceName);
 
                 const { snapshotPrefix: _sp, ...createSnapshotOpts } = snapshotDef.config.createSnapshotConfig;
-                const semaphore = this.generateSemaphoreConfig(sourceCluster.version, sourceName, snapshotName);
+                const semaphore = this.generateSemaphoreConfig(
+                    sourceCluster.version,
+                    sourceName,
+                    snapshotName,
+                    snapshotInfo?.serializeSnapshotCreation
+                );
                 createConfigs.push({
                     label: snapshotName,
                     snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || snapshotName,
@@ -735,10 +740,16 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         });
     }
 
-    private generateSemaphoreConfig(sourceVersion: string, sourceName: string, snapshotName: string) {
+    private generateSemaphoreConfig(
+        sourceVersion: string,
+        sourceName: string,
+        snapshotName: string,
+        serializeSnapshotCreationOverride: boolean | undefined
+    ) {
+        const serialize = resolveSerializeSnapshotCreation(sourceVersion, serializeSnapshotCreationOverride);
         return {
             semaphoreConfigMapName: 'concurrency-config',
-            semaphoreKey: generateSemaphoreKey(sourceVersion, sourceName, snapshotName)
+            semaphoreKey: generateSemaphoreKey(serialize, sourceName, snapshotName)
         };
     }
 

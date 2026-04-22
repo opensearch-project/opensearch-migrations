@@ -9,7 +9,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import {scrapeApprovals} from "./formatApprovals";
 import {setNamesInUserConfig} from "./migrationConfigTransformer";
-import { generateSemaphoreKey } from './semaphoreUtils';
+import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
 
 type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type KafkaClusterConfig = NonNullable<WorkflowConfig["kafkaClusters"]>[number];
@@ -613,8 +613,12 @@ export class MigrationInitializer {
 
         for (const [sourceName, sourceCluster] of Object.entries<any>(sourceClusters)) {
             const sourceVersion = sourceCluster.version || "";
+            const serialize = resolveSerializeSnapshotCreation(
+                sourceVersion,
+                sourceCluster.snapshotInfo?.serializeSnapshotCreation
+            );
             for (const snapshotName of Object.keys(sourceCluster.snapshotInfo?.snapshots || {})) {
-                const key = generateSemaphoreKey(sourceVersion, sourceName, snapshotName);
+                const key = generateSemaphoreKey(serialize, sourceName, snapshotName);
                 if (!semaphoreKeys.includes(key)) {
                     semaphoreKeys.push(key);
                 }
