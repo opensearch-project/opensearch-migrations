@@ -58,6 +58,12 @@ public class SnapshotRepoData_ES_9_0 {
         private List<String> snapshots;
         @JsonProperty("shard_generations")
         private List<String> shardGenerations;
+        /**
+         * Introduced in ES 9.x / OS 3.x. Values: 0=FIXED, 1=HASHED_PREFIX, 2=HASHED_INFIX.
+         * Null / absent means FIXED (classic layout) for repos written by older versions.
+         */
+        @JsonProperty("shard_path_type")
+        private Integer shardPathType;
     }
 
     @Getter

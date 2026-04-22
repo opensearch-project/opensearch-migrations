@@ -48,7 +48,7 @@ public class SnapshotReader_ES_9_0 implements ClusterSnapshotReader {
 
     @Override
     public SnapshotFileFinder getSnapshotFileFinder() {
-        return new BaseSnapshotFileFinder();
+        return new SnapshotFileFinder_ES_9_0(sourceRepo);
     }
 
     @Override
