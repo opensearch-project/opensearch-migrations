@@ -266,5 +266,13 @@
   "8.19": {
     "version": "8.19.11",
     "url": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-8.19.11-linux-ARCH.tar.gz"
+  },
+  "9.0": {
+    "version": "9.0.8",
+    "url": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-9.0.8-linux-ARCH.tar.gz"
+  },
+  "9.1": {
+    "version": "9.1.5",
+    "url": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-9.1.5-linux-ARCH.tar.gz"
   }
 }
