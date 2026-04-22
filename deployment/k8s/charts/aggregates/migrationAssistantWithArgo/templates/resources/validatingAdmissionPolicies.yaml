@@ -488,6 +488,11 @@ spec:
         (!has(oldObject.spec.snapshotLabel) || !has(object.spec.snapshotLabel) ||
          object.spec.snapshotLabel == oldObject.spec.snapshotLabel)
       message: "Impossible: SnapshotMigration identity fields cannot be changed. Delete and recreate."
+    # Impossible: USER_METADATA_PROCESS_OPTIONS fields marked impossible
+    - expression: |
+        (!has(oldObject.spec.metadataMigrationEnableSourcelessMigrations) || !has(object.spec.metadataMigrationEnableSourcelessMigrations) ||
+         object.spec.metadataMigrationEnableSourcelessMigrations == oldObject.spec.metadataMigrationEnableSourcelessMigrations)
+      message: "Impossible: SnapshotMigration metadata migration fields cannot be changed. Delete and recreate."
     # Impossible: USER_RFS_PROCESS_OPTIONS fields marked impossible
     - expression: |
         (!has(oldObject.spec.documentBackfillIndexAllowlist) || !has(object.spec.documentBackfillIndexAllowlist) ||
@@ -499,7 +504,9 @@ spec:
         (!has(oldObject.spec.documentBackfillDocTransformerConfig) || !has(object.spec.documentBackfillDocTransformerConfig) ||
          object.spec.documentBackfillDocTransformerConfig == oldObject.spec.documentBackfillDocTransformerConfig) &&
         (!has(oldObject.spec.documentBackfillDocTransformerConfigFile) || !has(object.spec.documentBackfillDocTransformerConfigFile) ||
-         object.spec.documentBackfillDocTransformerConfigFile == oldObject.spec.documentBackfillDocTransformerConfigFile)
+         object.spec.documentBackfillDocTransformerConfigFile == oldObject.spec.documentBackfillDocTransformerConfigFile) &&
+        (!has(oldObject.spec.documentBackfillEnableSourcelessMigrations) || !has(object.spec.documentBackfillEnableSourcelessMigrations) ||
+         object.spec.documentBackfillEnableSourcelessMigrations == oldObject.spec.documentBackfillEnableSourcelessMigrations)
       message: "Impossible: SnapshotMigration document backfill fields cannot be changed. Delete and recreate."
     # Gated: USER_RFS_PROCESS_OPTIONS fields marked gated
     - expression: |
