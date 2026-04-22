@@ -22,6 +22,10 @@ the root cause, and provides a workaround where one exists.
 | [JSON-QUERIES](#json-queries)                   | JSON Request API `queries` key not supported |
 | [JSON-PARAM-PREFIX](#json-param-prefix)         | JSON Request API `json.<param>` prefix passthrough not supported |
 | [UPDATE-COMMANDS](#update-commands)             | Only `add` and `delete-by-id` commands supported; JSON only |
+| [MM-AUTORELAX](#mm-autorelax)                   | eDisMax `mm.autoRelax` parameter not supported |
+| [MM-EDISMAX-OPERATOR-DEFAULT](#mm-edismax-operator-default) | eDisMax `mm` default with explicit operators not fully replicated |
+| [MM-EDISMAX-MIXED-OPERATORS](#mm-edismax-mixed-operators) | eDisMax `mm` with mixed explicit and implicit operators applies to wrong scope |
+| [MM-STOPWORD-MULTIFIELD](#mm-stopword-multifield) | `mm` with per-field stopword removal differs from Solr |
 
 ---
 
@@ -494,3 +498,149 @@ Both JSON and XML content types are supported.
 Only `application/json` request bodies are supported. XML bodies
 (`text/xml`, `application/xml`) cannot be parsed by the shim and will
 fail with an error. Clients using XML format must switch to JSON.
+
+---
+
+## MM-AUTORELAX
+
+**Feature:** eDisMax `mm.autoRelax` parameter
+
+**Solr behaviour:**
+When `mm.autoRelax=true` in eDisMax, Solr automatically relaxes the
+`minimum_should_match` requirement if a query clause is removed by stopword
+filtering in some but not all `qf` fields. This prevents zero-hit results
+caused by uneven stopword removal across fields with different analyzers.
+
+**OpenSearch behaviour:**
+OpenSearch has no equivalent parameter. The `minimum_should_match` value on
+a `bool` query is static — it cannot adapt based on per-field analysis
+differences at query time.
+
+**Cause:**
+This is a Solr query-parser-level optimization that inspects per-field
+analysis results during query construction. The shim operates at the HTTP
+transform layer and has no visibility into field-level analyzer behaviour.
+
+**Current status:**
+Not supported. The `mm.autoRelax` parameter is rejected by validation with
+a clear error message. Users relying on this behaviour should remove the
+parameter and consider aligning stopword lists across `qf` fields, or
+lowering the `mm` value to avoid zero-hit results from uneven stopword
+removal.
+
+**Reference:** https://solr.apache.org/guide/solr/latest/query-guide/edismax-query-parser.html
+
+---
+
+## MM-EDISMAX-OPERATOR-DEFAULT
+
+**Feature:** eDisMax `mm` default when explicit operators are present
+
+**Solr behaviour:**
+In eDisMax, the default `mm` value is `0%` if the query contains any explicit
+operator other than `AND` (such as `+`, `-`, `OR`, `NOT`), even when
+`q.op=AND`. Only when `q.op=AND` and no explicit operators are present does
+`mm` default to `100%`.
+
+**OpenSearch behaviour:**
+The shim's query parser handles `+`/`-`/`AND`/`OR`/`NOT` by placing terms
+into `must`/`must_not`/`should` clauses. The explicit `mm` value is applied
+to the `should` clauses via `minimum_should_match`. However, the nuanced
+default logic — where the *presence* of explicit operators changes the `mm`
+default from `100%` to `0%` — is not replicated.
+
+**Cause:**
+The shim does not track whether the original query string contained explicit
+operators to conditionally adjust the default `mm`. The parser structurally
+handles operators correctly, but the default `mm` inference differs.
+
+**Current status:**
+Partially supported. When `mm` is explicitly set, behaviour matches Solr.
+When `mm` is omitted and the query mixes explicit operators with bare terms
+under `q.op=AND`, the effective default may differ. Users relying on this
+nuance should set `mm` explicitly.
+
+**Reference:** https://solr.apache.org/guide/solr/latest/query-guide/edismax-query-parser.html
+
+---
+
+## MM-EDISMAX-MIXED-OPERATORS
+
+**Feature:** eDisMax `mm` with mixed explicit and implicit operators
+
+**Solr behaviour:**
+In eDisMax, a query like `q=A AND B C D` treats `A` and `B` as mandatory
+(from the explicit `AND`) and `C`, `D` as optional. Solr applies `mm` only
+to the optional clauses (`C`, `D`). Internally, Solr produces a flat boolean
+query: `must: [A, B], should: [C, D], minimum_should_match: <mm>`.
+
+**OpenSearch behaviour:**
+The shim's parser produces a different AST structure for this query. The
+`A AND B` sub-expression becomes a nested `bool.must` inside the top-level
+`should` array:
+```json
+{
+  "bool": {
+    "should": [
+      { "bool": { "must": [A, B] } },
+      C,
+      D
+    ],
+    "minimum_should_match": "<mm>"
+  }
+}
+```
+This means `mm` applies to all 3 top-level `should` entries (the nested
+`A AND B` group, `C`, and `D`) rather than just the optional `C` and `D`.
+
+**Cause:**
+The PEG grammar treats `A AND B` as a sub-expression at the same precedence
+level as the implicit-OR siblings `C D`. The parser wraps `A AND B` into a
+nested bool rather than hoisting the `and` clauses to the parent level. A
+`boolRule.ts` TODO exists for AST flattening which would resolve this.
+
+**Current status:**
+Not supported. This only affects eDisMax queries that mix explicit operators
+(`AND`, `OR`, `+`, `-`) with bare terms and use `mm`. Pure DisMax queries
+(no explicit operators) are unaffected since all terms are flat `should`
+clauses. Users experiencing incorrect results should restructure queries to
+avoid mixing explicit operators with `mm`, or use `+`/`-` prefixes on all
+terms to make intent explicit.
+
+**Reference:** https://solr.apache.org/guide/solr/latest/query-guide/edismax-query-parser.html
+
+---
+
+## MM-STOPWORD-MULTIFIELD
+
+**Feature:** `mm` interaction with per-field stopword removal in multi-field queries
+
+**Solr behaviour:**
+When searching across multiple `qf` fields with different query analyzers,
+the number of optional clauses may differ between fields (e.g., a term is a
+stopword in one field but not another). Solr applies `mm` to the **maximum**
+number of optional clauses across all fields. A query clause removed as a
+stopword in one field does not count as matched for that field, potentially
+causing zero results if `mm=100%`.
+
+**OpenSearch behaviour:**
+OpenSearch applies `minimum_should_match` at the `bool` query level, not
+per-field. When `qf` multi-field expansion produces `dis_max` queries per
+term, the `minimum_should_match` operates on the outer bool across terms,
+not on the inner per-field disjunctions. Stopword handling is delegated to
+each field's analyzer independently.
+
+**Cause:**
+This is a fundamental architectural difference. Solr's DisMax/eDisMax parser
+has visibility into per-field analysis results and adjusts clause counts
+accordingly. OpenSearch's `bool` query treats `minimum_should_match` as a
+flat count over its `should` array without per-field clause awareness.
+
+**Current status:**
+Not supported. In most practical cases the behaviour is equivalent. Edge
+cases arise when fields have significantly different stopword lists and `mm`
+is set to a high value (e.g., `100%`). Users experiencing zero-hit queries
+due to this difference should consider aligning stopword lists across fields
+or lowering the `mm` value.
+
+**Reference:** https://solr.apache.org/guide/solr/latest/query-guide/dismax-query-parser.html#mm-minimum-should-match-parameter
