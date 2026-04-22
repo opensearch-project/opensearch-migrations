@@ -33,7 +33,7 @@ TrafficCapture/dockerSolution/src/main/docker/migrationConsole/staging
 
 # Directory used to temporarily store snapshots during testing
 DocumentsFromSnapshotMigration/docker/snapshots/
-transformation/standardJavascriptTransforms/coverage/
+**/coverage/
 transformation/standardJavascriptTransforms/node_modules/
 orchestrationSpecs/k8sResources/
 orchestrationSpecs/dist/
