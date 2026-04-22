@@ -1,0 +1,2 @@
+org.opensearch.migrations.bulkload.lucene.version_10.IgnoreBloomFilter85
+org.opensearch.migrations.bulkload.lucene.version_10.IgnoreBloomFilter87

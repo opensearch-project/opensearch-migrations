@@ -47,7 +47,7 @@ public class Lucene10Es9Os3SnapshotSpikeTest {
 
     private static final String SNAPSHOT_NAME = "test_snapshot";
     private static final String REPO_NAME = "test_repo";
-    private static final String INDEX_NAME = "spike_source_test";
+    private static final String INDEX_NAME = "pipeline_source_test";
 
     @TempDir private File localDirectory;
 
