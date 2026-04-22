@@ -108,11 +108,11 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
     kafka: {
       config: {
         "auto.create.topics.enable": false,
-        "offsets.topic.replication.factor": 1,
-        "transaction.state.log.replication.factor": 1,
-        "transaction.state.log.min.isr": 1,
-        "default.replication.factor": 1,
-        "min.insync.replicas": 1,
+        "offsets.topic.replication.factor": 3,
+        "transaction.state.log.replication.factor": 3,
+        "transaction.state.log.min.isr": 2,
+        "default.replication.factor": 3,
+        "min.insync.replicas": 2,
       },
     },
     entityOperator: {
@@ -121,17 +121,37 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
     },
   },
   nodePoolSpecOverrides: {
-    replicas: 1,
+    replicas: 3,
     roles: ["controller", "broker"],
     storage: {
       type: "persistent-claim",
-      size: "1Gi",
+      size: "2Gi",
       deleteClaim: true,
+    },
+    template: {
+      pod: {
+        affinity: {
+          podAntiAffinity: {
+            preferredDuringSchedulingIgnoredDuringExecution: [{
+              weight: 100,
+              podAffinityTerm: {
+                labelSelector: {
+                  matchExpressions: [{
+                    key: "strimzi.io/name",
+                    operator: "Exists",
+                  }],
+                },
+                topologyKey: "kubernetes.io/hostname",
+              },
+            }],
+          },
+        },
+      },
     },
   },
   topicSpecOverrides: {
     partitions: 1,
-    replicas: 1,
+    replicas: 3,
     config: {
       "retention.ms": 604800000,
       "segment.bytes": 1073741824,

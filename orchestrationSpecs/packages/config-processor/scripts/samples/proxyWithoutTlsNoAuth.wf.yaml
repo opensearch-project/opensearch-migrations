@@ -7,30 +7,6 @@ kafkaClusterConfiguration:
     autoCreate:
       auth:
         type: "none"
-      clusterSpecOverrides:
-        kafka:
-          config:
-            auto.create.topics.enable: false
-            offsets.topic.replication.factor: 1
-            transaction.state.log.replication.factor: 1
-            transaction.state.log.min.isr: 1
-            default.replication.factor: 1
-            min.insync.replicas: 1
-      nodePoolSpecOverrides:
-        replicas: 1
-        roles:
-          - controller
-          - broker
-        storage:
-          type: persistent-claim
-          size: 1Gi
-          deleteClaim: true
-      topicSpecOverrides:
-        partitions: 1
-        replicas: 1
-        config:
-          retention.ms: 604800000
-          segment.bytes: 1073741824
 
 sourceClusters:
   source:
