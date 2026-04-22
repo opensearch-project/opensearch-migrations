@@ -22,7 +22,7 @@ def ptc = new PullThroughCacheHelper(ptcEndpoint)
 def dockerBuildArgsMap = [
         "capture_proxy_base": [
                 CERT_BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
-                RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:11-al2023-headless"),
+                RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:21-al2023-headless"),
         ],
         "elasticsearch_client_test_console": [
                 BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),

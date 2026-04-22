@@ -1,6 +1,6 @@
 # Global ARGs (must be before first FROM to be usable in FROM lines)
 ARG CERT_BUILDER_IMAGE=docker.io/library/amazonlinux:2023
-ARG RUNTIME_IMAGE=docker.io/library/amazoncorretto:11-al2023-headless
+ARG RUNTIME_IMAGE=docker.io/library/amazoncorretto:21-al2023-headless
 
 # =======================
 # Stage 1: Certificate Generation

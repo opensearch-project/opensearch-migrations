@@ -9,7 +9,7 @@ pipeline {
             docker {
                 label 'Jenkins-Agent-AL2-X64-C54xlarge-Docker-Host'
                 image 'opensearchstaging/ci-runner:release-centos7-clients-v4'
-                args '-e JAVA_HOME=/opt/java/openjdk-11'
+                args '-e JAVA_HOME=/opt/java/openjdk-21'
                 alwaysPull true
             }
         }
