@@ -49,6 +49,49 @@ application {
     mainClass = 'org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy'
 }
 
+def certDir = layout.buildDirectory.dir("docker/usr/share/captureProxy/config")
+
+tasks.register("generateSelfSignedCerts") {
+    description = "Generate self-signed PEM certificates for the capture proxy default TLS config"
+    outputs.dir(certDir)
+    doLast {
+        def outDir = certDir.get().asFile
+        outDir.mkdirs()
+        def caFile = new File(outDir, "ca.pem")
+        if (caFile.exists()) return
+
+        def ksFile = File.createTempFile("proxy-ks", ".p12")
+        ksFile.delete() // keytool needs a non-existent path
+        ksFile.deleteOnExit()
+        def pass = "changeit"
+
+        // Generate self-signed cert via keytool (ships with every JDK)
+        def keytool = "${System.getProperty('java.home')}/bin/keytool"
+        exec {
+            commandLine keytool, "-genkeypair", "-alias", "proxy",
+                "-keyalg", "RSA", "-keysize", "4096",
+                "-validity", "36500", "-dname", "CN=localhost",
+                "-keystore", ksFile.absolutePath, "-storetype", "PKCS12",
+                "-storepass", pass, "-keypass", pass
+        }
+
+        // Extract PEM via Java APIs (no openssl needed)
+        def ks = java.security.KeyStore.getInstance("PKCS12")
+        ks.load(ksFile.newInputStream(), pass.toCharArray())
+        def cert = ks.getCertificate("proxy")
+        def key = ks.getKey("proxy", pass.toCharArray())
+        def enc = java.util.Base64.getMimeEncoder(64, "\n".bytes)
+
+        def certPem = "-----BEGIN CERTIFICATE-----\n${enc.encodeToString(cert.encoded)}\n-----END CERTIFICATE-----\n"
+        caFile.text = certPem
+        new File(outDir, "pub.pem").text = certPem
+        new File(outDir, "key.pem").text = "-----BEGIN PRIVATE KEY-----\n${enc.encodeToString(key.encoded)}\n-----END PRIVATE KEY-----\n"
+        ksFile.delete()
+    }
+}
+
+tasks.named("classes") { dependsOn("generateSelfSignedCerts") }
+
 import org.gradle.api.DefaultTask
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.TaskAction
