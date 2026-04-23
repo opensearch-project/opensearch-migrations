@@ -31,14 +31,14 @@ import type { ASTNode } from '../ast/nodes';
  *   "title"            → ["title"]
  *   "" / undefined     → undefined
  */
-export function parseQueryFields(qf: string | undefined): string[] | undefined {
-  if (!qf?.trim()) return undefined;
-  const fields = qf.trim().split(/\s+/);
+export function parseFieldSpecs(fieldSpec: string | undefined): string[] | undefined {
+  if (!fieldSpec?.trim()) return undefined;
+  const fields = fieldSpec.trim().split(/\s+/);
   return fields.length > 0 ? fields : undefined;
 }
 
 /**
- * Walk the AST and stamp queryFields onto every BareNode.
+ * Walk the AST and stamp queryFields (and optionally tieBreaker) onto every BareNode.
  *
  * Called as a post-parse pass when defType is edismax or dismax and qf is set.
  * BareNodes represent unfielded terms/phrases — in edismax/dismax these are
@@ -46,26 +46,41 @@ export function parseQueryFields(qf: string | undefined): string[] | undefined {
  *
  * Only BareNodes are annotated — FieldNodes, PhraseNodes, and RangeNodes
  * already have explicit fields from the query syntax and are left unchanged.
+ *
+ * @param node - The AST node to annotate.
+ * @param params - All request params. Reads `qf` and `tie`.
  */
-export function applyQueryFields(node: ASTNode, queryFields: string[]): void {
+export function applyQueryFields(node: ASTNode, params: ReadonlyMap<string, string>): void {
+  const queryFields = parseFieldSpecs(params.get('qf'));
+  if (!queryFields) return;
+
+  const tieRaw = params.get('tie');
+  const tieBreaker = tieRaw !== undefined ? Number.parseFloat(tieRaw) : undefined;
+  const validTie = tieBreaker !== undefined && !Number.isNaN(tieBreaker) ? tieBreaker : undefined;
+
+  _applyQueryFields(node, queryFields, validTie);
+}
+
+function _applyQueryFields(node: ASTNode, queryFields: string[], tieBreaker: number | undefined): void {
   switch (node.type) {
     case 'bare':
       node.queryFields = queryFields;
+      if (tieBreaker !== undefined) node.tieBreaker = tieBreaker;
       // Clear defaultField — queryFields takes precedence and bareRule uses queryFields first
       delete node.defaultField;
       break;
     case 'bool':
-      node.and.forEach((child) => applyQueryFields(child, queryFields));
-      node.or.forEach((child) => applyQueryFields(child, queryFields));
-      node.not.forEach((child) => applyQueryFields(child, queryFields));
+      node.and.forEach((child) => _applyQueryFields(child, queryFields, tieBreaker));
+      node.or.forEach((child) => _applyQueryFields(child, queryFields, tieBreaker));
+      node.not.forEach((child) => _applyQueryFields(child, queryFields, tieBreaker));
       break;
     case 'boost':
     case 'group':
     case 'filter':
-      applyQueryFields(node.child, queryFields);
+      _applyQueryFields(node.child, queryFields, tieBreaker);
       break;
     case 'localParams':
-      if (node.body) applyQueryFields(node.body, queryFields);
+      if (node.body) _applyQueryFields(node.body, queryFields, tieBreaker);
       break;
     case 'field':
     case 'phrase':

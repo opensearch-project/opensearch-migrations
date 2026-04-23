@@ -82,6 +82,71 @@ describe('bareRule', () => {
     expect(mm.get('fields')).toEqual(['title^2.5', 'description^0.5']);
   });
 
+  it('includes tie_breaker in multi_match when tieBreaker is set', () => {
+    const node: BareNode = {
+      type: 'bare',
+      value: 'java',
+      isPhrase: false,
+      queryFields: ['title^2', 'body'],
+      tieBreaker: 0.3,
+    };
+    const result = bareRule(node, stubTransformChild);
+    const mm = result.get('multi_match') as Map<string, any>;
+    expect(mm.get('tie_breaker')).toBe(0.3);
+  });
+
+  it('omits tie_breaker when tieBreaker is not set', () => {
+    const node: BareNode = {
+      type: 'bare',
+      value: 'java',
+      isPhrase: false,
+      queryFields: ['title', 'body'],
+    };
+    const result = bareRule(node, stubTransformChild);
+    const mm = result.get('multi_match') as Map<string, any>;
+    expect(mm.has('tie_breaker')).toBe(false);
+  });
+
+  it('includes tie_breaker=0 when tieBreaker is explicitly 0', () => {
+    const node: BareNode = {
+      type: 'bare',
+      value: 'java',
+      isPhrase: false,
+      queryFields: ['title', 'body'],
+      tieBreaker: 0,
+    };
+    const result = bareRule(node, stubTransformChild);
+    const mm = result.get('multi_match') as Map<string, any>;
+    expect(mm.get('tie_breaker')).toBe(0);
+  });
+
+  it('includes tie_breaker=1 for pure sum scoring', () => {
+    const node: BareNode = {
+      type: 'bare',
+      value: 'java',
+      isPhrase: false,
+      queryFields: ['title', 'body'],
+      tieBreaker: 1,
+    };
+    const result = bareRule(node, stubTransformChild);
+    const mm = result.get('multi_match') as Map<string, any>;
+    expect(mm.get('tie_breaker')).toBe(1);
+  });
+
+  it('phrase type with tieBreaker still uses type phrase', () => {
+    const node: BareNode = {
+      type: 'bare',
+      value: 'hello world',
+      isPhrase: true,
+      queryFields: ['title', 'body'],
+      tieBreaker: 0.1,
+    };
+    const result = bareRule(node, stubTransformChild);
+    const mm = result.get('multi_match') as Map<string, any>;
+    expect(mm.get('type')).toBe('phrase');
+    expect(mm.get('tie_breaker')).toBe(0.1);
+  });
+
   it('falls back to query_string when queryFields is empty array', () => {
     const node: BareNode = { type: 'bare', value: 'java', isPhrase: false, queryFields: [] };
     expect(bareRule(node, stubTransformChild)).toEqual(
