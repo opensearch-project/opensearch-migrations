@@ -26,6 +26,7 @@ from schema_converter import SchemaConverter
 from query_converter import QueryConverter
 from storage import StorageBackend, FileStorage, SessionState
 from report import MigrationReport
+from pricing_calculator import PricingCalculatorClient, PricingCalculatorError
 
 
 class SolrToOpenSearchMigrationSkill:
@@ -56,12 +57,17 @@ class SolrToOpenSearchMigrationSkill:
         response = skill.handle_message("Now generate the report.", session_id="user-123")
     """
 
-    def __init__(self, storage: Optional[StorageBackend] = None) -> None:
+    def __init__(
+        self,
+        storage: Optional[StorageBackend] = None,
+        pricing_calculator_url: str = "http://localhost:5050",
+    ) -> None:
         self._schema_converter = SchemaConverter()
         self._query_converter = QueryConverter()
         self._storage = storage or FileStorage()
         self._steering_docs = self._load_steering_docs()
         self._aws_knowledge_url = "https://knowledge-mcp.global.api.aws"
+        self._pricing_client = PricingCalculatorClient(base_url=pricing_calculator_url)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -170,6 +176,9 @@ class SolrToOpenSearchMigrationSkill:
         if "field type" in message_lc or "type mapping" in message_lc:
             return self.get_field_type_mapping_reference()
 
+        if any(kw in message_lc for kw in ("pricing", "cost estimate", "price estimate", "how much")):
+            return self._handle_pricing(message, message_lc, state)
+
         return self._handle_general(message, message_lc)
 
     # ------------------------------------------------------------------
@@ -253,6 +262,154 @@ class SolrToOpenSearchMigrationSkill:
             "migration report."
         )
 
+    def _handle_pricing(self, message: str, message_lc: str, state: SessionState) -> str:
+        """Handle a pricing estimate request via the opensearch-pricing-calculator.
+
+        Checks whether the calculator is reachable. If not, instructs the user
+        to start it. Otherwise, asks for the workload parameters needed to call
+        the appropriate estimate endpoint.
+        """
+        if not self._pricing_client.health_check():
+            return (
+                "To calculate pricing estimates I need the **opensearch-pricing-calculator** "
+                "to be running locally.\n\n"
+                "**Start it with:**\n"
+                "```bash\n"
+                "# Clone the repo\n"
+                "git clone https://github.com/opensearch-project/opensearch-migrations.git\n"
+                "cd opensearch-migrations/AIAdvisor/opensearch-pricing-calculator\n\n"
+                "# Build and run (requires Go 1.24+)\n"
+                "go mod download\n"
+                "go build -o opensearch-pricing-calculator .\n"
+                "./opensearch-pricing-calculator\n"
+                "```\n\n"
+                "Or with Docker:\n"
+                "```bash\n"
+                "docker build -t opensearch-pricing-calculator .\n"
+                "docker run -p 5050:5050 -p 8081:8081 opensearch-pricing-calculator\n"
+                "```\n\n"
+                "Once it is running on port 5050, ask me again and I'll calculate "
+                "your pricing estimate."
+            )
+
+        # Determine workload type from context
+        if "serverless" in message_lc:
+            return self._pricing_prompt_serverless(state)
+        if "vector" in message_lc:
+            return self._pricing_prompt_vector(state)
+        if "time" in message_lc and "series" in message_lc:
+            return self._pricing_prompt_time_series(state)
+
+        # Default: ask which workload type
+        return (
+            "I can estimate pricing for three OpenSearch workload types:\n\n"
+            "1. **Search** — general-purpose search workload\n"
+            "2. **Time-series** — log/metrics workload with hot/warm tiers\n"
+            "3. **Vector** — k-NN / semantic search workload\n"
+            "4. **Serverless** — OpenSearch Serverless collection\n\n"
+            "Which workload type best describes your use case? "
+            "Also let me know your approximate data size in GB and your AWS region."
+        )
+
+    def _pricing_prompt_search(self, state: SessionState) -> str:
+        return (
+            "For a **search workload** estimate, please provide:\n\n"
+            "- Total data size (GB)\n"
+            "- Number of Availability Zones (default: 3)\n"
+            "- Number of replicas (default: 1)\n"
+            "- Target shard size in GB (default: 25)\n"
+            "- CPUs per shard (default: 1.5)\n"
+            "- Pricing type: `OnDemand` or `Reserved` (default: OnDemand)\n"
+            "- AWS region (e.g. `US East (N. Virginia)`)\n\n"
+            "You can provide just the data size and region if you'd like defaults for the rest."
+        )
+
+    def _pricing_prompt_time_series(self, state: SessionState) -> str:
+        return (
+            "For a **time-series workload** estimate, please provide:\n\n"
+            "- Total data size (GB)\n"
+            "- Hot retention period in days (default: 14)\n"
+            "- Warm retention period in days (default: 76)\n"
+            "- Number of Availability Zones (default: 3)\n"
+            "- Number of replicas (default: 1)\n"
+            "- Target shard size in GB (default: 45)\n"
+            "- CPUs per shard (default: 1.25)\n"
+            "- Pricing type: `OnDemand` or `Reserved` (default: OnDemand)\n"
+            "- AWS region (e.g. `US East (N. Virginia)`)\n\n"
+            "You can provide just the data size and region if you'd like defaults for the rest."
+        )
+
+    def _pricing_prompt_vector(self, state: SessionState) -> str:
+        return (
+            "For a **vector search workload** estimate, please provide:\n\n"
+            "- Number of vectors\n"
+            "- Vector dimensions (e.g. 768 for BERT, 1536 for OpenAI ada-002)\n"
+            "- Engine type: `hnswfp32`, `hnswfp16`, `hnswbq`, `ivffp32`, `ivffp16`, or `ivfbq` (default: `hnswfp16`)\n"
+            "- Max edges / HNSW `m` parameter (default: 16)\n"
+            "- Number of Availability Zones (default: 3)\n"
+            "- Number of replicas (default: 1)\n"
+            "- Pricing type: `OnDemand` or `Reserved` (default: OnDemand)\n"
+            "- AWS region (e.g. `US East (N. Virginia)`)\n\n"
+            "You can provide just the vector count, dimensions, and region if you'd like defaults for the rest."
+        )
+
+    def _pricing_prompt_serverless(self, state: SessionState) -> str:
+        return (
+            "For a **serverless collection** estimate, please provide:\n\n"
+            "- Collection type: `timeSeries`, `search`, or `vector`\n"
+            "- Daily index size (GB)\n"
+            "- Days in hot storage (default: 1)\n"
+            "- Days in warm storage (default: 6)\n"
+            "- Minimum query rate (QPS, default: 1)\n"
+            "- Maximum query rate (QPS, default: 1)\n"
+            "- Hours per day at max query rate (default: 0)\n"
+            "- AWS region code (e.g. `us-east-1`)\n"
+            "- Multi-AZ redundancy: yes/no (default: yes)\n\n"
+            "You can provide just the daily index size and region if you'd like defaults for the rest."
+        )
+
+    def estimate_pricing(
+        self,
+        workload_type: str,
+        session_id: str,
+        **kwargs,
+    ) -> str:
+        """Call the pricing calculator and return a formatted estimate.
+
+        This is the primary public method for pricing. The skill's conversational
+        interface collects parameters from the user; this method executes the
+        actual HTTP call and formats the result.
+
+        Args:
+            workload_type: One of ``"search"``, ``"timeSeries"``, ``"vector"``,
+                           or ``"serverless"``.
+            session_id:    Session to store the estimate result in.
+            **kwargs:      Workload-specific parameters forwarded to the
+                           appropriate :class:`PricingCalculatorClient` method.
+
+        Returns:
+            A Markdown-formatted pricing estimate, or an error message.
+        """
+        state = self._load_session(session_id)
+        try:
+            if workload_type == "search":
+                result = self._pricing_client.estimate_provisioned_search(**kwargs)
+            elif workload_type == "timeSeries":
+                result = self._pricing_client.estimate_provisioned_time_series(**kwargs)
+            elif workload_type == "vector":
+                result = self._pricing_client.estimate_provisioned_vector(**kwargs)
+            elif workload_type == "serverless":
+                result = self._pricing_client.estimate_serverless(**kwargs)
+            else:
+                return f"Unknown workload type '{workload_type}'. Use: search, timeSeries, vector, serverless."
+        except PricingCalculatorError as exc:
+            return f"Pricing calculator error: {exc}"
+
+        summary = PricingCalculatorClient.format_estimate(result)
+        state.set_fact("pricing_estimate", {"workload_type": workload_type, "result": result})
+        self._save_session(state)
+        return f"**OpenSearch pricing estimate ({workload_type}):**\n\n{summary}"
+
     # ------------------------------------------------------------------
     # Report generation
     # ------------------------------------------------------------------
@@ -307,6 +464,14 @@ class SolrToOpenSearchMigrationSkill:
             ),
             "Effort": "Moderate (2-4 weeks for typical mid-sized workload).",
         }
+
+        # Include pricing calculator estimate if one was collected this session.
+        pricing = facts.get("pricing_estimate")
+        if pricing:
+            workload = pricing.get("workload_type", "unknown")
+            result = pricing.get("result", {})
+            summary = PricingCalculatorClient.format_estimate(result)
+            costs[f"OpenSearch ({workload} workload)"] = summary
 
         report = MigrationReport(
             milestones=milestones,

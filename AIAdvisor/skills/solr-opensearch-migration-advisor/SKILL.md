@@ -290,7 +290,47 @@ Identify any authentication changes required (e.g. moving from Solr Basic Auth t
 - **Search Relevance Engineer** — note any query or response shape differences between the Solr and OpenSearch client APIs that require logic changes beyond a library swap.
 - **DevOps / Platform Engineer** — focus on authentication changes and any integrations that make direct admin API calls; flag anything that requires network or firewall rule changes.
 
-### Step 8 — Migration Report
+### Step 8 — Pricing Estimate
+
+Before generating the final report, offer to calculate infrastructure cost estimates using the **opensearch-pricing-calculator**.
+
+Prompt the user:
+
+*"Would you like a pricing estimate for your OpenSearch deployment? I can calculate costs for managed clusters (search, time-series, or vector workloads) or OpenSearch Serverless collections."*
+
+**Prerequisites — the calculator must be running locally.** If it is not reachable, instruct the user to start it:
+
+```bash
+git clone https://github.com/opensearch-project/opensearch-migrations.git
+cd opensearch-migrations/AIAdvisor/opensearch-pricing-calculator
+go mod download
+go build -o opensearch-pricing-calculator .
+./opensearch-pricing-calculator
+```
+
+Or with Docker:
+
+```bash
+docker build -t opensearch-pricing-calculator .
+docker run -p 5050:5050 opensearch-pricing-calculator
+```
+
+The service exposes an HTTP API on **port 5050**. Once running, call `estimate_pricing` with the appropriate workload type and parameters collected from the user:
+
+| Workload type | Key inputs | Method |
+|---|---|---|
+| `search` | data size (GB), AZs, replicas, shard size, region | `estimate_provisioned_search` |
+| `timeSeries` | data size (GB), hot/warm retention days, region | `estimate_provisioned_time_series` |
+| `vector` | vector count, dimensions, engine type, region | `estimate_provisioned_vector` |
+| `serverless` | collection type, daily index size (GB), region | `estimate_serverless` |
+
+Collect only the parameters the user can readily provide; use documented defaults for the rest. Present the formatted estimate and store it in the session under `facts.pricing_estimate` so it is included in the migration report.
+
+**Stakeholder guidance:**
+- **Search Relevance Engineer** — note how engine type and shard sizing choices affect cost.
+- **DevOps / Platform Engineer** — compare OnDemand vs. Reserved pricing; discuss instance family options for the target region.
+
+### Step 9 — Migration Report
 
 Call `generate_report` to produce the final report. The report must cover:
 
