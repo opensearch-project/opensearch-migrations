@@ -393,7 +393,7 @@ The file must always contain the following sections, updated in place as the mig
 - **Append to Notes** whenever the user makes a decision, expresses a preference, or raises an open question that should be remembered across restarts.
 - **Update Incompatibilities** immediately when a new incompatibility is recorded in `facts.incompatibilities` — do not batch them until the report.
 - **Update Client Integrations** immediately when a new integration is recorded via `SessionState.add_client_integration`.
-- **When deleting information** keep the structure described, only delete information that has shown to be irrelevant, and place a not highlighting aspects that were shown during the conversation to be irrelevant, giving reasons why this is the case. Do not delete any information relevant to the migration effort - only add or update where suitable.
+- **When deleting information** keep the structure described, only delete information that has shown to be irrelevant, and place a note highlighting aspects that were shown during the conversation to be irrelevant, giving reasons why this is the case. Do not delete any information relevant to the migration effort - only add or update where suitable.
 - **The file is the source of truth for human readers.** Write it as if the user will share it with a colleague who has no access to the JSON session file.
 
 ### How to resume
