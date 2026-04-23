@@ -3,7 +3,7 @@ kind: WorkflowTemplate
 metadata:
   name: full-migration-with-clusters
 spec:
-  serviceAccountName: argo-workflow-executor
+  serviceAccountName: argo-test-workflow-executor
   onExit: conditional-cleanup
   entrypoint: main
   parallelism: 100

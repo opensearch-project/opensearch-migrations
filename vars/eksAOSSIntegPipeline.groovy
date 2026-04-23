@@ -1,5 +1,6 @@
 def call(Map config = [:]) {
     def collectionType = config.collectionType ?: 'SEARCH'
+    def gitBranchDefault = config.gitBranchDefault ?: 'main'
     def testIdMap = ['SEARCH': '0021', 'TIMESERIES': '0022', 'VECTORSEARCH': '0023']
     def envVarMap = ['SEARCH': 'AOSS_SEARCH_ENDPOINT', 'TIMESERIES': 'AOSS_TIMESERIES_ENDPOINT', 'VECTORSEARCH': 'AOSS_VECTOR_ENDPOINT']
     def testId = testIdMap[collectionType]
@@ -14,7 +15,8 @@ def call(Map config = [:]) {
 
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_BRANCH', defaultValue: gitBranchDefault, description: 'Git branch to use for repository')
+            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
             choice(name: 'SOURCE_VERSION', choices: ['OS_1.3'], description: 'Version of the cluster that created the snapshot')
@@ -23,8 +25,7 @@ def call(Map config = [:]) {
             string(name: 'S3_REPO_URI', defaultValue: 's3://migrations-snapshots-library-us-east-1/aoss-osb-data/os1x-aoss-osb-data/', description: 'Full S3 URI to snapshot repository')
             string(name: 'SNAPSHOT_NAME', defaultValue: 'os1x-aoss-osb-data', description: 'Name of the snapshot')
             string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '33', description: 'Max retries for workflow monitoring (~1/min). 33=~30min')
-            booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source instead of using public images')
-            booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
+            booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
             booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
         }
@@ -41,6 +42,7 @@ def call(Map config = [:]) {
                 genericVariables: [
                     [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
                     [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                    [key: 'GIT_COMMIT', value: '$.GIT_COMMIT'],
                     [key: 'job_name', value: '$.job_name']
                 ],
                 tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
@@ -53,7 +55,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout & Print Params') {
                 steps {
-                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL)
+                    checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
                         def pool = jobName.startsWith("main-") ? "m" : jobName.startsWith("release-") ? "r" : "p"
                         env.maStageName = "${params.STAGE ?: defaultStageId}-${pool}${currentBuild.number}"
@@ -71,8 +73,7 @@ def call(Map config = [:]) {
                             Test ID:          ${testId}
                             Source:           ${params.SOURCE_VERSION}
                             Workers:          ${params.RFS_WORKERS}
-                            Build Images:           ${params.BUILD_IMAGES}
-                            Build Chart:            ${params.BUILD_CHART_AND_DASHBOARDS}
+                            Build:                  ${params.BUILD}
                             Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
                             Version:                ${params.VERSION}
                             ================================================================
@@ -83,21 +84,17 @@ def call(Map config = [:]) {
 
             stage('Test Caller Identity') {
                 steps {
-                    script {
-                        sh 'aws sts get-caller-identity'
-                    }
+                    sh 'aws sts get-caller-identity'
                 }
             }
 
             // Skip source build when using release bootstrap or when not building
             // any artifacts from source (images/chart).
             stage('Build') {
-                when { expression { !params.USE_RELEASE_BOOTSTRAP && (params.BUILD_IMAGES || params.BUILD_CHART_AND_DASHBOARDS) } }
+                when { expression { !params.USE_RELEASE_BOOTSTRAP && params.BUILD } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
-                        script {
-                            sh './gradlew clean build -x test --no-daemon --stacktrace'
-                        }
+                        sh './gradlew clean build -x test --no-daemon --stacktrace'
                     }
                 }
             }
@@ -109,10 +106,10 @@ def call(Map config = [:]) {
                             withMigrationsTestAccount(region: params.REGION, duration: 7200) { accountId ->
                                 def bootstrap = resolveBootstrap(
                                     useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
-                                    buildImages: params.BUILD_IMAGES,
-                                    buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
+                                    build: params.BUILD,
                                     skipTestImages: true,
-                                    version: params.VERSION
+                                    version: params.VERSION,
+                                    useGeneralNodePool: true
                                 )
                                 bootstrapMA(
                                     stackName: env.STACK_NAME,

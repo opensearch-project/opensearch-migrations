@@ -773,6 +773,39 @@ def test_get_backfill_status_with_deep_check(runner, mocker):
     mock_detailed_status_call.assert_called_once()
 
 
+def test_get_backfill_status_with_deep_check_as_json(runner, mocker):
+    mocked_status = {
+        "status": "Completed",
+        "percentage_completed": 100.0,
+        "eta_ms": None,
+        "started": "2026-04-19T21:40:01+00:00",
+        "finished": "2026-04-19T21:40:01+00:00",
+        "shard_total": 0,
+        "shard_complete": 0,
+        "shard_in_progress": 0,
+        "shard_waiting": 0,
+    }
+    mock_build_status = mocker.patch.object(
+        ECSRFSBackfill,
+        'build_backfill_status',
+        autospec=True,
+        return_value=cli_module.BackfillOverallStatus(**mocked_status)
+    )
+    mock_middleware_status = mocker.patch('console_link.middleware.backfill.status')
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+         '--json', 'backfill', 'status', '--deep-check'],
+        catch_exceptions=True
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.output) == mocked_status
+    mock_build_status.assert_called_once()
+    mock_middleware_status.assert_not_called()
+
+
 def test_cli_replay_when_not_defined(runner, source_cluster_only_yaml_path):
     result = runner.invoke(cli, ['--config-file', source_cluster_only_yaml_path, 'replay', 'describe'],
                            catch_exceptions=True)

@@ -17,7 +17,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JavascriptTransformer;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
-import org.opensearch.migrations.transform.shim.ShimMain;
+import org.opensearch.migrations.transform.shim.SolrTransformerProvider;
 import org.opensearch.testcontainers.OpensearchContainer;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -27,6 +27,7 @@ import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.TestFactory;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -82,41 +83,63 @@ class TransformationShimE2ETest {
         });
     }
 
-    /** Run all test cases for a single Solr version using one shared fixture. */
+    /** Run all test cases for a single Solr version, grouping by transform bindings. */
     private void runAllTestsForVersion(
             List<TestCaseDefinition> testCases, String solrImage,
             OpensearchContainer<?> sharedOpenSearch) throws Exception {
         if (testCases.isEmpty()) return;
 
-        var firstTc = testCases.get(0);
-        var requestTransform = composeTransforms(firstTc.requestTransforms());
-        var responseTransform = composeTransforms(firstTc.responseTransforms());
-        var plugins = firstTc.plugins() != null ? firstTc.plugins() : List.<String>of();
+        var groups = new java.util.LinkedHashMap<String, List<TestCaseDefinition>>();
+        for (var tc : testCases) {
+            String key = tc.transformBindings() != null ? tc.transformBindings().toString() : "";
+            groups.computeIfAbsent(key, k -> new ArrayList<>()).add(tc);
+        }
 
-        try (var fixture = new ShimTestFixture(solrImage, sharedOpenSearch, requestTransform, responseTransform)) {
-            fixture.start(plugins);
-            var failures = new ArrayList<String>();
+        var allFailures = new ArrayList<String>();
+        for (var group : groups.values()) {
+            var firstTc = group.get(0);
+            var bindings = firstTc.transformBindings() != null ? firstTc.transformBindings() : EMPTY_BINDINGS;
+            var requestTransform = composeTransforms(firstTc.requestTransforms(), bindings);
+            var responseTransform = composeTransforms(firstTc.responseTransforms());
+            var plugins = firstTc.plugins() != null ? firstTc.plugins() : List.<String>of();
 
-            for (var tc : testCases) {
-                try {
-                    executeTestCase(fixture, tc, solrImage);
-                } catch (Throwable e) {
-                    log.error("FAILED: {} [{}]: {}", tc.name(), solrImage, e.getMessage());
-                    failures.add(tc.name() + ": " + e.getMessage());
-                } finally {
-                    cleanupData(fixture, tc);
+            try (var fixture = new ShimTestFixture(solrImage, sharedOpenSearch, requestTransform, responseTransform)) {
+                fixture.start(plugins);
+                for (var tc : group) {
+                    try {
+                        executeTestCase(fixture, tc, solrImage);
+                    } catch (Throwable e) {
+                        log.error("FAILED: {} [{}]: {}", tc.name(), solrImage, e.getMessage());
+                        allFailures.add(tc.name() + ": " + e.getMessage());
+                    } finally {
+                        cleanupData(fixture, tc);
+                    }
                 }
             }
+        }
 
-            if (!failures.isEmpty()) {
-                fail(failures.size() + " test(s) failed for " + solrImage + ":\n" + String.join("\n", failures));
-            }
+        if (!allFailures.isEmpty()) {
+            fail(allFailures.size() + " test(s) failed for " + solrImage + ":\n" + String.join("\n", allFailures));
         }
     }
 
     private void executeTestCase(
             ShimTestFixture fixture, TestCaseDefinition tc, String solrImage) throws Exception {
         seedData(fixture, tc);
+
+        // Error-path test: assert status code and error message, skip Solr comparison
+        if (tc.expectedStatusCode() != null) {
+            var resp = fixture.httpGetRaw(fixture.getProxyBaseUrl() + tc.requestPath());
+            assertEquals(tc.expectedStatusCode().intValue(), resp.statusCode(),
+                tc.name() + ": expected HTTP " + tc.expectedStatusCode() + " but got " + resp.statusCode());
+            if (tc.expectedErrorContains() != null) {
+                assertTrue(resp.body().contains(tc.expectedErrorContains()),
+                    tc.name() + ": expected error body to contain '" + tc.expectedErrorContains()
+                        + "' but got: " + resp.body());
+            }
+            log.info("PASSED (error-path): {} [{}] → HTTP {}", tc.name(), solrImage, resp.statusCode());
+            return;
+        }
 
         var proxyResponse = sendRequest(fixture, fixture.getProxyBaseUrl() + tc.requestPath(), tc);
         var proxyJson = MAPPER.readValue(proxyResponse, new TypeReference<Map<String, Object>>() {});
@@ -245,6 +268,7 @@ class TransformationShimE2ETest {
 
         if (seedSolr) {
             fixture.createSolrCore(tc.collection(), tc.solrSchema());
+            applySolrConfigDefaults(fixture, tc);
             fixture.httpPost(
                 fixture.getSolrBaseUrl() + "/solr/" + tc.collection() + "/update/json/docs?commit=true",
                 MAPPER.writeValueAsString(tc.documents()));
@@ -268,14 +292,43 @@ class TransformationShimE2ETest {
 
     // --- Transform loading ---
 
+    /** Apply solrconfig defaults to the running Solr instance via Config API. */
+    @SuppressWarnings("unchecked")
+    private void applySolrConfigDefaults(ShimTestFixture fixture, TestCaseDefinition tc) throws Exception {
+        if (tc.transformBindings() == null) return;
+        var solrConfig = (Map<String, Object>) tc.transformBindings().get("solrConfig");
+        if (solrConfig == null) return;
+
+        var selectConfig = (Map<String, Object>) solrConfig.get("/select");
+        if (selectConfig == null) return;
+
+        var handlerDef = new java.util.LinkedHashMap<String, Object>();
+        handlerDef.put("name", "/select");
+        handlerDef.put("class", "solr.SearchHandler");
+        if (selectConfig.containsKey("defaults")) {
+            handlerDef.put("defaults", selectConfig.get("defaults"));
+        }
+        if (selectConfig.containsKey("invariants")) {
+            handlerDef.put("invariants", selectConfig.get("invariants"));
+        }
+
+        var configUrl = fixture.getSolrBaseUrl() + "/solr/" + tc.collection() + "/config";
+        fixture.httpPost(configUrl, MAPPER.writeValueAsString(Map.of("update-requesthandler", handlerDef)));
+        log.info("Applied solrconfig defaults to Solr collection '{}'", tc.collection());
+    }
+
     private static IJsonTransformer composeTransforms(List<String> names) throws IOException {
+        return composeTransforms(names, EMPTY_BINDINGS);
+    }
+
+    private static IJsonTransformer composeTransforms(List<String> names, Map<?, ?> bindings) throws IOException {
         if (names == null || names.isEmpty()) {
             return new JavascriptTransformer(IDENTITY_JS, EMPTY_BINDINGS);
         }
         var transformers = new IJsonTransformer[names.size()];
         for (int i = 0; i < names.size(); i++) {
             transformers[i] = new JavascriptTransformer(
-                ShimMain.JS_POLYFILL + loadTransformJs(names.get(i) + ".js"), EMPTY_BINDINGS);
+                SolrTransformerProvider.JS_POLYFILL + loadTransformJs(names.get(i) + ".js"), bindings);
         }
         return transformers.length == 1 ? transformers[0] : new JsonCompositeTransformer(transformers);
     }

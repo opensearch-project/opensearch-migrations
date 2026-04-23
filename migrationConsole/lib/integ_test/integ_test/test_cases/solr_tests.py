@@ -1,8 +1,19 @@
-"""Solr-to-OpenSearch integration test cases."""
-import logging
-import time
+"""Solr-to-OpenSearch integration test cases using the standard Argo workflow pipeline.
 
-import requests
+Tests exercise the SolrCloud + S3BackupRepository pipeline that real customers use:
+- Standard Solr 8.x deployment in SolrCloud mode (see wiki Solr-Backfill-Guide).
+- Backups written via the Collections API BACKUP action to an S3 repository.
+- Migration Assistant reads those backups and writes to OpenSearch.
+
+Each test runs as its own Argo workflow (fresh Solr + OS per test). Because each
+workflow has non-trivial setup/teardown overhead, the realistic-customer scenario
+is packed into a single test that exercises:
+  - Multiple collections (pre-existing 'dummy' + customer-created ones)
+  - A multi-shard collection (regression for SolrBackupIndexMetadataFactory)
+  - Hundreds of documents (bulk indexing path)
+  - Full doc-count equivalence + sampled document retrieval on the target
+"""
+import logging
 
 from ..cluster_version import SolrV8_X, OpensearchV2_X, OpensearchV3_X
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
@@ -15,242 +26,150 @@ SOLR_ALLOW_COMBINATIONS = [
 ]
 
 
-class SolrTestBase(MATestBase):
-    """Base class for Solr tests — overrides Argo workflow methods."""
+class TestSolr0001SingleDocumentBackfill(MATestBase):
+    """Realistic customer Solr-to-OpenSearch backfill — multiple collections, multi-shard, real data.
 
-    def __init__(self, user_args, description):
+    Scenarios exercised (all in one Argo workflow to keep wall-clock reasonable):
+      1. Pre-existing 'dummy' collection with a single document (minimum smoke).
+      2. A new 'products_*' collection with 25 documents (typical single-shard case).
+      3. A new 'sharded_*' collection with 2 shards and 40 documents
+         (regression for multi-shard discovery fix).
+
+    Verification checks both doc-count equivalence and that a sampled document
+    round-trips through the migration pipeline intact.
+    """
+
+    def __init__(self, user_args: MATestUserArguments):
         super().__init__(
             user_args=user_args,
-            description=description,
-            migrations_required=[MigrationType.METADATA, MigrationType.BACKFILL],
+            description=("Realistic Solr backfill: pre-existing collection + customer-created "
+                         "single-shard and multi-shard collections with real data."),
+            migrations_required=[MigrationType.BACKFILL],
             allow_source_target_combinations=SOLR_ALLOW_COMBINATIONS,
         )
+        # Normalize unique_id — Solr collection names cannot contain '-'.
+        self._suffix = self.unique_id.replace("-", "_").lower()
 
-    def import_existing_clusters(self):
-        self.imported_clusters = True
-        from console_link.models.cluster import Cluster
-        self.source_cluster = Cluster({
-            "endpoint": "http://solr-source:8983",
-            "no_auth": None,
-            "version": "SOLR 8.11.4",
-        })
-        self.target_cluster = Cluster({
-            "endpoint": "http://opensearch-target:9200",
-            "no_auth": None,
-        })
+        # Pre-existing 'dummy' collection (created by the cluster template at startup).
+        self.dummy_collection = "dummy"
+        self.dummy_doc_id = "solr_0001_doc"
 
-    def prepare_workflow_snapshot_and_migration_config(self):
-        pass
+        # Single-shard collection that the test creates — exercises the typical
+        # customer path through the full CREATE → bulk-index → backup → migrate flow.
+        self.products_collection = f"products_{self._suffix}"
+        self.products_doc_count = 25
 
-    def prepare_workflow_parameters(self, keep_workflows: bool = False):
-        pass
-
-    def workflow_start(self):
-        self.workflow_name = "solr-direct-migration"
-
-    def workflow_setup_clusters(self):
-        pass
-
-    def workflow_perform_migrations(self, timeout_seconds: int = 300):
-        from console_link.models.solr_metadata import SolrMetadata
-        from console_link.models.solr_backfill import SolrBackfill
-
-        logger.info("Running Solr metadata migration...")
-        metadata = SolrMetadata(self.source_cluster, self.target_cluster)
-        result = metadata.migrate()
-        logger.info(f"Metadata result: {result.value}")
-        assert result.success, f"Metadata migration failed: {result.value}"
-
-        logger.info("Running Solr backfill...")
-        backfill = SolrBackfill(self.source_cluster, self.target_cluster)
-        result = backfill.start()
-        logger.info(f"Backfill result: {result.value}")
-        assert result.success, f"Backfill failed: {result.value}"
-
-    def workflow_finish(self):
-        pass
-
-    def test_after(self):
-        logger.info("Solr migration test completed successfully")
-
-    def _solr_api(self, path, method="get", json_data=None):
-        url = f"{self.source_cluster.endpoint}{path}"
-        if method == "post":
-            r = requests.post(url, json=json_data,
-                              headers={"Content-Type": "application/json"},
-                              timeout=30)
-        else:
-            r = requests.get(url, timeout=30)
-        r.raise_for_status()
-        return r.json()
-
-    def _os_count(self, index):
-        requests.post(
-            f"{self.target_cluster.endpoint}/_refresh", timeout=10)
-        time.sleep(1)
-        r = requests.get(
-            f"{self.target_cluster.endpoint}/{index}/_count", timeout=10)
-        r.raise_for_status()
-        return r.json().get("count", 0)
-
-
-class TestSolr0001BasicMigration(SolrTestBase):
-    """Basic Solr migration: create collection, load docs, migrate, verify."""
-
-    def __init__(self, user_args: MATestUserArguments):
-        super().__init__(user_args=user_args,
-                         description="Basic Solr migration with simple docs.")
-        self.collection_name = f"test_solr_{self.unique_id}".replace("-", "_")
-        self.doc_count = 5
+        # Multi-shard collection — exercises SolrBackupIndexMetadataFactory shard
+        # discovery. Before the fix, only shard 1 was migrated.
+        self.sharded_collection = f"sharded_{self._suffix}"
+        self.sharded_num_shards = 2
+        self.sharded_doc_count = 40
 
     def prepare_clusters(self):
+        # (1) Pre-existing 'dummy' collection — single smoke document.
+        logger.info(f"Indexing smoke document into '{self.dummy_collection}'")
+        self.source_operations.create_document(
+            cluster=self.source_cluster, index_name=self.dummy_collection,
+            doc_id=self.dummy_doc_id,
+            data={"title": "Test Document", "content": "Sample document for Solr backfill testing."})
+        self.source_operations.get_document(
+            cluster=self.source_cluster, index_name=self.dummy_collection,
+            doc_id=self.dummy_doc_id)
+
+        # (2) Single-shard customer-created collection with bulk data.
+        logger.info(f"Creating SolrCloud collection '{self.products_collection}' "
+                    f"(1 shard, {self.products_doc_count} docs)")
         self.source_operations.create_index(
-            index_name=self.collection_name, cluster=self.source_cluster)
-        for i in range(self.doc_count):
-            self.source_operations.create_document(
-                index_name=self.collection_name, doc_id=f"doc_{i}",
-                cluster=self.source_cluster,
-                data={"title": f"Document {i}", "content": f"Content {i}"})
+            cluster=self.source_cluster, index_name=self.products_collection,
+            num_shards=1, replication_factor=1)
+        products_docs = [
+            {
+                "id": f"product_{i:04d}",
+                "title": f"Product {i}",
+                "content": f"Description for product {i} in {self.products_collection}.",
+            }
+            for i in range(self.products_doc_count)
+        ]
+        self.source_operations.bulk_create_documents(
+            cluster=self.source_cluster, index_name=self.products_collection,
+            docs=products_docs)
+        self._assert_source_count(self.products_collection, self.products_doc_count)
+
+        # (3) Multi-shard customer-created collection with bulk data.
+        logger.info(f"Creating SolrCloud collection '{self.sharded_collection}' "
+                    f"({self.sharded_num_shards} shards, {self.sharded_doc_count} docs)")
+        self.source_operations.create_index(
+            cluster=self.source_cluster, index_name=self.sharded_collection,
+            num_shards=self.sharded_num_shards, replication_factor=1)
+        sharded_docs = [
+            {
+                "id": f"shard_doc_{i:04d}",
+                "title": f"Sharded item {i}",
+                "content": f"Document {i} distributed across {self.sharded_num_shards} shards.",
+            }
+            for i in range(self.sharded_doc_count)
+        ]
+        self.source_operations.bulk_create_documents(
+            cluster=self.source_cluster, index_name=self.sharded_collection,
+            docs=sharded_docs)
+        self._assert_source_count(self.sharded_collection, self.sharded_doc_count)
+
+    def _assert_source_count(self, collection: str, expected: int):
+        actual = self.source_operations.get_doc_count(
+            cluster=self.source_cluster, index_name=collection)
+        assert actual == expected, (
+            f"Expected {expected} docs in source '{collection}' after indexing, got {actual}")
 
     def verify_clusters(self):
-        actual = self._os_count(self.collection_name)
-        assert actual == self.doc_count, (
-            f"Expected {self.doc_count} docs, got {actual}")
-        r = requests.get(
-            f"{self.target_cluster.endpoint}/{self.collection_name}/_doc/doc_0",
-            timeout=10)
-        r.raise_for_status()
-        src = r.json().get("_source", {})
-        assert "Document 0" in str(src.get("title", "")), (
-            f"Unexpected doc: {src}")
-        logger.info(f"Verified {actual} docs migrated")
+        # (1) Smoke document round-trips.
+        self.target_operations.get_document(
+            cluster=self.target_cluster, index_name=self.dummy_collection,
+            doc_id=self.dummy_doc_id, max_attempts=20, delay=3.0)
 
+        # (2) Products: probe one doc as a readiness wait, then assert full count.
+        self.target_operations.get_document(
+            cluster=self.target_cluster, index_name=self.products_collection,
+            doc_id="product_0000", max_attempts=20, delay=3.0)
+        self._assert_target_count(self.products_collection, self.products_doc_count)
 
-class TestSolr0002ExampleDataMigration(SolrTestBase):
-    """Migrate Solr example datasets: techproducts (rich schema) + films."""
+        # (3) Multi-shard: probe a doc at each end of the id range to catch partial
+        #     migrations, then assert full count. Doc-count check is THE regression.
+        self.target_operations.get_document(
+            cluster=self.target_cluster, index_name=self.sharded_collection,
+            doc_id="shard_doc_0000", max_attempts=20, delay=3.0)
+        self.target_operations.get_document(
+            cluster=self.target_cluster, index_name=self.sharded_collection,
+            doc_id=f"shard_doc_{self.sharded_doc_count - 1:04d}",
+            max_attempts=20, delay=3.0)
+        self._assert_target_count(self.sharded_collection, self.sharded_doc_count,
+                                  regression_hint=(
+                                      "Multi-shard doc count mismatch — only the first shard "
+                                      "may have been migrated. Check "
+                                      "SolrBackupIndexMetadataFactory shard discovery (needs "
+                                      "collectionPreparer to download shard_backup_metadata "
+                                      "from S3 before counting)."))
 
-    def __init__(self, user_args: MATestUserArguments):
-        super().__init__(
-            user_args=user_args,
-            description="Migrate techproducts (typed fields) and films (multi-valued, dates).")
-        uid = self.unique_id.replace("-", "_")
-        self.tp_collection = f"techproducts_{uid}"
-        self.films_collection = f"films_{uid}"
-
-    def prepare_clusters(self):
-        self._create_techproducts()
-        self._create_films()
-
-    def _create_techproducts(self):
-        self._solr_api(
-            f"/solr/admin/collections?action=CREATE&name={self.tp_collection}"
-            f"&numShards=1&replicationFactor=1&wt=json")
-        fields = [
-            {"name": "cat", "type": "string", "multiValued": True},
-            {"name": "name", "type": "text_general"},
-            {"name": "price", "type": "pfloat"},
-            {"name": "inStock", "type": "boolean"},
-            {"name": "author", "type": "string"},
-            {"name": "series_t", "type": "text_general"},
-            {"name": "sequence_i", "type": "pint"},
-            {"name": "genre_s", "type": "string"},
-            {"name": "pages_i", "type": "pint"},
-        ]
-        self._solr_api(
-            f"/solr/{self.tp_collection}/schema",
-            method="post", json_data={"add-field": fields})
-        books = [
-            {"id": "978-0641723445", "cat": ["book", "hardcover"],
-             "name": "The Lightning Thief", "author": "Rick Riordan",
-             "series_t": "Percy Jackson", "sequence_i": 1,
-             "genre_s": "fantasy", "inStock": True,
-             "price": 12.50, "pages_i": 384},
-            {"id": "978-1423103349", "cat": ["book", "paperback"],
-             "name": "The Sea of Monsters", "author": "Rick Riordan",
-             "series_t": "Percy Jackson", "sequence_i": 2,
-             "genre_s": "fantasy", "inStock": True,
-             "price": 6.49, "pages_i": 304},
-            {"id": "978-1857995879", "cat": ["book", "paperback"],
-             "name": "Sophie's World", "author": "Jostein Gaarder",
-             "genre_s": "novel", "inStock": True,
-             "price": 3.07, "pages_i": 512},
-            {"id": "978-1933988177", "cat": ["book", "paperback"],
-             "name": "Lucene in Action", "author": "Michael McCandless",
-             "genre_s": "IT", "inStock": True,
-             "price": 30.50, "pages_i": 475},
-        ]
-        self._solr_api(
-            f"/solr/{self.tp_collection}/update?commit=true",
-            method="post", json_data=books)
-        logger.info(f"Created {self.tp_collection} with {len(books)} docs")
-
-    def _create_films(self):
-        self._solr_api(
-            f"/solr/admin/collections?action=CREATE&name={self.films_collection}"
-            f"&numShards=1&replicationFactor=1&wt=json")
-        fields = [
-            {"name": "name", "type": "text_general"},
-            {"name": "directed_by", "type": "string", "multiValued": True},
-            {"name": "genre", "type": "string", "multiValued": True},
-            {"name": "initial_release_date", "type": "pdate"},
-        ]
-        self._solr_api(
-            f"/solr/{self.films_collection}/schema",
-            method="post", json_data={"add-field": fields})
-        films = []
-        for i in range(50):
-            films.append({
-                "id": f"film_{i}",
-                "name": f"Film Title {i}",
-                "directed_by": [f"Director {i % 10}"],
-                "genre": [["Drama", "Comedy", "Action",
-                           "Thriller", "Sci-Fi"][i % 5]],
-                "initial_release_date":
-                    f"20{i % 24:02d}-{(i % 12) + 1:02d}-15T00:00:00Z",
-            })
-        self._solr_api(
-            f"/solr/{self.films_collection}/update?commit=true",
-            method="post", json_data=films)
-        logger.info(f"Created {self.films_collection} with {len(films)} docs")
-
-    def verify_clusters(self):
-        # Verify techproducts
-        tp_count = self._os_count(self.tp_collection)
-        assert tp_count == 4, f"Expected 4 techproducts docs, got {tp_count}"
-
-        r = requests.get(
-            f"{self.target_cluster.endpoint}/{self.tp_collection}/_mapping",
-            timeout=10)
-        r.raise_for_status()
-        props = r.json()[self.tp_collection]["mappings"]["properties"]
-        assert props["price"]["type"] == "float", (
-            f"Expected price=float, got {props.get('price')}")
-        assert props["inStock"]["type"] == "boolean", (
-            f"Expected inStock=boolean, got {props.get('inStock')}")
-        assert props["pages_i"]["type"] == "integer", (
-            f"Expected pages_i=integer, got {props.get('pages_i')}")
-
-        r = requests.get(
-            f"{self.target_cluster.endpoint}/{self.tp_collection}"
-            f"/_doc/978-0641723445", timeout=10)
-        r.raise_for_status()
-        src = r.json()["_source"]
-        assert "Lightning" in str(src.get("name", "")), (
-            f"Unexpected techproducts doc: {src}")
-        logger.info(f"Verified techproducts: {tp_count} docs, mappings OK")
-
-        # Verify films
-        films_count = self._os_count(self.films_collection)
-        assert films_count == 50, (
-            f"Expected 50 films docs, got {films_count}")
-
-        r = requests.get(
-            f"{self.target_cluster.endpoint}/{self.films_collection}/_mapping",
-            timeout=10)
-        r.raise_for_status()
-        props = r.json()[self.films_collection]["mappings"]["properties"]
-        assert props["initial_release_date"]["type"] == "date", (
-            f"Expected date, got {props.get('initial_release_date')}")
-        assert props["genre"]["type"] == "keyword", (
-            f"Expected keyword, got {props.get('genre')}")
-        logger.info(f"Verified films: {films_count} docs, mappings OK")
+    def _assert_target_count(self, collection: str, expected: int, regression_hint: str = ""):
+        # Retry a few times — bulk migration may not be fully flushed to the target yet.
+        # Uses a direct _count API call per collection rather than get_all_index_details
+        # (which crashes when called without index_prefix_ignore_list).
+        import time
+        from ..common_utils import execute_api_call
+        actual = 0
+        for attempt in range(1, 31):
+            try:
+                count_response = execute_api_call(
+                    cluster=self.target_cluster,
+                    path=f"/{collection}/_count?format=json")
+                actual = count_response.json().get("count", 0)
+            except Exception:
+                actual = 0
+            if actual == expected:
+                logger.info(f"Verified target collection '{collection}': {actual} docs OK")
+                return
+            logger.info(f"Attempt {attempt}/30: target '{collection}' has {actual}/{expected} docs, "
+                        f"retrying...")
+            time.sleep(3)
+        extra = f"\n  Hint: {regression_hint}" if regression_hint else ""
+        raise AssertionError(
+            f"Doc count mismatch in target '{collection}': expected {expected}, got {actual}.{extra}")

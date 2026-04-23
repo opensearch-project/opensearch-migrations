@@ -9,10 +9,19 @@ import { buildRequestContext } from './context';
 import type { JavaMap } from './context';
 import { runPipeline } from './pipeline';
 import { requestRegistry } from './registry';
+import { flushMetrics } from './metrics';
+
+// Read solrConfig from bindings once at init (closure, not global mutable state).
+// bindings is injected by Java via JavascriptTransformer's bindingsObject.
+declare const bindings: any;
+const solrConfig = (typeof bindings !== 'undefined' && bindings?.solrConfig) //NOSONAR — typeof required for undeclared closure var
+  ? bindings.solrConfig
+  : undefined;
 
 export function transform(msg: JavaMap): JavaMap {
   const ctx = buildRequestContext(msg);
   if (ctx.endpoint === 'unknown') return msg;
+  ctx.solrConfig = solrConfig;
   runPipeline(requestRegistry, ctx);
   if (ctx.body.size > 0) {
     let payload = msg.get('payload');
@@ -22,5 +31,6 @@ export function transform(msg: JavaMap): JavaMap {
     }
     payload.set('inlinedJsonBody', ctx.body);
   }
+  flushMetrics(ctx._metrics, msg);
   return msg;
 }

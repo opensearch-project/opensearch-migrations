@@ -134,6 +134,22 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addContainer(b => b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/root/createSnapshot/bin/CreateSnapshot"])
+            .addVolumesFromRecord({
+                'test-creds': {
+                    configMap: {
+                        name: expr.literal("localstack-test-creds"),
+                        optional: true
+                    },
+                    mountPath: "/config/credentials",
+                    readOnly: true
+                }
+            })
+            .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
+                expr.ternary(
+                    expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
+                    expr.literal("/config/credentials/configuration"),
+                    expr.literal(""))
+            )
             .addEnvVarsFromRecord(getSourceHttpAuthCreds(getHttpAuthSecretName(b.inputs.sourceConfig)))
             .addEnvVar("JDK_JAVA_OPTIONS",
                 expr.dig(expr.deserializeRecord(b.inputs.createSnapshotConfig), ["jvmArgs"], "")
@@ -203,6 +219,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("targetLabel", typeToken<string>())
         .addRequiredInput("semaphoreConfigMapName", typeToken<string>())
         .addRequiredInput("semaphoreKey", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
@@ -227,15 +244,17 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     targetK8sLabel: b.inputs.targetLabel,
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
                 }))
-
-            .addStep("patchDataSnapshot", ResourceManagement, "patchDataSnapshotReady", c =>
+            .addStep("patchDataSnapshotCompleted", ResourceManagement, "patchDataSnapshotCompleted", c =>
                 c.register({
                     resourceName: expr.concat(
                         expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
                         expr.literal("-"),
                         expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
                     ),
-                    snapshotName: expr.jsonPathStrict(b.inputs.snapshotConfig, "snapshotName")
+                    phase: expr.literal("Completed"),
+                    snapshotName: expr.jsonPathStrict(b.inputs.snapshotConfig, "snapshotName"),
+                    configChecksum: b.inputs.configChecksum,
+                    checksumForSnapshotMigration: b.inputs.configChecksum,
                 }))
         )
         .addSynchronization(c => ({

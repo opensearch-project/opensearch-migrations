@@ -3,13 +3,13 @@ from contextlib import ExitStack
 
 import click
 import logging
-import os
 import subprocess
 
 from kubernetes import client
 
 from .autocomplete_k8s_labels import get_label_completions
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .argo_utils import DEFAULT_ARGO_SERVER_URL
 from ..models.utils import load_k8s_config
 
 
@@ -40,12 +40,11 @@ def _get_label_selector(selector_str, prefix, workflow_name):
 @click.option('--all-workflows', is_flag=True, default=False, help='Show output for all workflows')
 @click.option(
     '--argo-server',
-    default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
-            f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
+    default=DEFAULT_ARGO_SERVER_URL,
     help='Argo Server URL (default: ARGO_SERVER env var, or ARGO_SERVER_SERVICE_HOST:ARGO_SERVER_SERVICE_PORT)'
 )
 @click.option('--namespace', default='ma')
-@click.option('--insecure', is_flag=True, default=False)
+@click.option('--insecure', is_flag=True, default=True)
 @click.option('--token', help='Bearer token for authentication')
 @click.option('--prefix', default='migrations.opensearch.org/', help='Label prefix for filters')
 @click.option(

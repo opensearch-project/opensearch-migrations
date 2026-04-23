@@ -15,6 +15,7 @@ def call(Map config = [:]) {
     if(jobName == null || jobName.isEmpty()){
         throw new RuntimeException("The jobName argument must be provided");
     }
+    def defaultGitBranch = config.defaultGitBranch ?: 'main'
     def source_context_id = config.sourceContextId ?: 'source-single-node-ec2'
     def migration_context_id = config.migrationContextId ?: 'migration-default'
     def source_context_file_name = 'sourceJenkinsContext.json'
@@ -29,9 +30,10 @@ def call(Map config = [:]) {
 
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_BRANCH', defaultValue: defaultGitBranch, description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
+            string(name: 'VERSION', defaultValue: '', description: 'Release version to deploy (e.g. "2.9.0"). When set, checks out the release tag instead of GIT_BRANCH.')
         }
 
         options {
@@ -61,11 +63,22 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     script {
+                        def checkoutBranch = params.VERSION?.trim() ? params.VERSION : params.GIT_BRANCH
+                        env.CHECKOUT_BRANCH = checkoutBranch
+                        echo """
+                            ================================================================
+                            Default Integration Pipeline
+                            ================================================================
+                            Git:                    ${params.GIT_REPO_URL} @ ${checkoutBranch}
+                            Stage:                  ${params.STAGE}
+                            Version:                ${params.VERSION ?: 'N/A (using GIT_BRANCH)'}
+                            ================================================================
+                        """
                         // Allow overwriting this step
                         if (config.checkoutStep) {
                             config.checkoutStep()
                         } else {
-                            checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
+                            checkoutStep(branch: checkoutBranch, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                         }
                     }
                 }
@@ -156,7 +169,7 @@ def call(Map config = [:]) {
                                             "--migration-context-id $migration_context_id " +
                                             "--stage ${stage} " +
                                             "--migrations-git-url ${params.GIT_REPO_URL} " +
-                                            "--migrations-git-branch ${params.GIT_BRANCH}"
+                                            "--migrations-git-branch ${env.CHECKOUT_BRANCH}"
                                     if (skipCaptureProxyOnNodeSetup) {
                                         baseCommand += " --skip-capture-proxy"
                                     }

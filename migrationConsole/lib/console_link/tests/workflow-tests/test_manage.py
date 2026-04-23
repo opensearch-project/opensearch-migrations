@@ -56,8 +56,10 @@ def mock_workflow_with_pod_and_suspend():
             "nodes": {
                 "node-1": {"id": "node-1", "displayName": "step-1", "type": "Pod",
                            "phase": PHASE_SUCCEEDED, "children": []},
-                "node-2": {"id": "node-2", "displayName": "suspend-1", "type": "Suspend", "phase": PHASE_RUNNING,
-                           "children": []}
+                "node-2": {"id": "node-2", "displayName": "suspend-1", "type": "Resource", "phase": PHASE_RUNNING,
+                           "children": [],
+                           "templateRef": {"name": "resource-management", "template": "waitforapproval"},
+                           "inputs": {"parameters": [{"name": "resourceName", "value": "my-gate"}]}}
             }
         }
     }

@@ -40,6 +40,7 @@ import type { TransformRuleFn } from './types';
 import { bareRule } from './rules/bareRule';
 import { boolRule } from './rules/boolRule';
 import { fieldRule } from './rules/fieldRule';
+import { filterRule } from './rules/filterRule';
 import { matchAllRule } from './rules/matchAllRule';
 import { phraseRule } from './rules/phraseRule';
 import { boostRule } from './rules/boostRule';
@@ -61,6 +62,7 @@ const rules: Record<string, TransformRuleFn> = {
   bare: bareRule,
   bool: boolRule,
   field: fieldRule,
+  filter: filterRule,
   matchAll: matchAllRule,
   phrase: phraseRule,
   range: rangeRule,
@@ -98,6 +100,23 @@ export function transformNode(node: ASTNode): Map<string, any> {
    */
   if (node.type === 'group') {
     return transformNode(node.child);
+  }
+
+  // LocalParamsNode: extract metadata and transform the body.
+  // The local params metadata (type, qf, df, etc.) is available on node.params
+  // for the orchestrator to use. The transformer only handles the body query.
+  if (node.type === 'localParams') {
+    if (node.body) {
+      return transformNode(node.body);
+    }
+    // No body — return match_all as default
+    return new Map([['match_all', new Map()]]);
+  }
+
+  // FuncNode: no transform rule yet — the orchestrator handles this via
+  // existing error modes (passthrough-on-error or partial translation).
+  if (node.type === 'func') {
+    throw new Error('No transform rule registered for node type: func');
   }
 
   const rule = rules[node.type];

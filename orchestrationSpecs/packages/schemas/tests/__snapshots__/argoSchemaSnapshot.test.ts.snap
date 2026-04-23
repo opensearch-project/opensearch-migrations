@@ -86,12 +86,20 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "items": {
                     "type": "string"
                   }
+                },
+                "configChecksum": {
+                  "type": "string"
+                },
+                "resourceUid": {
+                  "type": "string"
                 }
               },
               "required": [
                 "name",
                 "version",
-                "topics"
+                "topics",
+                "configChecksum",
+                "resourceUid"
               ]
             },
             "minItems": 1
@@ -180,11 +188,18 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "label": {
                       "type": "string"
+                    },
+                    "configChecksum": {
+                      "type": "string"
+                    },
+                    "clusterResourceUid": {
+                      "type": "string"
                     }
                   },
                   "required": [
                     "kafkaConnection",
-                    "label"
+                    "label",
+                    "configChecksum"
                   ]
                 },
                 "sourceEndpoint": {
@@ -289,7 +304,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "items": {
                         "type": "string"
                       },
-                      "description": "List of static headers to add to proxied requests, each in 'Header-Name: value' format."
+                      "description": "List of static headers to add to proxied requests, each in 'Header-Name: value' format.",
+                      "checksumFor": [
+                        "snapshot",
+                        "replayer"
+                      ],
+                      "changeRestriction": "gated"
                     },
                     "destinationConnectionPoolSize": {
                       "type": "number",
@@ -306,7 +326,12 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "listenPort": {
                       "type": "number",
-                      "description": "TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL."
+                      "description": "TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL.",
+                      "checksumFor": [
+                        "snapshot",
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
                     },
                     "maxTrafficBufferSize": {
                       "type": "number",
@@ -415,9 +440,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "secretName"
                           ],
                           "description": "Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "plaintext"
+                              ],
+                              "description": "Explicitly disable TLS. The proxy will serve plaintext HTTP. Use this to opt out of the secure-by-default TLS behavior."
+                            }
+                          },
+                          "required": [
+                            "mode"
+                          ],
+                          "description": "Explicitly disable TLS termination on the capture proxy."
                         }
                       ],
-                      "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile."
+                      "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile.",
+                      "changeRestriction": "gated"
                     },
                     "enableMSKAuth": {
                       "type": "boolean",
@@ -446,13 +488,33 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "required": [
                     "listenPort"
                   ]
+                },
+                "configChecksum": {
+                  "type": "string"
+                },
+                "topicConfigChecksum": {
+                  "type": "string"
+                },
+                "checksumForSnapshot": {
+                  "type": "string"
+                },
+                "checksumForReplayer": {
+                  "type": "string"
+                },
+                "resourceUid": {
+                  "type": "string"
                 }
               },
               "required": [
                 "name",
                 "kafkaConfig",
                 "sourceEndpoint",
-                "proxyConfig"
+                "proxyConfig",
+                "configChecksum",
+                "topicConfigChecksum",
+                "checksumForSnapshot",
+                "checksumForReplayer",
+                "resourceUid"
               ]
             },
             "default": []
@@ -550,8 +612,23 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "dependsOnProxySetups": {
                         "type": "array",
                         "items": {
-                          "type": "string"
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "configChecksum": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "configChecksum"
+                          ]
                         }
+                      },
+                      "configChecksum": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -561,7 +638,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "repo",
                       "semaphoreConfigMapName",
                       "semaphoreKey",
-                      "dependsOnProxySetups"
+                      "dependsOnProxySetups",
+                      "configChecksum"
                     ]
                   },
                   "minItems": 1
@@ -707,6 +785,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "label": {
                   "type": "string"
                 },
+                "migrationLabel": {
+                  "type": "string"
+                },
                 "snapshotNameResolution": {
                   "anyOf": [
                     {
@@ -733,254 +814,250 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     }
                   ]
                 },
-                "migrations": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "label": {
+                "snapshotConfigChecksum": {
+                  "type": "string"
+                },
+                "metadataMigrationConfig": {
+                  "type": "object",
+                  "properties": {
+                    "jvmArgs": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "loggingConfigurationOverrideConfigMap": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "componentTemplateAllowlist": {
+                      "type": "array",
+                      "items": {
                         "type": "string"
                       },
-                      "metadataMigrationConfig": {
-                        "type": "object",
-                        "properties": {
-                          "jvmArgs": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "loggingConfigurationOverrideConfigMap": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "componentTemplateAllowlist": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
+                      "default": []
+                    },
+                    "indexAllowlist": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "indexTemplateAllowlist": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "allowLooseVersionMatching": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "clusterAwarenessAttributes": {
+                      "type": "number",
+                      "default": 1
+                    },
+                    "multiTypeBehavior": {
+                      "type": "string",
+                      "enum": [
+                        "NONE",
+                        "UNION",
+                        "SPLIT"
+                      ],
+                      "default": "NONE"
+                    },
+                    "otelCollectorEndpoint": {
+                      "type": "string",
+                      "default": "http://otel-collector:4317"
+                    },
+                    "output": {
+                      "type": "string",
+                      "enum": [
+                        "HUMAN_READABLE",
+                        "JSON"
+                      ],
+                      "default": "HUMAN_READABLE"
+                    },
+                    "transformerConfigBase64": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "transformerConfig": {
+                      "type": "string",
+                      "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
+                    },
+                    "transformerConfigFile": {
+                      "type": "string",
+                      "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                    }
+                  }
+                },
+                "documentBackfillConfig": {
+                  "type": "object",
+                  "properties": {
+                    "podReplicas": {
+                      "type": "number",
+                      "default": 1
+                    },
+                    "jvmArgs": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "loggingConfigurationOverrideConfigMap": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "useTargetClusterForWorkCoordination": {
+                      "type": "boolean",
+                      "default": false,
+                      "description": "[Expert] When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). When false (default), a dedicated single-node OpenSearch coordinator cluster is automatically deployed within the Kubernetes cluster, used for the lifetime of the migration, then torn down on completion. Using a dedicated coordinator avoids adding coordination overhead to the target cluster."
+                    },
+                    "resources": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "limits": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU allocation for the container in Kubernetes millicores."
                             },
-                            "default": []
-                          },
-                          "indexAllowlist": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory allocation for the container."
                             },
-                            "default": []
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            }
                           },
-                          "indexTemplateAllowlist": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
+                        },
+                        "requests": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU allocation for the container in Kubernetes millicores."
                             },
-                            "default": []
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory allocation for the container."
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            }
                           },
-                          "allowLooseVersionMatching": {
-                            "type": "boolean",
-                            "default": true
-                          },
-                          "clusterAwarenessAttributes": {
-                            "type": "number",
-                            "default": 1
-                          },
-                          "multiTypeBehavior": {
-                            "type": "string",
-                            "enum": [
-                              "NONE",
-                              "UNION",
-                              "SPLIT"
-                            ],
-                            "default": "NONE"
-                          },
-                          "otelCollectorEndpoint": {
-                            "type": "string",
-                            "default": "http://otel-collector:4317"
-                          },
-                          "output": {
-                            "type": "string",
-                            "enum": [
-                              "HUMAN_READABLE",
-                              "JSON"
-                            ],
-                            "default": "HUMAN_READABLE"
-                          },
-                          "transformerConfigBase64": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "transformerConfig": {
-                            "type": "string",
-                            "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
-                          },
-                          "transformerConfigFile": {
-                            "type": "string",
-                            "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
-                          }
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
                         }
                       },
-                      "documentBackfillConfig": {
-                        "type": "object",
-                        "properties": {
-                          "podReplicas": {
-                            "type": "number",
-                            "default": 1
-                          },
-                          "jvmArgs": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "loggingConfigurationOverrideConfigMap": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "useTargetClusterForWorkCoordination": {
-                            "type": "boolean",
-                            "default": false,
-                            "description": "[Expert] When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). When false (default), a dedicated single-node OpenSearch coordinator cluster is automatically deployed within the Kubernetes cluster, used for the lifetime of the migration, then torn down on completion. Using a dedicated coordinator avoids adding coordination overhead to the target cluster."
-                          },
-                          "resources": {
-                            "type": "object",
-                            "nullable": true,
-                            "properties": {
-                              "limits": {
-                                "type": "object",
-                                "properties": {
-                                  "cpu": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+m$",
-                                    "description": "CPU allocation for the container in Kubernetes millicores."
-                                  },
-                                  "memory": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                    "description": "Memory allocation for the container."
-                                  },
-                                  "ephemeral-storage": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                    "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
-                                  }
-                                },
-                                "required": [
-                                  "cpu",
-                                  "memory"
-                                ],
-                                "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
-                              },
-                              "requests": {
-                                "type": "object",
-                                "properties": {
-                                  "cpu": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+m$",
-                                    "description": "CPU allocation for the container in Kubernetes millicores."
-                                  },
-                                  "memory": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                    "description": "Memory allocation for the container."
-                                  },
-                                  "ephemeral-storage": {
-                                    "type": "string",
-                                    "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
-                                    "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
-                                  }
-                                },
-                                "required": [
-                                  "cpu",
-                                  "memory"
-                                ],
-                                "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
-                              }
-                            },
-                            "required": [
-                              "limits",
-                              "requests"
-                            ],
-                            "description": "Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
-                          },
-                          "indexAllowlist": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "default": []
-                          },
-                          "allowLooseVersionMatching": {
-                            "type": "boolean",
-                            "default": true
-                          },
-                          "docTransformerConfigBase64": {
-                            "type": "string",
-                            "default": ""
-                          },
-                          "docTransformerConfig": {
-                            "type": "string",
-                            "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion)."
-                          },
-                          "docTransformerConfigFile": {
-                            "type": "string",
-                            "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
-                          },
-                          "documentsPerBulkRequest": {
-                            "type": "number",
-                            "default": 2147483647
-                          },
-                          "documentsSizePerBulkRequest": {
-                            "type": "number",
-                            "default": 10485760
-                          },
-                          "initialLeaseDuration": {
-                            "type": "string",
-                            "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
-                            "default": "PT1H"
-                          },
-                          "maxConnections": {
-                            "type": "number",
-                            "default": 10
-                          },
-                          "maxShardSizeBytes": {
-                            "type": "number",
-                            "default": 85899345920
-                          },
-                          "otelCollectorEndpoint": {
-                            "type": "string",
-                            "default": "http://otel-collector:4317"
-                          },
-                          "serverGeneratedIds": {
-                            "type": "string",
-                            "enum": [
-                              "AUTO",
-                              "ALWAYS",
-                              "NEVER"
-                            ],
-                            "default": "AUTO"
-                          },
-                          "allowedDocExceptionTypes": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            },
-                            "default": []
-                          },
-                          "coordinatorRetryMaxRetries": {
-                            "type": "number",
-                            "default": 7
-                          },
-                          "coordinatorRetryInitialDelayMs": {
-                            "type": "number",
-                            "default": 1000
-                          },
-                          "coordinatorRetryMaxDelayMs": {
-                            "type": "number",
-                            "default": 64000
-                          }
-                        }
-                      }
+                      "required": [
+                        "limits",
+                        "requests"
+                      ],
+                      "description": "Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
                     },
-                    "required": [
-                      "label"
-                    ]
-                  },
-                  "minItems": 1
+                    "indexAllowlist": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "allowLooseVersionMatching": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "docTransformerConfigBase64": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "docTransformerConfig": {
+                      "type": "string",
+                      "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion).",
+                      "checksumFor": [
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
+                    },
+                    "docTransformerConfigFile": {
+                      "type": "string",
+                      "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                      "checksumFor": [
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
+                    },
+                    "documentsPerBulkRequest": {
+                      "type": "number",
+                      "default": 2147483647
+                    },
+                    "documentsSizePerBulkRequest": {
+                      "type": "number",
+                      "default": 10485760
+                    },
+                    "initialLeaseDuration": {
+                      "type": "string",
+                      "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
+                      "default": "PT1H"
+                    },
+                    "maxConnections": {
+                      "type": "number",
+                      "default": 10
+                    },
+                    "maxShardSizeBytes": {
+                      "type": "number",
+                      "default": 85899345920
+                    },
+                    "otelCollectorEndpoint": {
+                      "type": "string",
+                      "default": "http://otel-collector:4317"
+                    },
+                    "serverGeneratedIds": {
+                      "type": "string",
+                      "enum": [
+                        "AUTO",
+                        "ALWAYS",
+                        "NEVER"
+                      ],
+                      "default": "AUTO"
+                    },
+                    "allowedDocExceptionTypes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "coordinatorRetryMaxRetries": {
+                      "type": "number",
+                      "default": 7
+                    },
+                    "coordinatorRetryInitialDelayMs": {
+                      "type": "number",
+                      "default": 1000
+                    },
+                    "coordinatorRetryMaxDelayMs": {
+                      "type": "number",
+                      "default": 64000
+                    }
+                  }
                 },
                 "sourceVersion": {
                   "type": "string"
@@ -1145,16 +1222,29 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 },
                 "sourceAuth": {
                   "nullable": true
+                },
+                "configChecksum": {
+                  "type": "string"
+                },
+                "checksumForReplayer": {
+                  "type": "string"
+                },
+                "resourceUid": {
+                  "type": "string"
                 }
               },
               "required": [
                 "label",
+                "migrationLabel",
                 "snapshotNameResolution",
-                "migrations",
+                "snapshotConfigChecksum",
                 "sourceVersion",
                 "sourceLabel",
                 "targetConfig",
-                "snapshotConfig"
+                "snapshotConfig",
+                "configChecksum",
+                "checksumForReplayer",
+                "resourceUid"
               ]
             },
             "default": []
@@ -1164,6 +1254,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
             "items": {
               "type": "object",
               "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "dependsOn": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
                 "dependsOnSnapshotMigrations": {
                   "type": "array",
                   "items": {
@@ -1176,16 +1275,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "snapshot": {
                         "type": "string",
                         "description": "Name of the snapshot. Must match a key in the source cluster's snapshotInfo.snapshots."
+                      },
+                      "migrationLabel": {
+                        "type": "string"
+                      },
+                      "configChecksum": {
+                        "type": "string"
                       }
                     },
                     "required": [
                       "source",
-                      "snapshot"
-                    ],
-                    "description": "Reference to a specific snapshot from a specific source cluster, used to express dependencies."
+                      "snapshot",
+                      "migrationLabel",
+                      "configChecksum"
+                    ]
                   }
                 },
                 "fromProxy": {
+                  "type": "string"
+                },
+                "fromProxyConfigChecksum": {
                   "type": "string"
                 },
                 "kafkaClusterName": {
@@ -1267,11 +1376,18 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "label": {
                       "type": "string"
+                    },
+                    "configChecksum": {
+                      "type": "string"
+                    },
+                    "clusterResourceUid": {
+                      "type": "string"
                     }
                   },
                   "required": [
                     "kafkaConnection",
-                    "label"
+                    "label",
+                    "configChecksum"
                   ]
                 },
                 "replayerConfig": {
@@ -1350,13 +1466,18 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                     },
+                    "authHeaderValue": {
+                      "type": "string",
+                      "default": ""
+                    },
                     "kafkaTrafficEnableMSKAuth": {
                       "type": "boolean",
                       "default": false
                     },
                     "kafkaTrafficPropertyFile": {
                       "type": "string",
-                      "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                      "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                      "changeRestriction": "impossible"
                     },
                     "lookaheadTimeSeconds": {
                       "type": "number",
@@ -1369,6 +1490,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "numClientThreads": {
                       "type": "number",
                       "default": 0
+                    },
+                    "nonRetryableDocExceptionTypes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception."
                     },
                     "observedPacketConnectionTimeout": {
                       "type": "number",
@@ -1396,27 +1524,41 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "transformerConfig": {
                       "type": "string",
-                      "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
+                      "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
+                      "changeRestriction": "gated"
                     },
                     "transformerConfigEncoded": {
                       "type": "string",
-                      "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
+                      "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
+                      "changeRestriction": "gated"
                     },
                     "transformerConfigFile": {
                       "type": "string",
-                      "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                      "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                      "changeRestriction": "gated"
                     },
                     "tupleTransformerConfig": {
                       "type": "string",
-                      "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
+                      "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
+                      "changeRestriction": "gated"
                     },
                     "tupleTransformerConfigBase64": {
                       "type": "string",
-                      "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
+                      "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
+                      "changeRestriction": "gated"
                     },
                     "tupleTransformerConfigFile": {
                       "type": "string",
-                      "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                      "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                      "changeRestriction": "gated"
+                    },
+                    "tupleMaxBufferSeconds": {
+                      "type": "number",
+                      "default": 60
+                    },
+                    "tupleMaxFileSizeMb": {
+                      "type": "number",
+                      "default": 256
                     },
                     "userAgent": {
                       "type": "string",
@@ -1524,15 +1666,26 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "endpoint",
                     "label"
                   ]
+                },
+                "configChecksum": {
+                  "type": "string"
+                },
+                "resourceUid": {
+                  "type": "string"
                 }
               },
               "required": [
+                "name",
+                "dependsOn",
                 "dependsOnSnapshotMigrations",
                 "fromProxy",
+                "fromProxyConfigChecksum",
                 "kafkaClusterName",
                 "kafkaConfig",
                 "replayerConfig",
-                "toTarget"
+                "toTarget",
+                "configChecksum",
+                "resourceUid"
               ]
             },
             "default": []
@@ -1888,7 +2041,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                     "type": "string"
                                   },
                                   "default": [],
-                                  "description": "List of index names to include in the snapshot. Each entry is either an exact index name (e.g. 'logs-2024-01') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*-2024'). An empty list includes all indices."
+                                  "description": "Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): exact names (e.g. 'logs-2024-01'), wildcards (e.g. 'logs-*'), and exclusions via a leading '-' (e.g. '-*-archive'). The entries are joined with commas and sent verbatim as the 'indices' field of the snapshot creation request; this is NOT a regex. Only the matching indices end up in the snapshot, so downstream stages have no way to recover indices excluded here. To further narrow which indices are migrated after the snapshot is taken (including with 'regex:' patterns), use the metadata or RFS indexAllowlist, which filter client-side on the snapshot contents. An empty list includes all indices."
                                 },
                                 "maxSnapshotRateMbPerNode": {
                                   "type": "number",
@@ -1929,6 +2082,10 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "description": "A snapshot configuration bound to a specific repository."
                 },
                 "description": "Snapshots to use or create for this source cluster."
+              },
+              "serializeSnapshotCreation": {
+                "type": "boolean",
+                "description": "Controls whether snapshot creations for this source run one-at-a-time or in parallel. When true, all snapshot creations share a single semaphore so only one runs at any given time; when false, each snapshot can run in parallel with others for this source. When omitted, defaults to true for legacy sources (ES 1-7, OS 1) and false for modern sources (ES 8+, OS 2+). Set explicitly to override the version-based default. Common reason to force true on a modern source: the cluster only supports one snapshot at a time for the indices being captured (for example, OpenSearch UltraWarm indices, which only allow a single index per snapshot and cannot be snapshotted concurrently)."
               }
             },
             "required": [
@@ -2113,7 +2270,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "List of index names to include in the metadata migration. Each entry is either an exact index name (e.g. 'my-index') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). An empty list includes all non-system indices."
+                        "description": "Filters which indices are migrated at the metadata stage — evaluated client-side on the snapshot contents after the snapshot has been taken. Each entry is either an exact index name (e.g. 'my-index') or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). Applies only among indices already captured in the snapshot; to exclude an index from the snapshot itself, use the CreateSnapshot indexAllowlist. An empty list includes all non-system indices."
                       },
                       "indexTemplateAllowlist": {
                         "type": "array",
@@ -2268,25 +2425,45 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "List of index names to include in the document backfill. Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). An empty list includes all non-system indices from the snapshot."
+                        "description": "Filters which indices are migrated by the document backfill (RFS) — evaluated client-side on the snapshot contents after the snapshot has been taken. Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). Applies only among indices already captured in the snapshot; to exclude an index from the snapshot itself, use the CreateSnapshot indexAllowlist. An empty list includes all non-system indices from the snapshot.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "allowLooseVersionMatching": {
                         "type": "boolean",
                         "default": true,
-                        "description": "[Expert] Allows document migration between clusters with non-exact version compatibility. Only disable if snapshot parsing issues require strict version matching."
+                        "description": "[Expert] Allows document migration between clusters with non-exact version compatibility. Only disable if snapshot parsing issues require strict version matching.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "docTransformerConfigBase64": {
                         "type": "string",
                         "default": "",
-                        "description": "Base64-encoded JSON transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion)."
+                        "description": "Base64-encoded JSON transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion).",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "docTransformerConfig": {
                         "type": "string",
-                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion)."
+                        "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion).",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "docTransformerConfigFile": {
                         "type": "string",
-                        "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                        "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "documentsPerBulkRequest": {
                         "type": "number",
@@ -2302,17 +2479,20 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "string",
                         "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
                         "default": "PT1H",
-                        "description": "ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration."
+                        "description": "ISO 8601 duration for the initial work item lease in the coordination store (e.g. 'PT1H' = 1 hour, 'PT10M' = 10 minutes). If a worker fails to complete a shard within this duration, the lease expires and another worker can pick it up, doubling the lease duration on each retry. Increase for very large shards (>200GB) to reduce the number of re-downloads per shard needed to complete the migration.",
+                        "changeRestriction": "gated"
                       },
                       "maxConnections": {
                         "type": "number",
                         "default": 10,
-                        "description": "Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing."
+                        "description": "Maximum number of concurrent HTTP connections from each RFS worker to the target cluster for bulk indexing.",
+                        "changeRestriction": "gated"
                       },
                       "maxShardSizeBytes": {
                         "type": "number",
                         "default": 85899345920,
-                        "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing."
+                        "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.",
+                        "changeRestriction": "gated"
                       },
                       "otelCollectorEndpoint": {
                         "type": "string",
@@ -2335,7 +2515,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "type": "string"
                         },
                         "default": [],
-                        "description": "List of document-level exception types to treat as non-fatal during bulk migration. For example, set to ['version_conflict_engine_exception'] when migrating into a data stream, where backing index writes may conflict with existing documents."
+                        "description": "List of document-level exception types to treat as successful operations during bulk migration. Documents that fail with these errors are not retried and not counted as failures — they are silently accepted. Use this for idempotent migrations where certain errors are expected and harmless. For example, set to ['version_conflict_engine_exception'] when migrating into a data stream where backing index writes may conflict with existing documents. Defaults to empty (all errors are treated as failures). See BulkDocErrorTypes for common OpenSearch exception type strings."
                       },
                       "coordinatorRetryMaxRetries": {
                         "type": "number",
@@ -2404,7 +2584,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "internetFacing": {
                     "type": "boolean",
                     "default": false,
-                    "description": "When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC."
+                    "description": "When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.",
+                    "changeRestriction": "impossible"
                   },
                   "podReplicas": {
                     "type": "number",
@@ -2492,7 +2673,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "items": {
                       "type": "string"
                     },
-                    "description": "List of static headers to add to proxied requests, each in 'Header-Name: value' format."
+                    "description": "List of static headers to add to proxied requests, each in 'Header-Name: value' format.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "gated"
                   },
                   "destinationConnectionPoolSize": {
                     "type": "number",
@@ -2512,19 +2698,30 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "listenPort": {
                     "type": "number",
-                    "description": "TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL."
+                    "description": "TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "impossible"
                   },
                   "maxTrafficBufferSize": {
                     "type": "number",
                     "minimum": 1,
                     "maximum": 1048576,
                     "default": 1048576,
-                    "description": "Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka."
+                    "description": "Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka.",
+                    "changeRestriction": "gated"
                   },
                   "noCapture": {
                     "type": "boolean",
                     "default": false,
-                    "description": "When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording."
+                    "description": "When true, the proxy forwards traffic to the source cluster without capturing it to Kafka. Useful for TLS termination or routing without traffic recording.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "gated"
                   },
                   "numThreads": {
                     "type": "number",
@@ -2624,14 +2821,32 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "secretName"
                         ],
                         "description": "Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "plaintext"
+                            ],
+                            "description": "Explicitly disable TLS. The proxy will serve plaintext HTTP. Use this to opt out of the secure-by-default TLS behavior."
+                          }
+                        },
+                        "required": [
+                          "mode"
+                        ],
+                        "description": "Explicitly disable TLS termination on the capture proxy."
                       }
                     ],
-                    "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile."
+                    "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile.",
+                    "changeRestriction": "gated"
                   },
                   "enableMSKAuth": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity."
+                    "description": "Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.",
+                    "changeRestriction": "gated"
                   },
                   "suppressCaptureForHeaderMatch": {
                     "type": "array",
@@ -2639,22 +2854,42 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "type": "string"
                     },
                     "default": [],
-                    "description": "List of header patterns. Requests matching any of these header patterns will be forwarded but not captured to Kafka."
+                    "description": "List of header patterns. Requests matching any of these header patterns will be forwarded but not captured to Kafka.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "gated"
                   },
                   "suppressCaptureForMethod": {
                     "type": "string",
                     "default": "",
-                    "description": "HTTP method to suppress from capture (e.g. 'HEAD'). Requests with this method are forwarded but not recorded."
+                    "description": "HTTP method to suppress from capture (e.g. 'HEAD'). Requests with this method are forwarded but not recorded.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "gated"
                   },
                   "suppressCaptureForUriPath": {
                     "type": "string",
                     "default": "",
-                    "description": "URI path pattern to suppress from capture. Requests matching this path are forwarded but not recorded."
+                    "description": "URI path pattern to suppress from capture. Requests matching this path are forwarded but not recorded.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "gated"
                   },
                   "suppressMethodAndPath": {
                     "type": "string",
                     "default": "",
-                    "description": "Combined method and path pattern for capture suppression in 'METHOD /path' format."
+                    "description": "Combined method and path pattern for capture suppression in 'METHOD /path' format.",
+                    "checksumFor": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "changeRestriction": "gated"
                   }
                 },
                 "required": [
@@ -2786,14 +3021,22 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     ],
                     "description": "Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                   },
+                  "authHeaderValue": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Static value to use for the \\"authorization\\" header of each request (cannot be used with other auth arguments)",
+                    "changeRestriction": "gated"
+                  },
                   "kafkaTrafficEnableMSKAuth": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity."
+                    "description": "Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.",
+                    "changeRestriction": "impossible"
                   },
                   "kafkaTrafficPropertyFile": {
                     "type": "string",
-                    "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                    "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                    "changeRestriction": "impossible"
                   },
                   "lookaheadTimeSeconds": {
                     "type": "number",
@@ -2809,6 +3052,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "number",
                     "default": 0,
                     "description": "Number of threads used to send replayed requests to the target. 0 uses the Netty event loop (typically number of available processors)."
+                  },
+                  "nonRetryableDocExceptionTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "List of document-level exception types that should not be retried during bulk replay. These errors still count as failures in the output but are not retried because they are deterministic client or mapping errors that will produce the same result on every attempt. When omitted, defaults to a built-in set including version_conflict_engine_exception, mapper_parsing_exception, strict_dynamic_mapping_exception, and others. Set explicitly to override the defaults entirely (not additive). Common values: version_conflict_engine_exception, mapper_parsing_exception, illegal_argument_exception, resource_already_exists_exception."
                   },
                   "observedPacketConnectionTimeout": {
                     "type": "number",
@@ -2828,7 +3078,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "removeAuthHeader": {
                     "type": "boolean",
                     "default": false,
-                    "description": "Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately."
+                    "description": "Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately.",
+                    "changeRestriction": "gated"
                   },
                   "speedupFactor": {
                     "type": "number",
@@ -2842,27 +3093,45 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   },
                   "transformerConfig": {
                     "type": "string",
-                    "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
+                    "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
+                    "changeRestriction": "gated"
                   },
                   "transformerConfigEncoded": {
                     "type": "string",
-                    "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster."
+                    "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
+                    "changeRestriction": "gated"
                   },
                   "transformerConfigFile": {
                     "type": "string",
-                    "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                    "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                    "changeRestriction": "gated"
                   },
                   "tupleTransformerConfig": {
                     "type": "string",
-                    "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
+                    "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
+                    "changeRestriction": "gated"
                   },
                   "tupleTransformerConfigBase64": {
                     "type": "string",
-                    "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response."
+                    "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
+                    "changeRestriction": "gated"
                   },
                   "tupleTransformerConfigFile": {
                     "type": "string",
-                    "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                    "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                    "changeRestriction": "gated"
+                  },
+                  "tupleMaxBufferSeconds": {
+                    "type": "number",
+                    "default": 60,
+                    "description": "Maximum seconds before rotating/uploading a tuple file to S3.",
+                    "changeRestriction": "gated"
+                  },
+                  "tupleMaxFileSizeMb": {
+                    "type": "number",
+                    "default": 256,
+                    "description": "Maximum uncompressed size in MB before rotating a tuple file to S3.",
+                    "changeRestriction": "gated"
                   },
                   "userAgent": {
                     "type": "string",

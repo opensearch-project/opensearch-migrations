@@ -12,6 +12,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.shim.netty.TransformException;
+import org.opensearch.migrations.transform.shim.reporting.ReportingSink;
 import org.opensearch.migrations.transform.shim.validation.DocCountValidator;
 import org.opensearch.migrations.transform.shim.validation.FieldIgnoringEquality;
 import org.opensearch.migrations.transform.shim.validation.Target;
@@ -41,6 +44,9 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 /**
  * Integration tests for the multi-target ShimProxy.
@@ -179,10 +185,109 @@ class ShimProxyTest {
         assertNotNull(combinedToken, "Expected merged nextCursorMark");
 
         // Decode and verify combined token
-        String decoded = new String(java.util.Base64.getDecoder().decode(combinedToken), StandardCharsets.UTF_8);
+        String decoded = new String(java.util.Base64.getUrlDecoder().decode(combinedToken), StandardCharsets.UTF_8);
         var tokenMap = MAPPER.readValue(decoded, Map.class);
         assertEquals("SOLR_TOKEN", tokenMap.get("solr"));
         assertEquals("OS_TOKEN", tokenMap.get("os"));
+    }
+
+    @Test
+    void singleTarget_transformError_returns500() throws Exception {
+        startBackend("A", backendPortA, "{\"response\":{\"numFound\":10}}");
+
+        // Create a transform that always throws
+        IJsonTransformer failingTransform = input -> {
+            throw new RuntimeException("Simulated transform failure");
+        };
+
+        var targets = Map.of("alpha",
+            new Target("alpha", URI.create("http://localhost:" + backendPortA),
+                failingTransform, null, null));
+        proxy = new ShimProxy(proxyPort, targets, "alpha", List.of());
+        proxy.start();
+
+        var resp = httpGet("http://localhost:" + proxyPort + "/test");
+        assertEquals(500, resp.statusCode(),
+            "Transform failure should return 500, not 502");
+    }
+
+    @Test
+    void singleTarget_unreachableBackend_returns502() throws Exception {
+        // No backend started — port is not listening
+        var targets = Map.of("alpha",
+            new Target("alpha", URI.create("http://localhost:" + backendPortA)));
+        proxy = new ShimProxy(proxyPort, targets, "alpha", List.of());
+        proxy.start();
+
+        var resp = httpGet("http://localhost:" + proxyPort + "/test");
+        assertEquals(502, resp.statusCode(),
+            "Unreachable backend should return 502");
+    }
+
+    @Test
+    void dualTarget_secondaryTransformError_primaryStillReturns200() throws Exception {
+        String body = "{\"response\":{\"numFound\":10}}";
+        startBackend("A", backendPortA, body);
+        startBackend("B", backendPortB, body);
+
+        IJsonTransformer failingTransform = input -> {
+            throw new TransformException("Secondary transform failure", new RuntimeException());
+        };
+
+        Map<String, Target> targets = new LinkedHashMap<>();
+        targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPortA)));
+        targets.put("beta", new Target("beta", URI.create("http://localhost:" + backendPortB),
+            failingTransform, null, null));
+
+        proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
+            null, false, Duration.ofSeconds(5));
+        proxy.start();
+
+        var resp = httpGet("http://localhost:" + proxyPort + "/test");
+        assertEquals(200, resp.statusCode(),
+            "Primary should return 200 even when secondary transform fails");
+    }
+
+    @Test
+    void dualTarget_primaryTransformError_returns500() throws Exception {
+        String body = "{\"response\":{\"numFound\":10}}";
+        startBackend("A", backendPortA, body);
+        startBackend("B", backendPortB, body);
+
+        IJsonTransformer failingTransform = input -> {
+            throw new RuntimeException("Primary transform failure");
+        };
+
+        Map<String, Target> targets = new LinkedHashMap<>();
+        targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPortA),
+            failingTransform, null, null));
+        targets.put("beta", new Target("beta", URI.create("http://localhost:" + backendPortB)));
+
+        proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
+            null, false, Duration.ofSeconds(5));
+        proxy.start();
+
+        var resp = httpGet("http://localhost:" + proxyPort + "/test");
+        assertEquals(500, resp.statusCode(),
+            "Primary transform failure should return 500 even when secondary succeeds");
+    }
+
+    @Test
+    void dualTarget_primaryUnreachable_returns502() throws Exception {
+        // Only start backend B — backend A port is not listening
+        startBackend("B", backendPortB, "{\"response\":{\"numFound\":10}}");
+
+        Map<String, Target> targets = new LinkedHashMap<>();
+        targets.put("alpha", new Target("alpha", URI.create("http://localhost:" + backendPortA)));
+        targets.put("beta", new Target("beta", URI.create("http://localhost:" + backendPortB)));
+
+        proxy = new ShimProxy(proxyPort, targets, "alpha", null, List.of(),
+            null, false, Duration.ofSeconds(5));
+        proxy.start();
+
+        var resp = httpGet("http://localhost:" + proxyPort + "/test");
+        assertEquals(502, resp.statusCode(),
+            "Unreachable primary should return 502, not 500");
     }
 
     // --- Mock backends ---
@@ -230,6 +335,35 @@ class ShimProxyTest {
             response.headers().set(HttpHeaderNames.CONNECTION, "close");
             ctx.writeAndFlush(response);
         }
+    }
+
+    // --- ReportingSink lifecycle ---
+
+    @Test
+    void stop_closesReportingSink() throws Exception {
+        var mockSink = mock(ReportingSink.class);
+        var targets = Map.of("a", new Target("a", URI.create("http://localhost:" + backendPortA)));
+        proxy = new ShimProxy(proxyPort, targets, "a", null, List.of(),
+            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH,
+            null, null, mockSink);
+        proxy.start();
+        proxy.stop();
+        proxy = null;
+        verify(mockSink).close();
+    }
+
+    @Test
+    void stop_handlesReportingSinkCloseException() throws Exception {
+        var mockSink = mock(ReportingSink.class);
+        doThrow(new RuntimeException("boom")).when(mockSink).close();
+        var targets = Map.of("a", new Target("a", URI.create("http://localhost:" + backendPortA)));
+        proxy = new ShimProxy(proxyPort, targets, "a", null, List.of(),
+            null, false, Duration.ofSeconds(5), ShimProxy.DEFAULT_MAX_CONTENT_LENGTH,
+            null, null, mockSink);
+        proxy.start();
+        proxy.stop();
+        proxy = null;
+        verify(mockSink).close();
     }
 
     // --- Helpers ---

@@ -25,6 +25,7 @@ from ..tree_utils import (
     WorkflowDisplayer
 )
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .argo_utils import DEFAULT_ARGO_SERVER_URL
 from console_link.environment import Environment
 from console_link.middleware import snapshot as snapshot_middleware
 from console_link.middleware import backfill as backfill_middleware
@@ -165,8 +166,26 @@ class WorkflowDataFetcher:
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else {}
         url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}"
 
+        logger.warning(
+            "Fetching workflow data from Argo API: workflow=%s namespace=%s url=%s insecure=%s",
+            workflow_name, namespace, url, insecure
+        )
         response = requests.get(url, headers=headers, verify=not insecure)
-        return response.json() if response.status_code == 200 else {}
+        if response.status_code != 200:
+            logger.warning(
+                "Argo API workflow fetch failed: status=%s content_type=%s body=%s",
+                response.status_code,
+                response.headers.get("content-type"),
+                response.text[:1000],
+            )
+            return {}
+
+        logger.warning(
+            "Argo API workflow fetch succeeded: status=%s content_type=%s",
+            response.status_code,
+            response.headers.get("content-type"),
+        )
+        return response.json()
 
     def list_workflows(self, argo_server: str, namespace: str,
                        insecure: bool, exclude_completed: bool) -> List[Dict[str, Any]]:
@@ -440,12 +459,11 @@ class LiveCheckProcessor:
 @click.option('--all-workflows', is_flag=True, default=False, help='Show status for all workflows')
 @click.option(
     '--argo-server',
-    default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
-    f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
+    default=DEFAULT_ARGO_SERVER_URL,
     help='Argo Server URL (default: ARGO_SERVER env var, or ARGO_SERVER_SERVICE_HOST:ARGO_SERVER_SERVICE_PORT)'
 )
 @click.option('--namespace', default='ma', help='Kubernetes namespace for the workflow (default: ma)')
-@click.option('--insecure', is_flag=True, default=False, help='Skip TLS certificate verification')
+@click.option('--insecure', is_flag=True, default=True, help='Skip TLS certificate verification (default: True)')
 @click.option('--token', help='Bearer token for authentication')
 @click.option('--all', 'show_all', is_flag=True, default=False,
               help='Show all workflows including completed ones (default: only running)')

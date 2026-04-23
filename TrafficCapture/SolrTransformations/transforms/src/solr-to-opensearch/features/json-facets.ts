@@ -9,13 +9,21 @@
  */
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext, JavaMap } from '../context';
+import type { ParamRule } from './validation';
 import { convertSort, isMapLike, isSolrDateMathGap, convertSolrDateGap } from './utils';
+
+/** Solr query params this feature handles. */
+export const params = ['json.facet'];
+export const paramPrefixes = ['json.facet.'];
+export const paramRules: ParamRule[] = [
+  { name: 'json.facet', type: 'json' },
+];
 
 const FEATURE_NAME = 'json-facets';
 
 // region Terms facet
 
-function convertTermsFacet(def: JavaMap): JavaMap {
+function convertTermsFacet(def: JavaMap, ctx: RequestContext): JavaMap {
   const termsInner = new Map<string, any>();
   termsInner.set('field', def.get('field'));
 
@@ -24,11 +32,13 @@ function convertTermsFacet(def: JavaMap): JavaMap {
 
   // OpenSearch has no concept of offset. So, return a large result and
   // expect the client to take the last `limit` results.
-  // TODO: emit a metric when validation framework is ready.
   if (offset != null || limit != null) {
     offset ??= 0;
     limit ??= 10;
     termsInner.set('size', offset + limit);
+    if (offset > 0) {
+      ctx.emitMetric('terms_offset');
+    }
   }
 
   const mincount = def.get('mincount');
@@ -73,7 +83,7 @@ function convertTermsFacet(def: JavaMap): JavaMap {
  * Solr range syntax: [inclusive or (exclusive for boundaries, * for unbounded.
  * OpenSearch range agg: `from` is inclusive, `to` is exclusive by default.
  */
-function parseSolrRange(rangeStr: string): JavaMap {
+function parseSolrRange(rangeStr: string, ctx: RequestContext): JavaMap {
   const range = new Map<string, any>();
 
   // Always preserve the original Solr range string as the bucket key
@@ -104,6 +114,7 @@ function parseSolrRange(rangeStr: string): JavaMap {
     console.warn(
       `[${FEATURE_NAME}] Range boundary "${rangeStr}" may not map exactly to OpenSearch (default: from=inclusive, to=exclusive)`,
     );
+    ctx.emitMetric('range_boundary');
   }
 
   return range;
@@ -124,31 +135,31 @@ function parseSolrRange(rangeStr: string): JavaMap {
  *   - include (lower/upper/edge/outer/all) → No direct OpenSearch equivalent
  *   - other (before/after/between/none/all) → No direct OpenSearch equivalent
  */
-function convertRangeFacet(def: JavaMap): JavaMap {
+function convertRangeFacet(def: JavaMap, ctx: RequestContext): JavaMap {
   const ranges = def.get('ranges');
 
   // Arbitrary ranges → OpenSearch `range` aggregation
   if (ranges != null) {
-    return convertArbitraryRangeFacet(def, ranges);
+    return convertArbitraryRangeFacet(def, ranges, ctx);
   }
 
   // Uniform ranges → OpenSearch `histogram` aggregation
-  return convertUniformRangeFacet(def);
+  return convertUniformRangeFacet(def, ctx);
 }
 
 /**
  * Convert a single range item (string, Map-like, or plain object) to an OpenSearch range entry.
  * Returns null if the item type is unrecognised.
  */
-function convertRangeItem(item: any): JavaMap | null {
+function convertRangeItem(item: any, ctx: RequestContext): JavaMap | null {
   if (typeof item === 'string') {
-    return parseSolrRange(item);
+    return parseSolrRange(item, ctx);
   }
   if (isMapLike(item)) {
-    return convertMapLikeRangeItem(item);
+    return convertMapLikeRangeItem(item, ctx);
   }
   if (item && typeof item === 'object') {
-    return convertPlainObjectRangeItem(item);
+    return convertPlainObjectRangeItem(item, ctx);
   }
   console.warn(
     `[${FEATURE_NAME}] Skipping unrecognised range item of type "${typeof item}": ${JSON.stringify(item)}`,
@@ -157,10 +168,10 @@ function convertRangeItem(item: any): JavaMap | null {
 }
 
 /** Convert a Map-like range item (from Jackson / GraalVM interop) to an OpenSearch range entry. */
-function convertMapLikeRangeItem(item: JavaMap): JavaMap {
+function convertMapLikeRangeItem(item: JavaMap, ctx: RequestContext): JavaMap {
   const rangeStr = item.get('range');
   if (rangeStr && typeof rangeStr === 'string') {
-    return parseSolrRange(rangeStr);
+    return parseSolrRange(rangeStr, ctx);
   }
   const osRange = new Map<string, any>();
   const from = item.get('from');
@@ -173,10 +184,10 @@ function convertMapLikeRangeItem(item: JavaMap): JavaMap {
 }
 
 /** Convert a plain JS object range item (from query-string JSON parse) to an OpenSearch range entry. */
-function convertPlainObjectRangeItem(item: Record<string, any>): JavaMap {
+function convertPlainObjectRangeItem(item: Record<string, any>, ctx: RequestContext): JavaMap {
   const rangeStr = item.range;
   if (rangeStr && typeof rangeStr === 'string') {
-    return parseSolrRange(rangeStr);
+    return parseSolrRange(rangeStr, ctx);
   }
   const osRange = new Map<string, any>();
   if (item.from != null) osRange.set('from', item.from);
@@ -188,7 +199,7 @@ function convertPlainObjectRangeItem(item: Record<string, any>): JavaMap {
 /**
  * Convert Solr arbitrary ranges to an OpenSearch `range` aggregation.
  */
-function convertArbitraryRangeFacet(def: JavaMap, ranges: any): JavaMap {
+function convertArbitraryRangeFacet(def: JavaMap, ranges: any, ctx: RequestContext): JavaMap {
   const rangeInner = new Map<string, any>();
   rangeInner.set('field', def.get('field'));
 
@@ -197,7 +208,7 @@ function convertArbitraryRangeFacet(def: JavaMap, ranges: any): JavaMap {
   const osRanges: JavaMap[] = [];
 
   for (const item of rangeItems) {
-    const converted = convertRangeItem(item);
+    const converted = convertRangeItem(item, ctx);
     if (converted) {
       osRanges.push(converted);
     }
@@ -234,10 +245,10 @@ function detectFieldType(def: JavaMap): FieldTypeHint {
  * Convert Solr uniform range (start/end/gap) to the appropriate OpenSearch
  * aggregation — either `histogram` (numeric) or `date_histogram` (date).
  */
-function convertUniformRangeFacet(def: JavaMap): JavaMap {
+function convertUniformRangeFacet(def: JavaMap, ctx: RequestContext): JavaMap {
   const fieldType = detectFieldType(def);
   if (fieldType === 'date') {
-    return convertDateHistogramFacet(def);
+    return convertDateHistogramFacet(def, ctx);
   }
   return convertNumericHistogramFacet(def);
 }
@@ -297,7 +308,7 @@ function convertNumericHistogramFacet(def: JavaMap): JavaMap {
  * Unlike the numeric path, date extended_bounds pass through the raw start/end
  * strings (no arithmetic), and the gap is translated via convertSolrDateGap().
  */
-function convertDateHistogramFacet(def: JavaMap): JavaMap {
+function convertDateHistogramFacet(def: JavaMap, ctx: RequestContext): JavaMap {
   const dateHistInner = new Map<string, any>();
   dateHistInner.set('field', def.get('field'));
 
@@ -305,6 +316,11 @@ function convertDateHistogramFacet(def: JavaMap): JavaMap {
   if (gap != null) {
     const interval = convertSolrDateGap(gap);
     dateHistInner.set(interval.type, interval.value);
+    if (interval.approximation) {
+      ctx.emitMetric(interval.approximation === 'compound'
+        ? 'date_range_gap_compound'
+        : 'date_range_gap');
+    }
   }
 
   // Return ISO-8601 date strings (like Solr) instead of epoch millis
@@ -441,7 +457,7 @@ function warnUnknownKeys(def: JavaMap, knownKeys: Set<string>, facetType: string
  * they are recursively converted and attached as a sibling `aggs` key
  * on the returned aggregation Map.
  */
-function convertSingleFacet(facetDef: any): JavaMap {
+function convertSingleFacet(facetDef: any, ctx: RequestContext): JavaMap {
   if (!isMapLike(facetDef)) {
     return new Map();
   }
@@ -451,10 +467,10 @@ function convertSingleFacet(facetDef: any): JavaMap {
   let result: JavaMap;
   switch (type) {
     case 'terms':
-      result = convertTermsFacet(facetDef);
+      result = convertTermsFacet(facetDef, ctx);
       break;
     case 'range':
-      result = convertRangeFacet(facetDef);
+      result = convertRangeFacet(facetDef, ctx);
       break;
     case 'query':
       result = convertQueryFacet(facetDef);
@@ -466,7 +482,7 @@ function convertSingleFacet(facetDef: any): JavaMap {
   // Handle nested sub-facets: Solr's `facet` key → OpenSearch's `aggs` key
   const subFacets = facetDef.get('facet');
   if (subFacets && isMapLike(subFacets) && subFacets.size > 0) {
-    result.set('aggs', convertJsonFacets(subFacets));
+    result.set('aggs', convertJsonFacets(subFacets, ctx));
   }
 
   return result;
@@ -478,11 +494,11 @@ function convertSingleFacet(facetDef: any): JavaMap {
  * @param solrJsonFacet - The Solr json.facet Map (keys are facet names, values are facet definitions)
  * @returns An OpenSearch aggs Map ready to set on the request body
  */
-export function convertJsonFacets(solrJsonFacet: JavaMap): JavaMap {
+export function convertJsonFacets(solrJsonFacet: JavaMap, ctx: RequestContext): JavaMap {
   const aggs = new Map<string, any>();
   for (const name of solrJsonFacet.keys()) {
     const facetDef = solrJsonFacet.get(name);
-    aggs.set(name, convertSingleFacet(facetDef));
+    aggs.set(name, convertSingleFacet(facetDef, ctx));
   }
   return aggs;
 }
@@ -507,7 +523,7 @@ export const request: MicroTransform<RequestContext> = {
     }
 
     if (facetMap && facetMap.size > 0) {
-      ctx.body.set('aggs', convertJsonFacets(facetMap));
+      ctx.body.set('aggs', convertJsonFacets(facetMap, ctx));
     }
   },
 };

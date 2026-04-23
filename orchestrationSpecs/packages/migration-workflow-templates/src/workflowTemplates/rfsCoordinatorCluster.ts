@@ -2,10 +2,12 @@ import {
     BaseExpression,
     expr,
     INTERNAL,
+    makeDirectTypeProxy,
     makeStringTypeProxy,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
+import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
@@ -13,12 +15,31 @@ export function getRfsCoordinatorClusterName(sessionName: BaseExpression<string>
     return expr.concat(sessionName, expr.literal("-rfs-coordinator"));
 }
 
-function createRfsCoordinatorSecretManifest(clusterName: BaseExpression<string>) {
+function makeOwnerReferences(
+    ownerName: BaseExpression<string>,
+    ownerUid: BaseExpression<string>,
+): OwnerReference[] {
+    return [{
+        apiVersion: "migrations.opensearch.org/v1alpha1",
+        kind: "SnapshotMigration",
+        name: makeDirectTypeProxy(ownerName),
+        uid: makeDirectTypeProxy(ownerUid),
+        controller: false,
+        blockOwnerDeletion: true,
+    }];
+}
+
+function createRfsCoordinatorSecretManifest(
+    clusterName: BaseExpression<string>,
+    ownerName: BaseExpression<string>,
+    ownerUid: BaseExpression<string>,
+) {
     return {
         apiVersion: "v1",
         kind: "Secret",
         metadata: {
             name: makeStringTypeProxy(expr.concat(clusterName, expr.literal("-creds"))),
+            ownerReferences: makeOwnerReferences(ownerName, ownerUid),
             labels: {
                 app: makeStringTypeProxy(clusterName)
             }
@@ -31,12 +52,17 @@ function createRfsCoordinatorSecretManifest(clusterName: BaseExpression<string>)
     };
 }
 
-function createRfsCoordinatorServiceManifest(clusterName: BaseExpression<string>) {
+function createRfsCoordinatorServiceManifest(
+    clusterName: BaseExpression<string>,
+    ownerName: BaseExpression<string>,
+    ownerUid: BaseExpression<string>,
+) {
     return {
         apiVersion: "v1",
         kind: "Service",
         metadata: {
             name: makeStringTypeProxy(clusterName),
+            ownerReferences: makeOwnerReferences(ownerName, ownerUid),
             labels: {
                 app: makeStringTypeProxy(clusterName)
             }
@@ -57,12 +83,18 @@ function createRfsCoordinatorServiceManifest(clusterName: BaseExpression<string>
     };
 }
 
-function createRfsCoordinatorStatefulSetManifest(clusterName: BaseExpression<string>, coordinatorImage: BaseExpression<string>) {
+function createRfsCoordinatorStatefulSetManifest(
+    clusterName: BaseExpression<string>,
+    coordinatorImage: BaseExpression<string>,
+    ownerName: BaseExpression<string>,
+    ownerUid: BaseExpression<string>,
+) {
     return {
         apiVersion: "apps/v1",
         kind: "StatefulSet",
         metadata: {
             name: makeStringTypeProxy(clusterName),
+            ownerReferences: makeOwnerReferences(ownerName, ownerUid),
             labels: {
                 app: makeStringTypeProxy(clusterName),
                 "app.kubernetes.io/instance": makeStringTypeProxy(clusterName)
@@ -230,22 +262,34 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
 
     .addTemplate("createRfsCoordinatorSecret", t => t
         .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("ownerName", typeToken<string>())
+        .addRequiredInput("ownerUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
-                setOwnerReference: true,
-                manifest: createRfsCoordinatorSecretManifest(b.inputs.clusterName)
+                setOwnerReference: false,
+                manifest: createRfsCoordinatorSecretManifest(
+                    b.inputs.clusterName,
+                    b.inputs.ownerName,
+                    b.inputs.ownerUid
+                )
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
     .addTemplate("createRfsCoordinatorService", t => t
         .addRequiredInput("clusterName", typeToken<string>())
+        .addRequiredInput("ownerName", typeToken<string>())
+        .addRequiredInput("ownerUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
-                setOwnerReference: true,
-                manifest: createRfsCoordinatorServiceManifest(b.inputs.clusterName)
+                setOwnerReference: false,
+                manifest: createRfsCoordinatorServiceManifest(
+                    b.inputs.clusterName,
+                    b.inputs.ownerName,
+                    b.inputs.ownerUid
+                )
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
@@ -253,12 +297,19 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
     .addTemplate("createRfsCoordinatorStatefulSet", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("coordinatorImage", typeToken<string>())
+        .addRequiredInput("ownerName", typeToken<string>())
+        .addRequiredInput("ownerUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
-                setOwnerReference: true,
+                setOwnerReference: false,
                 successCondition: "status.readyReplicas > 0",
-                manifest: createRfsCoordinatorStatefulSetManifest(b.inputs.clusterName, b.inputs.coordinatorImage)
+                manifest: createRfsCoordinatorStatefulSetManifest(
+                    b.inputs.clusterName,
+                    b.inputs.coordinatorImage,
+                    b.inputs.ownerName,
+                    b.inputs.ownerUid
+                )
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
@@ -266,15 +317,30 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
     .addTemplate("createRfsCoordinator", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("coordinatorImage", typeToken<string>())
+        .addRequiredInput("ownerName", typeToken<string>())
+        .addRequiredInput("ownerUid", typeToken<string>())
         .addOptionalInput("groupName_view", c => "Start RFS OpenSearch cluster for worker coordination")
         .addSteps(b => b
             .addStep("createSecret", INTERNAL, "createRfsCoordinatorSecret", c =>
-                c.register({clusterName: b.inputs.clusterName}))
+                c.register({
+                    clusterName: b.inputs.clusterName,
+                    ownerName: b.inputs.ownerName,
+                    ownerUid: b.inputs.ownerUid
+                }))
             .addStepGroup(g => g
                 .addStep("createService", INTERNAL, "createRfsCoordinatorService", c =>
-                    c.register({clusterName: b.inputs.clusterName}))
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        ownerName: b.inputs.ownerName,
+                        ownerUid: b.inputs.ownerUid
+                    }))
                 .addStep("createStatefulSet", INTERNAL, "createRfsCoordinatorStatefulSet", c =>
-                    c.register({clusterName: b.inputs.clusterName, coordinatorImage: b.inputs.coordinatorImage}))
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        coordinatorImage: b.inputs.coordinatorImage,
+                        ownerName: b.inputs.ownerName,
+                        ownerUid: b.inputs.ownerUid
+                    }))
             )
         )
     )

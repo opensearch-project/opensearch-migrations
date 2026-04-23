@@ -1,10 +1,30 @@
 import logging
+import subprocess
+
 import pytest
 
 from .test_cases.ma_argo_test_base import MATestBase
 
 
 logger = logging.getLogger(__name__)
+
+
+def _run_workflow_reset(namespace: str = "ma"):
+    """Run 'workflow reset --all --include-proxies' to delete all migration CRDs."""
+    cmd = ["workflow", "reset", "--all", "--include-proxies", "--namespace", namespace]
+    logger.info("Running workflow reset: %s", " ".join(cmd))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.stdout:
+            logger.info("workflow reset stdout:\n%s", result.stdout)
+        if result.stderr:
+            logger.warning("workflow reset stderr:\n%s", result.stderr)
+        if result.returncode != 0:
+            logger.warning("workflow reset exited with code %d", result.returncode)
+    except subprocess.TimeoutExpired:
+        logger.warning("workflow reset timed out after 300s")
+    except FileNotFoundError:
+        logger.warning("'workflow' CLI not found on PATH, skipping CRD reset")
 
 
 @pytest.fixture(autouse=True)
@@ -26,10 +46,12 @@ def setup_and_teardown(request, keep_workflows, test_case: MATestBase):
         if request.node.rep_call and request.node.rep_call.failed:
             logger.info(f"Test failed - printing workflow details for {test_case.workflow_name}")
             test_case.argo_service.print_workflow_details(workflow_name=test_case.workflow_name)
-            # Save detailed diagnostics to logs directory (archived by Jenkins)
             test_case.argo_service.save_namespace_diagnostics("./logs")
         if not keep_workflows:
             test_case.argo_service.delete_workflow(workflow_name=test_case.workflow_name)
+    # Reset all migration CRDs before test-specific cleanup
+    _run_workflow_reset()
+    test_case.cleanup()
 
 
 def record_test(test_case: MATestBase, record_data) -> None:
@@ -45,6 +67,13 @@ def test_migration_assistant_workflow(record_data, keep_workflows, test_case: MA
     # Enable for stepping through workflows with Python debugger
     #breakpoint()
 
+    # Test lifecycle:
+    #   prepare_clusters        → seed test data on source cluster
+    #   workflow_start           → submit Argo workflow
+    #   workflow_perform_migrations → wait for migrations to complete (or replayer ready for CDC)
+    #   post_migration_actions   → hook for CDC: enable capture, send traffic through proxy
+    #   verify_clusters          → assert expected docs on target
+    #   test_after               → assert workflow phase (overridden by CDC to skip)
     test_case.test_before()
     test_case.import_existing_clusters()
     test_case.prepare_workflow_snapshot_and_migration_config()
@@ -58,6 +87,7 @@ def test_migration_assistant_workflow(record_data, keep_workflows, test_case: MA
     if not test_case.imported_clusters:
         test_case.prepare_clusters()
     test_case.workflow_perform_migrations()
+    test_case.post_migration_actions()
     test_case.display_final_cluster_state()
     test_case.verify_clusters()
     test_case.workflow_finish()

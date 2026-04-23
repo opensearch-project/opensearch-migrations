@@ -24,9 +24,51 @@
 
 // A query is an OR expression surrounded by optional whitespace.
 // An empty query (e.g., "") produces a MatchAllNode.
+// When a {!...} local params prefix is present, the body is captured as raw
+// text. The parser (parser.ts) re-parses the body based on the `type` param.
 query
-  = _ expr:orExpr _ { return expr; }
+  = _ lp:localParams body:$(.+)? _ {
+      return { type: 'localParams', params: lp, rawBody: body || null, body: null };
+    }
+  / _ expr:orExpr _ { return expr; }
   / _ { return { type: 'matchAll' }; }
+
+// ─── Local params ─────────────────────────────────────────────────────────────
+// Solr local params prefix: {!key=value ...}query
+// Carries metadata like parser type, default field, query fields.
+
+localParams
+  = "{!" _ shortForm:localParamsShortForm? pairs:(_ localParamsPair)* _ "}" {
+      const result = [];
+      if (shortForm) result.push({ key: 'type', value: shortForm, deref: false });
+      for (const p of pairs) result.push(p[1]);
+      return result;
+    }
+
+localParamsShortForm
+  = id:localParamsKey !("=") { return id; }
+
+localParamsPair
+  = key:localParamsKey "=" val:localParamsValue {
+      return { key: key, value: val.value, deref: val.deref };
+    }
+
+localParamsKey
+  = $([a-zA-Z_][a-zA-Z0-9._]*)
+
+localParamsValue
+  = "'" chars:localParamsSingleQuotedChar* "'" { return { value: chars.join(''), deref: false }; }
+  / "\"" chars:localParamsDoubleQuotedChar* "\"" { return { value: chars.join(''), deref: false }; }
+  / "$" name:localParamsKey { return { value: name, deref: true }; }
+  / val:$[^ \t\n\r}]+ { return { value: val, deref: false }; }
+
+localParamsSingleQuotedChar
+  = "\\" c:. { return c; }
+  / [^'\\]
+
+localParamsDoubleQuotedChar
+  = "\\" c:. { return c; }
+  / [^"\\]
 
 // ─── Boolean operators ────────────────────────────────────────────────────────
 // Precedence is encoded by nesting: orExpr → andExpr → unaryExpr → primary.
@@ -71,10 +113,32 @@ unaryExpr
   = notOp _ expr:unaryExpr {
       return { type: 'bool', and: [], or: [], not: [expr] };
     }
-  / prefixExpr
+  / prefixSequence
 
 // NOT operator: "NOT" (requires trailing whitespace) or "!" (no whitespace needed)
 notOp = "NOT" __ / "!"
+
+// Prefix sequence: consecutive +/- prefixed terms form an AND relationship.
+// In Solr, `+A +B` means "A required AND B required", not "(+A) OR (+B)".
+// This rule directly builds a BoolNode with and/not arrays from the prefix operators.
+//
+// Examples:
+//   `+A +B` → BoolNode { and: [A, B], or: [], not: [] }
+//   `-A -B` → BoolNode { and: [], or: [], not: [A, B] }
+//   `+A -B` → BoolNode { and: [A], or: [], not: [B] }
+prefixSequence
+  = head:prefixWithType tail:(__ prefixWithType)+ {
+      const all = [head, ...tail.map(t => t[1])];
+      const and = all.filter(p => p.op === '+').map(p => p.expr);
+      const not = all.filter(p => p.op === '-').map(p => p.expr);
+      return { type: 'bool', and, or: [], not, implicit: false };
+    }
+  / prefixExpr
+
+// Returns { op: '+' or '-', expr: node } for use by prefixSequence
+prefixWithType
+  = "+" _ expr:primary { return { op: '+', expr }; }
+  / "-" _ expr:primary { return { op: '-', expr }; }
 
 // Prefix expressions: +term (required) and -term (prohibited)
 // `+title:java` → BoolNode { and: [FieldNode] } (must match)
@@ -93,13 +157,29 @@ prefixExpr
 // The smallest building blocks. Order matters in PEG — first match wins.
 // matchAll (*:*) must come before fieldExpr to prevent `*` being consumed
 // as a field name.
+// filterFunc must come before bareValue to prevent `filter` being consumed
+// as a bare term.
 
 primary
   = group
   / matchAll
+  / filterFunc
   / fieldExpr
   / barePhrase
   / bareValue
+
+// FilterNode: filter(subquery) — Solr's inline filter caching syntax.
+// `filter(inStock:true)` → FilterNode { child: FieldNode }
+// The inner clause is cached in Solr's filter cache and executed as a
+// constant-score (non-scoring) clause. In OpenSearch, this maps to
+// bool.filter for equivalent non-scoring behavior.
+// See: https://solr.apache.org/guide/solr/latest/query-guide/standard-query-parser.html
+filterFunc
+  = "filter(" _ expr:query _ ")" boost:boost? {
+      const node = { type: 'filter', child: expr };
+      if (boost !== null) return { type: 'boost', child: node, value: boost };
+      return node;
+    }
 
 // GroupNode: parenthesized sub-expression that overrides operator precedence.
 // `(a OR b) AND c` → GroupNode wrapping BoolNode.
@@ -208,7 +288,7 @@ rangeVal
 // Note: + and - are special characters (prefix operators) and must be escaped
 // if used literally in values. They are NOT included here.
 valueChars
-  = $[a-zA-Z0-9._*#$@?/]+
+  = $[a-zA-Z0-9._*#$@?/~]+
 
 // Field name identifier: starts with a letter or underscore, followed by
 // alphanumeric and common special chars. More restrictive first character
@@ -236,3 +316,49 @@ __ "required whitespace"
 // Used inside ranges, groups, and at query boundaries.
 _ "whitespace"
   = [ \t\n\r]*
+
+// ─── Function query entry point ──────────────────────────────────────────────
+
+funcQuery
+  = _ fc:funcCall _ { return fc; }
+
+funcCall
+  = name:funcName "(" _ args:funcArgList? _ ")" {
+      return { type: 'func', name: name, args: args || [] };
+    }
+
+funcArgList
+  = head:funcArg tail:(_ "," _ funcArg)* {
+      return [head, ...tail.map(t => t[3])];
+    }
+
+funcArg
+  = funcNumericLiteral
+  / funcStringConstant
+  / funcCall
+  / funcFieldRef
+
+funcNumericLiteral
+  = val:$("-"? [0-9]+ ("." [0-9]+)? ([eE] [+\-]? [0-9]+)?) {
+      return { kind: 'numeric', value: parseFloat(val) };
+    }
+
+funcStringConstant
+  = "'" chars:funcSingleQuotedChar* "'" {
+      return { kind: 'string', value: chars.join('') };
+    }
+
+funcSingleQuotedChar
+  = "\\" c:. { return c; }
+  / [^'\\]
+
+funcFieldRef
+  = name:funcIdentifier !("(") {
+      return { kind: 'field', name: name };
+    }
+
+funcName
+  = $([a-zA-Z_][a-zA-Z0-9_]*)
+
+funcIdentifier
+  = $([a-zA-Z_][a-zA-Z0-9._]*)

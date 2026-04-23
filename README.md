@@ -44,6 +44,8 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 
 - **User-Friendly Interface via [Migration Console](https://github.com/opensearch-project/opensearch-migrations/blob/main/docs/migration-console.md)**: Command Line Interface (CLI) that guides you through each migration step.
 
+- **AI-Assisted Migration with [Kiro](kiro-cli/README.md)**: An AI agent that can guide you through the entire migration process — from source discovery to target provisioning to data migration. See [`agent-sops/`](agent-sops/) for the standard operating procedures and [`kiro-cli/`](kiro-cli/) for configuration.
+
 - **Flexible Deployment Options**:
   - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Fully automated deployment to AWS.
   - **[Local Docker Deployment](./TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
@@ -72,7 +74,10 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 <tr><td>OpenSearch 1.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
 <tr><td>OpenSearch 2.x</td><td></td><td>✅</td><td>✅</td></tr>
 <tr><td>OpenSearch 3.x</td><td></td><td></td><td>🔜 <a href="https://github.com/orgs/opensearch-project/projects/229?pane=issue&itemId=117495207">link</a></td></tr>
+<tr><td>Apache Solr 8.x–9.x*</td><td></td><td></td><td>✅</td></tr>
 </table>
+
+\* Backfill only — Capture and Replay is not supported for Solr sources.
 
 Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
 

@@ -285,8 +285,8 @@ describe('MigrationConfigTransformer validation', () => {
             label: "source1",
             proxy: {
                 name: "proxy1",
-                endpoint: "http://proxy1:9201",
-                allowInsecure: false
+                endpoint: "https://proxy1:9201",
+                allowInsecure: true
             }
         });
     });
@@ -311,5 +311,75 @@ describe('MigrationConfigTransformer validation', () => {
                 "Source 'source1' maps to multiple proxies (proxy1, proxy2). " +
                 "Console test routing requires exactly zero or one proxy per source."
             );
+    });
+
+    it('should key replay snapshot-migration dependencies by replay target', async () => {
+        const configWithTwoTargets = {
+            ...baseConfig,
+            targetClusters: {
+                target1: baseConfig.targetClusters.target1,
+                target2: {
+                    ...baseConfig.targetClusters.target1,
+                    endpoint: "https://opensearch-target-2:9200",
+                },
+            },
+            snapshotMigrationConfigs: [
+                {
+                    fromSource: "source1",
+                    toTarget: "target2",
+                    skipApprovals: false,
+                    perSnapshotConfig: {
+                        snap1: [
+                            {
+                                metadataMigrationConfig: {
+                                    skipEvaluateApproval: true,
+                                    skipMigrateApproval: true,
+                                },
+                                documentBackfillConfig: {
+                                    podReplicas: 1,
+                                },
+                            }
+                        ]
+                    }
+                },
+                {
+                    fromSource: "source1",
+                    toTarget: "target1",
+                    skipApprovals: false,
+                    perSnapshotConfig: {
+                        snap1: [
+                            {
+                                metadataMigrationConfig: {
+                                    skipEvaluateApproval: true,
+                                    skipMigrateApproval: true,
+                                }
+                            }
+                        ]
+                    }
+                }
+            ],
+            traffic: {
+                ...baseConfig.traffic,
+                replayers: {
+                    replay2: {
+                        fromProxy: "proxy1",
+                        toTarget: "target2",
+                        dependsOnSnapshotMigrations: [
+                            {source: "source1", snapshot: "snap1"}
+                        ]
+                    }
+                }
+            }
+        };
+
+        const result = await transformer.processFromObject(configWithTwoTargets);
+        const target2Migration = result.snapshotMigrations?.find(
+            migration => migration.sourceLabel === "source1" && migration.targetConfig.label === "target2"
+        );
+        const replay2 = result.trafficReplays?.find(replay => replay.toTarget.label === "target2");
+
+        expect(target2Migration).toBeDefined();
+        expect(replay2?.dependsOnSnapshotMigrations?.[0]?.configChecksum)
+            .toEqual(target2Migration?.checksumForReplayer);
     });
 });

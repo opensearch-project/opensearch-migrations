@@ -31,6 +31,8 @@ public class FilterScheme {
             "metrics-metadata-",
             "metrics-system.",
             "profiling-",
+            "searchguard",
+            "sg7-",
             "synthetics-"
     );
 

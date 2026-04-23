@@ -181,6 +181,92 @@ graph LR
 
 ---
 
+## Update Router
+
+Routes all `/update/*` requests through a single entry point that dispatches by path and body shape.
+
+```mermaid
+graph TD
+    subgraph Input["Solr /update Request"]
+        A1["POST /update/json/docs<br/>{id:1, title:'hello'}"]
+        A2["POST /update<br/>{delete:{id:'1'}}"]
+        A3["POST /update<br/>{add:{doc:{id:1,...}}}"]
+    end
+
+    subgraph Router["update-router.ts"]
+        R["Detect path + body shape"]
+    end
+
+    subgraph Handlers["Handlers"]
+        H1["update-doc.ts<br/>PUT /_doc/{id}"]
+        H2["delete-doc.ts<br/>DELETE /_doc/{id}"]
+    end
+
+    subgraph Response["update-router.ts (response)"]
+        Resp["Generic _doc response<br/>→ Solr responseHeader"]
+    end
+
+    A1 --> R -->|/json/docs| H1
+    A2 --> R -->|delete command| H2
+    A3 --> R -->|add command, unwrap doc| H1
+    H1 --> Resp
+    H2 --> Resp
+```
+
+### Adding New Commands
+
+To add support for a new command (e.g., `commit`, `delete-by-query`, bulk):
+
+1. Create a handler file (e.g., `features/commit-handler.ts`)
+2. Add a case in `update-router.ts` `dispatchCommand()` switch
+3. No pipeline or registry changes needed
+
+See `docs/LIMITATIONS.md` → `UPDATE-COMMANDS` for the full list of supported and unsupported commands.
+
+---
+
+## Input Validation
+
+Validation runs before any endpoint-specific transforms, rejecting invalid requests early with clear error messages.
+
+### Declaring Supported Params
+
+Each feature module can export three optional fields that the validation system auto-discovers:
+
+```typescript
+// features/my-feature.ts
+export const params = ['myParam'];                    // exact param names
+export const paramPrefixes = ['myParam.'];            // prefix matching (e.g., hl.fl, json.facet)
+export const paramRules: ParamRule[] = [
+  { name: 'myParam', type: 'integer' },               // type validation
+  { name: 'q', type: 'rejectPattern',                 // regex rejection
+    pattern: String.raw`^\{!`,
+    reason: 'Local params ({!...}) syntax not supported' },
+];
+```
+
+Register the module in `FEATURE_MODULES` in `registry.ts` so validation discovers its params.
+
+### Validation Order
+
+1. **Unsupported param detection** — any param not declared by any feature (and not in `COMMON_PARAMS`) is rejected
+2. **Param type checks** — rules run in declaration order:
+   - `integer` — must match `/^-?\d+$/` (rejects `10abc`)
+   - `boolean` — must be `'true'` or `'false'`
+   - `json` — must parse via `JSON.parse()`
+   - `rejectPattern` — must NOT match the given regex
+
+### Available ParamRule Types
+
+| Type | Validates | Example |
+|------|-----------|---------|
+| `integer` | Strict integer string | `{ name: 'rows', type: 'integer' }` |
+| `boolean` | `'true'` or `'false'` only | `{ name: 'hl', type: 'boolean' }` |
+| `json` | Valid JSON | `{ name: 'json.facet', type: 'json' }` |
+| `rejectPattern` | Value must NOT match regex | `{ name: 'sort', type: 'rejectPattern', pattern: String.raw`\{!`, reason: '...' }` |
+
+---
+
 ## Type System
 
 The TypeScript types mirror the Java-side `JsonKeysForHttpMessage` schema:

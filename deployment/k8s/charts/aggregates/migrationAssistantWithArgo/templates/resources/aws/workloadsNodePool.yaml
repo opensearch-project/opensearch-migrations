@@ -29,10 +29,13 @@ spec:
           operator: In
           values: {{ .Values.workloadsNodePool.architectures | toJson }}
         {{- end }}
+        - key: eks.amazonaws.com/instance-size
+          operator: In
+          values: ["medium", "large", "xlarge", "2xlarge", "4xlarge"]
         - key: kubernetes.io/os
           operator: In
           values: ["linux"]
   disruption:
-    consolidationPolicy: WhenEmptyOrUnderutilized
-    consolidateAfter: 300s
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30m
 {{- end }}

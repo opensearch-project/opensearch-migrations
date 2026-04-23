@@ -1,62 +1,22 @@
 """
-Integration tests for workflow CLI commands using Kubernetes clusters.
+Integration tests for workflow CLI commands using a dedicated Kubernetes test cluster.
 
-These tests support three execution modes:
-
-1. **GitHub Actions (CI)**: Uses a pre-configured Kind cluster set up by the workflow.
-   The cluster is created before tests run and is automatically detected.
-
-2. **Local with existing cluster**: Auto-detects and uses any accessible Kubernetes
-   cluster (minikube, k3s, kind, etc.) configured in your kubeconfig.
-
-3. **Local without cluster**: Falls back to creating a k3s container using
-   testcontainers-python for a lightweight, isolated test environment.
-
-The test suite automatically detects which mode to use based on cluster availability.
-No manual configuration is required - the tests adapt to the environment.
-
-## Running Tests Locally
-
-### With existing cluster (fastest):
-```bash
-# Start minikube, kind, or k3s first
-minikube start  # or: kind create cluster
-pytest tests/workflow-tests/test_workflow_integration.py
-```
-
-### Without existing cluster (automatic fallback):
-```bash
-# Tests will automatically create k3s container
-pytest tests/workflow-tests/test_workflow_integration.py
-```
-
-## Architecture
-
-The cluster detection logic is implemented in helper functions:
-- `_detect_existing_kubernetes_cluster()`: Checks for accessible cluster
-- `_get_kubernetes_client()`: Returns configured client for existing cluster
-
-The `k3s_container` fixture conditionally creates a k3s container only when
-no existing cluster is detected, ensuring tests work in all environments.
+These tests are intended to run against a pre-created Kind cluster, both locally
+and in CI. They require the active kube context to match the dedicated workflow
+test context and will fail fast otherwise.
 """
 
 import logging
-import os
 import pytest
 import subprocess
-import tempfile
 import time
 import uuid
-import requests
 from click.testing import CliRunner
-from kubernetes import client, config
+from kubernetes import client
 from kubernetes.client.rest import ApiException
-from testcontainers.k3s import K3SContainer
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
-from testcontainers.core.container import DockerContainer
-from kubernetes import utils
 
 logger = logging.getLogger(__name__)
 
@@ -305,150 +265,20 @@ def _wait_for_port_forward(process, port, timeout=10):
     return False
 
 
-def _detect_existing_kubernetes_cluster():
-    """
-    Detect if a Kubernetes cluster is already available and accessible.
-
-    This function attempts to load the kubeconfig and connect to a cluster.
-    It's used to determine whether to use an existing cluster (e.g., Kind in CI,
-    minikube locally) or fall back to creating a k3s container.
-
-    Returns:
-        bool: True if an existing cluster is accessible, False otherwise
-    """
-    try:
-        # Try to load kubeconfig from default location or KUBECONFIG env var
-        config.load_kube_config()
-
-        # Attempt to connect to the cluster by listing namespaces
-        v1 = client.CoreV1Api()
-        namespaces = v1.list_namespace(timeout_seconds=10)
-
-        # If we got here, we have a working cluster
-        logger.info("✓ Detected existing Kubernetes cluster")
-        logger.info(f"  Found {len(namespaces.items)} namespaces")
-
-        # Log cluster context for debugging
-        contexts, active_context = config.list_kube_config_contexts()
-        if active_context:
-            cluster_name = active_context.get('context', {}).get('cluster', 'unknown')
-            logger.info(f"  Active context: {active_context.get('name', 'unknown')}")
-            logger.info(f"  Cluster: {cluster_name}")
-
-        return True
-
-    except config.ConfigException as e:
-        logger.info(f"No kubeconfig found: {e}")
-        return False
-    except ApiException as e:
-        logger.info(f"Kubernetes API error: {e}")
-        return False
-    except Exception as e:
-        logger.info(f"Failed to connect to existing cluster: {e}")
-        return False
-
-
-def _get_kubernetes_client():
-    """
-    Get a configured Kubernetes client from an existing cluster.
-
-    This function loads the kubeconfig and returns a CoreV1Api client.
-    It should only be called after _detect_existing_kubernetes_cluster()
-    has confirmed a cluster is available.
-
-    Returns:
-        client.CoreV1Api: Configured Kubernetes client, or None if unable to connect
-    """
-    try:
-        # Load kubeconfig (should already be loaded, but ensure it's available)
-        config.load_kube_config()
-
-        # Create and return the client
-        v1 = client.CoreV1Api()
-
-        # Verify the client works
-        v1.list_namespace(timeout_seconds=10)
-
-        return v1
-
-    except Exception as e:
-        logger.error(f"Failed to create Kubernetes client: {e}")
-        return None
-
-
-# ============================================================================
-# Test Fixtures
-# ============================================================================
-
 @pytest.fixture(scope="session")
-def k3s_container():
-    """
-    Set up Kubernetes cluster for all workflow tests.
-
-    This fixture supports three modes:
-    1. GitHub Actions: Uses existing Kind cluster set up by the workflow
-    2. Local with existing cluster: Auto-detects minikube/k3s/kind
-    3. Local without cluster: Falls back to creating k3s container
-
-    The fixture automatically detects which mode to use and configures
-    the Kubernetes client accordingly.
-    """
-    # First, check if an existing Kubernetes cluster is available
-    has_existing_cluster = _detect_existing_kubernetes_cluster()
-
-    if has_existing_cluster:
-        logger.info("\n=== Using existing Kubernetes cluster ===")
-        logger.info("Skipping k3s container creation")
-
-        # Verify we can get a working client
-        k8s_client = _get_kubernetes_client()
-        if k8s_client is None:
-            pytest.fail("Detected existing cluster but failed to create client")
-
-        # Yield a sentinel value to indicate we're using an existing cluster
-        # The actual kubeconfig is already loaded by _detect_existing_kubernetes_cluster()
-        yield {"mode": "existing-cluster", "container": None}
-
-        # No cleanup needed for existing cluster
-        logger.info("\nUsing existing cluster - no cleanup needed")
-
-    else:
-        logger.info("\n=== No existing cluster detected ===")
-        logger.info("Starting k3s container for workflow tests...")
-
-        # Start k3s container
-        container = K3SContainer(image="rancher/k3s:latest")
-        container.start()
-
-        # Get kubeconfig from container
-        kubeconfig = container.config_yaml()
-
-        # Write kubeconfig to temporary file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-            f.write(kubeconfig)
-            kubeconfig_path = f.name
-
-        # Set KUBECONFIG environment variable
-        os.environ['KUBECONFIG'] = kubeconfig_path
-
-        # Load the kubeconfig
-        config.load_kube_config(config_file=kubeconfig_path)
-
-        yield {"mode": "k3s-container", "container": container}
-
-        logger.info("\nCleaning up k3s container...")
-        # Clean up
-        container.stop()
-        if os.path.exists(kubeconfig_path):
-            os.unlink(kubeconfig_path)
-        if 'KUBECONFIG' in os.environ:
-            del os.environ['KUBECONFIG']
+def k8s_cluster(required_workflow_test_kube_context):
+    """Require and use the dedicated workflow test cluster."""
+    logger.info(
+        "Using workflow test kube context: %s",
+        required_workflow_test_kube_context["active_context"],
+    )
+    return required_workflow_test_kube_context
 
 
 @pytest.fixture(scope="session")
-def argo_workflows(k3s_container):
-    """Install Argo Workflows in the k3s cluster"""
-    logger.info("\nInstalling Argo Workflows in k3s...")
+def argo_workflows(k8s_cluster):
+    """Verify and use Argo Workflows in the dedicated workflow test cluster."""
+    logger.info("\nVerifying Argo Workflows in workflow test cluster...")
 
     # Argo Workflows version to install
     argo_version = "v3.7.3"
@@ -456,61 +286,15 @@ def argo_workflows(k3s_container):
 
     v1 = client.CoreV1Api()
 
-    # Create argo namespace
-    namespace = client.V1Namespace(
-        metadata=client.V1ObjectMeta(name=argo_namespace)
-    )
     try:
-        v1.create_namespace(body=namespace)
-        logger.info(f"Created namespace: {argo_namespace}")
+        v1.read_namespace(name=argo_namespace)
+        logger.info(f"Namespace {argo_namespace} exists")
     except ApiException as e:
-        if e.status != 409:  # Ignore if already exists
-            raise
-        logger.info(f"Namespace {argo_namespace} already exists")
+        pytest.fail(
+            f"Expected namespace {argo_namespace!r} for workflow tests, but it was not found: {e}"
+        )
 
-    # Download and apply the Argo Workflows manifest
-    # Using install.yaml instead of quick-start-minimal.yaml for lighter installation
-    manifest_url = (
-        f"https://github.com/argoproj/argo-workflows/releases/download/"
-        f"{argo_version}/quick-start-minimal.yaml"
-    )
-
-    try:
-        logger.info(f"Downloading Argo Workflows manifest from {manifest_url}")
-        response = requests.get(manifest_url, timeout=30)
-        response.raise_for_status()
-        manifest_content = response.text
-
-        # Write manifest to temporary file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-            f.write(manifest_content)
-            manifest_path = f.name
-
-        # Apply the manifest using Kubernetes Python client
-        logger.info("Applying Argo Workflows manifest...")
-        k8s_client = client.ApiClient()
-
-        try:
-            utils.create_from_yaml(
-                k8s_client,
-                manifest_path,
-                namespace=argo_namespace
-            )
-            logger.info("Argo Workflows manifest applied successfully")
-        except Exception as apply_error:
-            # Some resources might already exist, which is okay
-            logger.info(f"Note during apply: {apply_error}")
-            logger.info("Continuing with installation verification...")
-
-        # Clean up temporary file
-        if os.path.exists(manifest_path):
-            os.unlink(manifest_path)
-
-    except Exception as e:
-        logger.info(f"Error installing Argo Workflows: {e}")
-        raise
-
-    # Use the clean waiter class to wait for Argo Workflows to be ready
+    logger.info("Waiting for existing Argo Workflows deployments to be ready...")
     waiter = ArgoWorkflowsWaiter(argo_namespace, timeout=300, check_interval=15)
 
     if not waiter.wait_for_ready(logger):
@@ -561,12 +345,11 @@ def argo_workflows(k3s_container):
         except subprocess.TimeoutExpired:
             port_forward_process.kill()
 
-    # Cleanup is handled by k3s_container fixture
-    logger.info("Argo Workflows cleanup (handled by k3s container cleanup)")
+    logger.info("Argo Workflows test fixture cleanup complete")
 
 
 @pytest.fixture(scope="session")
-def test_namespace(k3s_container):
+def test_namespace(k8s_cluster):
     """Create a unique namespace for the entire test session and clean it up afterwards"""
     # Generate a unique namespace name for this test session
     namespace_name = f"test-workflow-{uuid.uuid4().hex[:8]}"
@@ -598,10 +381,9 @@ def test_namespace(k3s_container):
 
 @pytest.fixture
 def k8s_workflow_store(test_namespace):
-    """Create a WorkflowConfigStore connected to k3s Kubernetes in the test namespace"""
+    """Create a WorkflowConfigStore connected to the test cluster in the test namespace."""
     try:
-        # Create a Kubernetes client using the already loaded configuration
-        # The kubeconfig from k3s already has admin permissions
+        # Create a Kubernetes client using the required test-cluster context.
         v1 = client.CoreV1Api()
 
         # Verify the connection is working before creating the store
@@ -610,7 +392,7 @@ def k8s_workflow_store(test_namespace):
         except Exception as e:
             pytest.skip(f"Kubernetes connection lost: {e}")
 
-        # Create the WorkflowConfigStore with the pre-configured client for the test namespace
+        # Create the WorkflowConfigStore with the pre-configured client for the test namespace.
         store = WorkflowConfigStore(
             namespace=test_namespace,
             config_map_prefix="workflow-test",
@@ -652,7 +434,7 @@ def sample_workflow_config():
 
 @pytest.mark.slow
 class TestWorkflowCLICommands:
-    """Integration tests for workflow CLI commands using real k3s"""
+    """Integration tests for workflow CLI commands using the dedicated test cluster."""
 
     def test_workflow_help(self, runner):
         """Test workflow help command"""
@@ -693,7 +475,7 @@ class TestWorkflowCLICommands:
                      "    auth:\n      username: admin\n      password: password\n")
         config = WorkflowConfig.from_yaml(yaml_text)
 
-        # Save config to k3s
+        # Save config to the test cluster.
         message = k8s_workflow_store.save_config(config, session_name)
         assert "created" in message or "updated" in message
 
@@ -849,10 +631,10 @@ class TestWorkflowCLICommands:
 
 @pytest.mark.slow
 class TestArgoWorkflows:
-    """Integration tests for Argo Workflows installation in k3s"""
+    """Integration tests for Argo Workflows in the dedicated test cluster."""
 
     def test_argo_workflows_installation(self, argo_workflows):
-        """Test that Argo Workflows is properly installed in k3s"""
+        """Test that Argo Workflows is properly installed in the test cluster."""
         argo_namespace = argo_workflows["namespace"]
         argo_version = argo_workflows["version"]
 
@@ -1446,13 +1228,10 @@ class TestArgoWorkflows:
                     pass
 
 
-def test_k3s_container_support():
-    """Test that k3s container support is available"""
-    try:
-        # Just verify the import works
-        assert DockerContainer is not None
-    except ImportError:
-        pytest.skip("testcontainers not installed - run: pip install testcontainers")
+def test_workflow_test_context_is_configured(required_workflow_test_kube_context):
+    """Verify workflow integration tests are pointed at the dedicated test context."""
+    assert required_workflow_test_kube_context["active_context"] == \
+        required_workflow_test_kube_context["expected_context"]
 
 
 def _test_output_command_for_workflow(runner, workflow_name, namespace, expected_message):

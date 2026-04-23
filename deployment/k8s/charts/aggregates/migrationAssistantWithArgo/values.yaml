@@ -296,7 +296,7 @@ charts:
 
 
   strimzi-kafka-operator:
-    version: 0.50.0
+    version: 0.50.1
     repository: "https://strimzi.io/charts/"
     values:
       storageType: ephemeral # strimzi is stateless
@@ -378,6 +378,7 @@ charts:
           - name: RESOURCE_STATE_CHECK_INTERVAL
             value: "1s"
       server:
+        secure: true
         replicas: 2
         resources:
           requests: { cpu: 100m, memory: 512Mi }
@@ -408,7 +409,7 @@ charts:
           name: argo-workflow-executor
 
   fluent-bit:
-    version: "0.49.0"
+    version: "0.51.0"
     repository: "https://fluent.github.io/helm-charts"
     values:
       resources:
@@ -607,6 +608,8 @@ charts:
           requests: { cpu: 100m, memory: 128Mi }
           limits:   { cpu: 500m, memory: 256Mi }
         sidecar:
+          image:
+            tag: 1.30.11
           dashboards:
             resources:
               requests: { cpu: 50m, memory: 100Mi }

@@ -19,7 +19,7 @@
  *   matchAll / empty query       → MatchAllNode
  *   group                        → GroupNode
  *   boost suffix (^N)            → BoostNode wrapping the boosted node
- *
+
  * Trace example for `title:java AND price:[10 TO 100]`:
  *   1. query → orExpr → andExpr
  *   2. andExpr matches: head "AND" tail
@@ -31,9 +31,14 @@
  *   3. andExpr action returns
  *        → { type:'bool', and:[FieldNode, RangeNode], or:[], not:[] }   (BoolNode)
  *
+ * Post-parse passes (applied in order):
+ *   1. applyDefaultOperator  — q.op=AND: convert implicit-OR BoolNodes to AND
+ *   2. resolveDefaultFields  — df → BareNode.defaultField
+ *   3. applyQueryFields      — qf → BareNode.queryFields (edismax/dismax only)
+ *
  * Responsibilities:
  *   - Parse the query string into an AST
- *   - Apply the default field (df) from params to BareNode nodes
+ *   - Orchestrate post-parse AST normalization passes
  *   - Return parse errors as ParseError (never throws)
  */
 
@@ -41,6 +46,7 @@ import * as peggy from 'peggy';
 import grammar from './solr.pegjs';
 import type { ASTNode } from '../ast/nodes';
 import type { ParseResult, ParseError } from './types';
+import { parseQueryFields, applyQueryFields } from './qf';
 
 // Lazily compiled parser — the grammar is inlined at build time and compiled
 // on the first call to parseSolrQuery, then cached for all subsequent calls.
@@ -49,7 +55,7 @@ let parserInstance: peggy.Parser | null = null;
 /** Return the cached parser, compiling the grammar on first call. */
 function getParser(): peggy.Parser {
   if (parserInstance) return parserInstance;
-  parserInstance = peggy.generate(grammar);
+  parserInstance = peggy.generate(grammar, { allowedStartRules: ['query', 'funcQuery'] });
   return parserInstance;
 }
 
@@ -57,8 +63,7 @@ function getParser(): peggy.Parser {
  * Parse a Solr query string into an AST.
  *
  * @param query - The raw Solr query string (the `q` parameter value)
- * @param params - Request parameters. Reads `df` to resolve bare
- *                 values and unfielded phrases to a default field.
+ * @param params - Request parameters. Reads `df`, `q.op`, `defType`, `qf`.
  * @returns ParseResult with the AST and any errors
  *
  * Examples:
@@ -66,7 +71,10 @@ function getParser(): peggy.Parser {
  *   → { ast: BoolNode { and: [FieldNode, RangeNode] }, errors: [] }
  *
  *   parseSolrQuery("java", new Map([["df", "title"]]))
- *   → { ast: FieldNode { field: "title", value: "java" }, errors: [] }
+ *   → { ast: BareNode { value: "java", defaultField: "title" }, errors: [] }
+ *
+ *   parseSolrQuery("java", new Map([["defType", "edismax"], ["qf", "title^2 body"]]))
+ *   → { ast: BareNode { value: "java", queryFields: [{field:"title",boost:2},{field:"body"}] }, errors: [] }
  *
  *   parseSolrQuery("title:java AND )", new Map())
  *   → { ast: null, errors: [{ message: "...", position: 16 }] }
@@ -85,14 +93,34 @@ export function parseSolrQuery(
   // Solr accepts both "AND" and "and", so we normalize to uppercase.
   const qOp = params.get('q.op')?.toUpperCase();
 
+  // defType selects edismax/dismax semantics for the qf pass.
+  const defType = params.get('defType')?.toLowerCase();
+
   try {
     const ast = getParser().parse(query) as ASTNode;
+
+    // Phase 2: If the grammar produced a LocalParamsNode, re-parse the body
+    // based on the query parser type. The grammar captures the body as raw
+    // text; we parse it here with the appropriate grammar.
+    if (ast.type === 'localParams') {
+      resolveLocalParamsBody(ast);
+    }
+
     // Apply q.op before resolveDefaultFields — applyDefaultOperator reads
     // the `implicit` flag which resolveDefaultFields cleans up.
     if (qOp === 'AND') {
       applyDefaultOperator(ast);
     }
     resolveDefaultFields(ast, df);
+
+    // qf → BareNode.queryFields (edismax/dismax only)
+    if (defType === 'edismax' || defType === 'dismax') {
+      const queryFields = parseQueryFields(params.get('qf'));
+      if (queryFields) {
+        applyQueryFields(ast, queryFields);
+      }
+    }
+
     return { ast, errors: [] };
   } catch (err: unknown) {
     return { ast: null, errors: [toParseError(err)] };
@@ -110,6 +138,65 @@ export function toParseError(err: unknown): ParseError {
     message: e?.message || 'Parse error',
     position: e?.location?.start?.offset ?? 0,
   };
+}
+
+/**
+ * Query parser types whose body uses Lucene/Solr query syntax.
+ * For these types, the raw body is re-parsed using the Solr grammar.
+ * Other types (e.g., func, terms) need their own parsers.
+ */
+const LUCENE_FAMILY_TYPES = new Set([
+  'lucene', 'dismax', 'edismax',
+]);
+
+/**
+ * Resolve the body of a LocalParamsNode.
+ *
+ * The grammar captures the body as raw text. This function determines the
+ * effective body string (from the `v` key or the trailing raw text), then
+ * re-parses it using the appropriate grammar based on the `type` param.
+ *
+ * For Lucene-family types (lucene, dismax, edismax, or no type specified),
+ * the body is parsed with the Solr grammar. For other types, the body is
+ * left as null — future parsers (e.g., function query) will handle them.
+ *
+ * @throws Re-throws parse errors from body re-parsing so the caller can
+ *         convert them to ParseError via toParseError().
+ */
+function resolveLocalParamsBody(node: import('../ast/nodes').LocalParamsNode): void {
+  const vPair = node.params.find((p) => p.key === 'v');
+
+  // Dereference — can't resolve at parse time
+  if (vPair?.deref) {
+    node.body = null;
+    return;
+  }
+
+  // Determine the effective body string: v key takes precedence over raw body
+  const bodyStr = vPair ? vPair.value : node.rawBody;
+  if (!bodyStr) {
+    node.body = null;
+    return;
+  }
+
+  // Determine the parser type (short form or explicit type= pair)
+  const typePair = node.params.find((p) => p.key === 'type');
+  const parserType = typePair?.value?.toLowerCase();
+
+  // For Lucene-family types (or no type = default Lucene), re-parse with Solr grammar
+  if (!parserType || LUCENE_FAMILY_TYPES.has(parserType)) {
+    node.body = getParser().parse(bodyStr) as import('../ast/nodes').ASTNode;
+    return;
+  }
+
+  // Function query type — parse with the funcQuery start rule
+  if (parserType === 'func') {
+    node.body = getParser().parse(bodyStr, { startRule: 'funcQuery' }) as import('../ast/nodes').ASTNode;
+    return;
+  }
+
+  // Unknown parser type — leave body null for now.
+  node.body = null;
 }
 
 /** Walk the AST and resolve BareNode default fields.
@@ -144,8 +231,13 @@ function resolveDefaultFields(node: ASTNode, df: string): void {
       break;
     case 'boost':
     case 'group':
+    case 'filter':
       resolveDefaultFields(node.child, df);
       break;
+    case 'localParams':
+      if (node.body) resolveDefaultFields(node.body, df);
+      break;
+    case 'func':
     case 'matchAll':
       break;
     // Compile-time exhaustive check, unreachable at runtime.
@@ -189,10 +281,15 @@ function applyDefaultOperator(node: ASTNode): void {
     }
     case 'boost':
     case 'group':
+    case 'filter':
       applyDefaultOperator(node.child);
+      break;
+    case 'localParams':
+      if (node.body) applyDefaultOperator(node.body);
       break;
     case 'bare':
     case 'field':
+    case 'func':
     case 'phrase':
     case 'range':
     case 'matchAll':
@@ -204,4 +301,3 @@ function applyDefaultOperator(node: ASTNode): void {
     }
   }
 }
-

@@ -17,7 +17,7 @@ from typing import List, Optional, Tuple
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "OS_1.3"]
+VALID_SOURCE_VERSIONS = ["ES_1.5", "ES_2.4", "ES_5.6", "ES_6.8", "ES_7.10", "OS_1.3", "SOLR_8.11"]
 VALID_TARGET_VERSIONS = ["OS_1.3", "OS_2.19", "OS_2.x", "OS_3.1"]
 MA_RELEASE_NAME = "ma"
 
@@ -60,7 +60,8 @@ class TestRunner:
 
     def __init__(self, k8s_service: K8sService, unique_id: str, test_ids: List[str], ma_chart_path: str,
                  combinations: List[Tuple[str, str]],
-                 registry_prefix: str = "", values_file: str = None, skip_install: bool = False) -> None:
+                 registry_prefix: str = "", values_file: str = None, skip_install: bool = False,
+                 speedup_factor: int = 20, observed_packet_timeout: int = 30) -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
@@ -69,6 +70,8 @@ class TestRunner:
         self.registry_prefix = registry_prefix
         self.values_file = values_file
         self.skip_install = skip_install
+        self.speedup_factor = speedup_factor
+        self.observed_packet_timeout = observed_packet_timeout
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -148,7 +151,7 @@ class TestRunner:
 
     def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False,
                   reuse_clusters: bool = False, test_reports_dir: str = None) -> TestReport:
-        """Runs pytest tests."""
+        """Runs pytest tests via background exec + poll to survive WebSocket drops."""
         logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
         command_list = [
             "pipenv",
@@ -170,8 +173,19 @@ class TestRunner:
             command_list.append("--reuse_clusters")
         if self.registry_prefix:
             command_list.append(f"--image_registry_prefix={self.registry_prefix}")
+        command_list.append(f"--speedup_factor={self.speedup_factor}")
+        command_list.append(f"--observed_packet_timeout={self.observed_packet_timeout}")
         command_list.append("-s")
-        self.k8s_service.exec_migration_console_cmd(command_list=command_list)
+
+        log_file = f"/tmp/{self.unique_id}_pytest.log"
+        exit_code_file = f"/tmp/{self.unique_id}_exit_code"
+
+        self.k8s_service.exec_background_cmd(
+            command_list=command_list, log_file=log_file, exit_code_file=exit_code_file)
+
+        exit_code = self.k8s_service.poll_cmd_completion(
+            log_file=log_file, exit_code_file=exit_code_file)
+
         output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
         logger.info(f"Retrieving test report at {output_file_path}")
         cmd_response = self.k8s_service.exec_migration_console_cmd(command_list=["cat", output_file_path],
@@ -184,6 +198,9 @@ class TestRunner:
         test_report = self._parse_test_report(test_data)
         print(f"Test cases passed: {test_report.summary.passed}")
         print(f"Test cases failed: {test_report.summary.failed}")
+        if exit_code != 0 and test_report.summary.failed == 0:
+            logger.warning(f"pytest exited with code {exit_code} but report shows no failures — "
+                           f"possible infrastructure error")
         return test_report
 
     def cleanup_clusters(self) -> None:
@@ -209,6 +226,7 @@ class TestRunner:
     def cleanup_deployment(self) -> None:
         helm_uninstall_error = None
         self.k8s_service.cleanup_ack_dashboard_crs()
+        self.k8s_service.cleanup_strimzi_crs()
         try:
             self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         except Exception as e:
@@ -480,6 +498,18 @@ def parse_args() -> argparse.Namespace:
         help="Kubernetes context to use for kubectl and helm commands. "
              "If not set, uses the current kubectl context."
     )
+    parser.add_argument(
+        "--speedup-factor",
+        type=int,
+        default=20,
+        help="Speedup factor for traffic replayer (default: 20)"
+    )
+    parser.add_argument(
+        "--observed-packet-timeout",
+        type=int,
+        default=30,
+        help="Observed packet connection timeout for traffic replayer (default: 30)"
+    )
     return parser.parse_args()
 
 
@@ -518,7 +548,9 @@ def main() -> None:
                              combinations=combinations,
                              registry_prefix=args.registry_prefix,
                              values_file=dev_values_file,
-                             skip_install=args.skip_install)
+                             skip_install=args.skip_install,
+                             speedup_factor=args.speedup_factor,
+                             observed_packet_timeout=args.observed_packet_timeout)
 
     if args.delete_only:
         return test_runner.cleanup_deployment()

@@ -8,6 +8,9 @@
  * This matches the replayer/document transform pattern in backfill.
  */
 
+import type { MetricsAccumulator, TransformMetricName } from './metrics';
+import { createMetrics, incrementMetric } from './metrics';
+
 export type SolrEndpoint = 'select' | 'update' | 'admin' | 'schema' | 'config' | 'unknown';
 
 /**
@@ -36,6 +39,16 @@ export interface RequestContext {
   targetName?: string;
   /** Routing mode — 'single' or 'dual'. Set by the shim proxy. */
   mode?: string;
+  /**
+   * Solr requestHandler config (defaults/invariants/appends) from solrconfig.xml.
+   * Injected from bindings at init, set per-context so transforms access it via ctx.
+   * Uses Record (plain object) because GraalVM exposes Java Maps as JS objects via allowMapAccess.
+   */
+  solrConfig?: Record<string, { defaults?: Record<string, string>; invariants?: Record<string, string>; appends?: Record<string, string> }>;
+  /** Record a limitation metric occurrence. */
+  emitMetric(metric: TransformMetricName): void;
+  /** Internal accumulator — use {@link emitMetric} instead. */
+  readonly _metrics: MetricsAccumulator;
 }
 
 /** Parsed once from the bundled {request, response}. Shared across all response micro-transforms. */
@@ -84,6 +97,7 @@ function getBodyMap(payload: JavaMap): JavaMap {
 
 export function buildRequestContext(msg: JavaMap): RequestContext {
   const uri: string = msg.get('URI') || '';
+  const metrics = createMetrics();
   return {
     msg,
     endpoint: detectEndpoint(uri),
@@ -92,6 +106,8 @@ export function buildRequestContext(msg: JavaMap): RequestContext {
     body: getBodyMap(msg.get('payload')),
     targetName: msg.get('_targetName') || 'opensearch',
     mode: msg.get('_mode') || 'single',
+    emitMetric: (metric: TransformMetricName) => incrementMetric(metrics, metric),
+    _metrics: metrics,
   };
 }
 

@@ -1,28 +1,30 @@
 ---
-name: solr-to-opensearch
-displayName: "Solr to OpenSearch Migration Advisor"
+name: solr-opensearch-migration-advisor
 description: >
   Expert in migrating Apache Solr collections to OpenSearch indexes. 
   Translates Solr XML/JSON schemas to OpenSearch mappings and converts 
   Solr syntax (Standard, DisMax, eDisMax) into OpenSearch DSL. 
   Provides sizing for nodes, shards, and JVM heap.
+  Provides guidance auf authentication migration from Solr to OpenSearch.
   Uses the AWS Knowledge MCP Server for accurate, up-to-date OpenSearch
   and AWS service information.
-keywords: 
-  - "Solr to OpenSearch"
-  - "migrate Solr"
-  - "schema.xml to mapping"
-  - "solrconfig.xml"
-  - "edismax to bool query"
-  - "synonyms.txt"
-  - "SolrCloud vs OpenSearch Cluster"
-  - "OpenSearch best practices"
-  - "AWS OpenSearch Service"
-  - "OpenSearch regional availability"
 metadata:
   author: jzonthemtn
   version: "0.2.0"
   capability: "translation-engine"
+  displayName: "Solr to OpenSearch Migration Advisor"
+  keywords:
+    - "Solr to OpenSearch"
+    - "migrate Solr"
+    - "schema.xml to mapping"
+    - "solrconfig.xml"
+    - "edismax to bool query"
+    - "synonyms.txt"
+    - "SolrCloud vs OpenSearch Cluster"
+    - "OpenSearch best practices"
+    - "AWS OpenSearch Service"
+    - "OpenSearch regional availability"
+    - "Authentication migration from Solr to OpenSearch"
 ---
 
 # Apache Solr to OpenSearch Migration Advisor
@@ -43,6 +45,7 @@ Use this skill when:
 - A user has Solr query strings and needs them translated to OpenSearch Query DSL.
 - A user needs a migration report covering milestones, blockers, and cost estimates.
 - A user has questions about Amazon OpenSearch Service features, regional availability, or AWS best practices.
+- A user has questions about migrating authentication from Solr to OpenSearch.
 
 **Trigger phrases:** "migrate from Solr", "convert Solr schema", "translate Solr
 query", "Solr to OpenSearch", "migration advisor", "migration report",
@@ -308,6 +311,91 @@ Present the report to the user and offer to drill into any section.
 
 Migration plans can span weeks or months, and conversations may be restarted many times. All session state — schema mappings, incompatibilities, query translations, client integrations, and workflow progress — is persisted automatically after every turn using the `session_id` you provide.
 
+## Migration Progress File
+
+In addition to the JSON session state, maintain a human-readable Markdown file at `sessions/<session_id>.md`. This file is the user's living record of their migration journey — update it at the end of every step so it always reflects the current state of the migration.
+
+### When to update
+
+Update `sessions/<session_id>.md` after every step completes. Do not wait until the end of the migration. Each update should reflect only what is known at that point — do not leave placeholder sections for steps not yet reached.
+
+### File structure
+
+The file must always contain the following sections, updated in place as the migration progresses:
+
+```markdown
+# Solr to OpenSearch Migration — <session_id>
+
+**Stakeholder role:** <role>
+**Solr version:** <version, or "not yet provided">
+**Current step:** <step number and name>
+**Last updated:** <date of last update>
+
+---
+
+## Progress
+
+| Step | Name | Status |
+|---|---|---|
+| 0 | Stakeholder Identification | ✅ Complete / 🔄 In Progress / ⬜ Not Started |
+| 1 | Solr Version | ... |
+| 2 | Schema Acquisition | ... |
+| 3 | Schema Review & Incompatibility Analysis | ... |
+| 4 | Query Translation | ... |
+| 5 | Solr Customizations | ... |
+| 6 | Cluster & Infrastructure Assessment | ... |
+| 7 | Client & Front-end Integration | ... |
+| 8 | Migration Report | ... |
+
+---
+
+## Key Facts
+
+- **Solr version:** <value from facts.solr_version>
+- **Stakeholder role:** <value from facts.stakeholder_role>
+- **Index name:** <agreed index name, if known>
+- **Schema migrated:** <yes / no / in progress>
+- **Customizations identified:** <list or "none identified yet">
+
+---
+
+## Incompatibilities
+
+<If none found yet, write "No incompatibilities identified yet.">
+
+| Severity | Category | Description | Recommendation |
+|---|---|---|---|
+| Breaking | ... | ... | ... |
+| Behavioral | ... | ... | ... |
+| Unsupported | ... | ... | ... |
+
+---
+
+## Client Integrations
+
+<If none recorded yet, write "No client integrations recorded yet.">
+
+| Name | Kind | Current Usage | Migration Action |
+|---|---|---|---|
+| ... | ... | ... | ... |
+
+---
+
+## Notes
+
+<Free-form notes added during the session — decisions made, open questions, user preferences, anything worth remembering across restarts.>
+```
+
+### Rules
+
+- **Create the file at the end of Step 0**, once the stakeholder role is known. Initialize all step statuses to ⬜ Not Started except Step 0 which becomes ✅ Complete.
+- **Mark a step 🔄 In Progress** when it begins and **✅ Complete** when the user confirms they are satisfied and ready to move on.
+- **Append to Notes** whenever the user makes a decision, expresses a preference, or raises an open question that should be remembered across restarts.
+- **Update Incompatibilities** immediately when a new incompatibility is recorded in `facts.incompatibilities` — do not batch them until the report.
+- **Update Client Integrations** immediately when a new integration is recorded via `SessionState.add_client_integration`.
+- **When deleting information** keep the structure described, only delete information that has shown to be irrelevant, and place a note highlighting aspects that were shown during the conversation to be irrelevant, giving reasons why this is the case. Do not delete any information relevant to the migration effort - only add or update where suitable.
+- **The file is the source of truth for human readers.** Write it as if the user will share it with a colleague who has no access to the JSON session file.
+
 ### How to resume
 
 When starting a new conversation, pass the same `session_id` you used previously:
@@ -322,7 +410,7 @@ Via MCP:
 { "tool": "handle_message", "arguments": { "message": "Let's continue", "session_id": "my-project-migration" } }
 ```
 
-The advisor will reload the full `SessionState` (history, facts, progress, incompatibilities, client integrations) and pick up exactly where you left off.
+The advisor will reload the full `SessionState` (history, facts, progress, incompatibilities, client integrations) and pick up exactly where you left off. The Markdown progress file at `sessions/<session_id>.md` will also be updated to reflect the resumed state.
 
 ### Choosing a session ID
 
@@ -351,7 +439,10 @@ print(f"Facts: {state.facts}")
 
 ### Session files
 
-With the default `FileStorage` backend, each session is stored as a JSON file at `sessions/<session_id>.json`. You can back these up, copy them between machines, or inspect them directly. The file is human-readable and contains the full conversation history, all discovered facts, and migration progress.
+With the default `FileStorage` backend, each session produces two files:
+
+- `sessions/<session_id>.json` — machine-readable JSON containing the full conversation history, all discovered facts, incompatibilities, client integrations, and progress. Used by the skill for session resumption.
+- `sessions/<session_id>.md` — human-readable Markdown progress file. Updated after every step. Safe to share with colleagues, attach to tickets, or check into version control. See the **Migration Progress File** section above for the full format.
 
 ### Starting fresh
 
@@ -367,10 +458,43 @@ Or simply use a new `session_id`.
 
 ## Reference Knowledge Base
 
-You have access to a verified knowledge base of technical information about Apache Solr and OpenSearch located under the `references` directory. Before answering any questions, search the provided context and cite your sources from the reference materials.
+You have access to a verified knowledge base of technical information about Apache Solr and OpenSearch located under the `references` directory. Consult these files proactively — do not wait for the user to ask. Use the table below to select the most relevant file(s) for the current topic, then cite the specific section you drew from.
 
-#[[file:references/01-sample-reference.md]]
-#[[file:steering/stakeholders.md]]
+### When to Use Each Reference File
+
+| File | Content Summary | Use When… |
+|---|---|---|
+| `references/01-schema-migration.md` | Field type mappings, `schema.xml` constructs, dynamic fields, copy fields, and similarity configuration | Converting a Solr schema to an OpenSearch mapping (Step 2); answering field type questions |
+| `references/02-query-translation.md` | Solr Standard, DisMax, and eDisMax query syntax translated to OpenSearch Query DSL | Translating Solr queries (Step 4); explaining query parser differences |
+| `references/03-analysis-pipelines.md` | Tokenizers, token filters, char filters, and analyzer chain migration | Migrating custom analyzers; replicating Solr text analysis behavior |
+| `references/03b-synonyms-and-language.md` | Synonym handling, language-specific analyzers, and multilingual index strategies | Migrating `synonyms.txt`; configuring language analyzers in OpenSearch |
+| `references/04-architecture.md` | SolrCloud vs. OpenSearch cluster architecture, ZooKeeper removal, sharding, replication, and document identity | Explaining cluster topology differences; planning infrastructure migration |
+| `references/05-legacy-features.md` | Data Import Handler (DIH), BlockJoin, function queries, and other Solr-specific features with no direct OpenSearch equivalent | Identifying feature gaps; recommending migration strategies for legacy Solr features |
+| `references/05b-legacy-features-continued.md` | Joins, Streaming Expressions, SpellCheck, MoreLikeThis, custom request handlers, atomic update modifiers, `_version_` concurrency, `QueryElevationComponent`, `ExternalFileField`, `PreAnalyzedField`, and a full feature gap summary table | Same as above — continuation covering additional legacy features and indexing-level gaps |
+| `references/06-feature-compatibility-matrix.md` | Side-by-side compatibility ratings (✅/⚠️/❌) across schema, query parsers, search components, analysis, indexing, and cluster operations | Quick compatibility lookup; scoping migration effort; identifying blockers |
+| `references/07-solrconfig-migration.md` | `solrconfig.xml` constructs (request handlers, caches, update settings, merge policy, similarity) mapped to OpenSearch equivalents | Migrating `solrconfig.xml`; configuring OpenSearch index and node settings |
+| `references/08-query-behavior-edge-cases.md` | Known behavioral differences between Solr query parsers and OpenSearch Query DSL: default operator, fuzzy scale, date math, scoring, highlighting, sorting, deep pagination, Solr-only query parsers (`{!complexphrase}`, `{!surround}`, `{!graph}`, `{!switch}`, `{!rerank}`) with no OpenSearch equivalent | Debugging query result differences; validating query parity after migration; identifying unsupported query parsers |
+| `references/09-sizing-and-performance.md` | Node roles, shard sizing formulas, JVM/heap tuning, bulk indexing settings, cache configuration, hardware recommendations, and monitoring metrics | Sizing a new OpenSearch cluster; performance tuning; capacity planning (Step 3 / DevOps stakeholder) |
+
+### Usage Guidelines
+
+- **Cite your sources.** When drawing on a reference file, name the file and section (e.g., *"per `references/06-feature-compatibility-matrix.md`, section 3 — Query Parsers"*).
+- **Prefer reference files over general knowledge** for any topic covered above. The reference files reflect decisions and conventions specific to this migration skill.
+- **Combine files when needed.** For example, a schema question may require both `01-schema-migration.md` (field types) and `03-analysis-pipelines.md` (analyzer chains).
+- **Stakeholder filtering.** For a DevOps / Platform Engineer, prioritize `04-architecture.md`, `09-sizing-and-performance.md`, and `07-solrconfig-migration.md`. For a Search Relevance Engineer, prioritize `01-schema-migration.md`, `02-query-translation.md`, `03-analysis-pipelines.md`, and `08-query-behavior-edge-cases.md`.
+
+#[[file:references/01-schema-migration.md]]
+#[[file:references/02-query-translation.md]]
+#[[file:references/03-analysis-pipelines.md]]
+#[[file:references/03b-synonyms-and-language.md]]
+#[[file:references/04-architecture.md]]
+#[[file:references/05-legacy-features.md]]
+#[[file:references/05b-legacy-features-continued.md]]
+#[[file:references/06-feature-compatibility-matrix.md]]
+#[[file:references/07-solrconfig-migration.md]]
+#[[file:references/08-query-behavior-edge-cases.md]]
+#[[file:references/09-sizing-and-performance.md]]
+
 
 ## Instructions
 
@@ -378,9 +502,10 @@ You have access to a verified knowledge base of technical information about Apac
 - Follow the steps in order. If the user jumps ahead, acknowledge their input, store it in the session, and guide them back to complete any skipped steps.
 - If a user asks for migration advice but hasn't provided technical details, proactively request the Solr schema or a sample JSON document (Step 2).
 - **Use `facts.solr_version` throughout every step.** Once the Solr version is known, apply version-specific checks, flag version-specific incompatibilities, and tailor all recommendations accordingly. Never give generic advice when a version-specific answer is more accurate.
-- Use the steering documents (Stakeholders, Query Translation, Index Design, Sizing, Incompatibilities) to inform all reasoning.
+- Use the steering documents (Stakeholders, Query Translation, Index Design, Sizing, Incompatibilities, Authentication) to inform all reasoning.
 - **Incompatibility tracking is mandatory.** Every incompatibility found in any step must be recorded in `facts.incompatibilities` (via `SessionState.add_incompatibility`) before moving on. Never silently skip a known issue.
 - When in doubt about whether something is an incompatibility, flag it conservatively — a false positive is far less harmful than a missed breaking change.
+- **Cite reference sources.** Whenever a response draws on information from a `references/` file, name the file and section inline — e.g., *"per `references/06-feature-compatibility-matrix.md`, section 2 — Query Parsers"*. Do not present reference-derived content as general knowledge.
 
 ### Session State Fields
 
@@ -449,19 +574,9 @@ Or configure it in your MCP client (e.g. `.kiro/settings/mcp.json`):
 }
 ```
 
-## Reference Data
-
-### Field Type Mapping Reference
-| Solr Field Type | OpenSearch Type |
-|---|---|
-| TextField | text |
-| StrField | keyword |
-| IntPointField / TrieIntField | integer |
-| LongPointField / TrieLongField | long |
-| FloatPointField / TrieFloatField | float |
-| DoublePointField / TrieDoubleField | double |
-| DatePointField / TrieDateField | date |
-| BoolField | boolean |
-| BinaryField | binary |
-| LatLonPointSpatialField | geo_point |
-| SpatialRecursivePrefixTreeFieldType | geo_shape |
+### Persistence Fallback
+In case you are not successful using provided session persistence tools for persistence as a JSON file at 
+`sessions/<session_id>.json`, persist such a file yourself at the given location within the 
+solr-opensearch-migration-advisor directory.
+The file is human-readable and contains the full conversation history, all discovered facts, and migration progress.
+Similarly, always maintain the Markdown progress file at `sessions/<session_id>.md` as described in the **Migration Progress File** section. If the JSON session file cannot be written, the Markdown file must still be kept up to date — it is the human-readable record of the migration and must never be skipped.

@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -173,7 +174,7 @@ public class S3Repo implements SourceRepo {
         }
 
         String relativePathStr = filePathStr.substring(s3LocalDirStr.length());
-        if (relativePathStr.startsWith(java.io.File.separator)) {
+        if (relativePathStr.startsWith(File.separator)) {
             relativePathStr = relativePathStr.substring(1);
         }
 
@@ -240,6 +241,56 @@ public class S3Repo implements SourceRepo {
     }
 
     /**
+     * Lists top-level "directories" (common prefixes) under the repo's S3 prefix.
+     * Useful for discovering Solr collection names in a backup without downloading anything.
+     *
+     * @return list of directory names (without trailing slash)
+     */
+    public List<String> listTopLevelDirectories() {
+        return listSubDirectories("");
+    }
+
+    /**
+     * Lists "directories" (common prefixes) under a relative prefix within the repo.
+     * For example, with repo prefix {@code s3://bucket/backup/} and relativePrefix
+     * {@code "myCollection/"}, returns names like {@code ["zk_backup_0", "zk_backup_1", "index"]}.
+     *
+     * @param relativePrefix path relative to repo root (e.g. "myCollection/"). Empty string lists top-level.
+     * @return list of directory names (without trailing slash)
+     */
+    public List<String> listSubDirectories(String relativePrefix) {
+        String prefixKey = s3RepoUri.key;
+        if (!prefixKey.isEmpty() && !prefixKey.endsWith("/")) {
+            prefixKey = prefixKey + "/";
+        }
+        String fullPrefix = prefixKey + relativePrefix;
+        if (!fullPrefix.isEmpty() && !fullPrefix.endsWith("/")) {
+            fullPrefix = fullPrefix + "/";
+        }
+
+        var listRequest = ListObjectsV2Request.builder()
+            .bucket(s3RepoUri.bucketName)
+            .prefix(fullPrefix.isEmpty() ? null : fullPrefix)
+            .delimiter("/")
+            .build();
+
+        ListObjectsV2Response response;
+        try {
+            response = s3Client.listObjectsV2(listRequest).join();
+        } catch (CompletionException e) {
+            throw new CannotListObjectsInS3(s3RepoUri.bucketName, fullPrefix, e);
+        }
+
+        String finalFullPrefix = fullPrefix;
+        return response.commonPrefixes().stream()
+            .map(p -> p.prefix())
+            .map(p -> p.substring(finalFullPrefix.length()))
+            .map(p -> p.endsWith("/") ? p.substring(0, p.length() - 1) : p)
+            .filter(p -> !p.isEmpty())
+            .toList();
+    }
+
+    /**
      * Downloads all files from the S3 prefix to the local directory, preserving relative paths.
      * Useful for Solr backups and other non-ES-snapshot formats where the entire directory
      * needs to be available locally.
@@ -247,16 +298,45 @@ public class S3Repo implements SourceRepo {
      * @return the local directory containing all downloaded files
      */
     public Path downloadAllFiles() {
-        String prefixKey = s3RepoUri.key;
-        if (!prefixKey.isEmpty() && !prefixKey.endsWith("/")) {
-            prefixKey = prefixKey + "/";
+        return downloadPrefix("");
+    }
+
+    /**
+     * Downloads a single file by its relative path within the repo.
+     * Skips download if the file already exists locally.
+     *
+     * @param relativePath path relative to the repo root (e.g. "myCollection/index/abc123")
+     * @return the local file path
+     */
+    public Path downloadFile(String relativePath) {
+        var localPath = s3LocalDir.resolve(relativePath);
+        return fetch(localPath);
+    }
+
+    /**
+     * Downloads files under a specific sub-prefix within the repo's S3 prefix.
+     * For example, if the repo URI is {@code s3://bucket/backup/} and prefix is
+     * {@code "myCollection/index/"}, this downloads all files under
+     * {@code s3://bucket/backup/myCollection/index/}.
+     *
+     * @param prefix relative prefix within the repo (e.g. "collection/index/"). Empty string downloads everything.
+     * @return the local directory containing all downloaded files
+     */
+    public Path downloadPrefix(String prefix) {
+        String baseKey = s3RepoUri.key;
+        if (!baseKey.isEmpty() && !baseKey.endsWith("/")) {
+            baseKey = baseKey + "/";
+        }
+        String fullPrefix = baseKey + prefix;
+        if (!fullPrefix.isEmpty() && !fullPrefix.endsWith("/")) {
+            fullPrefix = fullPrefix + "/";
         }
 
         String continuationToken = null;
         do {
             var requestBuilder = ListObjectsV2Request.builder()
                 .bucket(s3RepoUri.bucketName)
-                .prefix(prefixKey.isEmpty() ? null : prefixKey);
+                .prefix(fullPrefix.isEmpty() ? null : fullPrefix);
             if (continuationToken != null) {
                 requestBuilder.continuationToken(continuationToken);
             }
@@ -265,18 +345,18 @@ public class S3Repo implements SourceRepo {
             try {
                 response = s3Client.listObjectsV2(requestBuilder.build()).join();
             } catch (CompletionException e) {
-                throw new CannotListObjectsInS3(s3RepoUri.bucketName, prefixKey, e);
+                throw new CannotListObjectsInS3(s3RepoUri.bucketName, fullPrefix, e);
             }
 
-            String finalPrefixKey = prefixKey;
+            String finalBaseKey = baseKey;
             for (S3Object obj : response.contents()) {
-                downloadS3Object(obj, finalPrefixKey);
+                downloadS3Object(obj, finalBaseKey);
             }
 
             continuationToken = response.isTruncated() ? response.nextContinuationToken() : null;
         } while (continuationToken != null);
 
-        log.info("Downloaded all files from {} to {}", s3RepoUri, s3LocalDir);
+        log.atInfo().setMessage("Downloaded files from {} prefix '{}' to {}").addArgument(s3RepoUri).addArgument(prefix).addArgument(s3LocalDir).log();
         return s3LocalDir;
     }
 

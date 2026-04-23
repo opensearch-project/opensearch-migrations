@@ -28,6 +28,7 @@ import {
     getApprovalMap,
     getSourceTargetPathAndSnapshotAndMigrationIndex
 } from "./commonUtils/configContextPathConstructors";
+import {ResourceManagement} from "./resourceManagement";
 
 const COMMON_METADATA_PARAMETERS = {
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({
@@ -37,6 +38,8 @@ const COMMON_METADATA_PARAMETERS = {
     sourceVersion: defineRequiredParam<string>(),
     targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
     migrationLabel: defineRequiredParam<string>(),
+    crdName: defineRequiredParam<string>(),
+    crdUid: defineRequiredParam<string>(),
     ...makeRequiredImageParametersForKeys(["MigrationConsole"])
 };
 
@@ -211,11 +214,17 @@ export const MetadataMigration = WorkflowBuilder.create({
 
     .addTemplate("approveEvaluate", t => t
         .addRequiredInput("name", typeToken<string>())
-        .addSuspend()
+        .addSteps(b => b
+            .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
+                c.register({resourceName: b.inputs.name}))
+        )
     )
     .addTemplate("approveMigrate", t => t
         .addRequiredInput("name", typeToken<string>())
-        .addSuspend()
+        .addSteps(b => b
+            .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
+                c.register({resourceName: b.inputs.name}))
+        )
     )
 
 
@@ -251,7 +260,7 @@ export const MetadataMigration = WorkflowBuilder.create({
             )
             .addStep("approveEvaluate", INTERNAL, "approveEvaluate", c =>
                 c.register({
-                    "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("evaluateMetadata"))
+                    "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("evaluatemetadata"))
                 }),
                 {when: expr.not(b.inputs.skipEvaluateApproval)}
             )
@@ -267,7 +276,7 @@ export const MetadataMigration = WorkflowBuilder.create({
             )
             .addStep("approveMigrate", INTERNAL, "approveMigrate", c =>
                 c.register({
-                    "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("migrateMetadata"))
+                    "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("migratemetadata"))
                 }),
                 {when: expr.not(b.inputs.skipMigrateApproval)}
             )

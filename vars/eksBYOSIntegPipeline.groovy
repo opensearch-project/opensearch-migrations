@@ -15,6 +15,7 @@ import groovy.json.JsonOutput
 
 def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "eksbyos"
+    def gitBranchDefault = config.gitBranchDefault ?: 'main'
     def jobName = config.jobName ?: "eks-byos-integ-test"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
     def clusterContextFilePath = "tmp/cluster-context-byos-${currentBuild.number}.json"
@@ -55,7 +56,7 @@ def call(Map config = [:]) {
 <b>custom</b> — uses the parameter fields below as-is'''
             )
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_BRANCH', defaultValue: gitBranchDefault, description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             string(name: 'RFS_WORKERS', defaultValue: '1', description: 'Number of RFS worker pods for document backfill (podReplicas)')
@@ -81,8 +82,7 @@ def call(Map config = [:]) {
                 choices: ['default', 'large'],
                 description: 'Target cluster size (default: 2x r8g.large, large: 24x r8g.8xlarge with dedicated masters)'
             )
-            booleanParam(name: 'BUILD_IMAGES', defaultValue: true, description: 'Build container images from source instead of using public images')
-            booleanParam(name: 'BUILD_CHART_AND_DASHBOARDS', defaultValue: true, description: 'Build Helm chart and dashboards from source instead of using release artifacts')
+            booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
             booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
         }
@@ -107,7 +107,7 @@ def call(Map config = [:]) {
             )
         }
         stages {
-            stage('Checkout & Print params') {
+            stage('Checkout & Print Params') {
                 steps {
                     checkoutStep(branch: params.GIT_BRANCH, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                     script {
@@ -120,8 +120,7 @@ def call(Map config = [:]) {
     Git:                    ${params.GIT_REPO_URL} @ ${params.GIT_BRANCH}
     Stage:                  ${env.maStageName}
     Region:                 ${params.REGION}
-    Build Images:           ${params.BUILD_IMAGES}
-    Build Chart:            ${params.BUILD_CHART_AND_DASHBOARDS}
+    Build:                  ${params.BUILD}
     Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
     Version:                ${params.VERSION}
     ================================================================
@@ -179,23 +178,19 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Test Caller ID') {
+            stage('Test Caller Identity') {
                 steps {
-                    script {
-                        sh 'aws sts get-caller-identity'
-                    }
+                    sh 'aws sts get-caller-identity'
                 }
             }
 
             // Skip source build when using release bootstrap or when not building
             // any artifacts from source (images/chart).
             stage('Build') {
-                when { expression { !params.USE_RELEASE_BOOTSTRAP && (params.BUILD_IMAGES || params.BUILD_CHART_AND_DASHBOARDS) } }
+                when { expression { !params.USE_RELEASE_BOOTSTRAP && params.BUILD } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
-                        script {
-                            sh './gradlew clean build -x test --no-daemon --stacktrace'
-                        }
+                        sh './gradlew clean build -x test --no-daemon --stacktrace'
                     }
                 }
             }
@@ -209,10 +204,10 @@ def call(Map config = [:]) {
                             withMigrationsTestAccount(region: params.REGION) { accountId ->
                                 def bootstrap = resolveBootstrap(
                                     useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
-                                    buildImages: params.BUILD_IMAGES,
-                                    buildChartAndDashboards: params.BUILD_CHART_AND_DASHBOARDS,
+                                    build: params.BUILD,
                                     skipTestImages: true,
-                                    version: params.VERSION
+                                    version: params.VERSION,
+                                    useGeneralNodePool: true
                                 )
                                 bootstrapMA(
                                     stackName: env.MA_STACK_NAME,
@@ -345,6 +340,9 @@ def call(Map config = [:]) {
 
 
                         withMigrationsTestAccount(region: region, duration: 4500) { accountId ->
+                                sh "mkdir -p libraries/testAutomation/logs"
+                                archiveArtifacts artifacts: 'libraries/testAutomation/logs/**', allowEmptyArchive: true
+
                                 // EKS/k8s cleanup (only if EKS was deployed)
                                 if (env.eksClusterName) {
                                     dir('libraries/testAutomation') {

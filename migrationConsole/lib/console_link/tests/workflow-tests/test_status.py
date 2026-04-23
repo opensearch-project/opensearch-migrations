@@ -96,7 +96,7 @@ class TestStatusCommand:
         handler.data_fetcher = FakeDataFetcher(workflows, service)
 
         output = capture_output(lambda: handler.handle_status_command(
-            'test-wf', 'http://argo', 'ma', False, False, False))
+            'test-wf', 'https://argo', 'ma', False, False, False))
 
         assert 'test-wf' in output
         assert 'Running' in output
@@ -123,7 +123,7 @@ class TestStatusCommand:
         handler.data_fetcher = FakeDataFetcher(workflows, service)
 
         output = capture_output(lambda: handler.handle_status_command(
-            'test-wf', 'http://argo', 'ma', False, False, False))
+            'test-wf', 'https://argo', 'ma', False, False, False))
 
         assert 'test-wf' in output
         assert 'Succeeded' in output
@@ -134,7 +134,7 @@ class TestStatusCommand:
         handler.data_fetcher = FakeDataFetcher({}, service)
 
         with pytest.raises(Exception):  # click.Abort
-            handler.handle_status_command('nonexistent', 'http://argo', 'ma', False, False, False)
+            handler.handle_status_command('nonexistent', 'https://argo', 'ma', False, False, False)
 
     def test_list_multiple_workflows(self):
         workflows = {
@@ -157,7 +157,7 @@ class TestStatusCommand:
         handler.data_fetcher = FakeDataFetcher(workflows, service)
 
         output = capture_output(lambda: handler.handle_status_command(
-            None, 'http://argo', 'ma', False, False, False))
+            None, 'https://argo', 'ma', False, False, False))
 
         assert 'Found 2 workflow(s)' in output
         assert 'wf-1' in output
@@ -185,7 +185,7 @@ class TestStatusCommand:
         handler.data_fetcher = FakeDataFetcher(workflows, service)
 
         output = capture_output(lambda: handler.handle_status_command(
-            None, 'http://argo', 'ma', False, False, False))
+            None, 'https://argo', 'ma', False, False, False))
 
         assert 'Found 1 workflow(s)' in output
         assert 'wf-running' in output
@@ -197,7 +197,7 @@ class TestStatusCommand:
         handler.data_fetcher = FakeDataFetcher({}, service)
 
         output = capture_output(lambda: handler.handle_status_command(
-            None, 'http://argo', 'ma', False, False, False))
+            None, 'https://argo', 'ma', False, False, False))
 
         assert 'No running workflows found' in output
 
@@ -227,7 +227,7 @@ class TestStatusCommand:
         handler.data_fetcher = FakeDataFetcher(workflows, service)
 
         output = capture_output(lambda: handler.handle_status_command(
-            'test-wf', 'http://argo', 'ma', False, False, False))
+            'test-wf', 'https://argo', 'ma', False, False, False))
 
         assert 'test-wf' in output
         assert 'step1' in output
@@ -249,7 +249,7 @@ class TestStatusCommand:
         handler.data_fetcher = FakeDataFetcher(workflows, service)
 
         output = capture_output(lambda: handler.handle_status_command(
-            None, 'http://argo', 'ma', False, True, False))
+            None, 'https://argo', 'ma', False, True, False))
 
         assert 'Found 1 workflow(s)' in output
         assert 'wf-done' in output
@@ -277,7 +277,7 @@ class TestStatusCommand:
         handler.data_fetcher = FakeDataFetcher(workflows, service)
 
         output = capture_output(lambda: handler.handle_status_command(
-            None, 'http://argo', 'ma', False, False, False))
+            None, 'https://argo', 'ma', False, False, False))
 
         assert 'No running workflows found' in output
         assert 'last completed workflow' in output
@@ -295,7 +295,7 @@ class TestStatusCommand:
         handler.data_fetcher.list_workflows = bad_list
 
         with pytest.raises(Exception):
-            handler.handle_status_command(None, 'http://argo', 'ma', False, False, False)
+            handler.handle_status_command(None, 'https://argo', 'ma', False, False, False)
 
     def test_rfs_coordinator_retry_collapsed_in_status(self):
         """Infrastructure retry nodes (bare leaf Pods) are collapsed; retries with
@@ -355,7 +355,7 @@ class TestStatusCommand:
         handler.data_fetcher = FakeDataFetcher(workflows, service)
 
         output = capture_output(lambda: handler.handle_status_command(
-            'test-wf', 'http://argo', 'ma', False, False, False))
+            'test-wf', 'https://argo', 'ma', False, False, False))
 
         # RFS retry attempts should be collapsed — no (0) or (1) suffixes visible
         assert 'createRfsCoordinatorStatefulSet(0)' not in output
@@ -425,7 +425,7 @@ snapshot:
 
         # This will attempt live checks but fail gracefully without real clusters
         output = capture_output(lambda: handler.handle_status_command(
-            'test-wf', 'http://argo', 'ma', False, False, True))
+            'test-wf', 'https://argo', 'ma', False, False, True))
 
         assert 'test-wf' in output
 
@@ -483,7 +483,7 @@ backfill:
         handler.live_check_processor.config_converter = FakeConverter()
 
         output = capture_output(lambda: handler.handle_status_command(
-            'test-wf', 'http://argo', 'ma', False, False, True))
+            'test-wf', 'https://argo', 'ma', False, False, True))
 
         assert 'test-wf' in output
 
@@ -539,6 +539,6 @@ target_cluster:
 
         # Should handle unknown check type gracefully
         output = capture_output(lambda: handler.handle_status_command(
-            'test-wf', 'http://argo', 'ma', False, False, True))
+            'test-wf', 'https://argo', 'ma', False, False, True))
 
         assert 'test-wf' in output

@@ -6,10 +6,18 @@ import subprocess
 import threading
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, TypedDict
 
-from console_link.workflow.services.workflow_service import WorkflowApproveResult, logger, WorkflowService
-from console_link.workflow.tree_utils import clean_display_name
+from console_link.workflow.commands.approve import approve_gate
+from console_link.workflow.services.workflow_service import logger, WorkflowService
+
+
+class WorkflowApproveResult(TypedDict):
+    success: bool
+    workflow_name: str
+    namespace: str
+    message: str
+    error: Optional[str]
 
 
 @dataclass
@@ -122,7 +130,7 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
                 # Only keep what is actually rendered in tree_utils
                 slim_nodes[node_id] = {
                     "id": node_id,
-                    "displayName": clean_display_name(node.get("displayName") or node_id),
+                    "displayName": node.get("displayName") or node_id,
                     # no reason to keep the massive version
                     "phase": node.get("phase"),
                     "type": node.get("type"),
@@ -130,9 +138,15 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
                     "children": node.get("children", []),
                     "startedAt": node.get("startedAt"),
                     "finishedAt": node.get("finishedAt"),
+                    # Capture templateRef/templateName so tree_utils can identify approval nodes
+                    **({"templateRef": node["templateRef"]} if "templateRef" in node else {}),
+                    **({"templateName": node["templateName"]} if "templateName" in node else {}),
+                    **({"message": node["message"]} if "message" in node else {}),
                     # Only keep inputs/outputs if they contain specific UI keys
-                    "inputs": {"parameters": [p for p in node.get("inputs", {}).get("parameters", []) if
-                                              p['name'] in ('groupName_view', 'configContents', 'name')]},
+                    "inputs": {"parameters": [
+                        p for p in node.get("inputs", {}).get("parameters", [])
+                        if p['name'] in ('groupName_view', 'configContents', 'name', 'resourceName')
+                    ]},
                     "outputs": {"parameters": [p for p in node.get("outputs", {}).get("parameters", []) if
                                                p['name'] in ('statusOutput', 'overriddenPhase')],
                                 "artifacts": [a for a in node.get("outputs", {}).get("artifacts", []) if
@@ -156,8 +170,37 @@ def make_argo_service(argo_url: str, insecure: bool, token: str) -> ArgoWorkflow
         return res, slim_data
 
     def approve(namespace: str, workflow_name: str, node_data: dict) -> WorkflowApproveResult:
-        return WorkflowService().approve_workflow(workflow_name, namespace, argo_url, token, insecure,
-                                                  f"id={node_data.get('id')}")
+        gate_name = None
+        for param in node_data.get("inputs", {}).get("parameters", []):
+            if param.get("name") in ("resourceName", "name"):
+                gate_name = param.get("value")
+                break
+
+        if not gate_name:
+            return WorkflowApproveResult(
+                success=False,
+                workflow_name=workflow_name,
+                namespace=namespace,
+                message="Could not determine approval gate name for this node",
+                error="missing approval gate name",
+            )
+
+        if approve_gate(namespace, gate_name):
+            return WorkflowApproveResult(
+                success=True,
+                workflow_name=workflow_name,
+                namespace=namespace,
+                message=f"Approved {gate_name}",
+                error=None,
+            )
+
+        return WorkflowApproveResult(
+            success=False,
+            workflow_name=workflow_name,
+            namespace=namespace,
+            message=f"Failed to approve {gate_name}",
+            error=f"failed to approve {gate_name}",
+        )
 
     return ArgoWorkflowInterface(
         get_workflow=lambda name, namespace: _get_workflow_data_internal(WorkflowService(), name, namespace),

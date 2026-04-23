@@ -17,8 +17,10 @@ import console_link.middleware.kafka as kafka_
 import console_link.middleware.tuples as tuples_
 
 from console_link.models.container_utils import get_version_str
+from console_link.models.backfill_base import BackfillOverallStatus, DeepStatusNotYetAvailable
 from console_link.models.cluster import HttpMethod
 from console_link.models.backfill_rfs import RfsWorkersInProgress, WorkingIndexDoesntExist
+from console_link.models.step_state import StepStateWithPause
 from console_link.models.utils import DEFAULT_SNAPSHOT_REPO_NAME, ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
@@ -607,6 +609,16 @@ def scale_backfill_cmd(ctx, units: int):
 @click.pass_obj
 def status_backfill_cmd(ctx, deep_check):
     logger.info(f"Called `console backfill status`, with {deep_check=}")
+    if ctx.json and deep_check:
+        try:
+            message = json.dumps(ctx.env.backfill.build_backfill_status().model_dump(mode="json"))
+        except DeepStatusNotYetAvailable:
+            message = json.dumps(BackfillOverallStatus(
+                status=StepStateWithPause.PENDING,
+                percentage_completed=0.0,
+            ).model_dump(mode="json"))
+        click.echo(message)
+        return
     exitcode, message = backfill_.status(ctx.env.backfill, deep_check=deep_check)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)

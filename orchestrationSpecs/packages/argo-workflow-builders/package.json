@@ -11,7 +11,7 @@
   "scripts": {
     "build": "echo 'argo-workflow-builders: no build step needed (exports .ts directly)'",
     "type-check": "tsc --noEmit",
-    "test": "jest",
+    "test": "jest --coverage",
     "test:integ": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.integ.config.mjs",
     "test:integ:existing": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.integ.existing.config.mjs",
     "test:parity": "NODE_OPTIONS=--experimental-vm-modules jest --config jest.integ.config.mjs -- parity/",

@@ -19,6 +19,7 @@
       - [Commands \& options](#commands--options)
   - [Development](#development)
     - [Unit Tests](#unit-tests)
+    - [Workflow Test Cluster](#workflow-test-cluster)
     - [Coverage](#coverage)
     - [Backend APIs](#backend-apis)
       - [Locally testing](#locally-testing)
@@ -314,6 +315,31 @@ To run only those tests,
 ```shell
 pipenv run test -m "slow"
 ```
+
+### Workflow Test Cluster
+
+The real Kubernetes workflow tests under `tests/workflow-tests/` are best treated as integration tests against a dedicated `kind` cluster.
+
+The intended local flow is:
+
+```bash
+cd migrationConsole/lib/console_link
+./scripts/setup-workflow-test-cluster.sh
+pipenv run pytest -vv -s tests/workflow-tests/test_workflow_integration.py -k submit_hello_world
+./scripts/teardown-workflow-test-cluster.sh
+```
+
+By default the scripts use:
+
+- cluster name: `console-link-test`
+- kube context: `kind-console-link-test`
+
+You can override those with:
+
+- `WORKFLOW_TEST_KIND_CLUSTER_NAME`
+- `WORKFLOW_TEST_KUBE_CONTEXT`
+
+The long-term intent is for the real-cluster workflow tests to require this dedicated context explicitly rather than creating their own hidden Kubernetes cluster during pytest execution.
 
 ### Coverage
 

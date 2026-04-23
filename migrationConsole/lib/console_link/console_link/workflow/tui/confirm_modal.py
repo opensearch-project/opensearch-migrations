@@ -8,7 +8,7 @@ from textual.widgets import Static, Button
 class ConfirmModal(ModalScreen[bool]):
     CSS = """
     ConfirmModal { align: center middle; background: $background 60%; }
-    #dialog { width: 45; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
+    #dialog { width: 60; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
     #question { text-align: center; margin-bottom: 1; }
     #buttons { align: center middle; height: 3; }
     Button { margin: 0 1; min-width: 12; }
