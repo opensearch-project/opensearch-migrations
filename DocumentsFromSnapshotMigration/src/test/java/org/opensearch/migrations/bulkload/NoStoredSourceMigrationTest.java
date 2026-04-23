@@ -264,6 +264,14 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         if ("string".equals(type) && !perm.indexed()) {
             return Optional.of("pre-ES5 string uses `index` as enum, not boolean; skip indexed=false");
         }
+        // ES 1.x/2.x mapping API rejects `"index": false` on non-string field types
+        // (MapperParsingException: Wrong value for index [false] for field [...]).
+        // Pre-ES5 only accepts the string-enum form ("no"|"not_analyzed"|"analyzed") on
+        // text fields, so there's no meaningful indexed=false variant to exercise elsewhere.
+        if (!perm.indexed()
+                && (VersionMatchers.isES_1_X.or(VersionMatchers.isES_2_X)).test(sourceVersion.getVersion())) {
+            return Optional.of("pre-ES5 rejects `index: false` on non-string field types");
+        }
         // Array-value skips.
         if (perm.array()) {
             if ("constant_keyword".equals(type)) {
