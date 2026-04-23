@@ -5,6 +5,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.BaseSnapshotFileFinder;
@@ -92,11 +93,12 @@ public class SnapshotFileFinder_ES_9_0 extends BaseSnapshotFileFinder {
         }
 
         String prefix = SHARD_PATH_PREFIX + indexUUID + ".";
+        // At most one snapshot_path_<indexId>.* file per index per repo; take the first match.
         Path matching = null;
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(shardPathsDir, prefix + "*")) {
-            for (Path candidate : stream) {
-                matching = candidate;
-                break; // at most one snapshot_path_<indexId>.* file per index per repo
+            Iterator<Path> it = stream.iterator();
+            if (it.hasNext()) {
+                matching = it.next();
             }
         } catch (IOException e) {
             log.atDebug()
