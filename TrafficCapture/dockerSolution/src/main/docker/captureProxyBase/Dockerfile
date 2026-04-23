@@ -29,7 +29,6 @@ FROM ${RUNTIME_IMAGE}
 
 # Set environment variables
 ENV CONFIG_HOME=/usr/share/captureProxy/config
-ENV PROXY_TLS_CONFIG_FILE=$CONFIG_HOME/proxy_tls.yml
 
 # Copy certificates from builder stage
 USER root
@@ -41,17 +40,6 @@ RUN chown -R root:root $CONFIG_HOME/
 
 # Update the default Java truststore to trust the root-ca
 RUN keytool -import -alias root-ca -cacerts -file $CONFIG_HOME/ca.pem -storepass changeit -noprompt
-
-# Note: The following configurations are added to ensure compatibility with the es-7.10-oss base image.
-# The proxy_tls.yml file are configured to work seamlessly with the Capture Proxy.
-RUN echo 'plugins.security.ssl.http.enabled: true' >> $PROXY_TLS_CONFIG_FILE && \
-    echo 'plugins.security.ssl.http.pemcert_filepath: pub.pem' >> $PROXY_TLS_CONFIG_FILE && \
-    echo 'plugins.security.ssl.http.pemkey_filepath: key.pem' >> $PROXY_TLS_CONFIG_FILE && \
-    echo 'plugins.security.ssl.http.pemtrustedcas_filepath: ca.pem' >> $PROXY_TLS_CONFIG_FILE && \
-    echo "plugins.security.ssl.http.enabled_protocols: ['TLSv1.2', 'TLSv1.3']" >> $PROXY_TLS_CONFIG_FILE
-
-RUN chmod 644 $PROXY_TLS_CONFIG_FILE && \
-    chown root:root $PROXY_TLS_CONFIG_FILE
 
 # Default port
 EXPOSE 9200
