@@ -298,7 +298,15 @@ Prompt the user:
 
 *"Would you like a pricing estimate for your OpenSearch deployment? I can calculate costs for managed clusters (search, time-series, or vector workloads) or OpenSearch Serverless collections."*
 
-**Prerequisites — the calculator must be running locally.** If it is not reachable, instruct the user to start it:
+The service exposes an HTTP API on **port 5050**. Call `estimate_pricing` with the appropriate workload type and parameters collected from the user.
+
+**If the calculator is unreachable**, the client code will raise a `PricingCalculatorError`. When this happens, notify the user with a message such as:
+
+*"I wasn't able to connect to the OpenSearch Pricing Calculator at http://localhost:5050. Pricing estimates will be skipped for now — you can add them later by starting the calculator and re-running this step."*
+
+Then continue to Step 9 without blocking the migration report. Do not treat an unreachable calculator as a blocker. The report will note that pricing estimates are unavailable.
+
+To start the calculator later:
 
 ```bash
 git clone https://github.com/opensearch-project/opensearch-migrations.git
@@ -314,8 +322,6 @@ Or with Docker:
 docker build -t opensearch-pricing-calculator .
 docker run -p 5050:5050 opensearch-pricing-calculator
 ```
-
-The service exposes an HTTP API on **port 5050**. Once running, call `estimate_pricing` with the appropriate workload type and parameters collected from the user:
 
 | Workload type | Key inputs | Method |
 |---|---|---|
