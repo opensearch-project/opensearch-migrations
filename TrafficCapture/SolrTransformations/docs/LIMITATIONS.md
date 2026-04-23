@@ -21,6 +21,7 @@ the root cause, and provides a workaround where one exists.
 | [FQ-CACHING](#fq-caching)                       | Filter query caching granularity differs between Solr and OpenSearch |
 | [JSON-QUERIES](#json-queries)                   | JSON Request API `queries` key not supported |
 | [JSON-PARAM-PREFIX](#json-param-prefix)         | JSON Request API `json.<param>` prefix passthrough not supported |
+| [UPDATE-COMMANDS](#update-commands)             | Only `add` and `delete-by-id` commands supported; JSON only |
 
 ---
 
@@ -461,3 +462,35 @@ parameters with the `json.` prefix are treated as unsupported params and
 rejected by validation.
 
 **Reference:** https://solr.apache.org/guide/solr/latest/query-guide/json-request-api.html#json-parameter-merging
+
+---
+
+## UPDATE-COMMANDS
+
+**Feature:** Solr `/update` endpoint command support
+
+**Solr behaviour:**
+The `/update` endpoint accepts JSON or XML bodies with multiple command types:
+`add`, `delete` (by id or query), `commit`, `optimize`, `rollback`. Commands
+can be mixed in a single request and can use arrays for bulk operations.
+Both JSON and XML content types are supported.
+
+**Current support:**
+
+| Command | Status |
+|---|---|
+| `add` (single doc) | ✅ Supported — `{"add":{"doc":{...}}}` |
+| `add` with `boost` | ❌ Not supported — fails fast (OpenSearch has no document-level boost) |
+| `add` with `overwrite: false` | ❌ Not supported — fails fast (OpenSearch always overwrites) |
+| `delete` by id | ✅ Supported — `{"delete":{"id":"..."}}` |
+| `delete` by query | ❌ Not supported — fails fast |
+| `commit` | ❌ Not supported — fails fast |
+| `optimize` / `rollback` | ❌ Not supported — fails fast |
+| Mixed commands | ❌ Not supported — fails fast |
+| Array/bulk operations | ❌ Not supported — fails fast |
+| XML content type | ❌ Not supported — fails fast (JSON only) |
+
+**Content type:**
+Only `application/json` request bodies are supported. XML bodies
+(`text/xml`, `application/xml`) cannot be parsed by the shim and will
+fail with an error. Clients using XML format must switch to JSON.

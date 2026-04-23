@@ -316,3 +316,49 @@ __ "required whitespace"
 // Used inside ranges, groups, and at query boundaries.
 _ "whitespace"
   = [ \t\n\r]*
+
+// ─── Function query entry point ──────────────────────────────────────────────
+
+funcQuery
+  = _ fc:funcCall _ { return fc; }
+
+funcCall
+  = name:funcName "(" _ args:funcArgList? _ ")" {
+      return { type: 'func', name: name, args: args || [] };
+    }
+
+funcArgList
+  = head:funcArg tail:(_ "," _ funcArg)* {
+      return [head, ...tail.map(t => t[3])];
+    }
+
+funcArg
+  = funcNumericLiteral
+  / funcStringConstant
+  / funcCall
+  / funcFieldRef
+
+funcNumericLiteral
+  = val:$("-"? [0-9]+ ("." [0-9]+)? ([eE] [+\-]? [0-9]+)?) {
+      return { kind: 'numeric', value: parseFloat(val) };
+    }
+
+funcStringConstant
+  = "'" chars:funcSingleQuotedChar* "'" {
+      return { kind: 'string', value: chars.join('') };
+    }
+
+funcSingleQuotedChar
+  = "\\" c:. { return c; }
+  / [^'\\]
+
+funcFieldRef
+  = name:funcIdentifier !("(") {
+      return { kind: 'field', name: name };
+    }
+
+funcName
+  = $([a-zA-Z_][a-zA-Z0-9_]*)
+
+funcIdentifier
+  = $([a-zA-Z_][a-zA-Z0-9._]*)

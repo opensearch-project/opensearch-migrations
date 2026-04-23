@@ -10,6 +10,7 @@ from kubernetes.client.rest import ApiException
 
 from ..models.utils import ExitCode, load_k8s_config
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .argo_utils import DEFAULT_ARGO_SERVER_URL
 from .crd_utils import (
     CRD_GROUP,
     CRD_VERSION,
@@ -61,13 +62,12 @@ def get_approval_task_name_completions(ctx, _, incomplete):
     '--argo-server',
     default=lambda: os.environ.get(
         'ARGO_SERVER',
-        f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}:"
-        f"{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}"
+        DEFAULT_ARGO_SERVER_URL
     ),
     help='Argo Server URL'
 )
 @click.option('--namespace', default='ma')
-@click.option('--insecure', is_flag=True, default=False)
+@click.option('--insecure', is_flag=True, default=True)
 @click.option('--token', help='Bearer token for authentication')
 @click.pass_context
 def approve_command(ctx, task_names, workflow_name, argo_server, namespace, insecure, token):
