@@ -233,13 +233,27 @@ public class SourceReconstructor {
         return value;
     }
 
-    /** Converts doc_value using mapping info when available, falling back to heuristics */
+    /** Converts doc_value using mapping info when available, falling back to heuristics.
+     *  For multi-valued fields (SortedNumeric/SortedSet doc_values), the reader returns a List —
+     *  convert each element through the same logic so per-type coercion (e.g. boolean Long→true/false)
+     *  applies to array fields, not just scalars. */
     private static Object convertDocValue(Object value, DocValueFieldInfo fieldInfo, FieldMappingInfo mappingInfo) {
+        if (value instanceof java.util.List<?> listVal) {
+            java.util.List<Object> converted = new java.util.ArrayList<>(listVal.size());
+            for (Object element : listVal) {
+                converted.add(convertSingleDocValue(element, fieldInfo, mappingInfo));
+            }
+            return converted;
+        }
+        return convertSingleDocValue(value, fieldInfo, mappingInfo);
+    }
+
+    private static Object convertSingleDocValue(Object value, DocValueFieldInfo fieldInfo, FieldMappingInfo mappingInfo) {
         // Use mapping-based conversion if available
         if (mappingInfo != null && mappingInfo.type() != EsFieldType.UNSUPPORTED) {
             return convertWithMappingInfo(value, mappingInfo);
         }
-        
+
         // Fall back to heuristic-based conversion
         if (fieldInfo.isBoolean() && value instanceof Long) {
             return ((Long) value) != 0;

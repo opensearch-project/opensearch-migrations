@@ -336,6 +336,25 @@ class SourceReconstructorTest {
         assertEquals(true, parseField(json, "enabled").asBoolean());
     }
 
+    /** Regression: multi-valued boolean doc_values (SORTED_NUMERIC) must coerce each Long
+     *  element to true/false. Previously only scalars were converted, leaving arrays as
+     *  [1, 0] which OpenSearch rejects with a mapper_parsing_exception. */
+    @Test
+    void reconstructFromDocValues_booleanArrayCoercesEachElement() throws IOException {
+        var reader = docValueReader("flags", DocValueFieldInfo.DocValueType.SORTED_NUMERIC, true,
+                List.of(1L, 0L));
+        var ctx = contextOf("flags", mapping(EsFieldType.BOOLEAN, "boolean"));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        JsonNode arr = parseField(json, "flags");
+        assertTrue(arr.isArray(), "expected array for multi-valued boolean field");
+        assertEquals(2, arr.size());
+        assertEquals(true, arr.get(0).asBoolean());
+        assertEquals(false, arr.get(1).asBoolean());
+        // And importantly: elements must be JSON booleans, not ints.
+        assertTrue(arr.get(0).isBoolean() && arr.get(1).isBoolean(),
+                "array elements must be JSON booleans, not numeric — got: " + arr);
+    }
+
     @Test
     void reconstructFromDocValues_numericLongPassthrough() throws IOException {
         var reader = docValueReader("count", DocValueFieldInfo.DocValueType.NUMERIC, false, 999L);
