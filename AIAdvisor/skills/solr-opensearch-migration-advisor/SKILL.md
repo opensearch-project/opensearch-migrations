@@ -311,6 +311,91 @@ Present the report to the user and offer to drill into any section.
 
 Migration plans can span weeks or months, and conversations may be restarted many times. All session state — schema mappings, incompatibilities, query translations, client integrations, and workflow progress — is persisted automatically after every turn using the `session_id` you provide.
 
+## Migration Progress File
+
+In addition to the JSON session state, maintain a human-readable Markdown file at `sessions/<session_id>.md`. This file is the user's living record of their migration journey — update it at the end of every step so it always reflects the current state of the migration.
+
+### When to update
+
+Update `sessions/<session_id>.md` after every step completes. Do not wait until the end of the migration. Each update should reflect only what is known at that point — do not leave placeholder sections for steps not yet reached.
+
+### File structure
+
+The file must always contain the following sections, updated in place as the migration progresses:
+
+```markdown
+# Solr to OpenSearch Migration — <session_id>
+
+**Stakeholder role:** <role>
+**Solr version:** <version, or "not yet provided">
+**Current step:** <step number and name>
+**Last updated:** <date of last update>
+
+---
+
+## Progress
+
+| Step | Name | Status |
+|---|---|---|
+| 0 | Stakeholder Identification | ✅ Complete / 🔄 In Progress / ⬜ Not Started |
+| 1 | Solr Version | ... |
+| 2 | Schema Acquisition | ... |
+| 3 | Schema Review & Incompatibility Analysis | ... |
+| 4 | Query Translation | ... |
+| 5 | Solr Customizations | ... |
+| 6 | Cluster & Infrastructure Assessment | ... |
+| 7 | Client & Front-end Integration | ... |
+| 8 | Migration Report | ... |
+
+---
+
+## Key Facts
+
+- **Solr version:** <value from facts.solr_version>
+- **Stakeholder role:** <value from facts.stakeholder_role>
+- **Index name:** <agreed index name, if known>
+- **Schema migrated:** <yes / no / in progress>
+- **Customizations identified:** <list or "none identified yet">
+
+---
+
+## Incompatibilities
+
+<If none found yet, write "No incompatibilities identified yet.">
+
+| Severity | Category | Description | Recommendation |
+|---|---|---|---|
+| Breaking | ... | ... | ... |
+| Behavioral | ... | ... | ... |
+| Unsupported | ... | ... | ... |
+
+---
+
+## Client Integrations
+
+<If none recorded yet, write "No client integrations recorded yet.">
+
+| Name | Kind | Current Usage | Migration Action |
+|---|---|---|---|
+| ... | ... | ... | ... |
+
+---
+
+## Notes
+
+<Free-form notes added during the session — decisions made, open questions, user preferences, anything worth remembering across restarts.>
+```
+
+### Rules
+
+- **Create the file at the end of Step 0**, once the stakeholder role is known. Initialize all step statuses to ⬜ Not Started except Step 0 which becomes ✅ Complete.
+- **Mark a step 🔄 In Progress** when it begins and **✅ Complete** when the user confirms they are satisfied and ready to move on.
+- **Append to Notes** whenever the user makes a decision, expresses a preference, or raises an open question that should be remembered across restarts.
+- **Update Incompatibilities** immediately when a new incompatibility is recorded in `facts.incompatibilities` — do not batch them until the report.
+- **Update Client Integrations** immediately when a new integration is recorded via `SessionState.add_client_integration`.
+- **When deleting information** keep the structure described, only delete information that has shown to be irrelevant, and place a note highlighting aspects that were shown during the conversation to be irrelevant, giving reasons why this is the case. Do not delete any information relevant to the migration effort - only add or update where suitable.
+- **The file is the source of truth for human readers.** Write it as if the user will share it with a colleague who has no access to the JSON session file.
+
 ### How to resume
 
 When starting a new conversation, pass the same `session_id` you used previously:
@@ -325,7 +410,7 @@ Via MCP:
 { "tool": "handle_message", "arguments": { "message": "Let's continue", "session_id": "my-project-migration" } }
 ```
 
-The advisor will reload the full `SessionState` (history, facts, progress, incompatibilities, client integrations) and pick up exactly where you left off.
+The advisor will reload the full `SessionState` (history, facts, progress, incompatibilities, client integrations) and pick up exactly where you left off. The Markdown progress file at `sessions/<session_id>.md` will also be updated to reflect the resumed state.
 
 ### Choosing a session ID
 
@@ -354,7 +439,10 @@ print(f"Facts: {state.facts}")
 
 ### Session files
 
-With the default `FileStorage` backend, each session is stored as a JSON file at `sessions/<session_id>.json`. You can back these up, copy them between machines, or inspect them directly. The file is human-readable and contains the full conversation history, all discovered facts, and migration progress.
+With the default `FileStorage` backend, each session produces two files:
+
+- `sessions/<session_id>.json` — machine-readable JSON containing the full conversation history, all discovered facts, incompatibilities, client integrations, and progress. Used by the skill for session resumption.
+- `sessions/<session_id>.md` — human-readable Markdown progress file. Updated after every step. Safe to share with colleagues, attach to tickets, or check into version control. See the **Migration Progress File** section above for the full format.
 
 ### Starting fresh
 
@@ -491,3 +579,4 @@ In case you are not successful using provided session persistence tools for pers
 `sessions/<session_id>.json`, persist such a file yourself at the given location within the 
 solr-opensearch-migration-advisor directory.
 The file is human-readable and contains the full conversation history, all discovered facts, and migration progress.
+Similarly, always maintain the Markdown progress file at `sessions/<session_id>.md` as described in the **Migration Progress File** section. If the JSON session file cannot be written, the Markdown file must still be kept up to date — it is the human-readable record of the migration and must never be skipped.
