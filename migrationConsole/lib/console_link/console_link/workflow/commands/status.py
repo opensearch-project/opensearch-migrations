@@ -25,6 +25,7 @@ from ..tree_utils import (
     WorkflowDisplayer
 )
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
+from .argo_utils import DEFAULT_ARGO_SERVER_URL
 from console_link.environment import Environment
 from console_link.middleware import snapshot as snapshot_middleware
 from console_link.middleware import backfill as backfill_middleware
@@ -458,12 +459,11 @@ class LiveCheckProcessor:
 @click.option('--all-workflows', is_flag=True, default=False, help='Show status for all workflows')
 @click.option(
     '--argo-server',
-    default=f"http://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
-    f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}",
+    default=DEFAULT_ARGO_SERVER_URL,
     help='Argo Server URL (default: ARGO_SERVER env var, or ARGO_SERVER_SERVICE_HOST:ARGO_SERVER_SERVICE_PORT)'
 )
 @click.option('--namespace', default='ma', help='Kubernetes namespace for the workflow (default: ma)')
-@click.option('--insecure', is_flag=True, default=False, help='Skip TLS certificate verification')
+@click.option('--insecure', is_flag=True, default=True, help='Skip TLS certificate verification (default: True)')
 @click.option('--token', help='Bearer token for authentication')
 @click.option('--all', 'show_all', is_flag=True, default=False,
               help='Show all workflows including completed ones (default: only running)')

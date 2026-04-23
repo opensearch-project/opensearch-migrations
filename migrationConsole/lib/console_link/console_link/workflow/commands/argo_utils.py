@@ -1,8 +1,14 @@
 """Shared utilities for Argo workflow lifecycle operations via k8s API."""
 
+import os
 import time
 from kubernetes import client
 from kubernetes.client.rest import ApiException
+
+DEFAULT_ARGO_SERVER_URL = (
+    f"https://{os.environ.get('ARGO_SERVER_SERVICE_HOST', 'localhost')}"
+    f":{os.environ.get('ARGO_SERVER_SERVICE_PORT', '2746')}"
+)
 
 ARGO_GROUP = 'argoproj.io'
 ARGO_VERSION = 'v1alpha1'

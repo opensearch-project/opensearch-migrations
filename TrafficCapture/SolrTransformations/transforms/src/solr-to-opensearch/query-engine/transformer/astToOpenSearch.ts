@@ -113,6 +113,12 @@ export function transformNode(node: ASTNode): Map<string, any> {
     return new Map([['match_all', new Map()]]);
   }
 
+  // FuncNode: no transform rule yet — the orchestrator handles this via
+  // existing error modes (passthrough-on-error or partial translation).
+  if (node.type === 'func') {
+    throw new Error('No transform rule registered for node type: func');
+  }
+
   const rule = rules[node.type];
   if (!rule) {
     throw new Error(`No transform rule registered for node type: ${node.type}`);
