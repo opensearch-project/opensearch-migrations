@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { request, response } from './update-doc';
-import type { RequestContext, ResponseContext, JavaMap } from '../context';
+import { request } from './update-doc';
+import type { RequestContext, JavaMap } from '../context';
 
 function buildCtx(
   uri: string,
@@ -26,28 +26,6 @@ function buildCtx(
 }
 
 describe('update-doc', () => {
-  // --- match guard ---
-
-  it('matches /update/json/docs path', () => {
-    const ctx = buildCtx('/solr/mycore/update/json/docs');
-    expect(request.match!(ctx)).toBe(true);
-  });
-
-  it('matches /update/json/docs with query params', () => {
-    const ctx = buildCtx('/solr/mycore/update/json/docs?commit=true');
-    expect(request.match!(ctx)).toBe(true);
-  });
-
-  it('does not match plain /update path', () => {
-    const ctx = buildCtx('/solr/mycore/update');
-    expect(request.match!(ctx)).toBe(false);
-  });
-
-  it('does not match /select path', () => {
-    const ctx = buildCtx('/solr/mycore/select?q=*:*');
-    expect(request.match!(ctx)).toBe(false);
-  });
-
   // --- happy path ---
 
   it('rewrites URI to /_doc/{id} with PUT method', () => {
@@ -186,71 +164,5 @@ describe('update-doc', () => {
     const ctx = buildCtx('/solr/mycore/update/json/docs', arrayLike);
 
     expect(() => request.apply(ctx)).toThrow('Array/bulk updates not supported');
-  });
-});
-
-function buildResponseCtx(
-  body: Map<string, any>,
-): ResponseContext {
-  return {
-    request: new Map() as unknown as JavaMap,
-    response: new Map() as unknown as JavaMap,
-    endpoint: 'update',
-    collection: 'mycore',
-    requestParams: new URLSearchParams(),
-    responseBody: body as unknown as JavaMap,
-  };
-}
-
-describe('update-doc response', () => {
-  it('matches OpenSearch _doc response (has result and _id)', () => {
-    const body = new Map<string, any>([
-      ['_index', 'mycore'], ['_id', '1'], ['result', 'created'], ['_version', 1],
-    ]);
-    expect(response.match!(buildResponseCtx(body))).toBe(true);
-  });
-
-  it('does not match select response', () => {
-    const body = new Map<string, any>([['hits', new Map()], ['took', 5]]);
-    expect(response.match!(buildResponseCtx(body))).toBe(false);
-  });
-
-  it('converts created response to Solr format with status 0', () => {
-    const body = new Map<string, any>([
-      ['_index', 'mycore'], ['_id', '1'], ['result', 'created'],
-      ['_version', 1], ['_shards', new Map()],
-    ]);
-    const ctx = buildResponseCtx(body);
-
-    response.apply(ctx);
-
-    const header = ctx.responseBody.get('responseHeader');
-    expect(header.get('status')).toBe(0);
-    expect(header.get('QTime')).toBe(0);
-    expect(ctx.responseBody.has('_index')).toBe(false);
-    expect(ctx.responseBody.has('_id')).toBe(false);
-    expect(ctx.responseBody.has('_shards')).toBe(false);
-  });
-
-  it('converts updated response to Solr format with status 0', () => {
-    const body = new Map<string, any>([
-      ['_index', 'mycore'], ['_id', '1'], ['result', 'updated'], ['_version', 2],
-    ]);
-    const ctx = buildResponseCtx(body);
-
-    response.apply(ctx);
-
-    expect(ctx.responseBody.get('responseHeader').get('status')).toBe(0);
-  });
-
-  it('sets status 1 for non-success results', () => {
-    const body = new Map<string, any>([
-      ['_index', 'mycore'], ['_id', '1'], ['result', 'noop'], ['_version', 1],
-    ]);
-    const ctx = buildResponseCtx(body);
-
-    response.apply(ctx);
-
-    expect(ctx.responseBody.get('responseHeader').get('status')).toBe(1);
   });
 });

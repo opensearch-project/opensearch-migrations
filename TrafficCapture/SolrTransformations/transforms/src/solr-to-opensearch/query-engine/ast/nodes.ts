@@ -198,12 +198,69 @@ export interface LocalParamsNode {
   body: ASTNode | null;
 }
 
+/**
+ * A numeric literal argument: 42, 3.14, -1, 3.16e-11
+ */
+export interface NumericLiteralArg {
+  kind: 'numeric';
+  value: number;
+}
+
+/**
+ * A field reference argument: popularity, price, date_field
+ *
+ * Named constants (e.g., NOW) are also parsed as field references —
+ * semantic disambiguation is deferred to the transformer layer.
+ */
+export interface FieldRefArg {
+  kind: 'field';
+  name: string;
+}
+
+/**
+ * A single-quoted string constant argument: 'hello world'
+ */
+export interface StringConstantArg {
+  kind: 'string';
+  value: string;
+}
+
+/**
+ * Discriminated union of all function query argument types.
+ *
+ * Leaf arguments use `kind` as discriminant. Nested function calls are
+ * represented directly as FuncNode (discriminated by `type: 'func'`).
+ */
+export type FuncArg =
+  | NumericLiteralArg
+  | FieldRefArg
+  | StringConstantArg
+  | FuncNode;
+
+/**
+ * AST node for a Solr function query expression.
+ *
+ * Example: sum(popularity, 1) →
+ *   { type: 'func', name: 'sum', args: [
+ *       { kind: 'field', name: 'popularity' },
+ *       { kind: 'numeric', value: 1 }
+ *   ]}
+ */
+export interface FuncNode {
+  type: 'func';
+  /** The function name (e.g., 'sum', 'recip', 'ms'). */
+  name: string;
+  /** Ordered list of arguments. May be empty for zero-arg functions like now(). */
+  args: FuncArg[];
+}
+
 /** Union of all AST node types. Every node in the parsed Solr query tree is one of these variants. */
 export type ASTNode =
   | BareNode
   | BoolNode
   | FieldNode
   | FilterNode
+  | FuncNode
   | PhraseNode
   | RangeNode
   | MatchAllNode

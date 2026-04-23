@@ -374,6 +374,53 @@ jobs:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
 
+  agent-skills-spec:
+    # Validate every SKILL.md under AIAdvisor/skills/ against the Agent
+    # Skills Spec (https://agentskills.io). Catches things like frontmatter
+    # fields outside the allowed set, or a skill whose `name:` disagrees
+    # with its directory — both of which are silent bugs for downstream
+    # skill-loaders that key on either the filesystem or the YAML.
+    #
+    # Fast job (~20s): pip-installs the reference validator from PyPI and
+    # runs `skills-ref validate` on every SKILL.md found. No Gradle, no
+    # Docker. Kept out of python-lint/python-tests because it's a narrow
+    # spec gate, not a Python-code gate — if it fails, the diagnostic
+    # ("Directory name X must match skill name Y" etc.) should not be
+    # hidden behind an unrelated flake8 / pytest failure.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install skills-ref validator
+        run: python -m pip install --upgrade 'skills-ref>=0.1.1'
+      - name: Validate every SKILL.md under AIAdvisor/skills/
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          failures=0
+          total=0
+          # Find every directory that contains a SKILL.md and validate it.
+          # `python -m skills_ref.cli` over the console-script entrypoint so
+          # this stays robust if the published entry-point name changes.
+          while IFS= read -r -d '' skill_md; do
+            skill_dir="$(dirname "$skill_md")"
+            total=$((total + 1))
+            if ! python -m skills_ref.cli validate "$skill_dir"; then
+              failures=$((failures + 1))
+            fi
+          done < <(find AIAdvisor/skills -name SKILL.md -print0 | sort -z)
+          echo
+          if [ "$total" -eq 0 ]; then
+            echo "No SKILL.md files found under AIAdvisor/skills/ — nothing to validate."
+          else
+            echo "Validated $total skill(s); $failures failure(s)."
+          fi
+          if [ "$failures" -gt 0 ]; then
+            exit 1
+          fi
+
   codeql-analyze:
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-22.04
@@ -491,6 +538,7 @@ jobs:
       - python-lint
       - gradle-extended-check
       - gradle-build-macos
+      - agent-skills-spec
       - codeql-analyze
       - sonarqube-analysis
     if: always()

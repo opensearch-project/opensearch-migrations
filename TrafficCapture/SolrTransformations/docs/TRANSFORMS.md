@@ -181,6 +181,50 @@ graph LR
 
 ---
 
+## Update Router
+
+Routes all `/update/*` requests through a single entry point that dispatches by path and body shape.
+
+```mermaid
+graph TD
+    subgraph Input["Solr /update Request"]
+        A1["POST /update/json/docs<br/>{id:1, title:'hello'}"]
+        A2["POST /update<br/>{delete:{id:'1'}}"]
+        A3["POST /update<br/>{add:{doc:{id:1,...}}}"]
+    end
+
+    subgraph Router["update-router.ts"]
+        R["Detect path + body shape"]
+    end
+
+    subgraph Handlers["Handlers"]
+        H1["update-doc.ts<br/>PUT /_doc/{id}"]
+        H2["delete-doc.ts<br/>DELETE /_doc/{id}"]
+    end
+
+    subgraph Response["update-router.ts (response)"]
+        Resp["Generic _doc response<br/>→ Solr responseHeader"]
+    end
+
+    A1 --> R -->|/json/docs| H1
+    A2 --> R -->|delete command| H2
+    A3 --> R -->|add command, unwrap doc| H1
+    H1 --> Resp
+    H2 --> Resp
+```
+
+### Adding New Commands
+
+To add support for a new command (e.g., `commit`, `delete-by-query`, bulk):
+
+1. Create a handler file (e.g., `features/commit-handler.ts`)
+2. Add a case in `update-router.ts` `dispatchCommand()` switch
+3. No pipeline or registry changes needed
+
+See `docs/LIMITATIONS.md` → `UPDATE-COMMANDS` for the full list of supported and unsupported commands.
+
+---
+
 ## Input Validation
 
 Validation runs before any endpoint-specific transforms, rejecting invalid requests early with clear error messages.
