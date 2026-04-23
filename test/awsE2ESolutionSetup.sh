@@ -87,6 +87,13 @@ clean_up_migration () {
   # resources left behind by a prior partial deploy) still holds up the
   # source destroy that follows.
   cd "$MIGRATION_CDK_PATH" || exit
+  # `cdk destroy` goes through the app entrypoint (`npx ts-node bin/app.ts`),
+  # which requires the migration CDK's node_modules to be installed so the
+  # `source-map-support/register` side-effect import (and its type decls)
+  # resolves. In the full deploy flow `npm ci` runs before `cdk deploy`, but
+  # the --clean-up-migration-only short-circuit skips that path, so install
+  # deps here unconditionally. `npm ci` is cheap relative to the destroy.
+  npm ci
   echo "Destroying migration CDK app stacks..."
   CDK_SKIP_LOCAL_IMAGE_HASH=true npx cdk destroy "*" --force --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID"
   local cdk_rc=$?
@@ -302,7 +309,25 @@ sed -i -e "s/<STAGE>/$STAGE/g" "$MIGRATION_GEN_CONTEXT_FILE"
 
 # Short-circuit for --clean-up-migration-only: don't touch the source CDK tree at all,
 # just destroy the migration app stacks and wait for their CFN delete to complete.
+# The migration CDK app still synths on destroy, so resolve <VPC_ID> and
+# <SOURCE_CLUSTER_ENDPOINT> the same way the full path does (via CFN outputs of
+# the source stacks if they still exist), falling back to dummy values when the
+# source side has already been destroyed -- cdk destroy doesn't actually hit the
+# endpoint/vpc, it only needs synth to succeed so it can match CFN stack names.
 if [ "$CLEAN_UP_MIGRATION_ONLY" = true ] ; then
+  source_endpoint=$(aws cloudformation describe-stacks --stack-name "$SOURCE_INFRA_STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text 2>/dev/null || echo "")
+  if [ -z "$source_endpoint" ] || [ "$source_endpoint" = "None" ]; then
+    source_endpoint="placeholder-source-endpoint.invalid"
+  fi
+  vpc_id=$(aws cloudformation describe-stacks --stack-name "$SOURCE_NETWORK_STACK_NAME" --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue | [0]" --output text 2>/dev/null || echo "")
+  if [ -z "$vpc_id" ] || [ "$vpc_id" = "None" ]; then
+    # CDK sentinel: Vpc.fromLookup returns a dummy VPC with id "vpc-12345"
+    # on cache miss; network-stack.ts explicitly short-circuits validation
+    # when it sees that id (see NetworkSetup ctor).
+    vpc_id="vpc-12345"
+  fi
+  sed -i -e "s/<VPC_ID>/$vpc_id/g" "$MIGRATION_GEN_CONTEXT_FILE"
+  sed -i -e "s/<SOURCE_CLUSTER_ENDPOINT>/http:\/\/${source_endpoint}:9200/g" "$MIGRATION_GEN_CONTEXT_FILE"
   clean_up_migration
   exit 0
 fi
