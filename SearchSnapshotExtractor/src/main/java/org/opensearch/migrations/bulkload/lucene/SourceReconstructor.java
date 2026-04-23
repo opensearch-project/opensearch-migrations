@@ -42,74 +42,13 @@ public class SourceReconstructor {
             FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
         try {
             Map<String, Object> reconstructed = new LinkedHashMap<>();
-            
-            // First, read from stored fields (more performant)
-            for (var field : document.getFields()) {
-                String fieldName = field.name();
-                if (shouldSkipField(fieldName)) {
-                    continue;
-                }
-                FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
-                Object value = getStoredFieldValue(field, mappingInfo);
-                if (value != null) {
-                    reconstructed.put(fieldName, value);
-                }
-            }
-            
-            // Then, read from doc_values (for fields not already in stored fields)
-            for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
-                String fieldName = fieldInfo.name();
-                log.debug("[DocValues] Found field {} with type {}", fieldName, fieldInfo.docValueType());
-                if (shouldSkipField(fieldName)) {
-                    log.debug("[DocValues] Skipping internal field {}", fieldName);
-                    continue;
-                }
-                if (reconstructed.containsKey(fieldName)) {
-                    log.debug("[DocValues] Skipping {} - already reconstructed from stored field", fieldName);
-                    continue;
-                }
-                FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
-                log.debug("[DocValues] Field {} mappingInfo: {}", fieldName, mappingInfo);
-                // Skip if mapping says doc_values is disabled (ES 2.x may still have them internally)
-                if (mappingInfo != null && !mappingInfo.docValues()) {
-                    log.debug("[DocValues] Skipping {} - doc_values disabled in mapping", fieldName);
-                    continue;
-                }
-                Object value = reader.getDocValue(docId, fieldInfo);
-                log.debug("[DocValues] Field {} raw value: {}", fieldName, value);
-                if (value != null) {
-                    Object converted = convertDocValue(value, fieldInfo, mappingInfo);
-                    log.debug("[DocValues] Field {} converted value: {}", fieldName, converted);
-                    if (converted != null) {
-                        reconstructed.put(fieldName, converted);
-                    }
-                }
-            }
-            
-            // Finally, try Points or Terms fallback for fields not yet recovered
-            if (mappingContext != null) {
-                for (String fieldName : mappingContext.getFieldNames()) {
-                    if (shouldSkipField(fieldName) || reconstructed.containsKey(fieldName)) {
-                        continue;
-                    }
-                    FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
-                    if (mappingInfo != null) {
-                        var fallbackValue = reader.getValueFromPointsOrTerms(docId, fieldName, mappingInfo.type(), termIndex);
-                        if (fallbackValue.isPresent()) {
-                            Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
-                            if (converted != null) {
-                                reconstructed.put(fieldName, converted);
-                            }
-                        }
-                    }
-                }
-            }
-            
+            populateFromSegment(reconstructed, reader, docId, document, mappingContext, termIndex);
+
             if (reconstructed.isEmpty()) {
                 log.atWarn().setMessage("No stored fields or doc_values found for document {}").addArgument(docId).log();
                 return null;
             }
-            
+
             return OBJECT_MAPPER.writeValueAsString(reconstructed);
         } catch (IOException e) {
             log.atWarn().setCause(e).setMessage("Failed to reconstruct source for document {}").addArgument(docId).log();
@@ -124,44 +63,89 @@ public class SourceReconstructor {
     }
 
     /**
-     * Merges reconstructed fields into existing source JSON.
+     * Merges reconstructed fields into existing source JSON. Used when the snapshot still
+     * holds a (possibly partial) _source — e.g. _source.includes/_source.excludes indices.
+     * Applies the same stored → doc_values → points/terms recovery chain as
+     * {@link #reconstructSource}, but only for fields missing from the existing source,
+     * so existing values are preserved verbatim.
      */
+    public static String mergeWithDocValues(String existingSource, LuceneLeafReader reader, int docId,
+            LuceneDocument document, FieldMappingContext mappingContext) {
+        return mergeWithDocValues(existingSource, reader, docId, document, mappingContext, null);
+    }
+
     @SuppressWarnings("unchecked")
-    public static String mergeWithDocValues(String existingSource, LuceneLeafReader reader, int docId, LuceneDocument document, FieldMappingContext mappingContext) {
+    public static String mergeWithDocValues(String existingSource, LuceneLeafReader reader, int docId,
+            LuceneDocument document, FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
         try {
             Map<String, Object> existing = OBJECT_MAPPER.readValue(existingSource, Map.class);
-            boolean modified = false;
-            
-            for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
-                String fieldName = fieldInfo.name();
-                if (shouldSkipField(fieldName) || existing.containsKey(fieldName)) {
-                    continue;
-                }
-                Object value = reader.getDocValue(docId, fieldInfo);
-                if (value != null) {
-                    FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
-                    existing.put(fieldName, convertDocValue(value, fieldInfo, mappingInfo));
-                    modified = true;
-                }
-            }
-            
-            for (var field : document.getFields()) {
-                String fieldName = field.name();
-                if (shouldSkipField(fieldName) || existing.containsKey(fieldName)) {
-                    continue;
-                }
-                FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
-                Object value = getStoredFieldValue(field, mappingInfo);
-                if (value != null) {
-                    existing.put(fieldName, value);
-                    modified = true;
-                }
-            }
-            
-            return modified ? OBJECT_MAPPER.writeValueAsString(existing) : existingSource;
+            int sizeBefore = existing.size();
+            populateFromSegment(existing, reader, docId, document, mappingContext, termIndex);
+            return existing.size() != sizeBefore ? OBJECT_MAPPER.writeValueAsString(existing) : existingSource;
         } catch (IOException e) {
             log.atWarn().setCause(e).setMessage("Failed to merge fields for document {}").addArgument(docId).log();
             return existingSource;
+        }
+    }
+
+    /**
+     * Populates {@code target} with fields recovered from a Lucene segment, skipping any
+     * field already present. Shared by {@link #reconstructSource} (empty seed) and
+     * {@link #mergeWithDocValues} (existing _source as seed) so both paths exercise the
+     * same stored → doc_values → points/terms recovery chain.
+     */
+    private static void populateFromSegment(Map<String, Object> target, LuceneLeafReader reader, int docId,
+            LuceneDocument document, FieldMappingContext mappingContext, SegmentTermIndex termIndex) throws IOException {
+        // 1. Stored fields (exact values when present)
+        for (var field : document.getFields()) {
+            String fieldName = field.name();
+            if (shouldSkipField(fieldName) || target.containsKey(fieldName)) {
+                continue;
+            }
+            FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
+            Object value = getStoredFieldValue(field, mappingInfo);
+            if (value != null) {
+                target.put(fieldName, value);
+            }
+        }
+
+        // 2. Doc values (fast, lossless for typed fields)
+        for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
+            String fieldName = fieldInfo.name();
+            if (shouldSkipField(fieldName) || target.containsKey(fieldName)) {
+                continue;
+            }
+            FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
+            // Skip if mapping says doc_values is disabled (ES 2.x may still have them internally)
+            if (mappingInfo != null && !mappingInfo.docValues()) {
+                continue;
+            }
+            Object value = reader.getDocValue(docId, fieldInfo);
+            if (value != null) {
+                Object converted = convertDocValue(value, fieldInfo, mappingInfo);
+                if (converted != null) {
+                    target.put(fieldName, converted);
+                }
+            }
+        }
+
+        // 3. Points / indexed terms fallback (recovers indexed-only numeric/boolean/keyword)
+        if (mappingContext != null) {
+            for (String fieldName : mappingContext.getFieldNames()) {
+                if (shouldSkipField(fieldName) || target.containsKey(fieldName)) {
+                    continue;
+                }
+                FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
+                if (mappingInfo != null) {
+                    var fallbackValue = reader.getValueFromPointsOrTerms(docId, fieldName, mappingInfo.type(), termIndex);
+                    if (fallbackValue.isPresent()) {
+                        Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
+                        if (converted != null) {
+                            target.put(fieldName, converted);
+                        }
+                    }
+                }
+            }
         }
     }
 

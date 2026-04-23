@@ -279,7 +279,7 @@ public class LuceneReader {
         }
         if (mappingContext != null) {
             String merged = SourceReconstructor.mergeWithDocValues(
-                new String(sourceBytes, java.nio.charset.StandardCharsets.UTF_8), reader, luceneDocId, document, mappingContext);
+                new String(sourceBytes, java.nio.charset.StandardCharsets.UTF_8), reader, luceneDocId, document, mappingContext, termIndex);
             return merged.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         }
         return sourceBytes;
