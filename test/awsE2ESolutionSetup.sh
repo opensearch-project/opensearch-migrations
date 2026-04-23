@@ -88,7 +88,7 @@ clean_up_migration () {
   # source destroy that follows.
   cd "$MIGRATION_CDK_PATH" || exit
   echo "Destroying migration CDK app stacks..."
-  npx cdk destroy "*" --force --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID"
+  CDK_SKIP_LOCAL_IMAGE_HASH=true npx cdk destroy "*" --force --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID"
   local cdk_rc=$?
   if [ $cdk_rc -ne 0 ]; then
     echo "Error: cdk destroy for migration stacks exited with code $cdk_rc, aborting cleanup before source destroy."

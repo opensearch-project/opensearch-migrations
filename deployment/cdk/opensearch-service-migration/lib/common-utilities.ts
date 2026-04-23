@@ -544,22 +544,35 @@ export function makeLocalAssetContainerImage(scope: Construct, imageName: string
         const tempDir = mkdtempSync(join(tmpdir(), 'docker-build-' + sanitizedImageName));
         const dockerfilePath = join(tempDir, 'Dockerfile');
 
+        // Destroy paths (e.g. pre-deploy cleanup) run `cdk destroy` before the
+        // local migrations/* images have been built. In that case `docker inspect`
+        // fails with "No such object" and synth aborts before CFN delete can
+        // happen. When CDK_SKIP_LOCAL_IMAGE_HASH is set, skip the hash fetch and
+        // return a stub hash so synth completes; the asset is never actually
+        // pushed because destroy doesn't upload assets.
+        const skipImageHash = process.env.CDK_SKIP_LOCAL_IMAGE_HASH === 'true';
+
         let imageHash = null;
-        try {
-            // Update the image if it is not a local image
-            if (!imageName.startsWith('migrations/')) {
-                execSync(`docker pull ${imageName}`);
+        if (skipImageHash) {
+            imageHash = 'destroy-stub';
+            CdkLogger.info('CDK_SKIP_LOCAL_IMAGE_HASH=true; using stub hash for image: ' + imageName);
+        } else {
+            try {
+                // Update the image if it is not a local image
+                if (!imageName.startsWith('migrations/')) {
+                    execSync(`docker pull ${imageName}`);
+                }
+                // Get the actual hash for the image
+                const imageId = execSync(`docker inspect --format='{{.Id}}' ${imageName}`).toString().trim();
+                if (!imageId) {
+                    throw new Error(`No RepoDigests found for image: ${imageName}`);
+                }
+                imageHash = imageId.replaceAll(/[^a-zA-Z0-9-_]/g, '_');
+                CdkLogger.info('For image: ' + imageName + ' found imageHash: ' + imageHash);
+            } catch (error) {
+                CdkLogger.error('Error fetching the actual hash for the image: ' + imageName + ' Error: ' + error);
+                throw new Error('Error fetching the image hash for the image: ' + imageName + ' Error: ' + error);
             }
-            // Get the actual hash for the image
-            const imageId = execSync(`docker inspect --format='{{.Id}}' ${imageName}`).toString().trim();
-            if (!imageId) {
-                throw new Error(`No RepoDigests found for image: ${imageName}`);
-            }
-            imageHash = imageId.replaceAll(/[^a-zA-Z0-9-_]/g, '_');
-            CdkLogger.info('For image: ' + imageName + ' found imageHash: ' + imageHash);
-        } catch (error) {
-            CdkLogger.error('Error fetching the actual hash for the image: ' + imageName + ' Error: ' + error);
-            throw new Error('Error fetching the image hash for the image: ' + imageName + ' Error: ' + error);
         }
 
         const dockerfileContent = `
