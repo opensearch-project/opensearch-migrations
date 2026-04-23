@@ -61,16 +61,11 @@ dependencies {
 }
 
 tasks.named('compileLucene10Java', JavaCompile) {
+    // compileJava runs first so the main sourceSet's compiled classes (used as a
+    // dependency of lucene10Implementation above) are available. The toolchain
+    // is inherited from the root project (JDK 21, Corretto), which is required
+    // for the Lucene 10 class-file major version.
     dependsOn tasks.named('compileJava')
-    // Lucene 10 requires JDK 21 (class-file v65). The rest of the project is pinned
-    // to JDK 17, so only this JavaCompile task gets the JDK 21 toolchain override.
-    // Do NOT move this onto the ShadowJar task — ShadowJar has no `javaLauncher`
-    // property and repackages class files without executing them.
-    javaCompiler = javaToolchains.compilerFor {
-        languageVersion = JavaLanguageVersion.of(21)
-        vendor = JvmVendorSpec.AMAZON
-    }
-    options.release.set(21)
 }
 
 tasks.register('shadowLucene5', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {

@@ -148,15 +148,6 @@ subprojects {
         tasks.withType(Test) {
             // Getting javadoc to compile is part of the test suite to ensure we are able to publish our artifacts
             dependsOn project.javadoc
-
-            // Run tests on JDK 21 so reflectively-loaded Lucene 10 shadow classes
-            // (class-file v65, compiled via compileLucene10Java) can be linked.
-            // Main project compiles at JDK 17 (bytecode v61), so consumer APIs stay
-            // on 17; only the test JVM runtime is bumped.
-            javaLauncher = javaToolchains.launcherFor {
-                languageVersion = JavaLanguageVersion.of(21)
-                vendor = JvmVendorSpec.AMAZON
-            }
         }
         if (!sourceSets.test.allSource.files.isEmpty()) {
             tasks.withType(Test) {
