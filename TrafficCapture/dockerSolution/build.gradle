@@ -185,6 +185,18 @@ javaContainerServices.each { dockerImageName, projectName ->
     CommonUtils.createDockerfile(project, artifactProject, baseImageOverrides[dockerImageName], dockerFilesForExternalServices, dockerImageName)
 }
 
+// Stage self-signed certs into the capture_proxy Docker build context
+tasks.named("copyArtifact_capture_proxy").configure {
+    def certTask = project(":TrafficCapture:trafficCaptureProxyServer").tasks.named("generateSelfSignedCerts")
+    dependsOn certTask
+    from(certTask.map { it.outputs.files }) {
+        into("certs")
+    }
+}
+tasks.named("createDockerfile_capture_proxy").configure {
+    copyFile("certs", "/usr/share/captureProxy/config")
+}
+
 javaContainerServices.forEach { dockerImageName, gradleProjectName ->
     def projectName = project(gradleProjectName).name;
     def dockerBuildDir = "build/docker/${dockerImageName}_${projectName}"
