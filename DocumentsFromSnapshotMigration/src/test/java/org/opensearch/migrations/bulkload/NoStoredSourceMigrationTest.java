@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload;
 import java.io.File;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -730,11 +731,18 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
     private static void assertValueMatches(Permutation perm, JsonNode fieldValue) {
         var cfg = perm.cfg();
 
-        // Extract one scalar JsonNode to compare against.
-        JsonNode target = fieldValue;
-        if (perm.array() && fieldValue.isArray() && fieldValue.size() > 0) {
-            target = fieldValue.get(0);
+        // For array perms, recovery paths legitimately do not preserve order or even
+        // array-ness (doc-values sort lex/numeric, terms-dict de-duplicates+sorts, numeric
+        // stored-fields may collapse to the last scalar). Accept a match against ANY of
+        // the original array values regardless of whether the recovered shape is a scalar
+        // or an array. See reconstruction-test-array-ordering-pitfall.
+        if (perm.array()) {
+            assertArrayValueMatches(perm, fieldValue);
+            return;
         }
+
+        // Extract one scalar JsonNode to compare against (scalar perms only).
+        JsonNode target = fieldValue;
 
         // Short-circuit by type; array collapses to the first element above.
         if (cfg.sourceType().equals("geo_point")) {
@@ -802,27 +810,75 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
 
         // For array mode, accept either exact match of the first element or the
         // reconstructed value being an array containing the expected value.
-        if (perm.array() && fieldValue.isArray()) {
-            boolean found = false;
-            for (int i = 0; i < fieldValue.size(); i++) {
-                JsonNode elt = fieldValue.get(i);
-                String eltText = elt.isTextual() ? elt.asText() : elt.asText();
-                if (cfg.sourceType().equals("date") || cfg.sourceType().equals("date_nanos")) {
-                    eltText = normalizeDate(eltText);
-                } else if (cfg.sourceType().equals("ip") && expected.contains(":")) {
-                    eltText = normalizeIpv6(eltText);
-                }
-                if (expected.equals(eltText)) {
-                    found = true;
-                    break;
-                }
+        // (Unreachable — array perms are handled by assertArrayValueMatches above.
+        // Retained as a no-op guard in case this function grows another entry path.)
+
+        assertEquals(expected, actual, perm.fieldName() + " value mismatch");
+    }
+
+    /**
+     * Array-perm value matcher. Recovery paths (doc-values, terms-dict, Points, stored
+     * fields) do NOT preserve insertion order, may sort lex/numeric, may de-duplicate,
+     * and may collapse a multi-valued doc to a scalar. Accept a match against ANY of
+     * the original array values regardless of whether the recovered shape is a scalar
+     * or an array.
+     */
+    private static void assertArrayValueMatches(Permutation perm, JsonNode fieldValue) {
+        var cfg = perm.cfg();
+
+        // geo_point & token_count have bespoke scalar/shape contracts that carry over
+        // to array mode — keep the original "not-null" / "count" semantics.
+        if (cfg.sourceType().equals("geo_point")) {
+            assertNotNull(fieldValue, perm.fieldName() + " should not be null");
+            return;
+        }
+        if (cfg.sourceType().equals("token_count")) {
+            JsonNode sample = fieldValue.isArray() && fieldValue.size() > 0
+                ? fieldValue.get(0) : fieldValue;
+            if (sample.isTextual()) {
+                // original string round-tripped via _recovery_source; just confirm presence
+                assertNotNull(fieldValue, perm.fieldName() + " should not be null");
+            } else {
+                assertEquals(5, sample.asInt(), perm.fieldName() + " token count mismatch");
             }
-            assertTrue(found || expected.equals(actual),
-                perm.fieldName() + " array should contain " + expected + " but was " + fieldValue);
             return;
         }
 
-        assertEquals(expected, actual, perm.fieldName() + " value mismatch");
+        Set<String> acceptable = new HashSet<>();
+        acceptable.add(normalizeForCompare(cfg, String.valueOf(cfg.testValue())));
+        acceptable.add(normalizeForCompare(cfg, String.valueOf(secondValueFor(cfg))));
+
+        Set<String> actualValues = new HashSet<>();
+        if (fieldValue.isArray()) {
+            for (int i = 0; i < fieldValue.size(); i++) {
+                actualValues.add(normalizeForCompare(cfg, nodeAsText(fieldValue.get(i))));
+            }
+        } else {
+            actualValues.add(normalizeForCompare(cfg, nodeAsText(fieldValue)));
+        }
+
+        assertFalse(Collections.disjoint(acceptable, actualValues),
+            perm.fieldName() + " should contain one of " + acceptable + " but was " + fieldValue);
+    }
+
+    private static String nodeAsText(JsonNode n) {
+        if (n == null || n.isNull()) return "";
+        if (n.isTextual()) return n.asText();
+        if (n.isBoolean()) return String.valueOf(n.asBoolean());
+        if (n.isInt()) return String.valueOf(n.asInt());
+        if (n.isLong()) return String.valueOf(n.asLong());
+        return n.asText();
+    }
+
+    private static String normalizeForCompare(FieldTypeConfig cfg, String s) {
+        if (s == null) return "";
+        if (cfg.sourceType().equals("ip") && s.contains(":")) {
+            return normalizeIpv6(s);
+        }
+        if (cfg.sourceType().equals("date") || cfg.sourceType().equals("date_nanos")) {
+            return normalizeDate(s);
+        }
+        return s;
     }
 
     /**
