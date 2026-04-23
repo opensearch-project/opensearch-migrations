@@ -432,9 +432,6 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
 }).describe("Kubernetes deployment-level options for the traffic replayer.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
-    authHeaderValue: z.string().default("").optional()
-        .describe("Static value to use for the \"authorization\" header of each request (cannot be used with other auth arguments)")
-        .changeRestriction('gated'),
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
         .changeRestriction('impossible'),
@@ -1120,6 +1117,23 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                             code: z.ZodIssueCode.custom,
                             message: `Replayer '${replayerName}' dependsOnSnapshotMigrations[${j}] references unknown source '${dep.source}'. Available: ${Object.keys(data.sourceClusters).join(', ')}`,
                             path: ['traffic', 'replayers', replayerName, 'dependsOnSnapshotMigrations', j, 'source']
+                        });
+                    }
+                }
+
+                // When the target has sigv4 or basic auth, the workflow auto-derives the replayer's auth
+                // at deploy time. Setting removeAuthHeader alongside that causes a dual-auth startup crash.
+                const targetCluster = data.targetClusters[rc.toTarget];
+                if (targetCluster && rc.replayerConfig && rc.replayerConfig.removeAuthHeader === true) {
+                    const targetHasSigv4 = targetCluster.authConfig && HTTP_AUTH_SIGV4.safeParse(targetCluster.authConfig).success;
+                    const targetHasBasicAuth = targetCluster.authConfig && HTTP_AUTH_BASIC.safeParse(targetCluster.authConfig).success;
+                    if (targetHasSigv4 || targetHasBasicAuth) {
+                        const targetAuthType = targetHasSigv4 ? 'sigv4' : 'basic';
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            message: `Replayer '${replayerName}' sets 'removeAuthHeader' but target '${rc.toTarget}' uses ${targetAuthType} auth. ` +
+                                `The replayer cannot use both — the target's auth is applied automatically. Remove 'removeAuthHeader' from replayerConfig.`,
+                            path: ['traffic', 'replayers', replayerName, 'replayerConfig', 'removeAuthHeader']
                         });
                     }
                 }
