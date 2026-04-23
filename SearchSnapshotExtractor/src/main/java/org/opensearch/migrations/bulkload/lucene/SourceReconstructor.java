@@ -475,6 +475,7 @@ public class SourceReconstructor {
     /** Decode a raw Long harvested from a shift==0 numeric term into the mapped JSON type. */
     private static Object decodeNumericTerm(long raw, FieldMappingInfo mappingInfo) {
         return switch (mappingInfo.type()) {
+            case BOOLEAN -> raw != 0;
             case IP -> String.format("%d.%d.%d.%d",
                 (raw >> 24) & 0xFF,
                 (raw >> 16) & 0xFF,
@@ -515,6 +516,16 @@ public class SourceReconstructor {
         byte[] packed = pointValues.get(0);
         
         return switch (mappingInfo.type()) {
+            case BOOLEAN -> {
+                // Booleans aren't typically stored as Points, but handle defensively.
+                // Historical encodings: legacy ES (pre-6.0) stored boolean as a single byte
+                // "T"=0x54 / "F"=0x46 (SortedDocValues BytesRef); modern ES stores as
+                // SortedNumericDocValues 0/1. For Points-path completeness, accept either:
+                if (packed.length == 1) {
+                    yield packed[0] == (byte) 'T' || packed[0] == 1;
+                }
+                yield null;
+            }
             case IP -> packed.length == 16 ? convertIpBytes(packed) : null;
             case NUMERIC -> {
                 String mappingType = mappingInfo.mappingType();

@@ -264,6 +264,12 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         if ("string".equals(type) && !perm.indexed()) {
             return Optional.of("pre-ES5 string uses `index` as enum, not boolean; skip indexed=false");
         }
+        // `binary` type is never indexed by definition and rejects the `index` mapping
+        // parameter outright on ES 5+/OS ("unknown parameter [index] on mapper [...] of type [binary]"),
+        // so there is no meaningful indexed=false variant to exercise.
+        if ("binary".equals(type) && !perm.indexed()) {
+            return Optional.of("binary type is never indexed; `index: false` is rejected by the mapper");
+        }
         // ES 1.x/2.x mapping API rejects `"index": false` on non-string field types
         // (MapperParsingException: Wrong value for index [false] for field [...]).
         // Pre-ES5 only accepts the string-enum form ("no"|"not_analyzed"|"analyzed") on
