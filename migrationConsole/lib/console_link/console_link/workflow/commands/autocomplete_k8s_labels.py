@@ -99,7 +99,7 @@ def _get_cached_label_data(ctx):
         namespace = ctx.params.get('namespace', 'ma')
         argo_server = ctx.params.get('argo_server') or os.environ.get('ARGO_SERVER') or DEFAULT_ARGO_SERVER_URL
         token = ctx.params.get('token')
-        insecure = ctx.params.get('insecure', False)
+        insecure = ctx.params.get('insecure', True)
 
         label_map, valid_combos = _fetch_workflow_labels(workflow_name, namespace, argo_server, token, insecure)
 
