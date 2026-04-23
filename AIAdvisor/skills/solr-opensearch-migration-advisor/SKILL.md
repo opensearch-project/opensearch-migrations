@@ -1,6 +1,5 @@
 ---
-name: solr-to-opensearch
-displayName: "Solr to OpenSearch Migration Advisor"
+name: solr-opensearch-migration-advisor
 description: >
   Expert in migrating Apache Solr collections to OpenSearch indexes. 
   Translates Solr XML/JSON schemas to OpenSearch mappings and converts 
@@ -9,22 +8,23 @@ description: >
   Provides guidance auf authentication migration from Solr to OpenSearch.
   Uses the AWS Knowledge MCP Server for accurate, up-to-date OpenSearch
   and AWS service information.
-keywords: 
-  - "Solr to OpenSearch"
-  - "migrate Solr"
-  - "schema.xml to mapping"
-  - "solrconfig.xml"
-  - "edismax to bool query"
-  - "synonyms.txt"
-  - "SolrCloud vs OpenSearch Cluster"
-  - "OpenSearch best practices"
-  - "AWS OpenSearch Service"
-  - "OpenSearch regional availability"
-  - "Authentication migration from Solr to OpenSearch"
 metadata:
   author: jzonthemtn
   version: "0.2.0"
   capability: "translation-engine"
+  displayName: "Solr to OpenSearch Migration Advisor"
+  keywords:
+    - "Solr to OpenSearch"
+    - "migrate Solr"
+    - "schema.xml to mapping"
+    - "solrconfig.xml"
+    - "edismax to bool query"
+    - "synonyms.txt"
+    - "SolrCloud vs OpenSearch Cluster"
+    - "OpenSearch best practices"
+    - "AWS OpenSearch Service"
+    - "OpenSearch regional availability"
+    - "Authentication migration from Solr to OpenSearch"
 ---
 
 # Apache Solr to OpenSearch Migration Advisor
