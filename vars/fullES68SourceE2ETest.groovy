@@ -102,6 +102,17 @@ def call(Map config = [:]) {
             jobName: config.jobName ?: 'full-es68source-e2e-test',
             testUniqueId: testUniqueId,
             integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202',
+            preDeployStep: { Map args ->
+                // Destroy any prior stacks in reverse order (migration, then source) before redeploying.
+                // Reuses the --clean-up-all path in awsE2ESolutionSetup.sh which invokes
+                // `cdk destroy "*"` first against the migration CDK app, then the source CDK app.
+                sh "./awsE2ESolutionSetup.sh --source-context-file './${args.sourceContextFileName}' " +
+                        "--migration-context-file './${args.migrationContextFileName}' " +
+                        "--source-context-id ${args.sourceContextId} " +
+                        "--migration-context-id ${args.migrationContextId} " +
+                        "--stage ${args.stage} " +
+                        "--clean-up-all"
+            },
             preIntegTestStep: { deployStage ->
                 def sourceEndpoint = "https://alb.migration.${deployStage}.local:9201"
                 def clusterName = "migration-${deployStage}-ecs-cluster"
