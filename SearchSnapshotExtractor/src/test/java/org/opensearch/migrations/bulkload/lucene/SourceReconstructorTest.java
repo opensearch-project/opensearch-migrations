@@ -1111,4 +1111,180 @@ class SourceReconstructorTest {
         assertTrue(!tree.has("_id"), "_id must be skipped: " + json);
         assertTrue(!tree.has("_routing"), "_routing must be skipped: " + json);
     }
+    // ==========================================================================================
+    // 10. MERGE PATH CORRECTNESS REGRESSIONS (bugs found by correctness critics — PR #2771)
+    // ==========================================================================================
+    // These exercise the `mergeWithDocValues` + `mergeWithRecoverySource` code paths that handle
+    // partial-_source indices (includes/excludes). Before the fixes, size-based dirty detection
+    // dropped nested inserts and `putAll` shallow-merged nested objects — both silently lost data.
+
+    @Test
+    void mergeWithDocValues_dottedSubfield_intoExistingParentMap_isReSerialized() throws IOException {
+        // REGRESSION: mergeWithDocValues used `existing.size() != sizeBefore` to decide whether to
+        // re-serialize. putNested writing `address.zip` into an already-present `address` inner map
+        // does NOT change the top-level size → original unchanged string was returned, losing zip.
+        var reader = mock(LuceneLeafReader.class);
+        var info = new DocValueFieldInfo.Simple("address.zip", DocValueFieldInfo.DocValueType.SORTED, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(info));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq(info))).thenReturn("10001");
+        try {
+            when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.empty());
+        } catch (IOException e) { throw new RuntimeException(e); }
+
+        var ctx = contextOfMany(java.util.Map.of(
+            "address.zip", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String merged = SourceReconstructor.mergeWithDocValues(
+                "{\"address\":{\"city\":\"NYC\"}}", reader, 0, document(), ctx);
+
+        JsonNode tree = MAPPER.readTree(merged);
+        assertEquals("NYC", tree.path("address").path("city").asText(),
+            "existing subfield preserved: " + merged);
+        assertEquals("10001", tree.path("address").path("zip").asText(),
+            "doc-value subfield written into existing parent map: " + merged);
+    }
+
+    @Test
+    void mergeWithDocValues_noChange_returnsOriginalString() {
+        // Sanity: when nothing is added, we return the exact original string (no re-serialize churn).
+        var reader = storedOnlyReader();  // no docvalues, no points, no terms
+        var ctx = contextOf("name", mapping(EsFieldType.STRING, "keyword"));
+        String original = "{\"name\":\"alice\"}";
+        String merged = SourceReconstructor.mergeWithDocValues(original, reader, 0, document(), ctx);
+        assertEquals(original, merged, "unchanged payload must be returned verbatim");
+    }
+
+    @Test
+    void mergeWithRecoverySource_deepMerge_preservesPartialSourceNestedSiblings() throws IOException {
+        // REGRESSION: mergeWithRecoverySource used `existing.putAll(recovery)` which replaces entire
+        // top-level values. If partial _source carries a nested child that recovery doesn't (e.g. a
+        // field added by an ingest pipeline AFTER _recovery_source was captured), that child was
+        // silently dropped. Deep-merge preserves it while still letting recovery win on scalar conflicts.
+        String existing = "{\"address\":{\"city\":\"NYC\",\"added_by_pipeline\":\"yes\"}}";
+        String recovery = "{\"address\":{\"city\":\"NYC\",\"zip\":\"10001\"}}";
+
+        String merged = SourceReconstructor.mergeWithRecoverySource(existing, recovery);
+        JsonNode tree = MAPPER.readTree(merged);
+        assertEquals("NYC", tree.path("address").path("city").asText(), merged);
+        assertEquals("10001", tree.path("address").path("zip").asText(), merged);
+        assertEquals("yes", tree.path("address").path("added_by_pipeline").asText(),
+            "partial-source sibling preserved across deep merge: " + merged);
+    }
+
+    @Test
+    void mergeWithRecoverySource_recoveryWinsOnScalarConflict() throws IOException {
+        // The documented contract: recovery_source is authoritative, so on leaf-value conflicts
+        // it overwrites. Deep merge must still respect this — only nested-object merge should recurse.
+        String existing = "{\"title\":\"partial\",\"address\":{\"city\":\"stale\"}}";
+        String recovery = "{\"title\":\"authoritative\",\"address\":{\"city\":\"fresh\"}}";
+
+        String merged = SourceReconstructor.mergeWithRecoverySource(existing, recovery);
+        JsonNode tree = MAPPER.readTree(merged);
+        assertEquals("authoritative", tree.path("title").asText(), merged);
+        assertEquals("fresh", tree.path("address").path("city").asText(), merged);
+    }
+
+    @Test
+    void mergeWithRecoverySource_parseFailure_returnsPartial() {
+        // Best-effort fallback: if either JSON is malformed, we return the partial unchanged so the
+        // document still migrates. (Better partial than dropped — see mergeWithRecoverySource javadoc.)
+        String partial = "{\"ok\":true}";
+        String merged = SourceReconstructor.mergeWithRecoverySource(partial, "{ not json }");
+        assertEquals(partial, merged);
+    }
+
+    @Test
+    void reconstructSource_literalDottedKey_inExistingSource_notDoubleEmitted() throws IOException {
+        // REGRESSION: hasNested used to walk only the nested chain, so a literal dotted key like
+        // `address.city` kept in the partial _source would NOT be considered "present" and
+        // putNested would write a second copy at `{"address":{"city":...}}` — emitting both shapes.
+        var reader = mock(LuceneLeafReader.class);
+        var info = new DocValueFieldInfo.Simple("address.city", DocValueFieldInfo.DocValueType.SORTED, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(info));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq(info))).thenReturn("SHOULD_NOT_APPEAR");
+        try {
+            when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.empty());
+        } catch (IOException e) { throw new RuntimeException(e); }
+
+        var ctx = contextOfMany(java.util.Map.of(
+            "address.city", mapping(EsFieldType.STRING, "keyword")
+        ));
+        // partial source with the literal dotted key preserved verbatim (some ingest pipelines do this)
+        String merged = SourceReconstructor.mergeWithDocValues(
+                "{\"address.city\":\"NYC\"}", reader, 0, document(), ctx);
+
+        JsonNode tree = MAPPER.readTree(merged);
+        assertEquals("NYC", tree.path("address.city").asText(),
+            "literal dotted key preserved: " + merged);
+        // Must NOT also emit a nested {address:{city:...}} copy.
+        assertTrue(!tree.has("address") || tree.path("address").isNull(),
+            "nested duplicate must not be emitted: " + merged);
+    }
+
+    @Test
+    void populateFromSegment_scalarAtNestedParent_dropsSubfieldWithWarn() throws IOException {
+        // REGRESSION: putNested previously returned silently when an ancestor path held a scalar.
+        // Now the path is still skipped (can't nest under a scalar) but a warn log is emitted so
+        // operators notice the dropped value. This test locks in the no-crash, no-corruption contract.
+        var reader = mock(LuceneLeafReader.class);
+        var info = new DocValueFieldInfo.Simple("address.city", DocValueFieldInfo.DocValueType.SORTED, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(info));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq(info))).thenReturn("NYC");
+        try {
+            when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.empty());
+        } catch (IOException e) { throw new RuntimeException(e); }
+
+        var ctx = contextOfMany(java.util.Map.of(
+            "address.city", mapping(EsFieldType.STRING, "keyword")
+        ));
+        // existing source has `address` as a plain scalar string (pathological but possible from old snapshots)
+        String merged = SourceReconstructor.mergeWithDocValues(
+                "{\"address\":\"plain scalar address\"}", reader, 0, document(), ctx);
+
+        // Scalar parent wins; subfield quietly dropped (warn log only). The existing source must be returned
+        // UNCHANGED — no corruption, no partial write.
+        assertEquals("{\"address\":\"plain scalar address\"}", merged,
+            "scalar parent blocks nested write; output unchanged: " + merged);
+    }
+
+    @Test
+    void reconstructSource_dottedSubfieldViaDocValues_isNested() throws IOException {
+        // Coverage gap: the doc-values loop is one of three recovery paths that calls putNested.
+        // Previously only the stored-fields path had an explicit dotted test. Lock in the shape.
+        var reader = mock(LuceneLeafReader.class);
+        var info = new DocValueFieldInfo.Simple("user.email", DocValueFieldInfo.DocValueType.SORTED, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(info));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq(info))).thenReturn("alice@example.com");
+        try {
+            when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.empty());
+        } catch (IOException e) { throw new RuntimeException(e); }
+
+        var ctx = contextOfMany(java.util.Map.of(
+            "user.email", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        JsonNode tree = MAPPER.readTree(json);
+        assertEquals("alice@example.com", tree.path("user").path("email").asText(),
+            "dotted subfield from doc_values path must nest: " + json);
+    }
 }

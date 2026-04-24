@@ -53,12 +53,26 @@ public class SourceReconstructor {
      * like {@code "address.city"} becomes {@code target["address"]["city"] = value}. If an
      * intermediate path collides with a non-map value already present, the non-map wins
      * (best-effort — stored/doc_values loops prefer earlier writes).
+     * <p>
+     * Returns {@code true} iff the target map was modified (a new entry was written at any
+     * level). Callers use this to decide whether a partial-source re-serialization is needed
+     * after {@link #populateFromSegment} runs — raw {@code target.size()} is not a sound
+     * dirty proxy because nested inserts do not change the top-level map size.
      */
     @SuppressWarnings("unchecked")
-    private static void putNested(Map<String, Object> target, String fieldName, Object value) {
+    private static boolean putNested(Map<String, Object> target, String fieldName, Object value) {
         if (!fieldName.contains(".")) {
+            if (target.containsKey(fieldName)) {
+                return false;
+            }
             target.put(fieldName, value);
-            return;
+            return true;
+        }
+        // Honour a literal dotted key already present in the map (some ingest pipelines preserve
+        // dotted names verbatim in _source rather than nesting them). Treat it as present so we
+        // don't emit both {"address.city":...} and {"address":{"city":...}}.
+        if (target.containsKey(fieldName)) {
+            return false;
         }
         String[] parts = fieldName.split("\\.");
         Map<String, Object> cursor = target;
@@ -71,21 +85,38 @@ public class SourceReconstructor {
                 cursor.put(parts[i], child);
                 cursor = child;
             } else {
-                // Non-map already sits at this path — leave it alone.
-                return;
+                // Non-map already sits at this path — cannot nest under a scalar. Warn once so
+                // operators notice the dropped subfield instead of it disappearing silently.
+                log.atWarn()
+                    .setMessage("Cannot write nested field '{}' under scalar at '{}' (type {}); dropping recovered value")
+                    .addArgument(fieldName)
+                    .addArgument(parts[i])
+                    .addArgument(next.getClass().getSimpleName())
+                    .log();
+                return false;
             }
         }
-        cursor.putIfAbsent(parts[parts.length - 1], value);
+        String leaf = parts[parts.length - 1];
+        if (cursor.containsKey(leaf)) {
+            return false;
+        }
+        cursor.put(leaf, value);
+        return true;
     }
 
     /**
      * True iff the (possibly-dotted) field path already has a value in {@code target}.
      * Walks intermediate maps for dotted names; non-dotted names fall back to {@code containsKey}.
+     * Also returns {@code true} when the literal dotted key is present at the top level (some
+     * ingest pipelines preserve dotted names verbatim).
      */
     @SuppressWarnings("unchecked")
     private static boolean hasNested(Map<String, Object> target, String fieldName) {
+        if (target.containsKey(fieldName)) {
+            return true;
+        }
         if (!fieldName.contains(".")) {
-            return target.containsKey(fieldName);
+            return false;
         }
         String[] parts = fieldName.split("\\.");
         Map<String, Object> cursor = target;
@@ -137,6 +168,10 @@ public class SourceReconstructor {
      * JSON captured as a byproduct of soft-deletes). Recovery wins on field conflicts since
      * it is the authoritative copy of the original document.
      * <p>
+     * Performs a recursive map-merge so nested siblings that happen to only exist in the
+     * partial {@code _source} (e.g. fields injected by an ingest pipeline after
+     * {@code _recovery_source} was captured) are preserved rather than silently dropped.
+     * <p>
      * On parse failure, returns the existing partial source unchanged so the document still
      * migrates (best-effort — better partial than dropped).
      */
@@ -145,12 +180,31 @@ public class SourceReconstructor {
         try {
             Map<String, Object> existing = OBJECT_MAPPER.readValue(existingSource, Map.class);
             Map<String, Object> recovery = OBJECT_MAPPER.readValue(recoverySource, Map.class);
-            // Recovery is the full original — merge every recovery field, overwriting partial values.
-            existing.putAll(recovery);
+            // Recovery is the authoritative copy — overwrites on scalar conflicts, recurses on object conflicts.
+            deepMerge(existing, recovery);
             return OBJECT_MAPPER.writeValueAsString(existing);
         } catch (IOException e) {
             log.atWarn().setCause(e).setMessage("Failed to merge recovery source; keeping partial _source").log();
             return existingSource;
+        }
+    }
+
+    /**
+     * Recursive in-place merge: every key in {@code source} is copied into {@code target};
+     * when both sides hold a {@code Map} at the same key, recurse; otherwise source wins.
+     * Preserves nested siblings that appear only on the target side (e.g. pipeline-added
+     * fields that were never captured in {@code _recovery_source}).
+     */
+    @SuppressWarnings("unchecked")
+    private static void deepMerge(Map<String, Object> target, Map<String, Object> source) {
+        for (Map.Entry<String, Object> entry : source.entrySet()) {
+            Object sourceValue = entry.getValue();
+            Object targetValue = target.get(entry.getKey());
+            if (targetValue instanceof Map<?, ?> targetMap && sourceValue instanceof Map<?, ?> sourceMap) {
+                deepMerge((Map<String, Object>) targetMap, (Map<String, Object>) sourceMap);
+            } else {
+                target.put(entry.getKey(), sourceValue);
+            }
         }
     }
 
@@ -171,9 +225,8 @@ public class SourceReconstructor {
             LuceneDocument document, FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
         try {
             Map<String, Object> existing = OBJECT_MAPPER.readValue(existingSource, Map.class);
-            int sizeBefore = existing.size();
-            populateFromSegment(existing, reader, docId, document, mappingContext, termIndex);
-            return existing.size() != sizeBefore ? OBJECT_MAPPER.writeValueAsString(existing) : existingSource;
+            boolean modified = populateFromSegment(existing, reader, docId, document, mappingContext, termIndex);
+            return modified ? OBJECT_MAPPER.writeValueAsString(existing) : existingSource;
         } catch (IOException e) {
             log.atWarn().setCause(e).setMessage("Failed to merge fields for document {}").addArgument(docId).log();
             return existingSource;
@@ -184,10 +237,14 @@ public class SourceReconstructor {
      * Populates {@code target} with fields recovered from a Lucene segment, skipping any
      * field already present. Shared by {@link #reconstructSource} (empty seed) and
      * {@link #mergeWithDocValues} (existing _source as seed) so both paths exercise the
-     * same stored → doc_values → points/terms recovery chain.
+     * same stored → doc_values → points/terms recovery chain. Returns {@code true} iff any
+     * new value was written into {@code target} (including into a nested child map, which
+     * would not change the top-level {@code target.size()}); callers use this to decide
+     * whether a re-serialization is needed.
      */
-    private static void populateFromSegment(Map<String, Object> target, LuceneLeafReader reader, int docId,
+    private static boolean populateFromSegment(Map<String, Object> target, LuceneLeafReader reader, int docId,
             LuceneDocument document, FieldMappingContext mappingContext, SegmentTermIndex termIndex) throws IOException {
+        boolean modified = false;
         // 1. Stored fields (exact values when present)
         for (var field : document.getFields()) {
             String fieldName = field.name();
@@ -197,7 +254,7 @@ public class SourceReconstructor {
             FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
             Object value = getStoredFieldValue(field, mappingInfo);
             if (value != null) {
-                putNested(target, fieldName, value);
+                modified |= putNested(target, fieldName, value);
             }
         }
 
@@ -216,7 +273,7 @@ public class SourceReconstructor {
             if (value != null) {
                 Object converted = convertDocValue(value, fieldInfo, mappingInfo);
                 if (converted != null) {
-                    putNested(target, fieldName, converted);
+                    modified |= putNested(target, fieldName, converted);
                 }
             }
         }
@@ -233,12 +290,13 @@ public class SourceReconstructor {
                     if (fallbackValue.isPresent()) {
                         Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
                         if (converted != null) {
-                            putNested(target, fieldName, converted);
+                            modified |= putNested(target, fieldName, converted);
                         }
                     }
                 }
             }
         }
+        return modified;
     }
 
     /** Extracts value from stored field, converting booleans stored as T/F and binary as base64 */
