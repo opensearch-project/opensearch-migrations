@@ -700,14 +700,28 @@ public class TrafficReplayer {
 
             setupShutdownHookForReplayer(tr);
             var tupleWriter = createS3TupleWriterIfConfigured(params);
-            tr.setupRunAndWaitForReplayWithShutdownChecks(
-                Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                serverTimeout,
-                blockingTrafficSource,
-                timeShifter,
-                tupleWriter,
-                Duration.ofMillis(params.quiescentPeriodMs)
-            );
+            if (tupleWriter != null) {
+                tr.setupRunAndWaitForReplayWithShutdownChecks(
+                    Duration.ofSeconds(params.observedPacketConnectionTimeout),
+                    serverTimeout,
+                    blockingTrafficSource,
+                    timeShifter,
+                    tupleWriter,
+                    Duration.ofMillis(params.quiescentPeriodMs)
+                );
+            } else {
+                var resultsToLogsConsumer = new ResultsToLogsConsumer(null, null,
+                        () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig));
+                var tupleLogConsumer = new TupleParserChainConsumer(resultsToLogsConsumer);
+                tr.setupRunAndWaitForReplayWithShutdownChecks(
+                    Duration.ofSeconds(params.observedPacketConnectionTimeout),
+                    serverTimeout,
+                    blockingTrafficSource,
+                    timeShifter,
+                    tupleLogConsumer,
+                    Duration.ofMillis(params.quiescentPeriodMs)
+                );
+            }
             log.info("Done processing TrafficStreams");
         } finally {
             scheduledExecutorService.shutdown();
