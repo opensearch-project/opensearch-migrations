@@ -128,6 +128,31 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Pre-Deploy Cleanup') {
+                when {
+                    expression { config.preDeployStep != null }
+                }
+                steps {
+                    timeout(time: 60, unit: 'MINUTES') {
+                        dir('test') {
+                            script {
+                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
+                                        config.preDeployStep(
+                                            stage: stage,
+                                            sourceContextFileName: source_context_file_name,
+                                            migrationContextFileName: migration_context_file_name,
+                                            sourceContextId: source_context_id,
+                                            migrationContextId: migration_context_id
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Deploy') {
                 steps {
                     timeout(time: 90, unit: 'MINUTES') {

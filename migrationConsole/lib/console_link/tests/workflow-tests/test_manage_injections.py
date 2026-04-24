@@ -257,7 +257,7 @@ class TestArgoServiceFiltering:
         mock_response.raw = io.BytesIO(json.dumps(bloated).encode())
         mock_get.return_value = mock_response
 
-        argo = make_argo_service("http://argo:2746", False, "token")
+        argo = make_argo_service("https://argo:2746", False, "token")
         _, slim_data = argo.get_workflow("my-workflow", "default")
 
         node1 = slim_data["status"]["nodes"]["node-1"]
@@ -295,7 +295,7 @@ class TestArgoServiceFiltering:
         mock_response.raw = io.BytesIO(json.dumps(bloated).encode())
         mock_get.return_value = mock_response
 
-        argo = make_argo_service("http://argo:2746", False, "token")
+        argo = make_argo_service("https://argo:2746", False, "token")
         _, slim_data = argo.get_workflow("my-workflow", "default")
 
         node1 = slim_data["status"]["nodes"]["node-1"]
@@ -320,7 +320,7 @@ class TestArgoServiceFiltering:
         mock_response.raw = io.BytesIO(json.dumps(bloated).encode())
         mock_get.return_value = mock_response
 
-        argo = make_argo_service("http://argo:2746", False, "token")
+        argo = make_argo_service("https://argo:2746", False, "token")
         _, slim_data = argo.get_workflow("my-workflow", "default")
 
         node1_inputs = slim_data["status"]["nodes"]["node-1"]["inputs"]["parameters"]
@@ -360,7 +360,7 @@ class TestArgoServiceFiltering:
         mock_response.raw = io.BytesIO(json.dumps(bloated).encode())
         mock_get.return_value = mock_response
 
-        argo = make_argo_service("http://argo:2746", False, "token")
+        argo = make_argo_service("https://argo:2746", False, "token")
         _, slim_data = argo.get_workflow("my-workflow", "default")
 
         node1_artifacts = slim_data["status"]["nodes"]["node-1"]["outputs"]["artifacts"]
@@ -382,7 +382,7 @@ class TestArgoServiceFiltering:
         mock_response.raw = io.BytesIO(json.dumps(bloated).encode())
         mock_get.return_value = mock_response
 
-        argo = make_argo_service("http://argo:2746", False, "token")
+        argo = make_argo_service("https://argo:2746", False, "token")
         _, slim_data = argo.get_workflow("my-workflow", "default")
 
         node1_outputs = slim_data["status"]["nodes"]["node-1"]["outputs"]["parameters"]
@@ -404,7 +404,7 @@ class TestArgoServiceFiltering:
         mock_response.status_code = 404
         mock_get.return_value = mock_response
 
-        argo = make_argo_service("http://argo:2746", False, "token")
+        argo = make_argo_service("https://argo:2746", False, "token")
 
         with pytest.raises(Exception) as exc_info:
             argo.get_workflow("missing-wf", "default")
