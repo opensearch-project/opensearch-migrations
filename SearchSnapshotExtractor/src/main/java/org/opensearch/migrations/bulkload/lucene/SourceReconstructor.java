@@ -63,6 +63,29 @@ public class SourceReconstructor {
     }
 
     /**
+     * Merges recovery-source JSON onto a partial _source JSON. Used when an ES 7+ segment
+     * has both _source (filtered by includes/excludes) and _recovery_source (full original
+     * JSON captured as a byproduct of soft-deletes). Recovery wins on field conflicts since
+     * it is the authoritative copy of the original document.
+     * <p>
+     * On parse failure, returns the existing partial source unchanged so the document still
+     * migrates (best-effort — better partial than dropped).
+     */
+    @SuppressWarnings("unchecked")
+    public static String mergeWithRecoverySource(String existingSource, String recoverySource) {
+        try {
+            Map<String, Object> existing = OBJECT_MAPPER.readValue(existingSource, Map.class);
+            Map<String, Object> recovery = OBJECT_MAPPER.readValue(recoverySource, Map.class);
+            // Recovery is the full original — merge every recovery field, overwriting partial values.
+            existing.putAll(recovery);
+            return OBJECT_MAPPER.writeValueAsString(existing);
+        } catch (IOException e) {
+            log.atWarn().setCause(e).setMessage("Failed to merge recovery source; keeping partial _source").log();
+            return existingSource;
+        }
+    }
+
+    /**
      * Merges reconstructed fields into existing source JSON. Used when the snapshot still
      * holds a (possibly partial) _source — e.g. _source.includes/_source.excludes indices.
      * Applies the same stored → doc_values → points/terms recovery chain as

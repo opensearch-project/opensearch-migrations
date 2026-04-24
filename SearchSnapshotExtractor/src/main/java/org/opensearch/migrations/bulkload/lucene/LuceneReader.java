@@ -184,6 +184,7 @@ public class LuceneReader {
         String openSearchDocId = null;
         String type = null;
         byte[] sourceBytes = null;
+        byte[] recoverySourceBytes = null;
         String routing = null;
 
         try {
@@ -208,16 +209,14 @@ public class LuceneReader {
                         break;
                     }
                     case "_recovery_source": {
-                        // ES 7.0+ and OpenSearch store the original _source in this field
-                        // when the index is configured with `_source.enabled: false`,
-                        // as a byproduct of soft-deletes being enabled by default.
-                        // (ES 6.5+ technically introduced the field, but soft-deletes
-                        // is opt-in there, so it's not reliably present.) When present,
-                        // it contains the full original JSON and can be used directly
-                        // without reconstruction. `_source` takes precedence when both are present.
-                        if (sourceBytes == null) {
-                            sourceBytes = field.utf8Value();
-                        }
+                        // ES 7.0+ and OpenSearch store the FULL original _source in this field
+                        // as a byproduct of soft-deletes (default on from 7.0, opt-in from 6.5).
+                        // Present whenever _source filtering drops fields (enabled:false,
+                        // includes, or excludes). When both _source and _recovery_source are
+                        // present, _source is the filtered view and _recovery_source is the
+                        // complete original — we merge recovery over the partial source so
+                        // excluded/filtered fields are restored exactly.
+                        recoverySourceBytes = field.utf8Value();
                         break;
                     }
                     case "_routing": {
@@ -237,7 +236,7 @@ public class LuceneReader {
                 return null;  // Skip documents with missing id
             }
 
-            sourceBytes = resolveSourceBytes(sourceBytes, reader, luceneDocId, document, mappingContext,
+            sourceBytes = resolveSourceBytes(sourceBytes, recoverySourceBytes, reader, luceneDocId, document, mappingContext,
                 openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
             if (sourceBytes == null) {
                 return null;
@@ -266,16 +265,40 @@ public class LuceneReader {
     }
 
     /**
-     * Resolves the _source bytes for a document, either from the existing source, by reconstruction
-     * from doc_values (Solr path), or by merging excluded fields.
+     * Resolves the _source bytes for a document.
+     * <p>
+     * Priority chain:
+     * <ol>
+     *   <li>If _source is missing but _recovery_source is present, use the full recovery source directly.</li>
+     *   <li>If both _source (partial — filtered by includes/excludes) and _recovery_source (full original)
+     *       are present, merge recovery on top of the partial source so filtered fields are restored
+     *       verbatim from the original JSON.</li>
+     *   <li>Otherwise fall back to doc_values/stored/points/terms reconstruction (Solr / pre-7.x path).</li>
+     * </ol>
      * @return resolved source bytes, or null if the document should be skipped
      */
-    private static byte[] resolveSourceBytes(byte[] sourceBytes, LuceneLeafReader reader, int luceneDocId,
+    private static byte[] resolveSourceBytes(byte[] sourceBytes, byte[] recoverySourceBytes,
+            LuceneLeafReader reader, int luceneDocId,
             LuceneDocument document, FieldMappingContext mappingContext, String openSearchDocId,
             Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, SegmentTermIndex termIndex) {
-        if (sourceBytes == null || sourceBytes.length == 0) {
+        boolean hasSource = sourceBytes != null && sourceBytes.length > 0;
+        boolean hasRecovery = recoverySourceBytes != null && recoverySourceBytes.length > 0;
+
+        if (!hasSource && hasRecovery) {
+            // _source.enabled:false path — recovery source is the only copy of the original JSON.
+            return recoverySourceBytes;
+        }
+        if (!hasSource) {
             return reconstructSourceBytes(reader, luceneDocId, document, mappingContext,
                 openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
+        }
+        if (hasRecovery) {
+            // includes/excludes path — _source is filtered, _recovery_source holds the full original.
+            // Merge recovery onto the partial source so filtered fields are restored exactly.
+            String merged = SourceReconstructor.mergeWithRecoverySource(
+                new String(sourceBytes, java.nio.charset.StandardCharsets.UTF_8),
+                new String(recoverySourceBytes, java.nio.charset.StandardCharsets.UTF_8));
+            return merged.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         }
         if (mappingContext != null) {
             String merged = SourceReconstructor.mergeWithDocValues(
