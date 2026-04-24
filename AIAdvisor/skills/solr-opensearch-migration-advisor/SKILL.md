@@ -482,9 +482,13 @@ Call `generate_report` to produce the final report. The report must cover:
 Present the report to the user and offer to drill into any section.
 
 **Stakeholder guidance — tailor the report structure and emphasis:**
-- **Search Relevance Engineer** — lead with the full incompatibility list and query translation details; include the complete OpenSearch mapping and all Query DSL examples as appendices.
-- **DevOps / Platform Engineer** — lead with the cluster sizing recommendation and infrastructure plan; make the deployment sequencing and operational runbook the most prominent section.
-- **Business Stakeholder** — lead with an executive summary: total estimated cost (infrastructure + engineering hours), proposed timeline with milestones, blocker count by severity expressed as schedule risk, and a go/no-go recommendation. Follow with a cost breakdown table (infrastructure monthly spend, one-time migration effort in hours/weeks, tooling costs). Place all technical detail in an appendix clearly labelled as optional reading. This is the highest-priority step for this role.
+- **Search Relevance Engineer** — lead with the full incompatibility list and query translation details; include the complete OpenSearch mapping and all Query DSL examples as appendices. After details are clarified, offer to persist report and suggest MIGRATION_REPORT_SEARCH_ENG.md as file name.
+- **DevOps / Platform Engineer** — lead with the cluster sizing recommendation and infrastructure plan; make the deployment sequencing and operational runbook the most prominent section. After details are clarified, offer to persist report and suggest MIGRATION_REPORT_SEARCH_OPS.md as file name.
+- **Business Stakeholder** — lead with an executive summary: total estimated cost (infrastructure + engineering hours), proposed timeline with milestones, blocker count by severity expressed as schedule risk, 
+  and a go/no-go recommendation. Make this first section a concise 1-pager. Place all technical detail in an appendix clearly labelled as optional reading.
+  Add another document with a cost breakdown table (infrastructure monthly spend, one-time migration effort in hours/weeks, tooling costs) and additional relevant information for this role.
+  After details are clarified with the user, offer to persist and suggest MIGRATION_REPORT_BUSINESS.md as file name for the first section 1-pager, MIGRATION_REPORT_DETAILS.md for the additional information.  
+  
 ## Resuming a Conversation
 
 Migration plans can span weeks or months, and conversations may be restarted many times. All session state — schema mappings, incompatibilities, query translations, client integrations, and workflow progress — is persisted automatically after every turn using the `session_id` you provide.
@@ -754,7 +758,6 @@ Or configure it in your MCP client (e.g. `.kiro/settings/mcp.json`):
 
 ### Persistence Fallback
 In case you are not successful using provided session persistence tools for persistence as a JSON file at 
-`sessions/<session_id>.json`, persist such a file yourself at the given location within the 
-solr-opensearch-migration-advisor directory.
+`sessions/<session_id>.json`, persist such a file yourself at the given location within the current working directory.
 The file is human-readable and contains the full conversation history, all discovered facts, and migration progress.
 Similarly, always maintain the Markdown progress file at `sessions/<session_id>.md` as described in the **Migration Progress File** section. If the JSON session file cannot be written, the Markdown file must still be kept up to date — it is the human-readable record of the migration and must never be skipped.
