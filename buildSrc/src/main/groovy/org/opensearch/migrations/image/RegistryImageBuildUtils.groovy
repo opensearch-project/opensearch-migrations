@@ -88,19 +88,93 @@ class RegistryImageBuildUtils {
     }
 
     /**
-     * Read the image digest from a BuildKit --metadata-file JSON output.
-     * Returns the value of "containerimage.digest" (e.g. "sha256:abc123...").
+     * Parse a BuildKit --metadata-file JSON output.
      */
-    static String readDigestFromMetadataFile(File metadataFile) {
+    static Map readMetadataFromFile(File metadataFile) {
         if (!metadataFile.exists()) {
             throw new GradleException("BuildKit metadata file not found: ${metadataFile}")
         }
-        def json = new groovy.json.JsonSlurper().parse(metadataFile)
+        return (Map) new groovy.json.JsonSlurper().parse(metadataFile)
+    }
+
+    /**
+     * Read the image digest from a BuildKit --metadata-file JSON output.
+     * For single-arch builds, BuildKit may write an OCI index digest that is not directly
+     * consumable as a base image. When an architecture suffix is supplied, resolve the
+     * platform-specific manifest digest from the pushed tag in the registry instead.
+     */
+    static String readDigestFromMetadataFile(File metadataFile, String targetArchitecture = "", String imageReferenceOverride = "") {
+        def json = readMetadataFromFile(metadataFile)
         def digest = json["containerimage.digest"]
         if (!digest) {
             throw new GradleException("No containerimage.digest found in ${metadataFile}")
         }
+        def imageName = imageReferenceOverride ?: json["image.name"]?.toString()
+        def descriptorMediaType = json["containerimage.descriptor"]?.get("mediaType")?.toString()
+        if (targetArchitecture && imageName && descriptorMediaType in [
+                "application/vnd.oci.image.index.v1+json",
+                "application/vnd.docker.distribution.manifest.list.v2+json"
+        ]) {
+            return resolvePlatformDigest(imageName, targetArchitecture, true)
+        }
         return digest.toString()
+    }
+
+    /**
+     * Resolve a platform-specific manifest digest for an image reference like
+     * "host:port/repo:tag" and return only the digest value ("sha256:...").
+     */
+    static String resolvePlatformDigest(String imageReference, String targetArchitecture, boolean allowInsecure) {
+        def atIdx = imageReference.indexOf('@')
+        def colonIdx = imageReference.lastIndexOf(':')
+        def slashIdx = imageReference.lastIndexOf('/')
+        String reference = atIdx >= 0
+                ? imageReference.substring(atIdx + 1)
+                : (colonIdx > slashIdx && colonIdx >= 0 ? imageReference.substring(colonIdx + 1) : "latest")
+        String repoWithHost = atIdx >= 0
+                ? imageReference.substring(0, atIdx)
+                : (colonIdx > slashIdx && colonIdx >= 0 ? imageReference.substring(0, colonIdx) : imageReference)
+
+        def firstSlash = repoWithHost.indexOf('/')
+        if (firstSlash < 0) throw new GradleException("Cannot parse registry host from image reference: ${imageReference}")
+        def registryHost = repoWithHost.substring(0, firstSlash)
+        def repository = repoWithHost.substring(firstSlash + 1)
+
+        def scheme = allowInsecure ? "http" : "https"
+        def url = new URL("${scheme}://${registryHost}/v2/${repository}/manifests/${reference}")
+        def conn = (HttpURLConnection) url.openConnection()
+        conn.setRequestMethod("GET")
+        conn.setRequestProperty("Accept",
+                "application/vnd.oci.image.index.v1+json, " +
+                "application/vnd.docker.distribution.manifest.list.v2+json, " +
+                "application/vnd.oci.image.manifest.v1+json, " +
+                "application/vnd.docker.distribution.manifest.v2+json")
+        conn.setConnectTimeout(5000)
+        conn.setReadTimeout(5000)
+
+        if (conn.responseCode != 200) {
+            throw new GradleException("Failed to resolve platform digest for ${imageReference}: registry returned HTTP ${conn.responseCode}")
+        }
+        def responseJson = new groovy.json.JsonSlurper().parse(conn.inputStream)
+        def mediaType = responseJson["mediaType"]?.toString()
+        if (mediaType in [
+                "application/vnd.oci.image.manifest.v1+json",
+                "application/vnd.docker.distribution.manifest.v2+json"
+        ]) {
+            def directDigest = conn.getHeaderField("Docker-Content-Digest")
+            if (!directDigest) {
+                throw new GradleException("Registry did not return Docker-Content-Digest for ${imageReference}")
+            }
+            return directDigest
+        }
+        def matchingManifest = responseJson["manifests"]?.find { manifest ->
+            manifest?.platform?.architecture == targetArchitecture && manifest?.platform?.os == "linux"
+        }
+        def platformDigest = matchingManifest?.digest?.toString()
+        if (!platformDigest) {
+            throw new GradleException("No ${targetArchitecture}/linux manifest found for ${imageReference}")
+        }
+        return platformDigest
     }
 
 
@@ -175,7 +249,11 @@ class RegistryImageBuildUtils {
                                 doFirst {
                                     def archSuffix = (targetArch != "multi") ? "_${targetArch}" : ""
                                     def metadataFile = RegistryImageBuildUtils.metadataFileFor(rootProject, producerServiceName, archSuffix)
-                                    def digest = RegistryImageBuildUtils.readDigestFromMetadataFile(metadataFile)
+                                    def digest = RegistryImageBuildUtils.readDigestFromMetadataFile(
+                                            metadataFile,
+                                            targetArch != "multi" ? targetArch : "",
+                                            baseImage
+                                    )
                                     def colonIdx = baseImage.lastIndexOf(':')
                                     def slashIdx = baseImage.lastIndexOf('/')
                                     def repoWithHost = (colonIdx > slashIdx && colonIdx >= 0) ? baseImage.substring(0, colonIdx) : baseImage
@@ -357,7 +435,10 @@ class RegistryImageBuildUtils {
             def extractedImageName = colonIdx >= 0 ? nameAndTag.substring(0, colonIdx) : nameAndTag
             // The repo portion before the image name (e.g. "docker-registry:5000/migrations")
             def repoPrefix = lastSlash >= 0 ? ref.substring(0, lastSlash) : ""
-            [(key): [imageName: extractedImageName, repoPrefix: repoPrefix]]
+            def hostVisibleRef = ref.startsWith(intermediateRegistry.containerUrl)
+                    ? "${intermediateRegistry.hostUrl}${ref.substring(intermediateRegistry.containerUrl.length())}"
+                    : ref
+            [(key): [imageName: extractedImageName, repoPrefix: repoPrefix, hostVisibleRef: hostVisibleRef]]
         }
 
         // Consumer buildKit_ tasks depend directly on producer buildKit_ tasks.
@@ -397,7 +478,8 @@ class RegistryImageBuildUtils {
                             "(needed by ${cfg.serviceName} build arg ${key}). Known images: ${imageToService.keySet()}")
                 }
                 def metadataFile = RegistryImageBuildUtils.metadataFileFor(project, producerServiceName, archSuffix)
-                def digest = RegistryImageBuildUtils.readDigestFromMetadataFile(metadataFile)
+                def arch = archSuffix.startsWith("_") ? archSuffix.substring(1) : archSuffix
+                def digest = RegistryImageBuildUtils.readDigestFromMetadataFile(metadataFile, arch, info.hostVisibleRef.toString())
                 "--build-arg ${key}=${info.repoPrefix}/${info.imageName}@${digest}"
             }
         }
