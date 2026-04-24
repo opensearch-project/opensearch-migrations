@@ -335,8 +335,9 @@ charts:
       images:
         pullPolicy: IfNotPresent
       crds:
-        # Full CRDs enable Validating Admission Policy support and kubectl explain on Argo CRDs
-        full: true
+        # Full CRDs require downloading from GitHub at install time, which fails in air-gapped environments.
+        # Minified CRDs are embedded inline in the chart and work without internet access.
+        full: false
       controller:
         pdb:
           enabled: true
