@@ -941,4 +941,174 @@ class SourceReconstructorTest {
         assertTrue(!tree.has("_type"), "_type must be filtered");
         assertTrue(!tree.has("_source"), "_source must be filtered");
     }
+
+    // ==========================================================================================
+    // 6. NESTED / DOTTED FIELD NAMES  (addresses PR #2771 reviewer concern)
+    // ==========================================================================================
+    // Dotted fields are ambiguous in Lucene: `title.keyword` is a multi-field sub-field (safe to
+    // drop — parent `title` recovers it); `address.city` is an object subfield (a distinct
+    // mapped field that MUST survive reconstruction, nested under `address`).
+    //
+    // `shouldSkipField` distinguishes them via the mapping context: object subfields are tracked
+    // under `properties` and come back from `mappingContext.getFieldInfo(...)`; multi-field
+    // sub-fields are not. `putNested` / `hasNested` then write/read the dotted path into the
+    // appropriate intermediate map.
+
+    /** Register multiple field mappings on a single context. */
+    private static FieldMappingContext contextOfMany(java.util.Map<String, FieldMappingInfo> entries) {
+        var ctx = new FieldMappingContext(null);
+        try {
+            var f = FieldMappingContext.class.getDeclaredField("fieldMappings");
+            f.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var m = (java.util.Map<String, FieldMappingInfo>) f.get(ctx);
+            m.putAll(entries);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
+        return ctx;
+    }
+
+    @Test
+    void objectSubfield_isNestedUnderParent() {
+        // `address.city` is a legitimate object subfield — must appear as
+        // {"address":{"city":"NYC"}} in the reconstructed source.
+        var reader = storedOnlyReader();
+        var doc = document(storedString("address.city", "NYC"));
+        var ctx = contextOfMany(java.util.Map.of(
+            "address.city", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        JsonNode tree;
+        try {
+            tree = MAPPER.readTree(json);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        assertTrue(tree.has("address"), "parent object must be present: " + json);
+        assertNotNull(tree.path("address").get("city"),
+            "address.city must be nested under address: " + json);
+        assertEquals("NYC", tree.path("address").get("city").asText());
+    }
+
+    @Test
+    void multipleObjectSubfields_shareParent() {
+        // Two subfields under the same parent object should merge into a single
+        // nested map, not overwrite each other.
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("address.city", "NYC"),
+            storedString("address.zip", "10001")
+        );
+        var ctx = contextOfMany(java.util.Map.of(
+            "address.city", mapping(EsFieldType.STRING, "keyword"),
+            "address.zip", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        JsonNode tree;
+        try {
+            tree = MAPPER.readTree(json);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        JsonNode addr = tree.path("address");
+        assertEquals("NYC", addr.get("city").asText(), "city preserved: " + json);
+        assertEquals("10001", addr.get("zip").asText(), "zip preserved: " + json);
+    }
+
+    @Test
+    void deepObjectSubfield_threeLevels() {
+        // `user.profile.email` — three-level nesting must be preserved.
+        var reader = storedOnlyReader();
+        var doc = document(storedString("user.profile.email", "a@b.com"));
+        var ctx = contextOfMany(java.util.Map.of(
+            "user.profile.email", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        JsonNode tree;
+        try {
+            tree = MAPPER.readTree(json);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        assertEquals("a@b.com", tree.path("user").path("profile").path("email").asText(),
+            "deep nesting preserved: " + json);
+    }
+
+    @Test
+    void multiFieldSubfield_withoutMapping_isSkipped() {
+        // `title.keyword` is NOT in the mapping — shouldSkipField must drop it
+        // (parent `title` reconstructs the sub-field upstream at index time).
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("title", "hello"),
+            storedString("title.keyword", "hello")
+        );
+        var ctx = contextOfMany(java.util.Map.of(
+            "title", mapping(EsFieldType.STRING, "text")
+            // NOTE: title.keyword intentionally NOT registered.
+        ));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        JsonNode tree;
+        try {
+            tree = MAPPER.readTree(json);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        assertEquals("hello", tree.path("title").asText());
+        assertTrue(!tree.has("title.keyword"), "multi-field sub-field must be skipped: " + json);
+        // Also must not leak into a nested {"title":{"keyword":"hello"}} shape — title is a
+        // scalar string, not an object.
+        assertTrue(tree.path("title").isTextual(), "title must remain scalar text: " + json);
+    }
+
+    @Test
+    void nullMappingContext_skipsAllDottedFields() {
+        // Defensive: when no mapping is available, we have no way to tell multi-field
+        // sub-fields apart from object subfields — drop anything dotted.
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("plain", "kept"),
+            storedString("address.city", "dropped")
+        );
+        var ctx = new FieldMappingContext(null);  // empty — no field info.
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        JsonNode tree;
+        try {
+            tree = MAPPER.readTree(json);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        assertEquals("kept", tree.path("plain").asText());
+        assertTrue(!tree.has("address"), "dotted field dropped when no mapping: " + json);
+    }
+
+    @Test
+    void underscorePrefix_stillSkipped_evenIfInMapping() {
+        // Internal fields (_id, _routing, _recovery_source) are ALWAYS skipped,
+        // even if they happen to be registered in the mapping — they're consumed
+        // by the reconstructor itself, not re-emitted into _source.
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("_id", "abc"),
+            storedString("_routing", "shard1"),
+            storedString("name", "alice")
+        );
+        var ctx = contextOfMany(java.util.Map.of(
+            "name", mapping(EsFieldType.STRING, "keyword"),
+            // Even if "_id" / "_routing" were somehow in mapping, they must be skipped.
+            "_id", mapping(EsFieldType.STRING, "keyword"),
+            "_routing", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        JsonNode tree;
+        try {
+            tree = MAPPER.readTree(json);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        assertEquals("alice", tree.path("name").asText());
+        assertTrue(!tree.has("_id"), "_id must be skipped: " + json);
+        assertTrue(!tree.has("_routing"), "_routing must be skipped: " + json);
+    }
 }

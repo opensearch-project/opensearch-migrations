@@ -25,9 +25,78 @@ public class SourceReconstructor {
 
     private SourceReconstructor() {}
 
-    /** Skip internal fields (e.g., _id) and multi-field sub-fields (e.g., title.keyword) */
-    private static boolean shouldSkipField(String fieldName) {
-        return fieldName.startsWith("_") || fieldName.contains(".");
+    /**
+     * Skip internal fields (e.g., _id) and multi-field sub-fields (e.g., title.keyword).
+     * <p>
+     * Dotted names are ambiguous in Lucene: {@code title.keyword} is a multi-field
+     * (indexed-only, recoverable via the parent), while {@code address.city} is an
+     * object subfield that IS a legitimate mapped field and must be emitted nested
+     * in the reconstructed {@code _source}. The mapping context distinguishes them —
+     * object subfields appear under {@code properties} (tracked by FieldMappingContext),
+     * multi-field sub-fields appear under {@code fields} (not tracked). So we keep any
+     * dotted name the mapping knows about, and skip the rest.
+     */
+    private static boolean shouldSkipField(String fieldName, FieldMappingContext mappingContext) {
+        if (fieldName.startsWith("_")) {
+            return true;
+        }
+        if (!fieldName.contains(".")) {
+            return false;
+        }
+        // Dotted field: keep it only if the mapping recognizes it as an object subfield.
+        return mappingContext == null || mappingContext.getFieldInfo(fieldName) == null;
+    }
+
+    /**
+     * Insert a value at a possibly-dotted path, creating intermediate maps for object subfields.
+     * A flat name like {@code "title"} becomes {@code target["title"] = value}; a dotted name
+     * like {@code "address.city"} becomes {@code target["address"]["city"] = value}. If an
+     * intermediate path collides with a non-map value already present, the non-map wins
+     * (best-effort — stored/doc_values loops prefer earlier writes).
+     */
+    @SuppressWarnings("unchecked")
+    private static void putNested(Map<String, Object> target, String fieldName, Object value) {
+        if (!fieldName.contains(".")) {
+            target.put(fieldName, value);
+            return;
+        }
+        String[] parts = fieldName.split("\\.");
+        Map<String, Object> cursor = target;
+        for (int i = 0; i < parts.length - 1; i++) {
+            Object next = cursor.get(parts[i]);
+            if (next instanceof Map<?, ?> map) {
+                cursor = (Map<String, Object>) map;
+            } else if (next == null) {
+                Map<String, Object> child = new LinkedHashMap<>();
+                cursor.put(parts[i], child);
+                cursor = child;
+            } else {
+                // Non-map already sits at this path — leave it alone.
+                return;
+            }
+        }
+        cursor.putIfAbsent(parts[parts.length - 1], value);
+    }
+
+    /**
+     * True iff the (possibly-dotted) field path already has a value in {@code target}.
+     * Walks intermediate maps for dotted names; non-dotted names fall back to {@code containsKey}.
+     */
+    @SuppressWarnings("unchecked")
+    private static boolean hasNested(Map<String, Object> target, String fieldName) {
+        if (!fieldName.contains(".")) {
+            return target.containsKey(fieldName);
+        }
+        String[] parts = fieldName.split("\\.");
+        Map<String, Object> cursor = target;
+        for (int i = 0; i < parts.length - 1; i++) {
+            Object next = cursor.get(parts[i]);
+            if (!(next instanceof Map<?, ?>)) {
+                return false;
+            }
+            cursor = (Map<String, Object>) next;
+        }
+        return cursor.containsKey(parts[parts.length - 1]);
     }
 
     /**
@@ -122,20 +191,20 @@ public class SourceReconstructor {
         // 1. Stored fields (exact values when present)
         for (var field : document.getFields()) {
             String fieldName = field.name();
-            if (shouldSkipField(fieldName) || target.containsKey(fieldName)) {
+            if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
                 continue;
             }
             FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
             Object value = getStoredFieldValue(field, mappingInfo);
             if (value != null) {
-                target.put(fieldName, value);
+                putNested(target, fieldName, value);
             }
         }
 
         // 2. Doc values (fast, lossless for typed fields)
         for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
             String fieldName = fieldInfo.name();
-            if (shouldSkipField(fieldName) || target.containsKey(fieldName)) {
+            if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
                 continue;
             }
             FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
@@ -147,7 +216,7 @@ public class SourceReconstructor {
             if (value != null) {
                 Object converted = convertDocValue(value, fieldInfo, mappingInfo);
                 if (converted != null) {
-                    target.put(fieldName, converted);
+                    putNested(target, fieldName, converted);
                 }
             }
         }
@@ -155,7 +224,7 @@ public class SourceReconstructor {
         // 3. Points / indexed terms fallback (recovers indexed-only numeric/boolean/keyword)
         if (mappingContext != null) {
             for (String fieldName : mappingContext.getFieldNames()) {
-                if (shouldSkipField(fieldName) || target.containsKey(fieldName)) {
+                if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
                     continue;
                 }
                 FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
@@ -164,7 +233,7 @@ public class SourceReconstructor {
                     if (fallbackValue.isPresent()) {
                         Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
                         if (converted != null) {
-                            target.put(fieldName, converted);
+                            putNested(target, fieldName, converted);
                         }
                     }
                 }
