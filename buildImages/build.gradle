@@ -262,7 +262,8 @@ gradle.projectsEvaluated {
             rootProject,
             jibProjects,
             publishedRegistry,
-            intermediateRegistry
+            intermediateRegistry,
+            buildKitProjects + testBuildKitProjects
     )
 }
 

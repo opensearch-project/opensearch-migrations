@@ -79,6 +79,31 @@ class RegistryImageBuildUtils {
         return "${repoWithHost}@${digest}"
     }
 
+    /**
+     * Return the path where a BuildKit task should write its --metadata-file output.
+     * Convention: {buildDir}/buildkit-metadata/{serviceName}{archSuffix}.json
+     */
+    static File metadataFileFor(Project project, String serviceName, String archSuffix) {
+        return project.file("${project.buildDir}/buildkit-metadata/${serviceName}${archSuffix}.json")
+    }
+
+    /**
+     * Read the image digest from a BuildKit --metadata-file JSON output.
+     * Returns the value of "containerimage.digest" (e.g. "sha256:abc123...").
+     */
+    static String readDigestFromMetadataFile(File metadataFile) {
+        if (!metadataFile.exists()) {
+            throw new GradleException("BuildKit metadata file not found: ${metadataFile}")
+        }
+        def json = new groovy.json.JsonSlurper().parse(metadataFile)
+        def digest = json["containerimage.digest"]
+        if (!digest) {
+            throw new GradleException("No containerimage.digest found in ${metadataFile}")
+        }
+        return digest.toString()
+    }
+
+
     // Determine the build mode based on the tasks requested in the CLI, throwing if multiple variants are configured
     private String detectArchitecture(Project rootProject) {
         def startTasks = rootProject.gradle.startParameter.taskNames
@@ -98,7 +123,9 @@ class RegistryImageBuildUtils {
         return "multi"
     }
 
-    void applyJibConfigurations(Project rootProject, Map<String, Map> projectsToConfigure, Registry finalRegistry, Registry intermediateRegistry) {
+    void applyJibConfigurations(Project rootProject, Map<String, Map> projectsToConfigure, Registry finalRegistry, Registry intermediateRegistry, List<Map> buildKitProjects = []) {
+        // Build a lookup from imageName -> serviceName for BuildKit-produced intermediate images
+        def imageToService = buildKitProjects.collectEntries { [(it.get("imageName").toString()): it.get("serviceName").toString()] }
         // Notice that the jib tasks don't exist yet! BUT - the command line options do, so we can use them
         // to help guide how tasks should be constructed.  jib* tasks are created below, but cannot coexist
         // within a single run!  With multi-architecture support, there would never be a reason to do that.
@@ -140,11 +167,20 @@ class RegistryImageBuildUtils {
                     )
 
                     // For intermediate images (built in the same pipeline), resolve the
-                    // digest at execution time to ensure reproducible builds.
+                    // digest at execution time by reading the producer's --metadata-file output.
                     if (baseEndpoint == intermediateRegistry.hostUrl && !intermediateRegistry.isEcr()) {
-                        project.tasks.named("jib").configure {
-                            doFirst {
-                                project.jib.from.image = RegistryImageBuildUtils.resolveDigest(baseImage, project.jib.allowInsecureRegistries)
+                        def producerServiceName = imageToService[config.baseImageName.toString()]
+                        if (producerServiceName) {
+                            project.tasks.named("jib").configure {
+                                doFirst {
+                                    def archSuffix = (targetArch != "multi") ? "_${targetArch}" : ""
+                                    def metadataFile = RegistryImageBuildUtils.metadataFileFor(rootProject, producerServiceName, archSuffix)
+                                    def digest = RegistryImageBuildUtils.readDigestFromMetadataFile(metadataFile)
+                                    def colonIdx = baseImage.lastIndexOf(':')
+                                    def slashIdx = baseImage.lastIndexOf('/')
+                                    def repoWithHost = (colonIdx > slashIdx && colonIdx >= 0) ? baseImage.substring(0, colonIdx) : baseImage
+                                    project.jib.from.image = "${repoWithHost}@${digest}"
+                                }
                             }
                         }
                     }
@@ -259,7 +295,7 @@ class RegistryImageBuildUtils {
         }
     }
 
-    private void registerBuildKitTasks(Project project, Map cfg, Registry finalRegistry, Registry intermediateRegistry) {
+    private void registerBuildKitTasks(Project project, Map cfg, Registry finalRegistry, Registry intermediateRegistry, Map<String, String> imageToService) {
         def versionTag = project.findProperty("imageVersion")?.toString()
         def repoName = cfg.get("repoName")?.toString()
 
@@ -297,19 +333,41 @@ class RegistryImageBuildUtils {
         def (primaryDest, cacheDestination) = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag, repoName)
         def versionTaggedDest = versionTag ? formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, versionTag, repoName)[0] : null
 
-        def buildArgFlags = cfg.get("buildArgs", [:]).collect { key, value -> "--build-arg ${key}=${value}" }
+        // Split build args: intermediate-image args get digest-resolved at execution time
+        // by reading the producer's --metadata-file output; all others are static.
+        def allBuildArgs = cfg.get("buildArgs", [:]) as Map<String, String>
+        def intermediateBaseArgs = allBuildArgs.findAll { key, value ->
+            value?.toString()?.contains(intermediateRegistry.containerUrl)
+        }
+        def staticBuildArgFlags = allBuildArgs.findAll { key, value ->
+            !intermediateBaseArgs.containsKey(key)
+        }.collect { key, value -> "--build-arg ${key}=${value}" }
 
-        // Helper to resolve dependencies with architecture suffix
-        // archSuffix is empty for multi-arch task, non-empty for single-arch tasks
+        // For each intermediate base-image arg, find the producer service name so we can
+        // locate its metadata file at execution time.
+        // E.g. "docker-registry:5000/migrations/elasticsearch_test_console:latest"
+        //   -> producer service = the one whose imageName is "elasticsearch_test_console"
+        def intermediateArgProducers = intermediateBaseArgs.collectEntries { key, tagRef ->
+            // Extract the image name from the container-side reference
+            // e.g. "docker-registry:5000/migrations/elasticsearch_test_console:latest" -> "elasticsearch_test_console"
+            def ref = tagRef.toString()
+            def lastSlash = ref.lastIndexOf('/')
+            def nameAndTag = lastSlash >= 0 ? ref.substring(lastSlash + 1) : ref
+            def colonIdx = nameAndTag.lastIndexOf(':')
+            def extractedImageName = colonIdx >= 0 ? nameAndTag.substring(0, colonIdx) : nameAndTag
+            // The repo portion before the image name (e.g. "docker-registry:5000/migrations")
+            def repoPrefix = lastSlash >= 0 ? ref.substring(0, lastSlash) : ""
+            [(key): [imageName: extractedImageName, repoPrefix: repoPrefix]]
+        }
+
+        // Consumer buildKit_ tasks depend directly on producer buildKit_ tasks.
+        // --metadata-file provides synchronous handoff: the producer writes the digest
+        // to a local file before exiting, and the consumer reads it in doFirst.
         def resolveDependencies = { task, String archSuffix ->
             cfg.get("requiredDependencies", []).each { depTaskName ->
                 if (depTaskName.startsWith("buildKit_")) {
-                    // For buildKit dependencies:
-                    // - Single-arch tasks depend on matching single-arch dependency
-                    // - Multi-arch task depends on multi-arch dependency (no suffix)
                     task.dependsOn archSuffix ? "${depTaskName}${archSuffix}" : depTaskName
                 } else {
-                    // Non-buildKit dependencies are always the same
                     task.dependsOn depTaskName
                 }
             }
@@ -328,8 +386,25 @@ class RegistryImageBuildUtils {
             resolveDependencies(task, archSuffix)
         }
 
+
+        // Helper: resolve intermediate base-image args to digests by reading producer metadata files.
+        // archSuffix is used to locate the correct per-architecture metadata file.
+        def resolveIntermediateArgs = { String archSuffix ->
+            intermediateArgProducers.collect { key, info ->
+                def producerServiceName = imageToService[info.imageName]
+                if (!producerServiceName) {
+                    throw new GradleException("No BuildKit service produces image '${info.imageName}' " +
+                            "(needed by ${cfg.serviceName} build arg ${key}). Known images: ${imageToService.keySet()}")
+                }
+                def metadataFile = RegistryImageBuildUtils.metadataFileFor(project, producerServiceName, archSuffix)
+                def digest = RegistryImageBuildUtils.readDigestFromMetadataFile(metadataFile)
+                "--build-arg ${key}=${info.repoPrefix}/${info.imageName}@${digest}"
+            }
+        }
+
         def createPlatformTask = { String platform, String suffix ->
             def taskName = "buildKit_${cfg.serviceName}${suffix}"
+            def metadataFile = RegistryImageBuildUtils.metadataFileFor(project, cfg.serviceName, suffix)
             if (!project.tasks.findByName(taskName)) {
                 project.tasks.register(taskName, Exec) {
                     group = "docker"
@@ -339,29 +414,27 @@ class RegistryImageBuildUtils {
                         if (!builderIsValid) {
                             throw new GradleException("No -Pbuilder specified and no kube context set. Use -Pbuilder=<name> or set a kube context.")
                         }
+                        metadataFile.parentFile.mkdirs()
+                        def fullArgs = [
+                                "docker buildx build",
+                                "--progress=plain",
+                                "--platform ${platform}",
+                                *(resolvedBuilder ? ["--builder ${resolvedBuilder}"] : []),
+                                "-t ${primaryDest}",
+                                *(versionTaggedDest ? ["-t", "${versionTaggedDest}"] : []),
+                                "--push",
+                                "--metadata-file ${metadataFile.absolutePath}",
+                                "--cache-to=type=registry,ref=${cacheDestination}${suffix},mode=max,ignore-error=true",
+                                "--cache-from=type=registry,ref=${cacheDestination}${suffix}"
+                        ]
+                        staticBuildArgFlags.each { fullArgs.add(it) }
+                        resolveIntermediateArgs(suffix).each { fullArgs.add(it) }
+                        fullArgs.add("\"${contextPath}\"")
+                        commandLine 'sh', '-c', fullArgs.join(" ")
                     }
 
                     commonInputs(it, suffix)
                     inputs.property("platform", platform)
-
-                    // Use primaryDest and cacheDestination which were calculated using registryEndpoint (Container View)
-                    def fullArgs = [
-                            "docker buildx build",
-                            "--progress=plain",
-                            "--platform ${platform}",
-                            *(builder ? ["--builder ${builder}"] : []),
-                            // don't include the suffix - this is dangerous, but single-platform builds are supported
-                            // as a convenience to developers that are purposefully ONLY supporting PART of the
-                            // potential architectures
-                            "-t ${primaryDest}",
-                            *(versionTaggedDest ? ["-t", "${versionTaggedDest}"] : []),
-                            "--push",
-                            "--cache-to=type=registry,ref=${cacheDestination}${suffix},mode=max,ignore-error=true",
-                            "--cache-from=type=registry,ref=${cacheDestination}${suffix}"
-                    ]
-                    buildArgFlags.each { fullArgs.add(it) }
-                    fullArgs.add("\"${contextPath}\"")
-                    commandLine 'sh', '-c', fullArgs.join(" ")
                 }
             }
         }
@@ -370,37 +443,44 @@ class RegistryImageBuildUtils {
         createPlatformTask("linux/arm64", "_arm64")
 
         def multiArchTaskName = "buildKit_${cfg.serviceName}"
+        def multiArchMetadataFile = RegistryImageBuildUtils.metadataFileFor(project, cfg.serviceName, "")
         if (!project.tasks.findByName(multiArchTaskName)) {
             project.tasks.register(multiArchTaskName, Exec) {
                 doFirst {
                     if (!builderIsValid) {
                         throw new GradleException("No -Pbuilder specified and no kube context set. Use -Pbuilder=<name> or set a kube context.")
                     }
+                    multiArchMetadataFile.parentFile.mkdirs()
+                    def fullArgs = [
+                            "docker buildx build",
+                            "--progress=plain",
+                            "--platform linux/amd64,linux/arm64",
+                            *(resolvedBuilder ? ["--builder ${resolvedBuilder}"] : []),
+                            "-t ${primaryDest}",
+                            *(versionTaggedDest ? ["-t", "${versionTaggedDest}"] : []),
+                            "--push",
+                            "--metadata-file ${multiArchMetadataFile.absolutePath}",
+                            "--cache-to=type=registry,ref=${cacheDestination},mode=max,ignore-error=true",
+                            "--cache-from=type=registry,ref=${cacheDestination}",
+                            "--cache-from=type=registry,ref=${cacheDestination}_amd64",
+                            "--cache-from=type=registry,ref=${cacheDestination}_arm64"
+                    ]
+                    staticBuildArgFlags.each { fullArgs.add(it) }
+                    resolveIntermediateArgs("").each { fullArgs.add(it) }
+                    fullArgs.add("\"${contextPath}\"")
+                    commandLine 'sh', '-c', fullArgs.join(" ")
                 }
                 commonInputs(it, "")
-                def fullArgs = [
-                        "docker buildx build",
-                        "--progress=plain",
-                        "--platform linux/amd64,linux/arm64",
-                        *(builder ? ["--builder ${builder}"] : []),
-                        "-t ${primaryDest}",
-                        *(versionTaggedDest ? ["-t", "${versionTaggedDest}"] : []),
-                        "--push",
-                        "--cache-to=type=registry,ref=${cacheDestination},mode=max,ignore-error=true",
-                        "--cache-from=type=registry,ref=${cacheDestination}",
-                        "--cache-from=type=registry,ref=${cacheDestination}_amd64",
-                        "--cache-from=type=registry,ref=${cacheDestination}_arm64"
-                ]
-                buildArgFlags.each { fullArgs.add(it) }
-                fullArgs.add("\"${contextPath}\"")
-                commandLine 'sh', '-c', fullArgs.join(" ")
             }
         }
     }
 
     void applyBuildKitConfigurations(Project rootProject, List<Map> projects, Registry finalRegistry, Registry intermediateRegistry) {
+        // Build a lookup from imageName -> serviceName across all BuildKit projects,
+        // so consumers can find the correct producer metadata file by image name.
+        def imageToService = projects.collectEntries { [(it.get("imageName").toString()): it.get("serviceName").toString()] }
         projects.each { cfg ->
-            registerBuildKitTasks(rootProject, cfg, finalRegistry, intermediateRegistry)
+            registerBuildKitTasks(rootProject, cfg, finalRegistry, intermediateRegistry, imageToService)
         }
     }
 }
