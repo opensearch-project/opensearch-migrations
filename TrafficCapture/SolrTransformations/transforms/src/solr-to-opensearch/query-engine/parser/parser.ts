@@ -46,7 +46,7 @@ import * as peggy from 'peggy';
 import grammar from './solr.pegjs';
 import type { ASTNode } from '../ast/nodes';
 import type { ParseResult, ParseError } from './types';
-import { parseQueryFields, applyQueryFields } from './qf';
+import { applyQueryFields } from './qf';
 
 // Lazily compiled parser — the grammar is inlined at build time and compiled
 // on the first call to parseSolrQuery, then cached for all subsequent calls.
@@ -115,10 +115,7 @@ export function parseSolrQuery(
 
     // qf → BareNode.queryFields (edismax/dismax only)
     if (defType === 'edismax' || defType === 'dismax') {
-      const queryFields = parseQueryFields(params.get('qf'));
-      if (queryFields) {
-        applyQueryFields(ast, queryFields);
-      }
+      applyQueryFields(ast, params);
     }
 
     return { ast, errors: [] };
