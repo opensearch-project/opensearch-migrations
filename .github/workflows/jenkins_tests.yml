@@ -206,7 +206,8 @@ jobs:
 
   eks-cdc-only-integ-test:
     if: |
-      contains(github.event.pull_request.labels.*.name, 'run-cdc-tests')
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -229,7 +230,8 @@ jobs:
 
   eks-cdc-full-e2e-test:
     if: |
-      contains(github.event.pull_request.labels.*.name, 'run-cdc-tests')
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -252,7 +254,8 @@ jobs:
 
   eks-cdc-only-aoss-test:
     if: |
-      contains(github.event.pull_request.labels.*.name, 'run-cdc-tests')
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
@@ -275,7 +278,8 @@ jobs:
 
   eks-cdc-aoss-e2e-test:
     if: |
-      contains(github.event.pull_request.labels.*.name, 'run-cdc-tests')
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
     needs: [get-require-approval, sanitize-input]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04

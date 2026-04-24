@@ -14,6 +14,7 @@ def call(Map config = [:]) {
     def jobName = config.jobName ?: "eks-cdc-aoss-integ-test"
     def defaultTestIds = config.defaultTestIds ?: "0034"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
+    def cronSchedule = config.cronSchedule ?: periodicCron(jobName)
     def clusterContextFilePath = "tmp/cluster-context-cdc-aoss-${currentBuild.number}.json"
 
     pipeline {
@@ -53,6 +54,7 @@ def call(Map config = [:]) {
                     regexpFilterExpression: "^$jobName\$",
                     regexpFilterText: "\$job_name",
             )
+            cron(cronSchedule)
         }
 
         stages {

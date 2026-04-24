@@ -9,6 +9,7 @@ def call(Map config = [:]) {
     def targetVersion = config.targetVersion ?: ""
     def sourceClusterType = config.sourceClusterType ?: ""
     def targetClusterType = config.targetClusterType ?: ""
+    def cronSchedule = config.cronSchedule ?: periodicCron(jobName)
     def clusterContextFilePath = "tmp/cluster-context-cdc-integ-${currentBuild.number}.json"
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -66,6 +67,7 @@ def call(Map config = [:]) {
                     regexpFilterExpression: "^$jobName\$",
                     regexpFilterText: "\$job_name",
             )
+            cron(cronSchedule)
         }
 
         stages {
