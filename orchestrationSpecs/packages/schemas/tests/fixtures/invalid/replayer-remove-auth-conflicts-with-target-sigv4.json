@@ -1,0 +1,34 @@
+{
+  "sourceClusters": {
+    "source": {
+      "version": "ES 7.10",
+      "endpoint": "https://source.us-east-1.es.amazonaws.com"
+    }
+  },
+  "targetClusters": {
+    "target": {
+      "endpoint": "https://target.us-east-1.es.amazonaws.com",
+      "authConfig": {
+        "sigv4": { "region": "us-east-1", "service": "es" }
+      }
+    }
+  },
+  "snapshotMigrationConfigs": [],
+  "traffic": {
+    "proxies": {
+      "proxy1": {
+        "source": "source",
+        "proxyConfig": { "listenPort": 9201 }
+      }
+    },
+    "replayers": {
+      "replayer1": {
+        "fromProxy": "proxy1",
+        "toTarget": "target",
+        "replayerConfig": {
+          "removeAuthHeader": true
+        }
+      }
+    }
+  }
+}
