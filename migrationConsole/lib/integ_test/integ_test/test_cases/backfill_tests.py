@@ -35,6 +35,9 @@ class Test0006OpenSearchBenchmarkBackfill(MATestBase):
             (ElasticsearchV8_X, OpensearchV1_X),
             (ElasticsearchV8_X, OpensearchV2_X),
             (ElasticsearchV8_X, OpensearchV3_X),
+            (OpensearchV1_X, OpensearchV2_X),
+            (OpensearchV1_X, OpensearchV3_X),
+            (OpensearchV2_X, OpensearchV3_X),
         ]
         description = "Run OpenSearch Benchmark tests and then runs metadata and backfill."
         super().__init__(user_args=user_args,

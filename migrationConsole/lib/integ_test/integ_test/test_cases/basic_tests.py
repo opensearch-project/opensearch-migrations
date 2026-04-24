@@ -1,8 +1,5 @@
 import logging
-from ..cluster_version import (
-    ElasticsearchV1_X, ElasticsearchV2_X, ElasticsearchV5_X, ElasticsearchV6_X, ElasticsearchV7_X,
-    OpensearchV1_X, OpensearchV2_X, OpensearchV3_X
-)
+from ..cluster_version import RFS_MIGRATION_COMBINATIONS
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
 logger = logging.getLogger(__name__)
@@ -11,29 +8,12 @@ logger = logging.getLogger(__name__)
 # This test case is subject to removal, as its value looks limited
 class Test0001SingleDocumentBackfill(MATestBase):
     def __init__(self, user_args: MATestUserArguments):
-        allow_combinations = [
-            (ElasticsearchV1_X, OpensearchV1_X),
-            (ElasticsearchV1_X, OpensearchV2_X),
-            (ElasticsearchV1_X, OpensearchV3_X),
-            (ElasticsearchV2_X, OpensearchV1_X),
-            (ElasticsearchV2_X, OpensearchV2_X),
-            (ElasticsearchV2_X, OpensearchV3_X),
-            (ElasticsearchV5_X, OpensearchV1_X),
-            (ElasticsearchV5_X, OpensearchV2_X),
-            (ElasticsearchV5_X, OpensearchV3_X),
-            (ElasticsearchV6_X, OpensearchV1_X),
-            (ElasticsearchV6_X, OpensearchV2_X),
-            (ElasticsearchV6_X, OpensearchV3_X),
-            (ElasticsearchV7_X, OpensearchV1_X),
-            (ElasticsearchV7_X, OpensearchV2_X),
-            (ElasticsearchV7_X, OpensearchV3_X),
-        ]
         migrations_required = [MigrationType.BACKFILL]
         description = "Performs backfill migration for a single document (target cluster as coordinator)."
         super().__init__(user_args=user_args,
                          description=description,
                          migrations_required=migrations_required,
-                         allow_source_target_combinations=allow_combinations)
+                         allow_source_target_combinations=RFS_MIGRATION_COMBINATIONS)
         self.index_name = f"test_0001_{self.unique_id}"
         self.doc_id = "test_0001_doc"
         self.doc_type = "sample_type"
@@ -66,29 +46,12 @@ class Test0001SingleDocumentBackfill(MATestBase):
 
 class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
     def __init__(self, user_args: MATestUserArguments):
-        allow_combinations = [
-            (ElasticsearchV1_X, OpensearchV1_X),
-            (ElasticsearchV1_X, OpensearchV2_X),
-            (ElasticsearchV1_X, OpensearchV3_X),
-            (ElasticsearchV2_X, OpensearchV1_X),
-            (ElasticsearchV2_X, OpensearchV2_X),
-            (ElasticsearchV2_X, OpensearchV3_X),
-            (ElasticsearchV5_X, OpensearchV1_X),
-            (ElasticsearchV5_X, OpensearchV2_X),
-            (ElasticsearchV5_X, OpensearchV3_X),
-            (ElasticsearchV6_X, OpensearchV1_X),
-            (ElasticsearchV6_X, OpensearchV2_X),
-            (ElasticsearchV6_X, OpensearchV3_X),
-            (ElasticsearchV7_X, OpensearchV1_X),
-            (ElasticsearchV7_X, OpensearchV2_X),
-            (ElasticsearchV7_X, OpensearchV3_X),
-        ]
         migrations_required = [MigrationType.BACKFILL]
         description = "Performs backfill migration for a single document (default coordinator)."
         super().__init__(user_args=user_args,
                          description=description,
                          migrations_required=migrations_required,
-                         allow_source_target_combinations=allow_combinations)
+                         allow_source_target_combinations=RFS_MIGRATION_COMBINATIONS)
         self.index_name = f"test_0002_{self.unique_id}"
         self.doc_id = "test_0002_doc"
         self.doc_type = "sample_type"
