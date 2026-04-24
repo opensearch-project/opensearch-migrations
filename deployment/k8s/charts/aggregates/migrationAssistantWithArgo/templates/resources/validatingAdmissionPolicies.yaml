@@ -343,8 +343,6 @@ spec:
     # Gated: auth, transformer, and tuple transformer fields
     - expression: |
         (
-          (!has(object.spec.authHeaderValue) || !has(oldObject.spec.authHeaderValue) ||
-           object.spec.authHeaderValue == oldObject.spec.authHeaderValue) &&
           (!has(object.spec.removeAuthHeader) || !has(oldObject.spec.removeAuthHeader) ||
            object.spec.removeAuthHeader == oldObject.spec.removeAuthHeader) &&
           (!has(object.spec.transformerConfig) || !has(oldObject.spec.transformerConfig) ||
@@ -369,31 +367,21 @@ spec:
       messageExpression: |
         "Gated changes detected on TrafficReplay fields [" +
         (
-          (has(object.spec.authHeaderValue) && has(oldObject.spec.authHeaderValue) &&
-           object.spec.authHeaderValue != oldObject.spec.authHeaderValue ? "authHeaderValue" : "") +
           (has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
-           object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader ?
-             ((has(object.spec.authHeaderValue) && has(oldObject.spec.authHeaderValue) &&
-               object.spec.authHeaderValue != oldObject.spec.authHeaderValue) ? ", removeAuthHeader" : "removeAuthHeader") : "") +
+           object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader ? "removeAuthHeader" : "") +
           (has(object.spec.transformerConfig) && has(oldObject.spec.transformerConfig) &&
            object.spec.transformerConfig != oldObject.spec.transformerConfig ?
-             (((has(object.spec.authHeaderValue) && has(oldObject.spec.authHeaderValue) &&
-                object.spec.authHeaderValue != oldObject.spec.authHeaderValue) ||
-               (has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
-                object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader)) ? ", transformerConfig" : "transformerConfig") : "") +
+             ((has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+               object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader) ? ", transformerConfig" : "transformerConfig") : "") +
           (has(object.spec.transformerConfigEncoded) && has(oldObject.spec.transformerConfigEncoded) &&
            object.spec.transformerConfigEncoded != oldObject.spec.transformerConfigEncoded ?
-             (((has(object.spec.authHeaderValue) && has(oldObject.spec.authHeaderValue) &&
-                object.spec.authHeaderValue != oldObject.spec.authHeaderValue) ||
-               (has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+             (((has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
                 object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader) ||
                (has(object.spec.transformerConfig) && has(oldObject.spec.transformerConfig) &&
                 object.spec.transformerConfig != oldObject.spec.transformerConfig)) ? ", transformerConfigEncoded" : "transformerConfigEncoded") : "") +
           (has(object.spec.transformerConfigFile) && has(oldObject.spec.transformerConfigFile) &&
            object.spec.transformerConfigFile != oldObject.spec.transformerConfigFile ?
-             (((has(object.spec.authHeaderValue) && has(oldObject.spec.authHeaderValue) &&
-                object.spec.authHeaderValue != oldObject.spec.authHeaderValue) ||
-               (has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+             (((has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
                 object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader) ||
                (has(object.spec.transformerConfig) && has(oldObject.spec.transformerConfig) &&
                 object.spec.transformerConfig != oldObject.spec.transformerConfig) ||
@@ -401,9 +389,7 @@ spec:
                 object.spec.transformerConfigEncoded != oldObject.spec.transformerConfigEncoded)) ? ", transformerConfigFile" : "transformerConfigFile") : "") +
           (has(object.spec.tupleTransformerConfig) && has(oldObject.spec.tupleTransformerConfig) &&
            object.spec.tupleTransformerConfig != oldObject.spec.tupleTransformerConfig ?
-             (((has(object.spec.authHeaderValue) && has(oldObject.spec.authHeaderValue) &&
-                object.spec.authHeaderValue != oldObject.spec.authHeaderValue) ||
-               (has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+             (((has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
                 object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader) ||
                (has(object.spec.transformerConfig) && has(oldObject.spec.transformerConfig) &&
                 object.spec.transformerConfig != oldObject.spec.transformerConfig) ||
@@ -413,9 +399,7 @@ spec:
                 object.spec.transformerConfigFile != oldObject.spec.transformerConfigFile)) ? ", tupleTransformerConfig" : "tupleTransformerConfig") : "") +
           (has(object.spec.tupleTransformerConfigBase64) && has(oldObject.spec.tupleTransformerConfigBase64) &&
            object.spec.tupleTransformerConfigBase64 != oldObject.spec.tupleTransformerConfigBase64 ?
-             (((has(object.spec.authHeaderValue) && has(oldObject.spec.authHeaderValue) &&
-                object.spec.authHeaderValue != oldObject.spec.authHeaderValue) ||
-               (has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+             (((has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
                 object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader) ||
                (has(object.spec.transformerConfig) && has(oldObject.spec.transformerConfig) &&
                 object.spec.transformerConfig != oldObject.spec.transformerConfig) ||
@@ -427,9 +411,7 @@ spec:
                 object.spec.tupleTransformerConfig != oldObject.spec.tupleTransformerConfig)) ? ", tupleTransformerConfigBase64" : "tupleTransformerConfigBase64") : "") +
           (has(object.spec.tupleTransformerConfigFile) && has(oldObject.spec.tupleTransformerConfigFile) &&
            object.spec.tupleTransformerConfigFile != oldObject.spec.tupleTransformerConfigFile ?
-             (((has(object.spec.authHeaderValue) && has(oldObject.spec.authHeaderValue) &&
-                object.spec.authHeaderValue != oldObject.spec.authHeaderValue) ||
-               (has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+             (((has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
                 object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader) ||
                (has(object.spec.transformerConfig) && has(oldObject.spec.transformerConfig) &&
                 object.spec.transformerConfig != oldObject.spec.transformerConfig) ||

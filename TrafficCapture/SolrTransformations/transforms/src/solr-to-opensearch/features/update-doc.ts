@@ -20,7 +20,7 @@
  * The body is passed through unchanged — no field-level translation needed.
  */
 import type { MicroTransform } from '../pipeline';
-import type { RequestContext, ResponseContext } from '../context';
+import type { RequestContext } from '../context';
 
 /** Detect GraalVM Java ArrayList — exposes numeric keys + length, unlike a Map. */
 function isJavaList(obj: any): boolean {
@@ -29,7 +29,6 @@ function isJavaList(obj: any): boolean {
 
 export const request: MicroTransform<RequestContext> = {
   name: 'update-doc',
-  match: (ctx) => /\/update\/json\/docs/.test(ctx.msg.get('URI') || ''),
   apply: (ctx) => {
     const body = ctx.body;
 
@@ -58,36 +57,5 @@ export const request: MicroTransform<RequestContext> = {
 
     ctx.msg.set('URI', uri);
     ctx.msg.set('method', 'PUT');
-  },
-};
-
-/**
- * Response transform — convert OpenSearch _doc response to Solr update response.
- *
- * OpenSearch returns: {"_index":"mycore","_id":"1","result":"created","_version":1,...}
- * Solr returns:       {"responseHeader":{"status":0,"QTime":N}}
- */
-export const response: MicroTransform<ResponseContext> = {
-  name: 'update-doc-response',
-  match: (ctx) => ctx.responseBody.has('result') && ctx.responseBody.has('_id'),
-  apply: (ctx) => {
-    const result = ctx.responseBody.get('result');
-    const status = (result === 'created' || result === 'updated') ? 0 : 1;
-
-    // Clear OpenSearch-specific fields
-    const keys = Array.from(ctx.responseBody.keys());
-    for (const key of keys) {
-      ctx.responseBody.delete(key);
-    }
-
-    // Write Solr-format response.
-    // QTime is 0 because OpenSearch's _doc response doesn't include processing time.
-    ctx.responseBody.set(
-      'responseHeader',
-      new Map<string, unknown>([
-        ['status', status],
-        ['QTime', 0],
-      ]),
-    );
   },
 };

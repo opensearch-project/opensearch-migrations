@@ -378,6 +378,7 @@ charts:
           - name: RESOURCE_STATE_CHECK_INTERVAL
             value: "1s"
       server:
+        secure: true
         replicas: 2
         resources:
           requests: { cpu: 100m, memory: 512Mi }
