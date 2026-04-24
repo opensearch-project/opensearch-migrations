@@ -36,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Matrix end-to-end test: for each (source ES/OS version, target OS version) pair, creates one
@@ -845,13 +846,49 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             return;
         }
         if (cfg.sourceType().equals("token_count")) {
-            JsonNode sample = fieldValue.isArray() && fieldValue.size() > 0
-                ? fieldValue.get(0) : fieldValue;
-            if (sample.isTextual()) {
-                // original string round-tripped via _recovery_source; just confirm presence
-                assertNotNull(fieldValue, perm.fieldName() + " should not be null");
+            // token_count array perms store two strings whose tokenised counts DIFFER:
+            //   "one two three four five" -> 5 tokens
+            //   "alpha beta gamma"        -> 3 tokens
+            // Doc-values / Points recovery paths numerically sort the count array, so
+            // the recovered order is [3,5] (not [5,3]). Never read by index — iterate
+            // every node and accept membership in {5, 3}. Text nodes (from
+            // _recovery_source on ES 7+) are always acceptable; we just confirm they
+            // parse to the expected count or are one of the original input strings.
+            assertNotNull(fieldValue, perm.fieldName() + " should not be null");
+            Set<Integer> acceptableCounts = Set.of(
+                5,  // count of cfg.testValue() "one two three four five"
+                3   // count of secondValueFor(cfg) "alpha beta gamma"
+            );
+            Set<String> acceptableStrings = Set.of(
+                String.valueOf(cfg.testValue()),
+                String.valueOf(secondValueFor(cfg))
+            );
+            List<JsonNode> nodes = new ArrayList<>();
+            if (fieldValue.isArray()) {
+                for (int i = 0; i < fieldValue.size(); i++) {
+                    nodes.add(fieldValue.get(i));
+                }
             } else {
-                assertEquals(5, sample.asInt(), perm.fieldName() + " token count mismatch");
+                nodes.add(fieldValue);
+            }
+            for (JsonNode n : nodes) {
+                if (n.isTextual()) {
+                    String s = n.asText();
+                    try {
+                        int cnt = Integer.parseInt(s);
+                        assertTrue(acceptableCounts.contains(cnt),
+                            perm.fieldName() + " token count " + cnt
+                                + " not in acceptable set " + acceptableCounts);
+                    } catch (NumberFormatException nfe) {
+                        assertTrue(acceptableStrings.contains(s),
+                            perm.fieldName() + " text " + s
+                                + " not in acceptable original strings " + acceptableStrings);
+                    }
+                } else {
+                    assertTrue(acceptableCounts.contains(n.asInt()),
+                        perm.fieldName() + " token count " + n.asInt()
+                            + " not in acceptable set " + acceptableCounts);
+                }
             }
             return;
         }
