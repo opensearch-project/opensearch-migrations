@@ -11,7 +11,7 @@ import {CdkLogger} from "./cdk-logger";
 import {mkdtempSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {execSync} from 'node:child_process';
+import {execFileSync} from 'node:child_process';
 
 export const MAX_IAM_ROLE_NAME_LENGTH = 64;
 export const MAX_STAGE_NAME_LENGTH = 15;
@@ -557,13 +557,19 @@ export function makeLocalAssetContainerImage(scope: Construct, imageName: string
             imageHash = 'destroy-stub';
             CdkLogger.info('CDK_SKIP_LOCAL_IMAGE_HASH=true; using stub hash for image: ' + imageName);
         } else {
+            // Basic validation: reject image names with shell metacharacters. Even
+            // though execFileSync below does not spawn a shell, this is a defense
+            // in depth against callers accidentally passing user-controlled names.
+            if (!/^[a-zA-Z0-9._/:@-]+$/.test(imageName)) {
+                throw new Error(`Refusing to run docker commands with suspicious image name: ${imageName}`);
+            }
             try {
                 // Update the image if it is not a local image
                 if (!imageName.startsWith('migrations/')) {
-                    execSync(`docker pull ${imageName}`);
+                    execFileSync('docker', ['pull', imageName]);
                 }
                 // Get the actual hash for the image
-                const imageId = execSync(`docker inspect --format='{{.Id}}' ${imageName}`).toString().trim();
+                const imageId = execFileSync('docker', ['inspect', '--format={{.Id}}', imageName]).toString().trim();
                 if (!imageId) {
                     throw new Error(`No RepoDigests found for image: ${imageName}`);
                 }
