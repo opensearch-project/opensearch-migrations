@@ -117,7 +117,7 @@ bootstrap_region () {
   # Picking arbitrary context values to satisfy required values for CDK synthesis. These should not need to be kept in sync with the actual deployment context values
   # The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
   cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
-  cdk bootstrap --require-approval never --c contextKey="$SOURCE_CONTEXT_ID"
+  npx cdk bootstrap --require-approval never --c contextKey="$SOURCE_CONTEXT_ID"
 }
 
 usage() {
@@ -308,7 +308,7 @@ fi
 
 if [ "$SKIP_SOURCE_DEPLOY" = false ] && [ "$CLEAN_UP_ALL" = false ] ; then
   # Deploy source cluster on EC2 instances
-  cdk deploy "*" --c contextKey="$SOURCE_CONTEXT_ID" --require-approval never
+  npx cdk deploy "*" --c contextKey="$SOURCE_CONTEXT_ID" --require-approval never
   if [ $? -ne 0 ]; then
     echo "Error: deploy source cluster failed, exiting."
     exit 1
@@ -337,7 +337,7 @@ if [ "$SKIP_MIGRATION_DEPLOY" = false ] ; then
     exit 1
   fi
   npm ci
-  cdk deploy "*" --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID" --require-approval never --concurrency 3
+  npx cdk deploy "*" --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID" --require-approval never --concurrency 3
   if [ $? -ne 0 ]; then
     echo "Error: deploying migration stacks failed, exiting."
     exit 1
