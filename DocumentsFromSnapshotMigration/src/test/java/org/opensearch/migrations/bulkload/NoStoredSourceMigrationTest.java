@@ -750,9 +750,22 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             return;
         }
         if (cfg.sourceType().equals("token_count")) {
-            // For recovery source, original string round-trips; otherwise it's the count.
+            // token_count acceptable forms across versions:
+            //   - numeric (e.g. 5)         → count from doc_values / Points reconstruction (ES 7+ usual path)
+            //   - textual integer ("5")    → ES 5.x/6.x stored field (numeric count rendered as string;
+            //                                those versions have no _recovery_source to round-trip the
+            //                                original text)
+            //   - textual original string  → ES 7+ _recovery_source round-tripped the original text
             if (target.isTextual()) {
-                assertEquals(cfg.testValue().toString(), target.asText(),
+                String s = target.asText();
+                try {
+                    int n = Integer.parseInt(s);
+                    assertEquals(5, n, perm.fieldName() + " value mismatch");
+                    return;
+                } catch (NumberFormatException nfe) {
+                    // Not a numeric string — must be the original text from _recovery_source.
+                }
+                assertEquals(cfg.testValue().toString(), s,
                     perm.fieldName() + " should preserve original string via _recovery_source");
             } else {
                 assertEquals(5, target.asInt(), perm.fieldName() + " value mismatch");
