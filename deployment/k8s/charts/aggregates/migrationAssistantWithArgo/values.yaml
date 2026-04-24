@@ -604,6 +604,8 @@ charts:
           requests: { cpu: 25m, memory: 16Mi }
           limits:   { cpu: 100m, memory: 32Mi }
       grafana:
+        image:
+          tag: "11.6.13"
         resources:
           requests: { cpu: 100m, memory: 128Mi }
           limits:   { cpu: 500m, memory: 256Mi }
