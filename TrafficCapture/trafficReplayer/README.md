@@ -166,7 +166,7 @@ can be augmented however it may choose.
 ## Authorization Header for Replayed Requests
 
 There is a level of precedence that will determine which or if any Auth header should be added to outgoing Replayer requests, which is listed below.
-1. If the user provides an explicit auth header option to the Replayer, such as providing a static value auth header(--auth-header-value), this mechanism will be used for the auth header of outgoing requests. The options can be found as Parameters [here](src/main/java/org/opensearch/migrations/replay/TrafficReplayer.java)
+1. If the user provides an explicit auth option to the Replayer, such as `--target-username`/`--target-password` for basic auth, `--sigv4-auth-header-service-region` for SigV4, or `--remove-auth-header` to strip auth, this mechanism will be used for the auth header of outgoing requests. The options can be found as Parameters [here](src/main/java/org/opensearch/migrations/replay/TrafficReplayer.java)
 2. If the user provides no auth header option and incoming captured requests have an auth header, this auth header will try to be reused for outgoing requests. **Note**: Reusing existing auth headers has a certain level of risk. Reusing Basic Auth headers may work without issue, but reusing SigV4 headers likely won't unless the content AND headers are NOT reformatted
 3. If the user provides no auth header option and incoming captured requests have no auth header, then no auth header will be used for outgoing requests
 

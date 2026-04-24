@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseSolrQuery, toParseError } from './parser';
+import { transformNode } from '../transformer/astToOpenSearch';
 
 const emptyParams = new Map<string, string>();
 const paramsWithDf = (df: string) => new Map([['df', df]]);
@@ -718,6 +719,246 @@ describe('parseSolrQuery', () => {
     it('handles null/undefined error', () => {
       expect(toParseError(null)).toEqual({ message: 'Parse error', position: 0 });
       expect(toParseError(undefined)).toEqual({ message: 'Parse error', position: 0 });
+    });
+  });
+
+  // ─── FuncNode ──────────────────────────────────────────────────────────────
+
+  describe('FuncNode — grammar parsing via {!func} local params', () => {
+    it('parses {!func}sum(popularity, 1) → FuncNode with field ref and numeric args', () => {
+      const { ast, errors } = parseSolrQuery('{!func}sum(popularity, 1)', emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.type).toBe('localParams');
+      expect(lp.body.type).toBe('func');
+      expect(lp.body.name).toBe('sum');
+      expect(lp.body.args).toEqual([
+        { kind: 'field', name: 'popularity' },
+        { kind: 'numeric', value: 1 },
+      ]);
+    });
+
+    it('parses {!func}recip(ms(NOW, date), 3.16e-11, 1, 1) → nested FuncNode in args', () => {
+      const { ast, errors } = parseSolrQuery('{!func}recip(ms(NOW, date), 3.16e-11, 1, 1)', emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.type).toBe('localParams');
+      expect(lp.body.type).toBe('func');
+      expect(lp.body.name).toBe('recip');
+      expect(lp.body.args).toHaveLength(4);
+      // First arg is a nested function call (grammar returns FuncNode directly)
+      expect(lp.body.args[0]).toEqual({
+        type: 'func',
+        name: 'ms',
+        args: [
+          { kind: 'field', name: 'NOW' },
+          { kind: 'field', name: 'date' },
+        ],
+      });
+      expect(lp.body.args[1]).toEqual({ kind: 'numeric', value: 3.16e-11 });
+      expect(lp.body.args[2]).toEqual({ kind: 'numeric', value: 1 });
+      expect(lp.body.args[3]).toEqual({ kind: 'numeric', value: 1 });
+    });
+
+    it('parses {!func}now() → FuncNode with empty args', () => {
+      const { ast, errors } = parseSolrQuery('{!func}now()', emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.type).toBe('localParams');
+      expect(lp.body.type).toBe('func');
+      expect(lp.body.name).toBe('now');
+      expect(lp.body.args).toEqual([]);
+    });
+
+    it('parses {!func}sum(popularity, -1) → numeric(-1) arg', () => {
+      const { ast, errors } = parseSolrQuery('{!func}sum(popularity, -1)', emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.body.args).toEqual([
+        { kind: 'field', name: 'popularity' },
+        { kind: 'numeric', value: -1 },
+      ]);
+    });
+
+    it('parses {!func}recip(age, 3.16e-11, 1, 1) → numeric(3.16e-11) arg', () => {
+      const { ast, errors } = parseSolrQuery('{!func}recip(age, 3.16e-11, 1, 1)', emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.body.name).toBe('recip');
+      expect(lp.body.args[0]).toEqual({ kind: 'field', name: 'age' });
+      expect(lp.body.args[1]).toEqual({ kind: 'numeric', value: 3.16e-11 });
+    });
+
+    it('parses {!func}div(price, 0.5) → numeric(0.5) arg', () => {
+      const { ast, errors } = parseSolrQuery('{!func}div(price, 0.5)', emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.body.name).toBe('div');
+      expect(lp.body.args).toEqual([
+        { kind: 'field', name: 'price' },
+        { kind: 'numeric', value: 0.5 },
+      ]);
+    });
+
+    it("parses {!func}strdist('hello', name, edit) → string('hello') arg", () => {
+      const { ast, errors } = parseSolrQuery("{!func}strdist('hello', name, edit)", emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.body.name).toBe('strdist');
+      expect(lp.body.args).toEqual([
+        { kind: 'string', value: 'hello' },
+        { kind: 'field', name: 'name' },
+        { kind: 'field', name: 'edit' },
+      ]);
+    });
+
+    it(String.raw`parses {!func}strdist('it\'s', name, edit) → string("it's") arg (escape handling)`, () => {
+      const input = String.raw`{!func}strdist('it\'s', name, edit)`;
+      const { ast, errors } = parseSolrQuery(input, emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.body.name).toBe('strdist');
+      expect(lp.body.args[0]).toEqual({ kind: 'string', value: "it's" });
+    });
+
+    it('parses {!func}sum( popularity , 1 ) → whitespace tolerance', () => {
+      const { ast, errors } = parseSolrQuery('{!func}sum( popularity , 1 )', emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.body.type).toBe('func');
+      expect(lp.body.name).toBe('sum');
+      expect(lp.body.args).toEqual([
+        { kind: 'field', name: 'popularity' },
+        { kind: 'numeric', value: 1 },
+      ]);
+    });
+
+    it('parses {!func}abs(price) → single field ref arg', () => {
+      const { ast, errors } = parseSolrQuery('{!func}abs(price)', emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.body.type).toBe('func');
+      expect(lp.body.name).toBe('abs');
+      expect(lp.body.args).toEqual([
+        { kind: 'field', name: 'price' },
+      ]);
+    });
+
+    it('parses {!func}sum(product(a, b), div(c, d)) → deeply nested functions', () => {
+      const { ast, errors } = parseSolrQuery('{!func}sum(product(a, b), div(c, d))', emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.body.type).toBe('func');
+      expect(lp.body.name).toBe('sum');
+      expect(lp.body.args).toEqual([
+        {
+          type: 'func',
+          name: 'product',
+          args: [
+            { kind: 'field', name: 'a' },
+            { kind: 'field', name: 'b' },
+          ],
+        },
+        {
+          type: 'func',
+          name: 'div',
+          args: [
+            { kind: 'field', name: 'c' },
+            { kind: 'field', name: 'd' },
+          ],
+        },
+      ]);
+    });
+  });
+
+  describe('FuncNode — parser routing and error cases', () => {
+    it("parses {!func v='sum(popularity, 1)'} → LocalParamsNode with FuncNode body from v key", () => {
+      const { ast, errors } = parseSolrQuery("{!func v='sum(popularity, 1)'}", emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.type).toBe('localParams');
+      expect(lp.body).not.toBeNull();
+      expect(lp.body.type).toBe('func');
+      expect(lp.body.name).toBe('sum');
+      expect(lp.body.args).toEqual([
+        { kind: 'field', name: 'popularity' },
+        { kind: 'numeric', value: 1 },
+      ]);
+    });
+
+    it('parses {!func v=$qq} → LocalParamsNode with body: null (dereference)', () => {
+      const { ast, errors } = parseSolrQuery('{!func v=$qq}', emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.type).toBe('localParams');
+      expect(lp.params).toEqual(
+        expect.arrayContaining([
+          { key: 'type', value: 'func', deref: false },
+          { key: 'v', value: 'qq', deref: true },
+        ]),
+      );
+      expect(lp.body).toBeNull();
+    });
+
+    it('parses {!func}not_a_function → parse error (no ( after identifier)', () => {
+      const { ast, errors } = parseSolrQuery('{!func}not_a_function', emptyParams);
+      expect(ast).toBeNull();
+      expect(errors.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('parses {!func}sum(popularity, 1 → parse error (missing closing paren)', () => {
+      const { ast, errors } = parseSolrQuery('{!func}sum(popularity, 1', emptyParams);
+      expect(ast).toBeNull();
+      expect(errors.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('parses {!func} → LocalParamsNode with body: null (no body)', () => {
+      const { ast, errors } = parseSolrQuery('{!func}', emptyParams);
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.type).toBe('localParams');
+      expect(lp.body).toBeNull();
+    });
+  });
+
+  describe('FuncNode — AST walker and transformer integration', () => {
+    it('resolveDefaultFields handles FuncNode body (df=title)', () => {
+      const { ast, errors } = parseSolrQuery('{!func}sum(popularity, 1)', new Map([['df', 'title']]));
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.type).toBe('localParams');
+      expect(lp.body.type).toBe('func');
+      expect(lp.body.name).toBe('sum');
+      expect(lp.body.args).toEqual([
+        { kind: 'field', name: 'popularity' },
+        { kind: 'numeric', value: 1 },
+      ]);
+    });
+
+    it('applyDefaultOperator handles FuncNode body (q.op=AND)', () => {
+      const { ast, errors } = parseSolrQuery('{!func}sum(popularity, 1)', new Map([['q.op', 'AND']]));
+      expect(errors).toEqual([]);
+      const lp = ast as any;
+      expect(lp.type).toBe('localParams');
+      expect(lp.body.type).toBe('func');
+      expect(lp.body.name).toBe('sum');
+      expect(lp.body.args).toEqual([
+        { kind: 'field', name: 'popularity' },
+        { kind: 'numeric', value: 1 },
+      ]);
+    });
+
+    it('transformNode throws for FuncNode', () => {
+      const funcNode = {
+        type: 'func' as const,
+        name: 'sum',
+        args: [
+          { kind: 'field' as const, name: 'popularity' },
+          { kind: 'numeric' as const, value: 1 },
+        ],
+      };
+      const callTransform = () => transformNode(funcNode as any);
+      expect(callTransform).toThrow('No transform rule registered for node type: func');
     });
   });
 });

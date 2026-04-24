@@ -102,6 +102,33 @@ def call(Map config = [:]) {
             jobName: config.jobName ?: 'full-es68source-e2e-test',
             testUniqueId: testUniqueId,
             integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202',
+            preDeployStep: { Map args ->
+                // Destroy any prior stacks in strict order before redeploying: migration CDK
+                // app first, BLOCK until all of its CloudFormation stacks reach DELETE_COMPLETE,
+                // then destroy the source (E2E solution) CDK app. Running these as two
+                // separate shell invocations makes the ordering explicit in the Jenkins log
+                // and guarantees the second call cannot start until the first has fully
+                // returned. `npx cdk destroy` already polls CFN synchronously, and
+                // --clean-up-migration-only additionally waits on `aws cloudformation wait
+                // stack-delete-complete` for any leftover "OSMigrations-<stage>" stacks.
+                //
+                // Note on why a context file is passed here even though we may be cleaning
+                // up an old deploy whose context differed: CloudFormation stacks are named
+                // purely by `--stage` (e.g. OSMigrations-<stage>, opensearch-infra-stack-
+                // ec2-source-<stage>), so cleanup is already stage-scoped regardless of
+                // context content. The context file is only required for `cdk destroy` to
+                // synth successfully so it can enumerate its own stack list; the
+                // awsE2ESolutionSetup.sh short-circuits also substitute placeholder
+                // <VPC_ID>/<SOURCE_CLUSTER_ENDPOINT> values when the real source side is
+                // already gone, so a stale or default context is still safe.
+                def commonArgs = "--source-context-file './${args.sourceContextFileName}' " +
+                        "--migration-context-file './${args.migrationContextFileName}' " +
+                        "--source-context-id ${args.sourceContextId} " +
+                        "--migration-context-id ${args.migrationContextId} " +
+                        "--stage ${args.stage}"
+                sh "./awsE2ESolutionSetup.sh ${commonArgs} --clean-up-migration-only"
+                sh "./awsE2ESolutionSetup.sh ${commonArgs} --clean-up-source-only"
+            },
             preIntegTestStep: { deployStage ->
                 def sourceEndpoint = "https://alb.migration.${deployStage}.local:9201"
                 def clusterName = "migration-${deployStage}-ecs-cluster"

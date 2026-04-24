@@ -5,8 +5,8 @@
  * for bare terms. Test cases are generated for both defType values to avoid
  * duplication. eDisMax-specific cases (field:value syntax) are appended at the end.
  */
-import { solrTest } from '../../test-types';
-import type { TestCase } from '../../test-types';
+import { solrTest } from '../../../test-types';
+import type { TestCase } from '../../../test-types';
 
 const twoFieldSchema = {
   fields: {

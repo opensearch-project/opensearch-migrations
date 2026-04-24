@@ -46,7 +46,7 @@ import * as peggy from 'peggy';
 import grammar from './solr.pegjs';
 import type { ASTNode } from '../ast/nodes';
 import type { ParseResult, ParseError } from './types';
-import { parseQueryFields, applyQueryFields } from './qf';
+import { applyQueryFields } from './qf';
 
 // Lazily compiled parser — the grammar is inlined at build time and compiled
 // on the first call to parseSolrQuery, then cached for all subsequent calls.
@@ -55,7 +55,7 @@ let parserInstance: peggy.Parser | null = null;
 /** Return the cached parser, compiling the grammar on first call. */
 function getParser(): peggy.Parser {
   if (parserInstance) return parserInstance;
-  parserInstance = peggy.generate(grammar);
+  parserInstance = peggy.generate(grammar, { allowedStartRules: ['query', 'funcQuery'] });
   return parserInstance;
 }
 
@@ -115,10 +115,7 @@ export function parseSolrQuery(
 
     // qf → BareNode.queryFields (edismax/dismax only)
     if (defType === 'edismax' || defType === 'dismax') {
-      const queryFields = parseQueryFields(params.get('qf'));
-      if (queryFields) {
-        applyQueryFields(ast, queryFields);
-      }
+      applyQueryFields(ast, params);
     }
 
     return { ast, errors: [] };
@@ -189,8 +186,13 @@ function resolveLocalParamsBody(node: import('../ast/nodes').LocalParamsNode): v
     return;
   }
 
+  // Function query type — parse with the funcQuery start rule
+  if (parserType === 'func') {
+    node.body = getParser().parse(bodyStr, { startRule: 'funcQuery' }) as import('../ast/nodes').ASTNode;
+    return;
+  }
+
   // Unknown parser type — leave body null for now.
-  // Future: route to func query parser, terms parser, etc.
   node.body = null;
 }
 
@@ -232,6 +234,7 @@ function resolveDefaultFields(node: ASTNode, df: string): void {
     case 'localParams':
       if (node.body) resolveDefaultFields(node.body, df);
       break;
+    case 'func':
     case 'matchAll':
       break;
     // Compile-time exhaustive check, unreachable at runtime.
@@ -283,6 +286,7 @@ function applyDefaultOperator(node: ASTNode): void {
       break;
     case 'bare':
     case 'field':
+    case 'func':
     case 'phrase':
     case 'range':
     case 'matchAll':
