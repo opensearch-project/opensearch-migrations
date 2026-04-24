@@ -1,0 +1,64 @@
+# k6 Operator TestRun for CDC Load Testing
+#
+# Prerequisites:
+#   1. Install k6 Operator:
+#      helm repo add grafana https://grafana.github.io/helm-charts
+#      helm install k6-operator grafana/k6-operator -n ma --set namespace.create=false
+#
+#   2. Create ConfigMap from the k6 script:
+#      kubectl create configmap cdc-load-test-script \
+#        --from-file=cdc-load-test.js=../cdc-load-test.js -n ma
+#
+# Usage:
+#   kubectl apply -n ma -f testrun.yaml
+#
+# Monitor:
+#   kubectl get testrun -n ma
+#   kubectl logs -n ma -l k6_cr=cdc-load-test
+#
+# Cleanup:
+#   kubectl delete testrun cdc-load-test -n ma
+
+---
+# Single runner — baseline test
+apiVersion: k6.io/v1alpha1
+kind: TestRun
+metadata:
+  name: cdc-load-test
+spec:
+  parallelism: 1
+  script:
+    configMap:
+      name: cdc-load-test-script
+      file: cdc-load-test.js
+  arguments: >-
+    -e PROXY_ENDPOINT=https://capture-proxy:9201
+    -e WRITE_RATE=5
+    -e DURATION=30s
+  runner:
+    env:
+    - name: K6_INSECURE_SKIP_TLS_VERIFY
+      value: "true"
+
+---
+# Parallel runners — distributed load test
+# Uncomment and apply separately (delete the single runner first)
+#
+# apiVersion: k6.io/v1alpha1
+# kind: TestRun
+# metadata:
+#   name: cdc-load-test-parallel
+# spec:
+#   parallelism: 2
+#   script:
+#     configMap:
+#       name: cdc-load-test-script
+#       file: cdc-load-test.js
+#   arguments: >-
+#     -e PROXY_ENDPOINT=https://capture-proxy:9201
+#     -e WRITE_RATE=10
+#     -e DURATION=30s
+#   runner:
+#     env:
+#     - name: K6_INSECURE_SKIP_TLS_VERIFY
+#       value: "true"
