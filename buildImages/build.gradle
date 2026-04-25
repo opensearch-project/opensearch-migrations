@@ -258,6 +258,60 @@ gradle.projectsEvaluated {
             publishedRegistry,
             intermediateRegistry
     )
+    imageHelper.registerBuildKitBakeAggregateTask(
+            rootProject,
+            "buildKitBakeAll",
+            buildKitProjects,
+            buildKitProjects + testBuildKitProjects,
+            "multi",
+            publishedRegistry,
+            intermediateRegistry
+    )
+    imageHelper.registerBuildKitBakeAggregateTask(
+            rootProject,
+            "buildKitBakeAll_amd64",
+            buildKitProjects,
+            buildKitProjects + testBuildKitProjects,
+            "amd64",
+            publishedRegistry,
+            intermediateRegistry
+    )
+    imageHelper.registerBuildKitBakeAggregateTask(
+            rootProject,
+            "buildKitBakeAll_arm64",
+            buildKitProjects,
+            buildKitProjects + testBuildKitProjects,
+            "arm64",
+            publishedRegistry,
+            intermediateRegistry
+    )
+    imageHelper.registerBuildKitBakeAggregateTask(
+            rootProject,
+            "buildKitBakeTestAll",
+            testBuildKitProjects,
+            buildKitProjects + testBuildKitProjects,
+            "multi",
+            publishedRegistry,
+            intermediateRegistry
+    )
+    imageHelper.registerBuildKitBakeAggregateTask(
+            rootProject,
+            "buildKitBakeTestAll_amd64",
+            testBuildKitProjects,
+            buildKitProjects + testBuildKitProjects,
+            "amd64",
+            publishedRegistry,
+            intermediateRegistry
+    )
+    imageHelper.registerBuildKitBakeAggregateTask(
+            rootProject,
+            "buildKitBakeTestAll_arm64",
+            testBuildKitProjects,
+            buildKitProjects + testBuildKitProjects,
+            "arm64",
+            publishedRegistry,
+            intermediateRegistry
+    )
     imageHelper.applyJibConfigurations(
             rootProject,
             jibProjects,
@@ -353,7 +407,7 @@ tasks.register("buildImagesToRegistry") {
     group = "build"
     description = "Build all multi-arch images to registry: ${publishedRegistry}"
     println "buildImagesToRegistry will build images to registry: ${publishedRegistry}"
-    dependsOn("buildKitAll")
+    dependsOn(rootProject.tasks.named("buildKitBakeAll"))
     dependsOn("jibAll")
 }
 
@@ -361,7 +415,7 @@ tasks.register("buildImagesToRegistry_amd64") {
     group = "build"
     description = "Build all amd64 images to registry: ${publishedRegistry}"
     println "buildImagesToRegistry_amd64 will build amd64 images to registry: ${publishedRegistry}"
-    dependsOn("buildKitAll_amd64")
+    dependsOn(rootProject.tasks.named("buildKitBakeAll_amd64"))
     dependsOn("jibAll_amd64")
 }
 
@@ -369,6 +423,6 @@ tasks.register("buildImagesToRegistry_arm64") {
     group = "build"
     description = "Build all arm64 images to registry: ${publishedRegistry}"
     println "buildImagesToRegistry_arm64 will build arm64 images to registry: ${publishedRegistry}"
-    dependsOn("buildKitAll_arm64")
+    dependsOn(rootProject.tasks.named("buildKitBakeAll_arm64"))
     dependsOn("jibAll_arm64")
 }

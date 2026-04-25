@@ -1,5 +1,6 @@
 package org.opensearch.migrations.image
 
+import groovy.json.JsonOutput
 import org.gradle.api.GradleException
 import org.gradle.api.Project
 import org.gradle.api.tasks.Exec
@@ -24,6 +25,13 @@ class RegistryImageBuildUtils {
 
         String getRegistryDomain() { hostUrl.split('/')[0] }
         boolean isEcr() { registryDomain.contains('.ecr.') && registryDomain.contains('.amazonaws.com') }
+    }
+
+    boolean isAggregateBakeRequested(Project rootProject) {
+        def startTasks = rootProject.gradle.startParameter.taskNames*.toLowerCase()
+        return startTasks.any {
+            it.contains("buildimagestoregistry") || it.contains("buildkitbakeall")
+        }
     }
 
     static String resolveBaseImage(Registry registry, String group, String image, String tag) {
@@ -331,8 +339,12 @@ class RegistryImageBuildUtils {
                         def targetProject = projectPathStr ? rootProject.project(projectPathStr) : rootProject
                         taskNames.each { depName ->
                             def resolvedDepName = depName
-                            if (depName.startsWith("buildKit_") && targetArch != "multi") {
-                                resolvedDepName = "${depName}_${targetArch}"
+                            if (depName.startsWith("buildKit_")) {
+                                if (isAggregateBakeRequested(rootProject)) {
+                                    resolvedDepName = targetArch == "multi" ? "buildKitBakeAll" : "buildKitBakeAll_${targetArch}"
+                                } else if (targetArch != "multi") {
+                                    resolvedDepName = "${depName}_${targetArch}"
+                                }
                             }
                             project.tasks.named("jib").configure {
                                 dependsOn("${targetProject.path}:${resolvedDepName}".replace("::", ":"))
@@ -563,6 +575,197 @@ class RegistryImageBuildUtils {
         def imageToService = projects.collectEntries { [(it.get("imageName").toString()): it.get("serviceName").toString()] }
         projects.each { cfg ->
             registerBuildKitTasks(rootProject, cfg, finalRegistry, intermediateRegistry, imageToService)
+        }
+    }
+
+    void registerBuildKitBakeAggregateTask(Project project,
+                                           String taskName,
+                                           List<Map> selectedProjects,
+                                           List<Map> allProjects,
+                                           String architecture,
+                                           Registry finalRegistry,
+                                           Registry intermediateRegistry) {
+        if (project.tasks.findByName(taskName)) {
+            return
+        }
+
+        def allProjectsByTaskName = allProjects.collectEntries { cfg ->
+            [("buildKit_${cfg.serviceName}".toString()): cfg]
+        }
+
+        def selectedByServiceName = [:] as LinkedHashMap<String, Map>
+        def collectWithDependencies
+        collectWithDependencies = { Map cfg ->
+            if (!cfg) {
+                return
+            }
+            cfg.get("requiredDependencies", []).each { depTaskName ->
+                if (depTaskName.startsWith("buildKit_")) {
+                    collectWithDependencies(allProjectsByTaskName[depTaskName])
+                }
+            }
+            selectedByServiceName[cfg.serviceName.toString()] = cfg
+        }
+        selectedProjects.each { collectWithDependencies(it) }
+        def includedProjects = selectedByServiceName.values().toList()
+
+        def includedByServiceName = includedProjects.collectEntries { cfg ->
+            [(cfg.serviceName.toString()): cfg]
+        }
+
+        def levelByServiceName = [:] as Map<String, Integer>
+        def calculateLevel
+        calculateLevel = { String serviceName ->
+            if (levelByServiceName.containsKey(serviceName)) {
+                return levelByServiceName[serviceName]
+            }
+            def cfg = includedByServiceName[serviceName]
+            def buildKitDeps = cfg.get("requiredDependencies", [])
+                    .findAll { it.startsWith("buildKit_") }
+                    .collect { it.replaceFirst(/^buildKit_/, "") }
+                    .findAll { includedByServiceName.containsKey(it) }
+            def level = buildKitDeps ? (buildKitDeps.collect { calculateLevel(it) }.max() + 1) : 0
+            levelByServiceName[serviceName] = level
+            return level
+        }
+
+        includedProjects.each { cfg -> calculateLevel(cfg.serviceName.toString()) }
+
+        def projectsByLevel = includedProjects.groupBy { cfg -> levelByServiceName[cfg.serviceName.toString()] }
+        def formatterByRegistry = [:] as Map<String, Object>
+        def builder = project.findProperty("builder") ?: ""
+        def builderWasExplicit = true
+        if (!builder) {
+            try {
+                def context = "kubectl config current-context".execute().text.trim()
+                if (context) {
+                    builder = "builder-" + context.replaceAll("[^a-zA-Z0-9_-]", "-")
+                    if (!builderWarningShown) {
+                        project.logger.lifecycle("No -Pbuilder specified, derived '${builder}' from kube context '${context}'")
+                        builderWarningShown = true
+                    }
+                }
+            } catch (Exception ignored) {}
+            if (!builder) {
+                builder = "UNSET"
+                builderWasExplicit = false
+            }
+        }
+
+        project.tasks.register(taskName, Exec) { task ->
+            group = "docker"
+            description = "Build BuildKit images in dependency-ordered parallel phases using buildx bake (${architecture})"
+
+            doFirst {
+                if (!builderWasExplicit) {
+                    throw new GradleException("No -Pbuilder specified and no kube context set. Use -Pbuilder=<name> or set a kube context.")
+                }
+
+                def bakeDefinition = [group: [:], target: [:]]
+                def phaseNames = []
+
+                projectsByLevel.keySet().sort().each { level ->
+                    def phaseName = "phase${level}"
+                    phaseNames << phaseName
+                    def targetsForPhase = []
+                    projectsByLevel[level].sort { a, b -> a.serviceName.toString() <=> b.serviceName.toString() }.each { cfg ->
+                        def repoName = cfg.get("repoName")?.toString()
+                        Registry targetRegistry = repoName ? finalRegistry : intermediateRegistry
+                        def registryEndpoint = targetRegistry.containerUrl
+                        def formatter = formatterByRegistry.computeIfAbsent(registryEndpoint) {
+                            ImageRegistryFormatterFactory.getFormatter(registryEndpoint)
+                        }
+                        def imageName = cfg.get("imageName").toString()
+                        def imageTag = cfg.get("imageTag", "latest").toString()
+                        def versionTag = project.findProperty("imageVersion")?.toString()
+                        def (primaryDest, cacheDestination) = formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, imageTag, repoName)
+                        def versionTaggedDest = versionTag ? formatter.getFullTargetImageIdentifier(registryEndpoint, imageName, versionTag, repoName)[0] : null
+                        def buildArgs = cfg.get("buildArgs", [:]).collectEntries { key, value ->
+                            [(key.toString()): value.toString()]
+                        }
+
+                        def cacheSuffix = architecture == "multi" ? "" : "_${architecture}"
+                        def cacheFrom = ["type=registry,ref=${cacheDestination}${cacheSuffix}".toString()]
+                        if (architecture == "multi") {
+                            cacheFrom.add("type=registry,ref=${cacheDestination}_amd64".toString())
+                            cacheFrom.add("type=registry,ref=${cacheDestination}_arm64".toString())
+                        }
+
+                        def targetName = cfg.serviceName.toString()
+                        targetsForPhase << targetName
+                        bakeDefinition.target[targetName] = [
+                                context     : project.file(cfg.get("contextDir", ".")).absolutePath,
+                                dockerfile  : "Dockerfile",
+                                tags        : ([primaryDest] + (versionTaggedDest ? [versionTaggedDest] : [])),
+                                args        : buildArgs,
+                                platforms   : architecture == "multi" ? ["linux/amd64", "linux/arm64"] : ["linux/${architecture}".toString()],
+                                "cache-from": cacheFrom,
+                                "cache-to"  : ["type=registry,ref=${cacheDestination}${cacheSuffix},mode=max,ignore-error=true".toString()]
+                        ]
+                    }
+                    bakeDefinition.group[phaseName] = [targets: targetsForPhase]
+                }
+
+                def outputFile = project.layout.buildDirectory.file("docker-bake/${taskName}.json").get().asFile
+                outputFile.parentFile.mkdirs()
+                outputFile.text = JsonOutput.prettyPrint(JsonOutput.toJson(bakeDefinition))
+
+                def commands = phaseNames.collect { phaseName ->
+                    def args = [
+                            "docker buildx bake",
+                            "--progress=plain",
+                            "-f \"${outputFile.absolutePath}\"",
+                            "--builder ${builder}",
+                            "--push",
+                            phaseName
+                    ]
+                    args.join(" ")
+                }
+                commandLine 'sh', '-c', commands.join(" && ")
+            }
+
+            doLast {
+                def archSuffix = architecture == "multi" ? "" : "_${architecture}"
+                includedProjects.each { cfg ->
+                    def repoName = cfg.get("repoName")?.toString()
+                    Registry targetRegistry = repoName ? finalRegistry : intermediateRegistry
+                    def hostFormatter = ImageRegistryFormatterFactory.getFormatter(targetRegistry.hostUrl)
+                    def imageName = cfg.get("imageName").toString()
+                    def imageTag = cfg.get("imageTag", "latest").toString()
+                    def hostVisibleRef = hostFormatter.getFullTargetImageIdentifier(
+                            targetRegistry.hostUrl,
+                            imageName,
+                            imageTag,
+                            repoName
+                    )[0].toString()
+                    def digest = resolvePlatformDigest(hostVisibleRef, architecture, true)
+                    def metadataFile = RegistryImageBuildUtils.metadataFileFor(project, cfg.serviceName.toString(), archSuffix)
+                    metadataFile.parentFile.mkdirs()
+                    metadataFile.text = JsonOutput.prettyPrint(JsonOutput.toJson([
+                            "image.name"           : hostVisibleRef,
+                            "containerimage.digest": digest
+                    ]))
+                }
+            }
+
+            includedProjects.each { cfg ->
+                inputs.dir(project.file(cfg.get("contextDir", ".")))
+                inputs.property("${cfg.serviceName}.contextDir".toString(), cfg.get("contextDir", ".").toString())
+                inputs.property("${cfg.serviceName}.imageName".toString(), cfg.get("imageName").toString())
+                inputs.property("${cfg.serviceName}.imageTag".toString(), cfg.get("imageTag", "latest").toString())
+                inputs.property("${cfg.serviceName}.buildArgs".toString(), cfg.get("buildArgs", [:]).collectEntries { key, value ->
+                    [(key.toString()): value.toString()]
+                })
+
+                cfg.get("requiredDependencies", []).findAll { !it.startsWith("buildKit_") }.each { depTaskName ->
+                    dependsOn depTaskName
+                }
+            }
+
+            inputs.property("architecture", architecture)
+            inputs.property("imageVersion", (project.findProperty("imageVersion") ?: "").toString())
+            inputs.property("publishStyle", (project.findProperty("publishStyle") ?: "").toString())
+            outputs.upToDateWhen { false }
         }
     }
 }

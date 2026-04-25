@@ -43,6 +43,11 @@ The following Gradle command builds images to the docker registry created above:
 ./gradlew buildImagesToRegistry -PregistryEndpoint=localhost:5002
 ```
 
+This aggregate task now uses `docker buildx bake` for the BuildKit-managed
+images, so independent Docker image builds run concurrently while preserving
+the required dependency ordering between images that build on top of each
+other.
+
 Or customized to use a specific registry endpoint
 ```shell
 ./gradlew buildImagesToRegistry -PregistryEndpoint=123456789012.dkr.ecr.us-east-2.amazonaws.com/my-ecr-repo
