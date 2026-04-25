@@ -79,6 +79,9 @@ see a line with "Audience: " followed by audience ids that match below roles as 
 - DevOps / Platform Engineer: DOP
 - Business Stakeholder: BSH
 
+While walking through the steps, make sure you record all relevant information you collect in the session state json files
+as described in the persistence section below.
+
 ### Step 0 — Stakeholder Identification
 
 Before diving into the migration, identify who you are working with so you can tailor the depth and focus of your guidance throughout the conversation.
@@ -621,7 +624,7 @@ print(f"Facts: {state.facts}")
 
 ### Session files
 
-With the default `FileStorage` backend, each session produces two files:
+With the default `FileStorage` backend, each session produces two files in the current working directory:
 
 - `sessions/<session_id>.json` — machine-readable JSON containing the full conversation history, all discovered facts, incompatibilities, client integrations, and progress. Used by the skill for session resumption.
 - `sessions/<session_id>.md` — human-readable Markdown progress file. Updated after every step. Safe to share with colleagues, attach to tickets, or check into version control. See the **Migration Progress File** section above for the full format.
