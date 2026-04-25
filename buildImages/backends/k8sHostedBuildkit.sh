@@ -162,9 +162,10 @@ ensure_k8s_buildx_builder() {
 }
 
 setup_build_backend() {
-  export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
-  export BUILD_CONTAINER_REGISTRY_ENDPOINT="${BUILD_CONTAINER_REGISTRY_ENDPOINT:-docker-registry:5000}"
-  export BUILDKIT_HELM_ARGS="${BUILDKIT_HELM_ARGS:-"--set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0"}"
+  export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-false}"
+  if [[ "${USE_LOCAL_REGISTRY}" == "true" ]]; then
+    export BUILD_CONTAINER_REGISTRY_ENDPOINT="${BUILD_CONTAINER_REGISTRY_ENDPOINT:-docker-registry:5000}"
+  fi
   export BUILDKIT_NAMESPACE="${BUILDKIT_NAMESPACE:-buildkit}"
   ensure_k8s_buildkit_release
   ensure_k8s_local_registry

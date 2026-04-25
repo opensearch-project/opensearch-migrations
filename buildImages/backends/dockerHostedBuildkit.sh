@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+if [[ -z "${MIGRATIONS_REPO_ROOT_DIR:-}" ]]; then
+  MIGRATIONS_REPO_ROOT_DIR="$(git rev-parse --show-toplevel)"
+fi
+
 set_docker_hosted_defaults() {
   : "${EXTERNAL_DOCKER_NETWORK:=local-migrations-network}"
   : "${EXTERNAL_REGISTRY_NAME:=docker-registry}"
