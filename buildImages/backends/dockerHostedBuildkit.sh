@@ -10,6 +10,51 @@ set_docker_hosted_defaults() {
   : "${BUILD_CONTAINER_REGISTRY_ENDPOINT:=${EXTERNAL_REGISTRY_NAME}:5000}"
 }
 
+get_docker_network_dns_servers() {
+  local resolv_conf dns_line
+  resolv_conf="$(docker run --rm --network "${EXTERNAL_DOCKER_NETWORK}" registry:2 cat /etc/resolv.conf 2>/dev/null || true)"
+  dns_line="$(printf '%s\n' "${resolv_conf}" | sed -n 's/^# ExtServers: \[\(.*\)\]$/\1/p' | head -n1)"
+
+  if [[ -z "${dns_line}" ]]; then
+    return 0
+  fi
+
+  printf '%s\n' "${dns_line}" | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}'
+}
+
+write_buildkit_config() {
+  local source_config target_config
+  source_config="${MIGRATIONS_REPO_ROOT_DIR}/buildImages/buildkitd.toml"
+  target_config="/tmp/buildkitd-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}.toml"
+
+  cp "${source_config}" "${target_config}"
+
+  local docker_dns_servers=()
+  local server
+  while IFS= read -r server; do
+    [[ -n "${server}" ]] && docker_dns_servers+=("${server}")
+  done < <(get_docker_network_dns_servers)
+
+  if [[ "${#docker_dns_servers[@]}" -gt 0 ]]; then
+    {
+      printf '\n[dns]\n'
+      printf '  nameservers = ['
+      local first=true
+      for server in "${docker_dns_servers[@]}"; do
+        if [[ "${first}" == true ]]; then
+          first=false
+        else
+          printf ', '
+        fi
+        printf '"%s"' "${server}"
+      done
+      printf ']\n'
+    } >> "${target_config}"
+  fi
+
+  printf '%s\n' "${target_config}"
+}
+
 ensure_docker_network() {
   if ! docker network inspect "${EXTERNAL_DOCKER_NETWORK}" >/dev/null 2>&1; then
     docker network create "${EXTERNAL_DOCKER_NETWORK}" >/dev/null
@@ -39,7 +84,7 @@ ensure_buildx_builder() {
   local builder_name
   builder_name="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
   local buildkit_config
-  buildkit_config="${MIGRATIONS_REPO_ROOT_DIR}/buildImages/buildkitd.toml"
+  buildkit_config="$(write_buildkit_config)"
 
   if ! docker buildx inspect "${builder_name}" --bootstrap >/dev/null 2>&1; then
     docker buildx rm "${builder_name}" >/dev/null 2>&1 || true
