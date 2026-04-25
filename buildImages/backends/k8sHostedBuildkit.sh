@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+if [[ -z "${MIGRATIONS_REPO_ROOT_DIR:-}" ]]; then
+  MIGRATIONS_REPO_ROOT_DIR="$(git rev-parse --show-toplevel)"
+fi
+
 get_k8s_build_context() {
   if [[ -n "${KUBE_CONTEXT:-}" ]]; then
     echo "${KUBE_CONTEXT}"
