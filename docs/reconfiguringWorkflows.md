@@ -259,7 +259,6 @@ The replayer has no downstream dependencies — nothing waits on it. The checksu
 | --- | --- | --- | --- | --- |
 | `spec.kafkaTrafficEnableMSKAuth` | Impossible | Kafka auth mode — changing breaks the consumer connection | N/A | ✅ |
 | `spec.kafkaTrafficPropertyFile` | Impossible | Kafka connection properties — fundamental to consumer setup | N/A | ✅ |
-| `spec.authHeaderValue` | **Gated** | Changes auth sent to target cluster | Yes (rolling) | ✅ |
 | `spec.removeAuthHeader` | **Gated** | Toggles auth header stripping | Yes (rolling) | ✅ |
 | `spec.transformerConfig` | **Gated** | Changes traffic transformation — could corrupt replay | Yes (rolling) | ✅ |
 | `spec.transformerConfigEncoded` | **Gated** | Same as above, different encoding | Yes (rolling) | ✅ |
