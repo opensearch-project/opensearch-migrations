@@ -15,7 +15,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
-import org.opensearch.common.collect.Tuple;
 import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
@@ -98,7 +97,7 @@ class NettyScanningHttpProxyTest {
         var servers = startServers(rootCtx, captureFactory);
 
         try (var client = new SimpleHttpClientForTesting()) {
-            var nettyEndpoint = URI.create("http://localhost:" + servers.v1().getProxyPort() + "/");
+            var nettyEndpoint = URI.create("http://localhost:" + servers.getKey().getProxyPort() + "/");
             for (int i = 0; i < NUM_INTERACTIONS; ++i) {
                 var responseBody = makeTestRequestViaClient(client, nettyEndpoint);
                 Assertions.assertEquals(UPSTREAM_SERVER_RESPONSE_BODY, responseBody);
@@ -179,7 +178,7 @@ class NettyScanningHttpProxyTest {
         return responseBody;
     }
 
-    private static Tuple<NettyScanningHttpProxy, Integer> startServers(
+    private static Map.Entry<NettyScanningHttpProxy, Integer> startServers(
         RootWireLoggingContext rootCtx,
         IConnectionCaptureFactory connectionCaptureFactory
     ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
@@ -215,7 +214,7 @@ class NettyScanningHttpProxyTest {
                 throw Lombok.sneakyThrow(e);
             }
         });
-        return new Tuple<>(nshp.get(), underlyingPort);
+        return Map.entry(nshp.get(), underlyingPort);
     }
 
     private static SimpleHttpResponse makeContext(HttpRequest request) {
