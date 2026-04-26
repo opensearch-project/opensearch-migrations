@@ -48,10 +48,60 @@ class RegistryImageBuildUtils {
     }
 
     /**
+     * Determine the HTTP scheme for a registry host.
+     * Defaults to http for localhost, https for everything else.
+     * Can be overridden with -DregistryAllowInsecure=true or REGISTRY_ALLOW_INSECURE=true env var.
+     */
+    private static String registryScheme(String registryHost) {
+        def override = System.getProperty("registryAllowInsecure") ?: System.getenv("REGISTRY_ALLOW_INSECURE")
+        if (override != null && !override.isEmpty()) {
+            return override.toBoolean() ? "http" : "https"
+        }
+        return registryHost.startsWith("localhost") ? "http" : "https"
+    }
+
+    /**
+     * Read a Basic auth token for a registry host from Docker's credential store.
+     * Returns null if no credentials are found.
+     */
+    private static String registryAuthHeader(String registryHost) {
+        try {
+            def configFile = new File(System.getProperty("user.home"), ".docker/config.json")
+            if (!configFile.exists()) return null
+            def config = new groovy.json.JsonSlurper().parse(configFile)
+
+            // Check for inline auth first
+            def authEntry = config.auths?.get("https://${registryHost}")
+                    ?: config.auths?.get(registryHost)
+            if (authEntry?.auth) {
+                return "Basic ${authEntry.auth}"
+            }
+
+            // Try credential helper
+            def helperName = config.credHelpers?.get(registryHost) ?: config.credsStore
+            if (helperName) {
+                def proc = ["docker-credential-${helperName}", "get"].execute()
+                proc.outputStream.write("https://${registryHost}".bytes)
+                proc.outputStream.close()
+                proc.waitFor()
+                def output = proc.inputStream.text
+                if (output) {
+                    def result = new groovy.json.JsonSlurper().parseText(output)
+                    if (result?.Username && result?.Secret) {
+                        def token = "${result.Username}:${result.Secret}".bytes.encodeBase64().toString()
+                        return "Basic ${token}"
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return null
+    }
+
+    /**
      * Query a v2 registry for the digest of an image reference like "host:port/repo:tag"
      * and return "host:port/repo@sha256:...". Throws if the digest cannot be resolved.
      */
-    static String resolveDigest(String imageReference, boolean allowInsecure) {
+    static String resolveDigest(String imageReference) {
         def atIdx = imageReference.indexOf('@')
         if (atIdx >= 0) return imageReference // already has a digest
 
@@ -65,7 +115,7 @@ class RegistryImageBuildUtils {
         def registryHost = repoWithHost.substring(0, firstSlash)
         def repository = repoWithHost.substring(firstSlash + 1)
 
-        def scheme = allowInsecure ? "http" : "https"
+        def scheme = registryScheme(registryHost)
         def url = new URL("${scheme}://${registryHost}/v2/${repository}/manifests/${tag}")
         def conn = (HttpURLConnection) url.openConnection()
         conn.setRequestMethod("HEAD")
@@ -74,6 +124,8 @@ class RegistryImageBuildUtils {
                 "application/vnd.docker.distribution.manifest.v2+json, " +
                 "application/vnd.oci.image.index.v1+json, " +
                 "application/vnd.oci.image.manifest.v1+json")
+        def authHeader = registryAuthHeader(registryHost)
+        if (authHeader) conn.setRequestProperty("Authorization", authHeader)
         conn.setConnectTimeout(5000)
         conn.setReadTimeout(5000)
 
@@ -123,7 +175,7 @@ class RegistryImageBuildUtils {
                 "application/vnd.oci.image.index.v1+json",
                 "application/vnd.docker.distribution.manifest.list.v2+json"
         ]) {
-            return resolvePlatformDigest(imageName, targetArchitecture, true)
+            return resolvePlatformDigest(imageName, targetArchitecture)
         }
         return digest.toString()
     }
@@ -132,7 +184,7 @@ class RegistryImageBuildUtils {
      * Resolve a platform-specific manifest digest for an image reference like
      * "host:port/repo:tag" and return only the digest value ("sha256:...").
      */
-    static String resolvePlatformDigest(String imageReference, String targetArchitecture, boolean allowInsecure) {
+    static String resolvePlatformDigest(String imageReference, String targetArchitecture) {
         def atIdx = imageReference.indexOf('@')
         def colonIdx = imageReference.lastIndexOf(':')
         def slashIdx = imageReference.lastIndexOf('/')
@@ -148,7 +200,7 @@ class RegistryImageBuildUtils {
         def registryHost = repoWithHost.substring(0, firstSlash)
         def repository = repoWithHost.substring(firstSlash + 1)
 
-        def scheme = allowInsecure ? "http" : "https"
+        def scheme = registryScheme(registryHost)
         def url = new URL("${scheme}://${registryHost}/v2/${repository}/manifests/${reference}")
         def conn = (HttpURLConnection) url.openConnection()
         conn.setRequestMethod("GET")
@@ -157,6 +209,8 @@ class RegistryImageBuildUtils {
                 "application/vnd.docker.distribution.manifest.list.v2+json, " +
                 "application/vnd.oci.image.manifest.v1+json, " +
                 "application/vnd.docker.distribution.manifest.v2+json")
+        def authHeader = registryAuthHeader(registryHost)
+        if (authHeader) conn.setRequestProperty("Authorization", authHeader)
         conn.setConnectTimeout(5000)
         conn.setReadTimeout(5000)
 
@@ -738,7 +792,9 @@ class RegistryImageBuildUtils {
                             imageTag,
                             repoName
                     )[0].toString()
-                    def digest = resolvePlatformDigest(hostVisibleRef, architecture, true)
+                    def digest = architecture == "multi"
+                            ? resolveDigest(hostVisibleRef)?.split('@')?.last()
+                            : resolvePlatformDigest(hostVisibleRef, architecture)
                     def metadataFile = RegistryImageBuildUtils.metadataFileFor(project, cfg.serviceName.toString(), archSuffix)
                     metadataFile.parentFile.mkdirs()
                     metadataFile.text = JsonOutput.prettyPrint(JsonOutput.toJson([
