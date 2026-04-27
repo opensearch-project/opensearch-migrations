@@ -94,6 +94,7 @@ clean_up_source () {
   fi
 
   cd "$EC2_SOURCE_CDK_PATH" || exit
+  npm ci
   echo "Destroying source CDK app stacks..."
   # The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
   cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
