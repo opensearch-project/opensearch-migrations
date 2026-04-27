@@ -50,19 +50,14 @@ def jibProjects = [
                     ":TrafficCapture:transformationShim": ["syncVersionFile_transformation_shim"]
                 ]
         ],
-        "TrafficCapture:trafficCaptureProxyServer": [
+        "TrafficCapture:trafficCaptureProxyServer": correttoBase + [
                 // purposefully omit '-Dio.netty.handler.codec.http.defaultStrictLineParsing=false'
-                baseImageRegistryEndpoint: intermediateRegistry.hostUrl,
-                baseImageGroup : "migrations",
-                baseImageName  : "capture_proxy_base",
-                baseImageTag   : "latest",
                 imageName      : "capture_proxy",
                 imageTag       : "latest",
                 jvmFlags      : defaultJvmFlags,
                 extraPermissions: ['/runJavaWithClasspath.sh': '755'],
                 requiredDependencies: [
-                    "": ["buildKit_captureProxyBase"],
-                    ":TrafficCapture:trafficCaptureProxyServer": ["syncVersionFile_capture_proxy"]
+                    ":TrafficCapture:trafficCaptureProxyServer": ["generateSelfSignedCerts", "syncVersionFile_capture_proxy"]
                 ]
         ]
 ]
@@ -82,16 +77,7 @@ def buildKitProjects = [
                 ]
         ],
         [
-                serviceName: "captureProxyBase",
-                contextDir: "TrafficCapture/dockerSolution/src/main/docker/captureProxyBase",
-                imageName:  "capture_proxy_base",
-                imageTag:   "latest",
-                buildArgs: [
-                        CERT_BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
-                        RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:21-al2023-headless"),
-                ]
-        ],
-        [
+
                 serviceName: "reindexFromSnapshot",
                 contextDir: "DocumentsFromSnapshotMigration/docker",
                 imageName:  "reindex_from_snapshot",

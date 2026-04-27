@@ -20,10 +20,7 @@ def ptc = new PullThroughCacheHelper(ptcEndpoint)
 
 // Build args for Dockerfiles that pull external base images
 def dockerBuildArgsMap = [
-        "capture_proxy_base": [
-                CERT_BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
-                RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:21-al2023-headless"),
-        ],
+
         "elasticsearch_client_test_console": [
                 BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
                 RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
@@ -38,7 +35,6 @@ def dockerBuildArgsMap = [
 
 def dockerFilesForExternalServices = [
         "elasticsearch_searchguard": "elasticsearchWithSearchGuard",
-        "capture_proxy_base": "captureProxyBase",
         "k8s_config_map_util_scripts": "k8sConfigMapUtilScripts",
         "elasticsearch_client_test_console": "elasticsearchTestConsole",
         "migration_console": migrationConsoleStagingDirName,
@@ -182,13 +178,24 @@ def javaContainerServices = [
         "traffic_replayer": ":TrafficCapture:trafficReplayer"
 ]
 def baseImageOverrides = [
-        "capture_proxy": "capture_proxy_base",
         "capture_proxy_es": "elasticsearch_searchguard",
 ]
 javaContainerServices.each { dockerImageName, projectName ->
     def artifactProject = project(projectName);
     CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project as Project, artifactProject, dockerImageName)
     CommonUtils.createDockerfile(project, artifactProject, baseImageOverrides[dockerImageName], dockerFilesForExternalServices, dockerImageName)
+}
+
+// Stage self-signed certs into the capture_proxy Docker build context
+tasks.named("copyArtifact_capture_proxy").configure {
+    def certTask = project(":TrafficCapture:trafficCaptureProxyServer").tasks.named("generateSelfSignedCerts")
+    dependsOn certTask
+    from(certTask.map { it.outputs.files }) {
+        into("certs")
+    }
+}
+tasks.named("createDockerfile_capture_proxy").configure {
+    copyFile("certs", "/usr/share/captureProxy/config")
 }
 
 javaContainerServices.forEach { dockerImageName, gradleProjectName ->

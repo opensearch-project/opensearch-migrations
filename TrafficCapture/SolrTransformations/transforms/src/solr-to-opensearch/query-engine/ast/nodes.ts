@@ -93,6 +93,13 @@ export interface BareNode {
    * Takes precedence over defaultField when set.
    */
   queryFields?: string[];
+  /**
+   * Tie breaker from the `tie` parameter (edismax/dismax).
+   * Controls how much non-best-matching fields contribute to the score.
+   * Only meaningful when queryFields is set.
+   * 0.0 (default) = pure disjunction max, 1.0 = sum of all fields.
+   */
+  tieBreaker?: number;
 }
 
 /**

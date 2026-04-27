@@ -8,33 +8,14 @@ plugins {
     id 'com.google.cloud.tools.jib'
 }
 
-configurations {
-    // This is included to load certs and keys.  Doing it again isn't currently worth it.
-    opensearchSecurityPlugin
-}
-
 dependencies {
-    def openSearch = '2.19.4'
-    implementation "org.opensearch:opensearch:${openSearch}"
-    implementation "org.opensearch:opensearch-core:${openSearch}"
-    implementation "org.opensearch:opensearch-common:${openSearch}"
-    implementation "org.opensearch.plugin:opensearch-security:${openSearch}.0"
-    opensearchSecurityPlugin "org.opensearch.plugin:opensearch-security:${openSearch}.0"
-    implementation files(zipTree("$configurations.opensearchSecurityPlugin.singleFile").matching {
-        include "*.jar"
-        exclude "slf*.jar"
-        exclude "netty*.jar"
-        exclude "google-java-format-*.jar"
-    })
-
     implementation project(':TrafficCapture:captureOffloader')
     implementation project(':TrafficCapture:nettyWireLogging')
     implementation project(':TrafficCapture:captureKafkaOffloader')
     implementation project(':coreUtilities')
 
     implementation libs.protobuf.java
-    implementation libs.jackson.core
-    implementation libs.jackson.databind
+    implementation libs.kafka.clients
     implementation libs.disruptor
     implementation libs.netty.all
     implementation libs.log4j.api
@@ -67,6 +48,50 @@ application {
     // Define the main class for the application.
     mainClass = 'org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy'
 }
+
+def certDir = layout.buildDirectory.dir("docker/usr/share/captureProxy/config")
+
+tasks.register("generateSelfSignedCerts") {
+    description = "Generate self-signed PEM certificates for the capture proxy default TLS config"
+    outputs.dir(certDir)
+    doLast {
+        def outDir = certDir.get().asFile
+        outDir.mkdirs()
+        def caFile = new File(outDir, "ca.pem")
+        if (caFile.exists()) return
+
+        def ksFile = File.createTempFile("proxy-ks", ".p12")
+        ksFile.delete() // keytool needs a non-existent path
+        ksFile.deleteOnExit()
+        def pass = "changeit"
+
+        // Generate self-signed cert via keytool (ships with every JDK)
+        def keytool = "${System.getProperty('java.home')}/bin/keytool"
+        exec {
+            commandLine keytool, "-genkeypair", "-alias", "proxy",
+                "-keyalg", "RSA", "-keysize", "4096",
+                "-validity", "36500", "-dname", "CN=localhost",
+                "-keystore", ksFile.absolutePath, "-storetype", "PKCS12",
+                "-storepass", pass, "-keypass", pass
+        }
+
+        // Extract PEM via Java APIs (no openssl needed)
+        def ks = java.security.KeyStore.getInstance("PKCS12")
+        ks.load(ksFile.newInputStream(), pass.toCharArray())
+        def cert = ks.getCertificate("proxy")
+        def key = ks.getKey("proxy", pass.toCharArray())
+        def enc = java.util.Base64.getMimeEncoder(64, "\n".bytes)
+
+        def certPem = "-----BEGIN CERTIFICATE-----\n${enc.encodeToString(cert.encoded)}\n-----END CERTIFICATE-----\n"
+        caFile.text = certPem
+        new File(outDir, "pub.pem").text = certPem
+        new File(outDir, "key.pem").text = "-----BEGIN PRIVATE KEY-----\n${enc.encodeToString(key.encoded)}\n-----END PRIVATE KEY-----\n"
+        ksFile.delete()
+    }
+}
+
+tasks.named("classes") { dependsOn("generateSelfSignedCerts") }
+
 
 tasks.withType(Test).configureEach {
     // Allow lenient line parsing for compatibility with older clients and tests
