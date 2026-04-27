@@ -402,6 +402,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             try (var requestResponseTuple = new SourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
                 log.atDebug()
                     .setMessage("Source/Target Request/Response tuple: {}").addArgument(requestResponseTuple).log();
+                assert tupleConsumer != null : "expected non-null tuple consumer";
                 tupleConsumer.accept(requestResponseTuple);
             }
 
