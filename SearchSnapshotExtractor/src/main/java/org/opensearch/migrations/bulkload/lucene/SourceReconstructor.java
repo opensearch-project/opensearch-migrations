@@ -25,87 +25,130 @@ public class SourceReconstructor {
 
     private SourceReconstructor() {}
 
-    /** Skip internal fields (e.g., _id) and multi-field sub-fields (e.g., title.keyword) */
-    private static boolean shouldSkipField(String fieldName) {
-        return fieldName.startsWith("_") || fieldName.contains(".");
+    /**
+     * Skip internal fields (e.g., _id) and multi-field sub-fields (e.g., title.keyword).
+     * <p>
+     * Dotted names are ambiguous in Lucene: {@code title.keyword} is a multi-field
+     * (indexed-only, recoverable via the parent), while {@code address.city} is an
+     * object subfield that IS a legitimate mapped field and must be emitted nested
+     * in the reconstructed {@code _source}. The mapping context distinguishes them —
+     * object subfields appear under {@code properties} (tracked by FieldMappingContext),
+     * multi-field sub-fields appear under {@code fields} (not tracked). So we keep any
+     * dotted name the mapping knows about, and skip the rest.
+     */
+    private static boolean shouldSkipField(String fieldName, FieldMappingContext mappingContext) {
+        if (fieldName.startsWith("_")) {
+            return true;
+        }
+        if (!fieldName.contains(".")) {
+            return false;
+        }
+        // Dotted field: keep it only if the mapping recognizes it as an object subfield.
+        return mappingContext == null || mappingContext.getFieldInfo(fieldName) == null;
+    }
+
+    /**
+     * Insert a value at a possibly-dotted path, creating intermediate maps for object subfields.
+     * A flat name like {@code "title"} becomes {@code target["title"] = value}; a dotted name
+     * like {@code "address.city"} becomes {@code target["address"]["city"] = value}. If an
+     * intermediate path collides with a non-map value already present, the non-map wins
+     * (best-effort — stored/doc_values loops prefer earlier writes).
+     * <p>
+     * Returns {@code true} iff the target map was modified (a new entry was written at any
+     * level). Callers use this to decide whether a partial-source re-serialization is needed
+     * after {@link #populateFromSegment} runs — raw {@code target.size()} is not a sound
+     * dirty proxy because nested inserts do not change the top-level map size.
+     */
+    @SuppressWarnings("unchecked")
+    private static boolean putNested(Map<String, Object> target, String fieldName, Object value) {
+        if (!fieldName.contains(".")) {
+            if (target.containsKey(fieldName)) {
+                return false;
+            }
+            target.put(fieldName, value);
+            return true;
+        }
+        // Honour a literal dotted key already present in the map (some ingest pipelines preserve
+        // dotted names verbatim in _source rather than nesting them). Treat it as present so we
+        // don't emit both {"address.city":...} and {"address":{"city":...}}.
+        if (target.containsKey(fieldName)) {
+            return false;
+        }
+        String[] parts = fieldName.split("\\.");
+        Map<String, Object> cursor = target;
+        for (int i = 0; i < parts.length - 1; i++) {
+            Object next = cursor.get(parts[i]);
+            if (next instanceof Map<?, ?> map) {
+                cursor = (Map<String, Object>) map;
+            } else if (next == null) {
+                Map<String, Object> child = new LinkedHashMap<>();
+                cursor.put(parts[i], child);
+                cursor = child;
+            } else {
+                // Non-map already sits at this path — cannot nest under a scalar. Warn once so
+                // operators notice the dropped subfield instead of it disappearing silently.
+                log.atWarn()
+                    .setMessage("Cannot write nested field '{}' under scalar at '{}' (type {}); dropping recovered value")
+                    .addArgument(fieldName)
+                    .addArgument(parts[i])
+                    .addArgument(next.getClass().getSimpleName())
+                    .log();
+                return false;
+            }
+        }
+        String leaf = parts[parts.length - 1];
+        if (cursor.containsKey(leaf)) {
+            return false;
+        }
+        cursor.put(leaf, value);
+        return true;
+    }
+
+    /**
+     * True iff the (possibly-dotted) field path already has a value in {@code target}.
+     * Walks intermediate maps for dotted names; non-dotted names fall back to {@code containsKey}.
+     * Also returns {@code true} when the literal dotted key is present at the top level (some
+     * ingest pipelines preserve dotted names verbatim).
+     */
+    @SuppressWarnings("unchecked")
+    private static boolean hasNested(Map<String, Object> target, String fieldName) {
+        if (target.containsKey(fieldName)) {
+            return true;
+        }
+        if (!fieldName.contains(".")) {
+            return false;
+        }
+        String[] parts = fieldName.split("\\.");
+        Map<String, Object> cursor = target;
+        for (int i = 0; i < parts.length - 1; i++) {
+            Object next = cursor.get(parts[i]);
+            if (!(next instanceof Map<?, ?>)) {
+                return false;
+            }
+            cursor = (Map<String, Object>) next;
+        }
+        return cursor.containsKey(parts[parts.length - 1]);
     }
 
     /**
      * Reconstructs _source JSON from stored fields and doc_values for a document.
      * Uses mapping context for type-aware conversion when available.
+     *
+     * @param termIndex per-segment term position cache, scoped to the current
+     *                  segment's Flux; may be null if caller does not need
+     *                  analyzed-text fallback (treated as empty).
      */
-    public static String reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document, FieldMappingContext mappingContext) {
+    public static String reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document,
+            FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
         try {
             Map<String, Object> reconstructed = new LinkedHashMap<>();
-            
-            // First, read from stored fields (more performant)
-            for (var field : document.getFields()) {
-                String fieldName = field.name();
-                if (shouldSkipField(fieldName)) {
-                    continue;
-                }
-                FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
-                Object value = getStoredFieldValue(field, mappingInfo);
-                if (value != null) {
-                    reconstructed.put(fieldName, value);
-                }
-            }
-            
-            // Then, read from doc_values (for fields not already in stored fields)
-            for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
-                String fieldName = fieldInfo.name();
-                log.debug("[DocValues] Found field {} with type {}", fieldName, fieldInfo.docValueType());
-                if (shouldSkipField(fieldName)) {
-                    log.debug("[DocValues] Skipping internal field {}", fieldName);
-                    continue;
-                }
-                if (reconstructed.containsKey(fieldName)) {
-                    log.debug("[DocValues] Skipping {} - already reconstructed from stored field", fieldName);
-                    continue;
-                }
-                FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
-                log.debug("[DocValues] Field {} mappingInfo: {}", fieldName, mappingInfo);
-                // Skip if mapping says doc_values is disabled (ES 2.x may still have them internally)
-                if (mappingInfo != null && !mappingInfo.docValues()) {
-                    log.debug("[DocValues] Skipping {} - doc_values disabled in mapping", fieldName);
-                    continue;
-                }
-                Object value = reader.getDocValue(docId, fieldInfo);
-                log.debug("[DocValues] Field {} raw value: {}", fieldName, value);
-                if (value != null) {
-                    Object converted = convertDocValue(value, fieldInfo, mappingInfo);
-                    log.debug("[DocValues] Field {} converted value: {}", fieldName, converted);
-                    if (converted != null) {
-                        reconstructed.put(fieldName, converted);
-                    }
-                }
-            }
-            
-            // Finally, try Points or Terms fallback for fields not yet recovered
-            if (mappingContext != null) {
-                for (String fieldName : mappingContext.getFieldNames()) {
-                    if (shouldSkipField(fieldName) || reconstructed.containsKey(fieldName)) {
-                        continue;
-                    }
-                    FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
-                    if (mappingInfo != null) {
-                        var fallbackValue = reader.getValueFromPointsOrTerms(docId, fieldName, mappingInfo.type());
-                        if (fallbackValue.isPresent()) {
-                            Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
-                            if (converted != null) {
-                                log.debug("[Fallback] Recovered field {} = {}", fieldName, converted);
-                                reconstructed.put(fieldName, converted);
-                            }
-                        }
-                    }
-                }
-            }
-            
+            populateFromSegment(reconstructed, reader, docId, document, mappingContext, termIndex);
+
             if (reconstructed.isEmpty()) {
                 log.atWarn().setMessage("No stored fields or doc_values found for document {}").addArgument(docId).log();
                 return null;
             }
-            
+
             return OBJECT_MAPPER.writeValueAsString(reconstructed);
         } catch (IOException e) {
             log.atWarn().setCause(e).setMessage("Failed to reconstruct source for document {}").addArgument(docId).log();
@@ -113,46 +156,114 @@ public class SourceReconstructor {
         }
     }
 
+    /** Backwards-compatible overload for callers that don't supply a term index (e.g. Solr path). */
+    public static String reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document,
+            FieldMappingContext mappingContext) {
+        return reconstructSource(reader, docId, document, mappingContext, null);
+    }
+
     /**
-     * Merges reconstructed fields into existing source JSON.
+     * Merges reconstructed fields into existing source JSON. Used when the snapshot still
+     * holds a (possibly partial) _source — e.g. _source.includes/_source.excludes indices.
+     * Applies the same stored → doc_values → points/terms recovery chain as
+     * {@link #reconstructSource}, but only for fields missing from the existing source,
+     * so existing values are preserved verbatim.
      */
+    public static String mergeWithDocValues(String existingSource, LuceneLeafReader reader, int docId,
+            LuceneDocument document, FieldMappingContext mappingContext) {
+        return mergeWithDocValues(existingSource, reader, docId, document, mappingContext, null);
+    }
+
     @SuppressWarnings("unchecked")
-    public static String mergeWithDocValues(String existingSource, LuceneLeafReader reader, int docId, LuceneDocument document, FieldMappingContext mappingContext) {
+    public static String mergeWithDocValues(String existingSource, LuceneLeafReader reader, int docId,
+            LuceneDocument document, FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
         try {
             Map<String, Object> existing = OBJECT_MAPPER.readValue(existingSource, Map.class);
-            boolean modified = false;
-            
-            for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
-                String fieldName = fieldInfo.name();
-                if (shouldSkipField(fieldName) || existing.containsKey(fieldName)) {
-                    continue;
-                }
-                Object value = reader.getDocValue(docId, fieldInfo);
-                if (value != null) {
-                    FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
-                    existing.put(fieldName, convertDocValue(value, fieldInfo, mappingInfo));
-                    modified = true;
-                }
-            }
-            
-            for (var field : document.getFields()) {
-                String fieldName = field.name();
-                if (shouldSkipField(fieldName) || existing.containsKey(fieldName)) {
-                    continue;
-                }
-                FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
-                Object value = getStoredFieldValue(field, mappingInfo);
-                if (value != null) {
-                    existing.put(fieldName, value);
-                    modified = true;
-                }
-            }
-            
+            boolean modified = populateFromSegment(existing, reader, docId, document, mappingContext, termIndex);
             return modified ? OBJECT_MAPPER.writeValueAsString(existing) : existingSource;
         } catch (IOException e) {
             log.atWarn().setCause(e).setMessage("Failed to merge fields for document {}").addArgument(docId).log();
             return existingSource;
         }
+    }
+
+    /**
+     * Populates {@code target} with fields recovered from a Lucene segment, skipping any
+     * field already present. Shared by {@link #reconstructSource} (empty seed) and
+     * {@link #mergeWithDocValues} (existing _source as seed) so both paths exercise the
+     * same stored → doc_values → points/terms recovery chain. Returns {@code true} iff any
+     * new value was written into {@code target} (including into a nested child map, which
+     * would not change the top-level {@code target.size()}); callers use this to decide
+     * whether a re-serialization is needed.
+     */
+    private static boolean populateFromSegment(Map<String, Object> target, LuceneLeafReader reader, int docId,
+            LuceneDocument document, FieldMappingContext mappingContext, SegmentTermIndex termIndex) throws IOException {
+        boolean modified = false;
+        // 1. Stored fields (exact values when present)
+        for (var field : document.getFields()) {
+            String fieldName = field.name();
+            if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+                continue;
+            }
+            FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
+            Object value = getStoredFieldValue(field, mappingInfo);
+            if (value != null) {
+                modified |= putNested(target, fieldName, value);
+            }
+        }
+
+        // 2. Doc values (fast, lossless for typed fields)
+        for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
+            String fieldName = fieldInfo.name();
+            if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+                continue;
+            }
+            FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
+            // Skip if mapping says doc_values is disabled (ES 2.x may still have them internally)
+            if (mappingInfo != null && !mappingInfo.docValues()) {
+                continue;
+            }
+            Object value = reader.getDocValue(docId, fieldInfo);
+            if (value != null) {
+                Object converted = convertDocValue(value, fieldInfo, mappingInfo);
+                if (converted != null) {
+                    modified |= putNested(target, fieldName, converted);
+                }
+            }
+        }
+
+        // 3. Points / indexed terms fallback (recovers indexed-only numeric/boolean/keyword)
+        if (mappingContext != null) {
+            for (String fieldName : mappingContext.getFieldNames()) {
+                if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+                    continue;
+                }
+                FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
+                if (mappingInfo != null) {
+                    var fallbackValue = reader.getValueFromPointsOrTerms(docId, fieldName, mappingInfo.type(), termIndex);
+                    if (fallbackValue.isPresent()) {
+                        Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
+                        if (converted != null) {
+                            modified |= putNested(target, fieldName, converted);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Mapping-level constant values (constant_keyword stores its value in the mapping, not the segment)
+        if (mappingContext != null) {
+            for (String fieldName : mappingContext.getFieldNames()) {
+                if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+                    continue;
+                }
+                FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
+                if (mappingInfo != null && mappingInfo.constantValue() != null) {
+                    modified |= putNested(target, fieldName, mappingInfo.constantValue());
+                }
+            }
+        }
+        return modified;
     }
 
     /** Extracts value from stored field, converting booleans stored as T/F and binary as base64 */
@@ -239,13 +350,27 @@ public class SourceReconstructor {
         return value;
     }
 
-    /** Converts doc_value using mapping info when available, falling back to heuristics */
+    /** Converts doc_value using mapping info when available, falling back to heuristics.
+     *  For multi-valued fields (SortedNumeric/SortedSet doc_values), the reader returns a List —
+     *  convert each element through the same logic so per-type coercion (e.g. boolean Long→true/false)
+     *  applies to array fields, not just scalars. */
     private static Object convertDocValue(Object value, DocValueFieldInfo fieldInfo, FieldMappingInfo mappingInfo) {
+        if (value instanceof java.util.List<?> listVal) {
+            java.util.List<Object> converted = new java.util.ArrayList<>(listVal.size());
+            for (Object element : listVal) {
+                converted.add(convertSingleDocValue(element, fieldInfo, mappingInfo));
+            }
+            return converted;
+        }
+        return convertSingleDocValue(value, fieldInfo, mappingInfo);
+    }
+
+    private static Object convertSingleDocValue(Object value, DocValueFieldInfo fieldInfo, FieldMappingInfo mappingInfo) {
         // Use mapping-based conversion if available
         if (mappingInfo != null && mappingInfo.type() != EsFieldType.UNSUPPORTED) {
             return convertWithMappingInfo(value, mappingInfo);
         }
-        
+
         // Fall back to heuristic-based conversion
         if (fieldInfo.isBoolean() && value instanceof Long) {
             return ((Long) value) != 0;
@@ -440,7 +565,7 @@ public class SourceReconstructor {
         return b;
     }
 
-    /** Convert fallback value from Points (List<byte[]>) or Terms (String) */
+    /** Convert fallback value from Points (List&lt;byte[]&gt;), Terms (String), or NumericTerms (Long) */
     @SuppressWarnings("unchecked")
     private static Object convertFallbackValue(Object value, FieldMappingInfo mappingInfo) {
         // Terms fallback returns String (for boolean - stored as "T"/"F" in Lucene)
@@ -454,7 +579,50 @@ public class SourceReconstructor {
         if (value instanceof java.util.List<?> pointValues) {
             return decodePointValue((java.util.List<byte[]>) pointValues, mappingInfo);
         }
+        // Numeric terms fallback returns a raw Long decoded from shift==0 trie term
+        // (Lucene 4-5 / ES 1.x-2.x indexes numerics/ip/date as prefix-coded longs or ints).
+        if (value instanceof Long numericVal) {
+            return decodeNumericTerm(numericVal, mappingInfo);
+        }
         return null;
+    }
+
+    /** Decode a raw Long harvested from a shift==0 numeric term into the mapped JSON type. */
+    private static Object decodeNumericTerm(long raw, FieldMappingInfo mappingInfo) {
+        return switch (mappingInfo.type()) {
+            case BOOLEAN -> raw != 0;
+            case IP -> String.format("%d.%d.%d.%d",
+                (raw >> 24) & 0xFF,
+                (raw >> 16) & 0xFF,
+                (raw >> 8) & 0xFF,
+                raw & 0xFF);
+            case DATE -> formatDate(raw, mappingInfo.format());
+            case DATE_NANOS -> formatDateNanos(raw);
+            case SCALED_FLOAT -> mappingInfo.scalingFactor() != null
+                ? raw / mappingInfo.scalingFactor()
+                : raw;
+            case UNSIGNED_LONG -> raw < 0 ? BigInteger.valueOf(raw).and(UNSIGNED_LONG_MASK) : raw;
+            case NUMERIC -> {
+                // Lucene 4/5 stores floats/doubles as sortable int/long bits in trie terms.
+                // sortableLongToDouble(l) = Double.longBitsToDouble(l ^ ((l >> 63) & 0x7FFFFFFFFFFFFFFFL))
+                // sortableIntToFloat(i)   = Float.intBitsToFloat(i ^ ((i >> 31) & 0x7FFFFFFF))
+                String mappingType = mappingInfo.mappingType();
+                if ("double".equals(mappingType)) {
+                    long bits = raw ^ ((raw >> 63) & 0x7FFFFFFFFFFFFFFFL);
+                    yield Double.longBitsToDouble(bits);
+                }
+                if ("float".equals(mappingType) || "half_float".equals(mappingType)) {
+                    int iraw = (int) raw;
+                    int bits = iraw ^ ((iraw >> 31) & 0x7FFFFFFF);
+                    yield Float.intBitsToFloat(bits);
+                }
+                if ("integer".equals(mappingType) || "short".equals(mappingType) || "byte".equals(mappingType)) {
+                    yield (int) raw;
+                }
+                yield raw; // long, token_count, etc.
+            }
+            default -> raw;
+        };
     }
 
     /** Decode point value from packed bytes */
@@ -463,6 +631,16 @@ public class SourceReconstructor {
         byte[] packed = pointValues.get(0);
         
         return switch (mappingInfo.type()) {
+            case BOOLEAN -> {
+                // Booleans aren't typically stored as Points, but handle defensively.
+                // Historical encodings: legacy ES (pre-6.0) stored boolean as a single byte
+                // "T"=0x54 / "F"=0x46 (SortedDocValues BytesRef); modern ES stores as
+                // SortedNumericDocValues 0/1. For Points-path completeness, accept either:
+                if (packed.length == 1) {
+                    yield packed[0] == (byte) 'T' || packed[0] == 1;
+                }
+                yield null;
+            }
             case IP -> packed.length == 16 ? convertIpBytes(packed) : null;
             case NUMERIC -> {
                 String mappingType = mappingInfo.mappingType();
@@ -473,10 +651,16 @@ public class SourceReconstructor {
                     yield sortableShortToHalfFloat(s);
                 }
                 if ("float".equals(mappingType) && packed.length == 4) {
-                    yield Float.intBitsToFloat(decodeIntPoint(packed));
+                    int sortable = decodeIntPoint(packed);
+                    // Undo Lucene's sortableInt→float transform for negative values
+                    int bits = sortable ^ ((sortable >> 31) & 0x7FFFFFFF);
+                    yield Float.intBitsToFloat(bits);
                 }
                 if ("double".equals(mappingType) && packed.length == 8) {
-                    yield Double.longBitsToDouble(decodeLongPoint(packed));
+                    long sortable = decodeLongPoint(packed);
+                    // Undo Lucene's sortableLong→double transform for negative values
+                    long bits = sortable ^ ((sortable >> 63) & 0x7FFFFFFFFFFFFFFFL);
+                    yield Double.longBitsToDouble(bits);
                 }
                 if (packed.length == 8) yield decodeLongPoint(packed);
                 if (packed.length == 4) yield decodeIntPoint(packed);

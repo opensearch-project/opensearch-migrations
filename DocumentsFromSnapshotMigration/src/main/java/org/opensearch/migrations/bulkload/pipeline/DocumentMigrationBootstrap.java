@@ -4,6 +4,9 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -16,6 +19,8 @@ import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.RfsException;
+import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
+import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.pipeline.adapter.EsShardPartition;
 import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink;
@@ -88,6 +93,19 @@ public class DocumentMigrationBootstrap {
     // Optional: external document source (e.g. Solr). When set, bypasses LuceneSnapshotSource.
     @Builder.Default
     private final DocumentSource externalDocumentSource = null;
+
+    // Sourceless migration support: when true and index has _source disabled,
+    // reconstructs documents from stored fields and doc_values
+    @Builder.Default
+    private final boolean enableSourcelessMigrations = false;
+
+    // When true, treat _recovery_source as _source if present (ES 7+ / OpenSearch soft-deletes)
+    @Builder.Default
+    private final boolean useRecoverySource = false;
+
+    // Index metadata factory for reading mappings (needed for sourceless migration)
+    @Builder.Default
+    private final IndexMetadata.Factory indexMetadataFactory = null;
 
     // Optional: work coordination
     @Builder.Default
@@ -279,10 +297,38 @@ public class DocumentMigrationBootstrap {
             return externalDocumentSource;
         }
         var builder = LuceneSnapshotSource.builder(extractor, snapshotName, workDir)
-            .maxShardSizeBytes(maxShardSizeBytes);
+            .maxShardSizeBytes(maxShardSizeBytes)
+            .useRecoverySource(useRecoverySource);
         if (previousSnapshotName != null && deltaMode != null) {
             log.info("Creating delta document source: previous={}, mode={}", previousSnapshotName, deltaMode);
             builder.delta(previousSnapshotName, deltaMode, deltaContextFactory);
+        }
+        if (enableSourcelessMigrations && indexMetadataFactory != null) {
+            log.info("Sourceless migrations enabled — will reconstruct _source from stored fields/doc_values");
+            // Optional wraps nullable FieldMappingContext so computeIfAbsent caches the
+            // "no reconstruction needed" result too. Returning null from the remapping
+            // function is a no-op for ConcurrentHashMap storage, so a plain
+            // Map<String, FieldMappingContext> would re-read snapshot metadata on every
+            // provider invocation for _source-enabled indices.
+            Map<String, Optional<FieldMappingContext>> cache = new ConcurrentHashMap<>();
+            builder.sourcelessMappingContextProvider(indexName -> {
+                return cache.computeIfAbsent(indexName, name -> {
+                    try {
+                        var meta = indexMetadataFactory.fromRepo(snapshotName, name);
+                        if (!meta.needsSourceReconstruction()) {
+                            log.debug("Index {} has full _source enabled, no reconstruction needed", name);
+                            return Optional.empty();
+                        }
+                        log.info("Index {} needs source reconstruction (disabled={}, partial={}), building FieldMappingContext",
+                            name, !meta.isSourceEnabled(), meta.isSourcePartial());
+                        return Optional.of(new FieldMappingContext(meta.getMappings()));
+                    } catch (Exception e) {
+                        throw new RuntimeException(
+                            "Failed to read metadata for index " + name +
+                            " — cannot determine if source reconstruction is needed", e);
+                    }
+                }).orElse(null);
+            });
         }
         return builder.build();
     }

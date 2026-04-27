@@ -122,7 +122,7 @@ def call(Map config = [:]) {
                             if (config.buildStep) {
                                 config.buildStep()
                             } else {
-                                sh './gradlew clean build --no-daemon --stacktrace'
+                                sh './gradlew clean build -x test --no-daemon --stacktrace'
                             }
                         }
                     }

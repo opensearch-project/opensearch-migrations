@@ -268,6 +268,10 @@ spec:
                   type: boolean
                 metadataMigrationClusterAwarenessAttributes:
                   type: integer
+                metadataMigrationEnableSourcelessMigrations:
+                  type: boolean
+                metadataMigrationUseRecoverySource:
+                  type: boolean
                 metadataMigrationMultiTypeBehavior:
                   type: string
                 metadataMigrationOtelCollectorEndpoint:
@@ -299,6 +303,10 @@ spec:
                   items:
                     type: string
                 documentBackfillAllowLooseVersionMatching:
+                  type: boolean
+                documentBackfillEnableSourcelessMigrations:
+                  type: boolean
+                documentBackfillUseRecoverySource:
                   type: boolean
                 documentBackfillDocTransformerConfigBase64:
                   type: string
